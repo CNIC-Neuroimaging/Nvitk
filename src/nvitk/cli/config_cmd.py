@@ -1,7 +1,8 @@
 """``nvitk-config`` — inspect and scaffold nvitk's configuration.
 
-nvitk reads its site settings from three JSON files (``sge.json``, ``settings.json``,
-``xnat.json``) found in a configuration directory. This command answers the three questions a
+nvitk reads its site settings from four JSON files (``sge.json``, ``settings.json``,
+``xnat.json``, and ``gui.json`` — which the GUI writes for itself) found in a configuration
+directory. This command answers the three questions a
 new install raises: *where does that directory go*, *which file am I actually using*, and
 *what do I have to fill in*.
 
@@ -27,7 +28,11 @@ from nvitk.core import config_paths
 #: rather than only from a source checkout.
 TEMPLATE_DIR = Path(__file__).resolve().parent / "config_templates"
 
-CONFIG_FILES = ("sge.json", "settings.json", "xnat.json")
+CONFIG_FILES = ("sge.json", "settings.json", "xnat.json", "gui.json")
+
+#: Keys whose value is an opaque blob rather than a setting: printing a few
+#: hundred characters of base64 into a settings listing helps nobody.
+_OPAQUE_KEYS = {"dock_state"}
 
 #: A value that is still the shape the template shipped with, i.e. not yet filled in.
 _PLACEHOLDER_PREFIX = "<"
@@ -98,7 +103,7 @@ def path_cmd() -> None:
     "--only",
     type=click.Choice(CONFIG_FILES),
     multiple=True,
-    help="Only create these files (repeatable). Default: all three.",
+    help="Only create these files (repeatable). Default: all of them.",
 )
 def init_cmd(target_dir: Path | None, force: bool, only: tuple[str, ...]) -> None:
     """Create a starter configuration from the bundled templates."""
@@ -145,7 +150,7 @@ def init_cmd(target_dir: Path | None, force: bool, only: tuple[str, ...]) -> Non
     "--file", "which",
     type=click.Choice(CONFIG_FILES),
     default=None,
-    help="Show only this file. Default: all three.",
+    help="Show only this file. Default: all of them.",
 )
 def show_cmd(which: str | None) -> None:
     """Print resolved settings and the file each came from."""
@@ -164,8 +169,11 @@ def show_cmd(which: str | None) -> None:
             continue
         for key, value in settings:
             rendered = "null" if value is None else str(value)
-            if key.rsplit(".", 1)[-1] in {"password", "user"}:
+            leaf = key.rsplit(".", 1)[-1]
+            if leaf in {"password", "user"}:
                 rendered = "<redacted>"
+            elif leaf in _OPAQUE_KEYS:
+                rendered = f"<{len(str(value or ''))} bytes of saved layout>"
             click.echo(f"   {key:<50} {rendered}")
         click.echo("")
 

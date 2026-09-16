@@ -7,7 +7,7 @@ from typing import Any, Iterable
 from nvitk.core.backend import setup
 from nvitk.types import Image
 
-from ._common import bool_mask, ensure_same_shape, resolve_array
+from ._common import backend_array, bool_mask, ensure_same_shape, resolve_array
 
 setup(globals())
 
@@ -40,7 +40,7 @@ def masked_stats(
         Plain Python floats (CuPy arrays are materialized to host at the tail of the pipeline).
     """
     ensure_same_shape(image, mask)
-    raw = resolve_array(image)
+    raw = backend_array(image)
     m = bool_mask(mask)
 
     requested = [s.lower() for s in stats]

@@ -1130,7 +1130,8 @@ def install_vessel_cpr(
         "edited": {},
     }
 
-    timer = QTimer()
+    # Parented so the pending re-render cannot fire after the panel is gone.
+    timer = QTimer(panel)
     timer.setSingleShot(True)
     timer.setInterval(_RERENDER_MS)
     state["timer"] = timer

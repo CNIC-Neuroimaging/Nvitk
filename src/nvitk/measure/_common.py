@@ -33,11 +33,36 @@ def resolve_spacing(img: Image | Any, spacing: tuple[float, ...] | None) -> tupl
 
 
 def bool_mask(mask: Image | Any) -> Any:
-    """Boolean-cast *mask* preserving backend (NumPy/CuPy)."""
-    arr = resolve_array(mask)
-    if hasattr(arr, "astype"):
-        return arr.astype(bool)
-    return as_backend_array(arr).astype(bool)
+    """Boolean-cast *mask* onto the active backend (NumPy/CuPy).
+
+    Routed through :func:`as_backend_array` even when the input already casts:
+    a Napari layer holds host arrays, so returning them untouched under the CuPy
+    backend hands NumPy operands to a CuPy ufunc, which rejects them.
+    """
+    return as_backend_array(resolve_array(mask)).astype(bool)
+
+
+def backend_array(img: Image | Any) -> Any:
+    """The voxel array for *img*, on the active backend.
+
+    Napari hands out host arrays whatever the compute backend is, so anything
+    that will be combined with a backend array — indexed by a mask, fed to a
+    ufunc — has to come through here first, or CuPy rejects the pairing.
+    """
+    return as_backend_array(resolve_array(img))
+
+
+def label_mask(mask: Image | Any, label: int | None = None) -> Any:
+    """*mask* as booleans: every non-zero voxel, or only those equal to *label*.
+
+    The ``label`` form is what a multi-label segmentation needs. Collapsing one
+    to "non-zero" erases exactly the distinction a comparison against another
+    label map is meant to measure, and scores a prediction that assigns every
+    voxel to the wrong structure as a perfect match.
+    """
+    if label is None:
+        return bool_mask(mask)
+    return as_backend_array(resolve_array(mask)) == int(label)
 
 
 def ensure_same_shape(a: Image | Any, b: Image | Any) -> None:

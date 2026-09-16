@@ -48,6 +48,26 @@ _MEASURE_NOTIFY = frozenset({
     "surface_metrics",
 })
 
+#: Tools that compare the active mask against another *mask*. They are the ones
+#: that have to pair label id with label id: the rest compare a mask against an
+#: image, where restricting the reference makes no sense.
+_MASK_COMPARISON = frozenset({
+    "dice",
+    "jaccard",
+    "volsim",
+    "mcc",
+    "voxel_metrics",
+    "surface_metrics",
+})
+
+#: Which metrics each comparison tool reports.
+_COMPARISON_METRICS: dict[str, tuple[str, ...]] = {
+    "dice": ("dice",),
+    "jaccard": ("jaccard",),
+    "volsim": ("volsim",),
+    "mcc": ("mcc",),
+}
+
 
 def _reference_and_mask_images(
     viewer: Any,
@@ -196,8 +216,13 @@ def _unique_labels(data: np.ndarray) -> list[int]:
 
 
 def _label_ids_array(label_ids: list[int]) -> np.ndarray:
-    """Backend array of label ids for :func:`np.isin` (CuPy rejects plain lists)."""
-    return to_numpy(label_ids)
+    """Backend array of label ids for :func:`np.isin`.
+
+    On the active backend, not the host: CuPy's ``isin`` rejects a plain list
+    *and* a NumPy array for ``test_elements``, so a host array here fails on the
+    GPU exactly where a list would.
+    """
+    return as_backend_array(label_ids)
 
 
 def _multilabel_input_and_labels(
@@ -625,7 +650,7 @@ def run_gui_tool(
         new_aff = out.affine
         if new_aff is None:
             raise ValueError("Reorient produced no affine.")
-        new_aff = np.asarray(to_numpy(new_aff), dtype=float)
+        new_aff = as_backend_array(to_numpy(new_aff)).astype(float)
         codes = orientation_codes_from_affine(new_aff) or (
             out.orientation or str(params.get("target_orientation") or "")
         )
@@ -690,6 +715,17 @@ def run_gui_tool(
     )
     if per_label:
         return _run_multilabel(tool_id, layer, viewer, label_ids=per_label, params=params)
+
+    if tool_id in _MASK_COMPARISON:
+        # Handled whole: this path needs both label maps intact.
+        #
+        # "All labels" deliberately does *not* seed the list from the active
+        # layer. A structure the reference has and the prediction missed
+        # entirely would then never appear in the report — the one result you
+        # most need to see. _run_mask_comparison takes the union of both maps.
+        ids = list(label_ids or []) if target_mode == "label" else []
+        _run_mask_comparison(tool_id, layer, viewer, data, ids, params=params)
+        return None
 
     if tool_id in _MEASURE_NOTIFY:
         per_label_ids = label_ids
@@ -1046,7 +1082,12 @@ def run_gui_tool(
             viewer, layer, ref_name, proc_data
         )
         stats = masked_stats(intensity, mask_img)
-        notify(_format_metrics({k: round(float(v), 6) for k, v in stats.items()}))
+        _notify_results(
+            viewer,
+            _tool_label(tool_id),
+            {k: round(float(v), 6) for k, v in stats.items()},
+            subtitle=f"{getattr(layer, 'name', 'active')} over {ref_name or 'itself'}",
+        )
         return None
 
     if tool_id == "integrated_intensity":
@@ -1070,57 +1111,16 @@ def run_gui_tool(
             pet = img
             mask_img = img
         stats = suv_stats(pet, mask_img, **_suv_stats_kwargs(params))
-        notify(_format_metrics({k: round(float(v), 6) for k, v in stats.items()}))
+        _notify_results(
+            viewer,
+            _tool_label(tool_id),
+            {k: round(float(v), 6) for k, v in stats.items()},
+            subtitle=f"{getattr(layer, 'name', 'active')} over {ref_name or 'itself'}",
+        )
         return None
 
     if tool_id == "intensity_similarity":
         _run_intensity_similarity(viewer, layer, params)
-        return None
-
-    if tool_id == "dice":
-        from nvitk.measure.voxel import dice
-
-        ref_name = str(params.get("reference_layer") or "").strip()
-        ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, proc_data)
-        val = dice(ref_img, mask_img)
-        notify(f"Dice: {val:.6f}")
-        return None
-
-    if tool_id == "jaccard":
-        from nvitk.measure.voxel import jaccard
-
-        ref_name = str(params.get("reference_layer") or "").strip()
-        ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, proc_data)
-        val = jaccard(ref_img, mask_img)
-        notify(f"Jaccard: {val:.6f}")
-        return None
-
-    if tool_id in ("volsim", "mcc"):
-        from nvitk.measure.voxel import mcc, volsim
-
-        ref_name = str(params.get("reference_layer") or "").strip()
-        ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, proc_data)
-        fn = volsim if tool_id == "volsim" else mcc
-        label = "Volume similarity (VOLSIM)" if tool_id == "volsim" else "Matthews correlation (MCC)"
-        notify(f"{label}: {float(fn(ref_img, mask_img)):.6f}")
-        return None
-
-    if tool_id == "voxel_metrics":
-        from nvitk.measure.voxel import voxel_metrics
-
-        ref_name = str(params.get("reference_layer") or "").strip()
-        ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, proc_data)
-        metrics = voxel_metrics(ref_img, mask_img)
-        notify(_format_metrics({k: round(float(v), 6) for k, v in metrics.items()}))
-        return None
-
-    if tool_id == "surface_metrics":
-        from nvitk.measure.surface import surface_metrics
-
-        ref_name = str(params.get("reference_layer") or "").strip()
-        ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, proc_data)
-        metrics = surface_metrics(ref_img, mask_img)
-        notify(_format_metrics({k: round(float(v), 6) for k, v in metrics.items()}))
         return None
 
     if tool_id == "measure_mask_hemodynamics":
@@ -1171,9 +1171,16 @@ def run_gui_tool(
         from nvitk.morphology.centerline_siphon import compute_mask_genus
 
         report = compute_mask_genus(proc_data)
-        notify(
-            f"Genus: β₀={report.beta0} β₁={report.beta1} "
-            f"(raw β₁={report.beta1_raw}, max cycle={report.max_cycle_len})"
+        _notify_results(
+            viewer,
+            _tool_label(tool_id),
+            {
+                "beta0": int(report.beta0),
+                "beta1": int(report.beta1),
+                "beta1_raw": int(report.beta1_raw),
+                "max_cycle_len": int(report.max_cycle_len),
+            },
+            subtitle=getattr(layer, "name", ""),
         )
         return None
 
@@ -1470,7 +1477,7 @@ def run_gui_tool(
             sel_ids = unique_layer_labels(src_markers)
         if not sel_ids:
             raise ValueError("expand mode needs seed label(s) on the active layer.")
-        sel_arr = np.asarray(sel_ids, dtype=src_markers.dtype)
+        sel_arr = as_backend_array(sel_ids).astype(src_markers.dtype)
         markers_ml = np.where(
             np.isin(src_markers, sel_arr), src_markers, 0
         ).astype(np.int32, copy=False)
@@ -1975,7 +1982,7 @@ def _run_mask_binary_op(
 
     def _as_bool_mask_from_labels(data: np.ndarray, ids: list[int] | None) -> np.ndarray:
         """Coerce label/mask *data* to a boolean array, restricted to *ids* if given (else non-zero)."""
-        arr = np.asarray(data)
+        arr = as_backend_array(data)
         if not ids:
             return (arr != 0)
         return np.isin(arr, _label_ids_array(ids))
@@ -2340,7 +2347,7 @@ def _run_measure_centerline_arc_length(
     elif not targets:
         targets = [0]
 
-    lines = []
+    rows: dict[str, dict[str, float]] = {}
     if targets == [0]:
         polys = extract_polylines_from_centerline(
             arr,
@@ -2355,7 +2362,11 @@ def _run_measure_centerline_arc_length(
             mm_len = float(
                 np.sum(np.linalg.norm(seg * np.array([sx, sy, sz], dtype=np.float64), axis=1))
             ) if seg.shape[0] else 0.0
-            lines.append(f"branch[{i}]: {vox_len:.2f} vox, {mm_len:.2f} mm, {poly.shape[0]} points")
+            rows[f"branch[{i}]"] = {
+                "voxels": round(vox_len, 6),
+                "mm": round(mm_len, 6),
+                "points": int(poly.shape[0]),
+            }
     else:
         for lid in targets:
             try:
@@ -2370,7 +2381,9 @@ def _run_measure_centerline_arc_length(
                     reskeletonize=reskel,
                 )
                 if not polys:
-                    lines.append(f"label {lid}: no polyline")
+                    rows[_label_display(viewer, layer, lid)] = {
+                        "voxels": 0.0, "mm": 0.0, "points": 0,
+                    }
                     continue
                 poly = max(polys, key=lambda p: p.shape[0])
             cum = polyline_cumulative_arc_length(poly)
@@ -2379,11 +2392,19 @@ def _run_measure_centerline_arc_length(
             mm_len = float(
                 np.sum(np.linalg.norm(seg * np.array([sx, sy, sz], dtype=np.float64), axis=1))
             ) if seg.shape[0] else 0.0
-            lines.append(
-                f"label {lid}: {vox_len:.2f} vox, {mm_len:.2f} mm, {poly.shape[0]} points"
-            )
+            rows[_label_display(viewer, layer, lid)] = {
+                "voxels": round(vox_len, 6),
+                "mm": round(mm_len, 6),
+                "points": int(poly.shape[0]),
+            }
 
-    notify("Centerline arc length:\n" + "\n".join(lines))
+    _notify_results(
+        viewer,
+        _tool_label("measure_centerline_arc_length"),
+        rows,
+        subtitle=getattr(layer, "name", ""),
+        row_header="Branch" if targets == [0] else "Label",
+    )
 
 
 def _run_measure_loc_hemodynamics(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
@@ -2500,7 +2521,7 @@ def _run_measure_mask_hemodynamics(
         else:
             mag = cd = vel_mag = as_backend_array(ref_layer.data).astype(np.float64)
     method = str(params.get("hemo_method") or "both")
-    lines = []
+    rows: dict[str, dict[str, Any]] = {}
     for lid in lids:
         results = measure_mask_hemodynamics(
             mask_data,
@@ -2518,13 +2539,21 @@ def _run_measure_mask_hemodynamics(
             volume_seg=mask_data if not bool(params.get("measure_resegment", False)) else None,
         )
         for res in results:
-            extra = ""
+            # One row per (label, method): a label measured both ways yields two
+            # results, and collapsing them would hide which method produced what.
+            key = f"{_label_display(viewer, layer, int(lid))} [{res.method}]"
+            row: dict[str, Any] = {"PI": round(float(res.pi), 6), "RI": round(float(res.ri), 6)}
             if res.mean_flow_ml_s is not None:
-                extra = f" flow={res.mean_flow_ml_s:.2f} ml/s"
-            lines.append(
-                f"Label {lid} [{res.method}]: PI={res.pi:.3f} RI={res.ri:.3f}{extra} — {res.note}"
-            )
-    notify("\n".join(lines))
+                row["flow_ml_s"] = round(float(res.mean_flow_ml_s), 6)
+            row["note"] = str(res.note)
+            rows[key] = row
+    _notify_results(
+        viewer,
+        _tool_label("measure_mask_hemodynamics"),
+        rows,
+        subtitle=getattr(layer, "name", ""),
+        row_header="Label [method]",
+    )
 
 
 def _prepare_vessel_hemo_for_viz(
@@ -3424,7 +3453,12 @@ def _run_intensity_similarity(
         k: round(float(v), 6) if k != "n_samples" else int(v)
         for k, v in stats.items()
     }
-    notify(_format_metrics(display))
+    _notify_results(
+        viewer,
+        _tool_label("intensity_similarity"),
+        display,
+        subtitle=f"{getattr(primary_layer, 'name', 'active')} vs {getattr(other_layer, 'name', 'reference')}",
+    )
 
 
 def _run_viz_pet_hotspots(
@@ -3909,6 +3943,134 @@ def _layer_kwargs_from(layer: Any, name: str) -> dict[str, Any]:
     return {"name": f"{layer.name}_{name}", **layer_spatial_kwargs(layer)}
 
 
+def _label_display(viewer: Any, layer: Any, label_id: int) -> str:
+    """``"3 — Left ICA"`` when a schema names the label, ``"3"`` when none does."""
+    try:
+        from nvitk.gui.labels.catalog import get_schema, guess_schema_from_layer
+
+        key = guess_schema_from_layer(layer)
+        if key:
+            name = get_schema(key).name_for(int(label_id))
+            if name:
+                return f"{int(label_id)} — {name}"
+    except Exception:  # noqa: BLE001 — an unnamed label is still a usable row
+        pass
+    return str(int(label_id))
+
+
+def _run_mask_comparison(
+    tool_id: str,
+    layer: Any,
+    viewer: Any,
+    data: Any,
+    label_ids: list[int] | None,
+    *,
+    params: dict[str, Any],
+) -> None:
+    """Compare the active mask against a reference mask, label by label.
+
+    Both maps are carried through whole and reduced per label here, rather than
+    the active one being reduced up front: comparing one label of the prediction
+    against *every* label of the reference is what made a perfect segmentation
+    score 0.87, and binarising both sides is what made a segmentation with every
+    label wrong score 1.0.
+    """
+    from nvitk.measure.surface import surface_metrics
+    from nvitk.measure.voxel import label_ids_present, multilabel_metrics, voxel_metrics
+
+    ref_name = str(params.get("reference_layer") or "").strip()
+    ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, data)
+    ref_label_name = getattr(_resolve_layer(viewer, ref_name), "name", ref_name)
+
+    ids = [int(i) for i in (label_ids or [])] or label_ids_present(ref_img, mask_img)
+    metrics = _COMPARISON_METRICS.get(tool_id)
+
+    def _row(label: int | None) -> dict[str, float]:
+        """One metric row, for a single label or for the whole foreground."""
+        if tool_id == "surface_metrics":
+            return {
+                k: round(float(v), 6)
+                for k, v in surface_metrics(ref_img, mask_img, label=label).items()
+            }
+        return {
+            k: round(float(v), 6)
+            for k, v in voxel_metrics(ref_img, mask_img, metrics=metrics, label=label).items()
+        }
+
+    subtitle = f"{getattr(layer, 'name', 'active')} vs {ref_label_name}"
+    if len(ids) <= 1:
+        # One label (or a plain binary mask): the flat table is the whole story.
+        only = ids[0] if ids else None
+        payload = _row(only)
+        note = "" if only is None else f"Label {_label_display(viewer, layer, only)}"
+        _notify_results(viewer, _tool_label(tool_id), payload, subtitle=subtitle, note=note)
+        return
+
+    rows: dict[str, dict[str, float]] = {}
+    for lid in ids:
+        rows[_label_display(viewer, layer, lid)] = _row(lid)
+    columns = list(next(iter(rows.values())).keys())
+    # Ratios only. The mean of a confusion count across labels ("average TP")
+    # is not a quantity anyone reports, and printing 105.333333 under a column
+    # of integers just makes the table harder to read.
+    from nvitk.gui.viz.results_window import COUNT_METRICS
+
+    per_label_rows = list(rows.values())
+    rows["macro average"] = {
+        c: ("" if c in COUNT_METRICS
+            else round(sum(r[c] for r in per_label_rows) / len(per_label_rows), 6))
+        for c in columns
+    }
+    rows["foreground (any label)"] = _row(None)
+    note = (
+        "Each label is scored against the same label id in the reference. "
+        "'foreground' ignores label identity — it only asks whether the right "
+        "voxels were segmented at all, so it reads high even when every label is wrong."
+    )
+    _notify_results(
+        viewer,
+        _tool_label(tool_id),
+        rows,
+        subtitle=subtitle,
+        row_header="Label",
+        note=note,
+    )
+
+
+def _tool_label(tool_id: str) -> str:
+    """The registry's human label for *tool_id*, falling back to the id."""
+    try:
+        spec = tool_by_id(tool_id)
+        return str(getattr(spec, "label", "") or tool_id)
+    except Exception:  # noqa: BLE001
+        return tool_id
+
+
+def _notify_results(
+    viewer: Any,
+    title: str,
+    payload: Any,
+    *,
+    subtitle: str = "",
+    row_header: str = "",
+    note: str = "",
+) -> None:
+    """Show *payload* in the results window and log the same thing as text.
+
+    Both, deliberately: the window is where you read a table, the log is where
+    you find what a run produced an hour later.
+    """
+    from nvitk.gui.viz.results_window import show_results
+
+    try:
+        text = show_results(
+            viewer, title, payload, subtitle=subtitle, row_header=row_header, note=note
+        )
+    except Exception:  # noqa: BLE001 — a window failure must not lose the numbers
+        text = _format_metrics(payload) if isinstance(payload, dict) else str(payload)
+    notify(text)
+
+
 def _run_measure_per_label(
     tool_id: str,
     layer: Any,
@@ -3921,33 +4083,43 @@ def _run_measure_per_label(
     """Run a measure tool once per label id and log each result."""
     if not gpu_enabled():
         data = as_backend_array(to_numpy(data))
-    lines = []
+    rows: dict[str, dict[str, float]] = {}
     for lid in label_ids:
         proc, _ = prepare_layer_data(data, target_mode="label", label_ids=[lid])
         img = layer_to_image(layer, proc)
-        line = _measure_line(tool_id, img, layer, viewer, params)
-        lines.append(f"Label {lid}: {line}")
-    notify("\n".join(lines))
+        rows[_label_display(viewer, layer, lid)] = _measure_row(
+            tool_id, img, layer, viewer, params
+        )
+    _notify_results(
+        viewer,
+        _tool_label(tool_id),
+        rows,
+        subtitle=getattr(layer, "name", ""),
+        row_header="Label",
+    )
 
 
-def _measure_line(
+def _measure_row(
     tool_id: str,
     img: Image,
     layer: Any,
     viewer: Any,
     params: dict[str, Any],
-) -> str:
-    """Run the measurement tool named *tool_id* on *img* and format its result as a single summary
-    line for notification (volume, masked stats, similarity metrics, etc.)."""
+) -> dict[str, float]:
+    """Run the measurement tool named *tool_id* on *img* and return its metrics.
+
+    A mapping rather than a preformatted line, so a per-label sweep can be laid
+    out as one table with aligned columns instead of a stack of sentences.
+    """
     if tool_id == "volume_mm3":
         from nvitk.measure.volume import volume_mm3
 
-        return f"volume = {volume_mm3(img):.3f} mm³"
+        return {"volume_mm3": round(float(volume_mm3(img)), 6)}
     if tool_id == "volume_cc":
         from nvitk.measure.volume import volume_cc
 
-        v = volume_cc(img)
-        return f"volume = {v:.6f} cc ({v * 1000:.3f} mm³)"
+        v = float(volume_cc(img))
+        return {"volume_cc": round(v, 6), "volume_mm3": round(v * 1000.0, 6)}
     if tool_id == "masked_stats":
         from nvitk.measure.intensity import masked_stats
 
@@ -3956,7 +4128,7 @@ def _measure_line(
             viewer, layer, ref_name, img.data
         )
         stats = masked_stats(intensity, mask_img)
-        return _format_metrics({k: round(float(v), 6) for k, v in stats.items()})
+        return {k: round(float(v), 6) for k, v in stats.items()}
     if tool_id == "integrated_intensity":
         from nvitk.measure.radiomics import integrated_intensity
 
@@ -3964,7 +4136,9 @@ def _measure_line(
         intensity, mask_img = _reference_and_mask_images(
             viewer, layer, ref_name, img.data
         )
-        return f"integrated = {integrated_intensity(intensity, mask_img):.6g}"
+        return {
+            "integrated_intensity": round(float(integrated_intensity(intensity, mask_img)), 6)
+        }
     if tool_id == "suv_stats":
         from nvitk.measure.suv import suv_stats
 
@@ -3975,42 +4149,10 @@ def _measure_line(
             stats = suv_stats(pet, mask_img, **kw)
         else:
             stats = suv_stats(img, img, **kw)
-        return _format_metrics({k: round(float(v), 6) for k, v in stats.items()})
-    if tool_id == "dice":
-        from nvitk.measure.voxel import dice
-
-        ref_name = str(params.get("reference_layer") or "").strip()
-        ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, img.data)
-        return f"dice = {dice(ref_img, mask_img):.6f}"
-    if tool_id == "jaccard":
-        from nvitk.measure.voxel import jaccard
-
-        ref_name = str(params.get("reference_layer") or "").strip()
-        ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, img.data)
-        return f"jaccard = {jaccard(ref_img, mask_img):.6f}"
-    if tool_id in ("volsim", "mcc"):
-        from nvitk.measure.voxel import mcc, volsim
-
-        ref_name = str(params.get("reference_layer") or "").strip()
-        ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, img.data)
-        fn = volsim if tool_id == "volsim" else mcc
-        return f"{tool_id} = {float(fn(ref_img, mask_img)):.6f}"
-    if tool_id == "voxel_metrics":
-        from nvitk.measure.voxel import voxel_metrics
-
-        ref_name = str(params.get("reference_layer") or "").strip()
-        ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, img.data)
-        return _format_metrics(
-            {k: round(float(v), 6) for k, v in voxel_metrics(ref_img, mask_img).items()}
-        )
-    if tool_id == "surface_metrics":
-        from nvitk.measure.surface import surface_metrics
-
-        ref_name = str(params.get("reference_layer") or "").strip()
-        ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, img.data)
-        return _format_metrics(
-            {k: round(float(v), 6) for k, v in surface_metrics(ref_img, mask_img).items()}
-        )
+        return {k: round(float(v), 6) for k, v in stats.items()}
+    # Mask-vs-mask comparisons never reach here: they go through
+    # _run_mask_comparison, which reduces *both* label maps to the same label
+    # instead of scoring one label of the prediction against the whole reference.
     raise ValueError(f"Per-label measure not supported for {tool_id}")
 
 

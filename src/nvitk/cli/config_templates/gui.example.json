@@ -1,0 +1,5 @@
+{
+  "_comment": "Window state the nvitk GUI manages for itself. Unlike the other configuration files there is nothing here to fill in: the GUI writes these values when it closes and reads them when it opens, so the layout you leave is the layout you come back to.",
+  "_comment_dock_state": "Base64 QMainWindow.saveState(). Panel sizes, which docks are tabbed together, and which are floating. Delete the value to start again from the default arrangement; delete the file and the GUI will recreate it.",
+  "dock_state": ""
+}

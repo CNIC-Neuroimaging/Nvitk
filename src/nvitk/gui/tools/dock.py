@@ -194,11 +194,14 @@ def build_tools_dock(
     totalseg_roi.setVisible(False)
     _last_active_layer_id = None
 
-    _visibility_timer = QTimer()
+    # Parented to the dock: an ownerless QTimer outlives the widgets its
+    # callback touches, and a single-shot still pending when the window closes
+    # then fires against deleted C++ objects on the way out.
+    _visibility_timer = QTimer(container)
     _visibility_timer.setSingleShot(True)
     _visibility_timer.setInterval(120)
 
-    _active_sync_timer = QTimer()
+    _active_sync_timer = QTimer(container)
     _active_sync_timer.setSingleShot(True)
     _active_sync_timer.setInterval(0)
 
@@ -491,7 +494,7 @@ def build_tools_dock(
     tool_scroll.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
     tool_scroll.setMinimumHeight(_TOOL_SCROLL_MIN_HEIGHT)
 
-    _fit_timer = QTimer()
+    _fit_timer = QTimer(tool_scroll)
     _fit_timer.setSingleShot(True)
     _fit_timer.setInterval(0)
 

@@ -1,8 +1,9 @@
 """Locate nvitk's JSON configuration files.
 
-nvitk keeps its site configuration in three JSON files — ``sge.json`` (cluster settings and
-pipeline path roots), ``settings.json`` (dataset and atlas roots) and ``xnat.json`` (XNAT
-connection profile). This module is the single place that decides *where those files live*.
+nvitk keeps its site configuration in four JSON files — ``sge.json`` (cluster settings and
+pipeline path roots), ``settings.json`` (dataset and atlas roots), ``xnat.json`` (XNAT
+connection profile) and ``gui.json`` (window layout the GUI manages for itself). This module
+is the single place that decides *where those files live*.
 
 It exists because the previous arrangement had three separate copies of a
 ``_find_repo_root()`` that ascended from ``__file__`` looking for ``pyproject.toml`` and
@@ -48,7 +49,12 @@ FILE_ENV_VARS: dict[str, str] = {
     "sge.json": "NVITK_SGE_JSON",
     "settings.json": "NVITK_SETTINGS_JSON",
     "xnat.json": "NVITK_XNAT_CONFIG",
+    "gui.json": "NVITK_GUI_JSON",
 }
+
+#: Files a person fills in. ``gui.json`` is excluded: the GUI writes it, and
+#: "is this install configured?" should not be answered yes by a window layout.
+AUTHORED_CONFIG_FILES: tuple[str, ...] = ("sge.json", "settings.json", "xnat.json")
 
 # Set by set_config_dir(); wins over every environment variable.
 _override_dir: Path | None = None
@@ -336,6 +342,7 @@ __all__ = [
     "CONFIG_DIR_NAME",
     "ENV_CONFIG_DIR",
     "ENV_HOME",
+    "AUTHORED_CONFIG_FILES",
     "FILE_ENV_VARS",
     "ConfigError",
     "candidate_dirs",

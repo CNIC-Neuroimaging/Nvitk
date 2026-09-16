@@ -24,7 +24,7 @@ from scipy.spatial import cKDTree
 from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup
 
-from ._common import bool_mask, ensure_same_shape, resolve_spacing
+from ._common import bool_mask, ensure_same_shape, label_mask, resolve_spacing
 
 setup(globals())
 
@@ -44,10 +44,11 @@ def _distances(
     label_true: Any,
     label_pred: Any,
     spacing: tuple[float, ...],
+    label: int | None = None,
 ) -> _host_np.ndarray:
     """Return a 1D array of symmetric contour-to-contour distances in mm."""
-    a = bool_mask(label_true)
-    b = bool_mask(label_pred)
+    a = label_mask(label_true, label)
+    b = label_mask(label_pred, label)
 
     struct = _isotropic_structure(a.ndim)
 
@@ -153,13 +154,18 @@ def surface_metrics(
     *,
     spacing: tuple[float, ...] | None = None,
     metrics: Iterable[str] | None = None,
+    label: int | None = None,
 ) -> dict[str, float]:
     """
     Compute multiple surface metrics in one pass (all sharing the same distance array).
+
+    With *label*, both maps are reduced to that label id rather than to "any
+    non-zero voxel", so the distances are between the two versions of one
+    structure instead of between two whole segmentations.
     """
     ensure_same_shape(label_true, label_pred)
     sp = resolve_spacing(label_true, spacing)
-    d = _distances(label_true, label_pred, sp)
+    d = _distances(label_true, label_pred, sp, label)
     requested = tuple(_METRIC_FUNCS.keys()) if metrics is None else tuple(metrics)
     unknown = set(requested) - set(_METRIC_FUNCS.keys())
     if unknown:

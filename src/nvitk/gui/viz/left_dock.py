@@ -113,6 +113,10 @@ def attach_left_inspection_dock(
     return dock
 
 
+#: Edge of a title-bar button, in pixels. Pinned in the stylesheet as well as on
+#: the widget so an ancestor's padding or max-width cannot shrink the glyph away.
+_BUTTON_PX = 22
+
 #: Size a panel is given when the screen cannot be measured. Wide enough for the
 #: horizontal panels to be usable.
 _FLOAT_FALLBACK = (1100, 700)
@@ -146,17 +150,24 @@ def install_expand_button(dock: Any, title: str) -> Any:
         """One title-bar button, styled to read on the dark chrome."""
         widget = QPushButton(glyph)
         widget.setFlat(True)
-        widget.setFixedSize(22, 22)
+        widget.setAutoFillBackground(False)
+        widget.setFixedSize(_BUTTON_PX, _BUTTON_PX)
         widget.setCursor(Qt.PointingHandCursor)
-        # Explicit colours: a flat button inherits the dock's own stylesheet, and
-        # on the dark theme that renders the glyph at almost the background's
-        # value — the control is there but invisible.
+        # Every geometry property is set explicitly, not just the colours. A host
+        # stylesheet styles *all* its buttons — Napari caps title-bar buttons at
+        # 12x12, the statmodels window pads them by 5x12 — and either one leaves a
+        # 22px button with no room for its glyph. The control is then laid out and
+        # clickable but draws blank, which is indistinguishable from missing.
         widget.setStyleSheet(
             f"QPushButton {{ color: {COLOR_TEXT}; background: transparent;"
-            f" border: none; font-size: 13px; }}"
+            f" border: none; padding: 0px; margin: 0px;"
+            f" min-width: {_BUTTON_PX}px; max-width: {_BUTTON_PX}px;"
+            f" min-height: {_BUTTON_PX}px; max-height: {_BUTTON_PX}px;"
+            f" font-size: 13px; text-align: center; }}"
             f"QPushButton:hover {{ color: {COLOR_ACCENT};"
             f" background: {COLOR_CONTROL_HOVER}; border-radius: 3px; }}"
-            f"QPushButton:disabled {{ color: {COLOR_DISABLED}; }}"
+            f"QPushButton:pressed {{ color: {COLOR_ACCENT}; background: transparent; }}"
+            f"QPushButton:disabled {{ color: {COLOR_DISABLED}; background: transparent; }}"
         )
         return widget
 

@@ -55,6 +55,7 @@ from qtpy.QtWidgets import (
 )
 
 from nvitk.core.logger import Logger
+from nvitk.gui.viz.left_dock import install_expand_button
 from nvitk.gui.tools.runner import notify
 from nvitk.pipes.qvtpy.common.db_publish import QVTPY_PIPELINE_ID
 from nvitk.stats.mixedlm import formula_columns as _formula_columns
@@ -445,6 +446,13 @@ class StatmodelsWindow(QMainWindow):
         self._add_dock(
             "frame", "Analysis dataframe", self._build_frame_box(), Qt.BottomDockWidgetArea
         )
+        # The same pop-out / fullscreen controls the Napari panels carry. Only the
+        # untabbed docks get them: a tabbed one has no title bar to put them in —
+        # that is what _hide_title_bar_while_tabbed takes away — and its tab
+        # already names it. A table is the panel most often wanted full-screen,
+        # which is why this matters here more than anywhere else in the window.
+        for key, title in (("frame", "Analysis dataframe"), ("results", "Results")):
+            install_expand_button(self._docks[key], title)
 
         self.resizeDocks(
             [self._docks["data"], self._docks["results"]], [380, 400], Qt.Horizontal
@@ -458,12 +466,14 @@ class StatmodelsWindow(QMainWindow):
         self._status.setWordWrap(False)
         status.addWidget(self._status, 1)
 
-        # Collapse every dock when iterating on a plot, so the figure gets the
-        # whole window without closing panels one at a time.
+        # Collapse the docks when iterating on a plot, so the figure gets the
+        # window without closing panels one at a time. The results stay up: the
+        # plot is read against them.
         self._btn_focus = QPushButton("Focus plot")
         self._btn_focus.setCheckable(True)
         self._btn_focus.setToolTip(
-            "Hide every panel and give the plot the whole window. Click again to bring them back."
+            "Give the plot the window, keeping the results beside it. "
+            "Click again to bring the other panels back."
         )
         self._btn_focus.toggled.connect(self._on_focus_plot)
         status.addPermanentWidget(self._btn_focus)
@@ -1446,14 +1456,23 @@ class StatmodelsWindow(QMainWindow):
         """The plot panel itself, not the scroll area it is wrapped in."""
         return self._plot
 
+    #: Panels that stay up in focus mode. The plot is read against its numbers —
+    #: hiding the results to make room for the figure takes away half of what the
+    #: figure is being looked at for.
+    FOCUS_KEEPS: tuple[str, ...] = ("results",)
+
     def _on_focus_plot(self, focused: bool) -> None:
-        """Hide (or restore) every panel around the plot."""
+        """Hide the panels around the plot, keeping the ones it is read against."""
         if focused:
             # Remember the whole arrangement, not just which docks were open:
             # restoring by state also brings back tab order and sizes.
             self._focus_restore_state = self.saveState()
-            for dock in self._docks.values():
-                dock.hide()
+            for key, dock in self._docks.items():
+                if key in self.FOCUS_KEEPS:
+                    dock.show()
+                    dock.raise_()
+                else:
+                    dock.hide()
             self._btn_focus.setText("Show panels")
         else:
             state = getattr(self, "_focus_restore_state", None)

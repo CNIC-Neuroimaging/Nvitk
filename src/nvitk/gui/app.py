@@ -505,8 +505,12 @@ def run_app() -> None:
     # when neither of these existed, and ``restoreState`` silently drops entries
     # whose objectName it cannot find — hence a second, explicit restore here.
     try:
-        from nvitk.gui.core.prefs import restore_dock_state
+        from nvitk.gui.core.prefs import ensure_prefs_file, restore_dock_state
 
+        # Seed gui.json beside the rest of the configuration the first time a
+        # configured install opens the GUI, so there is somewhere for the layout
+        # to be remembered rather than it only appearing after a clean exit.
+        ensure_prefs_file()
         restore_dock_state(viewer.window._qt_window)
     except Exception:  # noqa: BLE001 — a stored layout must not block a launch
         pass
@@ -550,8 +554,12 @@ def run_app() -> None:
     _refresh_image_properties_tab()
 
     try:
-        qt_viewer = viewer.window._qt_viewer
-        _orig_close = qt_viewer.closeEvent
+        # The main window, not the viewer widget inside it. Napari's
+        # _QtMainWindow.closeEvent tears the session down without ever calling
+        # closeEvent on its child QtViewer, and Qt does not deliver close events
+        # to children on its own, so a handler installed on the viewer never runs.
+        qt_window = viewer.window._qt_window
+        _orig_close = qt_window.closeEvent
 
         def _close_with_xnat_cleanup(event: Any) -> None:
             """Clean up XNAT temp dirs and shut down the SGE monitor / vessel cross-section state
@@ -563,18 +571,19 @@ def run_app() -> None:
 
             shutdown_sge_monitor(app_state)
             shutdown_vessel_cross_sections(app_state)
-            # Saved from the main window, not the viewer this handler hangs off:
-            # the dock layout belongs to the QMainWindow.
+            # Before delegating: Napari's handler un-floats every floating dock
+            # on its way out, so a layout saved afterwards would forget which
+            # panels the user had torn off.
             try:
                 from nvitk.gui.core.prefs import save_dock_state
 
-                save_dock_state(viewer.window._qt_window)
+                save_dock_state(qt_window)
             except Exception:  # noqa: BLE001 — never block a close on a preference
                 pass
             if _orig_close is not None:
                 _orig_close(event)
 
-        qt_viewer.closeEvent = _close_with_xnat_cleanup
+        qt_window.closeEvent = _close_with_xnat_cleanup
     except Exception:
         pass
 
