@@ -60,6 +60,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Sequence, TextIO
 
+import sys
+
 import click
 
 from nvitk.cluster.remote_submit import prompt_ssh_credentials, run_sge_script_ssh_capture
@@ -531,6 +533,28 @@ def _submit_via_login_node(
         raise click.ClickException(str(exc)) from exc
 
 
+def _once(ctx, param, value):
+    """Reject an option given more than once.
+
+    ``nargs=2`` options without ``multiple=True`` silently keep the **last** occurrence, so
+    ``--ct-window -50 1100 --ct-window 300 600`` sets the main window to the lumen window and
+    leaves the context window unset. Nothing downstream can tell that apart from a deliberate
+    choice: stage 0 harmonises the whole corpus with a 300 HU-wide window, the SSL encoder
+    pre-trains on volumes that are 97% saturated, and the first sign of trouble is days later.
+    The second window belongs to ``--ct-context-window``; saying so here costs one line.
+    """
+    if value is not None and sum(
+        1 for token in sys.argv if token == param.opts[0]
+    ) > 1:
+        raise click.BadParameter(
+            f"{param.opts[0]} was given more than once. Click keeps only the last occurrence, "
+            f"so the earlier one would be silently discarded. The wide anatomical window goes "
+            f"in --ct-window and the narrow lumen window in --ct-context-window.",
+            ctx=ctx, param=param,
+        )
+    return value
+
+
 @click.command("nvitk-topbrain")
 @config_dir_click_option()
 @backend_click_option(default="gpu")
@@ -573,18 +597,18 @@ def _submit_via_login_node(
                    "Repeatable.")
 @click.option("--num-folds", type=int, default=None)
 @click.option("--seed", type=int, default=None)
-@click.option("--ct-window", type=float, nargs=2, default=None,
+@click.option("--ct-window", type=float, nargs=2, default=None, callback=_once,
               help="CT clip window in HU for the main channel (default -100 1500). Applied to "
                    "the labelled data AND to the pre-training corpus, so the encoder is "
                    "pre-trained on the intensities it is later fine-tuned on. Changes the "
                    "dataset and the corpus, so both must be rebuilt with --overwrite.")
-@click.option("--mr-percentiles", type=float, nargs=2, default=None,
+@click.option("--mr-percentiles", type=float, nargs=2, default=None, callback=_once,
               help="MR robust percentiles for the main channel (default 0.5 99.5).")
-@click.option("--ct-context-window", type=float, nargs=2, default=None,
+@click.option("--ct-context-window", type=float, nargs=2, default=None, callback=_once,
               help="Add a second input channel with a wide CT window (e.g. -100 900) beside "
                    "the narrow vessel window, restoring the anatomical context the narrow one "
                    "clips away. Changes the dataset, so stage 0 must be re-run.")
-@click.option("--mr-context-percentiles", type=float, nargs=2, default=None,
+@click.option("--mr-context-percentiles", type=float, nargs=2, default=None, callback=_once,
               help="Percentiles for the MR half of the context channel (default 0 100).")
 # ---- stage 1: pre-training --------------------------------------------------
 @click.option("--pretrain-source", type=click.Choice(["openmind", "scratch"]),

@@ -23,6 +23,7 @@ corpus consistent with what stage 0 feeds the segmentation model.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -305,6 +306,44 @@ def iter_source_volumes(source: CorpusSource) -> Iterator[CorpusVolume]:
         )
 
 
+#: Per-file record of how each corpus volume was harmonised, beside the volume itself.
+#:
+#: Without it the only "has this been done?" test is whether the output exists, which is wrong in
+#: both directions: it skips a volume whose window has since changed (silently keeping the old
+#: harmonisation), and it redoes every volume when ``--overwrite`` is given for an unrelated
+#: reason. With ~1400 CTAs that second case is the bulk of stage 0's runtime.
+SIDECAR_SUFFIX: str = ".harmonised.json"
+
+
+def _sidecar_payload(volume: CorpusVolume, ct_window: Sequence[float] | None,
+                     mr_percentiles: Sequence[float] | None) -> dict[str, Any]:
+    """Everything that decides the output bytes, so a match means the file is already right."""
+    source = Path(volume.path)
+    try:
+        stat = source.stat()
+        fingerprint: dict[str, Any] = {"size": stat.st_size, "mtime": int(stat.st_mtime)}
+    except OSError:
+        fingerprint = {}
+    return {
+        "source": str(source),
+        "modality": volume.modality,
+        "ct_window": list(ct_window) if ct_window else None,
+        "mr_percentiles": list(mr_percentiles) if mr_percentiles else None,
+        **fingerprint,
+    }
+
+
+def _is_current(destination: Path, expected: dict[str, Any]) -> bool:
+    """Whether *destination* was produced from exactly these inputs and parameters."""
+    sidecar = destination.with_suffix(destination.suffix + SIDECAR_SUFFIX)
+    if not (destination.is_file() and sidecar.is_file()):
+        return False
+    try:
+        return json.loads(sidecar.read_text(encoding="utf-8")) == expected
+    except (OSError, ValueError):
+        return False
+
+
 def harmonize_volume(volume: CorpusVolume, corpus_root: Path, *, overwrite: bool = False,
                      ct_window: Sequence[float] | None = None,
                      mr_percentiles: Sequence[float] | None = None) -> Path:
@@ -319,7 +358,11 @@ def harmonize_volume(volume: CorpusVolume, corpus_root: Path, *, overwrite: bool
     :func:`~nvitk.normalization.harmonize_modality`'s own defaults.
     """
     destination = Path(corpus_root) / volume.source / volume.subject_id / volume.name
-    if destination.is_file() and not overwrite:
+    expected = _sidecar_payload(volume, ct_window, mr_percentiles)
+    # Parameters decide, not merely the file's existence. A changed window redoes the volume even
+    # without --overwrite (otherwise the corpus silently keeps the old harmonisation), and an
+    # unchanged one is skipped even with it.
+    if _is_current(destination, expected) and not overwrite:
         return destination
     destination.parent.mkdir(parents=True, exist_ok=True)
 
@@ -330,6 +373,9 @@ def harmonize_volume(volume: CorpusVolume, corpus_root: Path, *, overwrite: bool
         **({"mr_percentiles": mr_percentiles} if mr_percentiles else {}),
     )
     imsave(destination, harmonised)
+    destination.with_suffix(destination.suffix + SIDECAR_SUFFIX).write_text(
+        json.dumps(expected, sort_keys=True) + "\n", encoding="utf-8"
+    )
     return destination
 
 
@@ -386,6 +432,16 @@ def build_collection(
                 ct_window=ct_window, mr_percentiles=mr_percentiles,
             )
 
+        already = sum(
+            1 for volume in volumes
+            if _is_current(
+                Path(corpus_root) / volume.source / volume.subject_id / volume.name,
+                _sidecar_payload(volume, ct_window, mr_percentiles),
+            )
+        )
+        if already and not overwrite:
+            log.info("%d volume(s) already harmonised with these exact parameters; "
+                     "re-doing the remaining %d.", already, len(volumes) - already)
         written = map_in_thread_pool(_harmonize, volumes, max_workers=int(workers))
     else:
         written = [volume.path for volume in volumes]
