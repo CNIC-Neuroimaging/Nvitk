@@ -1,4 +1,10 @@
-"""PESA-Fat QC portal (static HTML + Excel and DB-backed review endpoint)."""
+"""PESA-Fat QC portal (static HTML + database-backed review endpoints).
+
+Reviews live in the NVITK database: every save upserts the ``pesa_fat_qc_reviews`` audit row
+and, for measurement aspects, stamps ``qc_status`` onto the matching ``image_measurements``
+rows. There is no intermediate workbook -- the database is the record of truth, so a reviewer
+reading a report always sees what was actually stored.
+"""
 
 from __future__ import annotations
 
@@ -25,8 +31,8 @@ def review_widget_html(
     structures: Iterable[str],
     report_relpath: str,
 ) -> str:
-    """Self-contained HTML/JS review widget (per-structure QC status/comment rows, Excel
-    autosave, DB sync button) embedded into a subject's QC report."""
+    """Self-contained HTML/JS review widget (per-structure QC status/comment rows, database
+    autosave, index rebuild button) embedded into a subject's QC report."""
     from nvitk.pipes.pesa_fat.qc.review_policy import REVIEW_ASPECTS, REVIEW_ASPECT_LABELS
 
     structs = [str(s).strip() for s in structures if str(s).strip()]
@@ -44,13 +50,13 @@ def review_widget_html(
     }
     return f"""
 <div class="card" id="{dom}_card">
-  <div class="card-h"><h3>Review</h3><div class="muted">saves to reviews.xlsx · Sync Database pushes to NVITK DB</div></div>
+  <div class="card-h"><h3>Review</h3><div class="muted">each change saves to the NVITK database · Rebuild Index refreshes the SQLite catalog</div></div>
   <div class="card-b">
     <div class="muted" style="margin-bottom:8px">Reviewer: <input id="{dom}_reviewer" placeholder="name" style="padding:6px 8px;border-radius:8px;border:1px solid rgba(229,229,229,0.18);background:rgba(0,0,0,0.25);color:#fff;"/></div>
     <div id="{dom}_rows" style="display:grid;grid-template-columns:1fr;gap:8px"></div>
     <div class="muted" id="{dom}_status" style="margin-top:10px"></div>
     <div style="margin-top:12px">
-      <button type="button" id="{dom}_sync" style="padding:8px 14px;border-radius:8px;border:1px solid rgba(252,163,17,0.5);background:rgba(252,163,17,0.15);color:#fca311;font-weight:600;cursor:pointer">Sync Database</button>
+      <button type="button" id="{dom}_sync" style="padding:8px 14px;border-radius:8px;border:1px solid rgba(252,163,17,0.5);background:rgba(252,163,17,0.15);color:#fca311;font-weight:600;cursor:pointer">Rebuild Index</button>
     </div>
   </div>
 </div>
@@ -82,11 +88,12 @@ def review_widget_html(
       headers: {{'Content-Type': 'application/json'}},
       body: JSON.stringify(body),
     }});
-    if (!res.ok) {{
-      status.textContent = `Save failed (${{res.status}}).`;
+    const data = await res.json().catch(() => ({{}}));
+    if (!res.ok || !data.ok) {{
+      status.textContent = `Save failed: ${{data.db_error || data.error || res.status}}`;
       return false;
     }}
-    status.textContent = `Saved ${{structure}} (${{aspectLabel}}) → ${{qc_status}}` + (comment ? ' (with comment)' : '') + ' (Excel).';
+    status.textContent = `Saved ${{structure}} (${{aspectLabel}}) → ${{qc_status}}` + (comment ? ' (with comment)' : '') + ' (database).';
     return true;
   }};
   const loadState = async () => {{
@@ -132,22 +139,22 @@ def review_widget_html(
   }};
   syncBtn.addEventListener('click', async () => {{
     syncBtn.disabled = true;
-    status.textContent = 'Syncing to database (may take a moment)...';
+    status.textContent = 'Rebuilding database index (may take a moment)...';
     try {{
-      const res = await fetch('/review/sync-db', {{
+      const res = await fetch('/review/reindex', {{
         method: 'POST',
         headers: {{'Content-Type': 'application/json'}},
         body: JSON.stringify(ctx),
       }});
       const data = await res.json().catch(() => ({{}}));
       if (!res.ok || !data.ok) {{
-        status.textContent = `Database sync failed: ${{data.error || data.db_error || res.status}}`;
+        status.textContent = `Index rebuild failed: ${{data.error || data.db_error || res.status}}`;
         return;
       }}
       const st = data.stats || {{}};
-      status.textContent = `Database synced (${{st.synced_structures || 0}} entries, ${{st.updated_measurements || 0}} measurement rows).`;
+      status.textContent = `Index rebuilt (${{st.synced_structures || 0}} entries, ${{st.updated_measurements || 0}} measurement rows).`;
     }} catch (e) {{
-      status.textContent = 'Database sync failed: ' + e;
+      status.textContent = 'Index rebuild failed: ' + e;
     }} finally {{
       syncBtn.disabled = false;
     }}
@@ -186,7 +193,7 @@ def _utc_now_iso() -> str:
 
 @dataclass(frozen=True)
 class ReviewRow:
-    """One QC review entry (structure/aspect status + reviewer metadata) for the reviews sheet."""
+    """One QC review entry (structure/aspect status + reviewer metadata)."""
 
     batch: str
     subject: str
@@ -200,98 +207,21 @@ class ReviewRow:
     report_relpath: str = ""
 
 
-_HEADERS = [
-    "batch",
-    "subject",
-    "pipeline",
-    "structure",
-    "review_aspect",
-    "qc_status",
-    "reviewer",
-    "reviewed_at",
-    "comment",
-    "report_relpath",
-]
-
-
-def upsert_review_row_excel(path: Path, row: ReviewRow) -> None:
-    """Insert or update *row* in the ``reviews.xlsx`` workbook at *path*, keyed on
-    (batch, subject, pipeline, structure, review_aspect)."""
-    try:
-        import openpyxl
-    except Exception as exc:
-        raise BackendUnavailableError('openpyxl is required for QC review Excel writes.') from exc
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    if path.exists():
-        wb = openpyxl.load_workbook(path)
-        ws = wb.active
-        if ws.max_row < 1:
-            ws.append(_HEADERS)
-    else:
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "reviews"
-        ws.append(_HEADERS)
-
-    # Map header -> column index
-    header = [str(c.value).strip() if c.value is not None else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
-    if header != _HEADERS:
-        # normalize: rewrite header row if mismatched
-        for i, h in enumerate(_HEADERS, start=1):
-            ws.cell(row=1, column=i, value=h)
-
-    def key_match(r: int) -> bool:
-        """True if worksheet row *r* has the same (batch, subject, pipeline, structure,
-        review_aspect) key as *row*."""
-        vals = tuple(ws.cell(row=r, column=i).value for i in range(1, 6))
-        want = (row.batch, row.subject, row.pipeline, row.structure, row.review_aspect)
-        return vals == want
-
-    target_row = None
-    for r in range(2, ws.max_row + 1):
-        if key_match(r):
-            target_row = r
-            break
-    if target_row is None:
-        target_row = ws.max_row + 1
-
-    values = [
-        row.batch,
-        row.subject,
-        row.pipeline,
-        row.structure,
-        row.review_aspect,
-        row.qc_status,
-        row.reviewer,
-        row.reviewed_at or _utc_now_iso(),
-        row.comment,
-        row.report_relpath,
-    ]
-    for i, v in enumerate(values, start=1):
-        ws.cell(row=target_row, column=i, value=v)
-
-    wb.save(path)
-
-
 def create_qc_portal_app(
     *,
     qc_root: Path,
-    reviews_xlsx: Path,
     results_root: Path | None = None,
     default_batch: str | None = None,
-    publish_db: bool = True,
 ):
-    """Return a FastAPI app serving QC HTML and POST /review.
+    """Return a FastAPI app serving QC HTML and the database-backed review endpoints.
 
     The app serves:
     - `GET /` dashboard (when `results_root` is provided by the CLI wrapper)
     - `GET /batch/{batch}` convenience redirect to a batch QC index
     - `GET /files/...` static file server rooted at `results_root`
-    - `POST /review` upserts reviews.xlsx only (fast)
-    - `GET /review/state` returns saved reviews for a report
-    - `POST /review/sync-db` batch-publishes a report to NVITK DB + SQLite index
+    - `POST /review` upserts one review into the NVITK DB
+    - `GET /review/state` returns saved reviews for a report, read from the DB
+    - `POST /review/reindex` re-asserts a report's reviews and rebuilds the SQLite index
     """
     try:
         from fastapi import FastAPI
@@ -326,7 +256,7 @@ def create_qc_portal_app(
         @app.get("/", response_class=HTMLResponse)
         async def dashboard():
             """``GET /``: render the batch-listing dashboard (with a default-batch link if set)."""
-            html = _dashboard_html(results_root=results_root_eff, reviews_xlsx=reviews_xlsx)
+            html = _dashboard_html(results_root=results_root_eff)
             if default_batch:
                 # Offer a prominent link to the default batch when provided.
                 html = html.replace(
@@ -363,7 +293,7 @@ def create_qc_portal_app(
         batch = str(batch).strip()
         subject = str(subject).strip()
         pipeline = str(pipeline).strip()
-        rows = _read_reviews_xlsx(reviews_xlsx)
+        rows = _load_review_rows(batch=batch, subject=subject, pipeline=pipeline)
         structures: dict[str, dict[str, dict[str, str]]] = {}
         reviewer = ""
         for r in rows:
@@ -383,7 +313,7 @@ def create_qc_portal_app(
 
     @app.post("/review")
     async def post_review(payload: dict[str, Any]):
-        """``POST /review``: validate and upsert one review row into ``reviews.xlsx``."""
+        """``POST /review``: validate one review row and upsert it into the NVITK DB."""
         from nvitk.pipes.pesa_fat.qc.review_policy import DEFAULT_REVIEW_ASPECT
 
         try:
@@ -410,16 +340,35 @@ def create_qc_portal_app(
                     },
                     status_code=400,
                 )
-            upsert_review_row_excel(reviews_xlsx, row)
-            return JSONResponse({"ok": True, "excel": True})
+            from nvitk.pipes.pesa_fat.common.db_publish import try_publish_qc_review
+
+            stats, db_error = try_publish_qc_review(
+                batch=row.batch,
+                subject=row.subject,
+                pipeline=row.pipeline,
+                structure=row.structure,
+                review_aspect=row.review_aspect,
+                qc_status=row.qc_status,
+                reviewer=row.reviewer,
+                reviewed_at=row.reviewed_at,
+                comment=row.comment,
+                report_relpath=row.report_relpath,
+            )
+            if db_error:
+                return JSONResponse({"ok": False, "db_error": db_error}, status_code=400)
+            return JSONResponse({"ok": True, "stats": stats or {}})
         except Exception as exc:
             log.warning("review write failed: %s", exc)
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
-    @app.post("/review/sync-db")
-    async def sync_review_db(payload: dict[str, Any]):
-        """``POST /review/sync-db``: publish this batch/subject/pipeline's reviewed structures
-        and measurements to the NVITK DB + SQLite index."""
+    @app.post("/review/reindex")
+    async def reindex_review_db(payload: dict[str, Any]):
+        """``POST /review/reindex``: re-assert this report's stored reviews and rebuild the index.
+
+        Every ``POST /review`` already writes the audit row and stamps ``image_measurements``,
+        so this is not what makes a review durable. What it adds is the SQLite index rebuild,
+        which per-save writes skip because it is too costly to run on each keystroke.
+        """
         batch = str(payload.get("batch", "")).strip()
         subject = str(payload.get("subject", "")).strip()
         pipeline = str(payload.get("pipeline", "")).strip()
@@ -428,15 +377,10 @@ def create_qc_portal_app(
                 {"ok": False, "error": "batch, subject, and pipeline are required"},
                 status_code=400,
             )
-        if not publish_db:
-            return JSONResponse(
-                {"ok": False, "error": "Database publish disabled for this portal instance"},
-                status_code=400,
-            )
         try:
             from nvitk.pipes.pesa_fat.common.db_publish import try_sync_qc_reviews_for_report
 
-            all_rows = _read_reviews_xlsx(reviews_xlsx)
+            rows = _load_review_rows(batch=batch, subject=subject, pipeline=pipeline)
             row_dicts = [
                 {
                     "batch": r.batch,
@@ -450,7 +394,7 @@ def create_qc_portal_app(
                     "comment": r.comment,
                     "report_relpath": r.report_relpath,
                 }
-                for r in all_rows
+                for r in rows
                 if _reviewable_entry(r.structure, r.review_aspect, pipeline=r.pipeline)
             ]
             stats, db_error = try_sync_qc_reviews_for_report(
@@ -463,69 +407,53 @@ def create_qc_portal_app(
                 return JSONResponse({"ok": False, "db_error": db_error}, status_code=400)
             return JSONResponse({"ok": True, "stats": stats})
         except Exception as exc:
-            log.warning("review DB sync failed: %s", exc)
+            log.warning("review DB reindex failed: %s", exc)
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
     return app
 
 
-def _read_reviews_xlsx(path: Path) -> list[ReviewRow]:
-    """Best-effort read of the shared reviews workbook."""
-    try:
-        import openpyxl
-    except Exception:
-        return []
-    p = Path(path)
-    if not p.exists():
-        return []
-    try:
-        wb = openpyxl.load_workbook(p)
-    except Exception:
-        return []
-    ws = wb.active
-    rows: list[ReviewRow] = []
-    # Map header to index
-    header = [str(c.value).strip() if c.value is not None else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
-    idx = {h: i for i, h in enumerate(header)}
+def _load_review_rows(
+    *,
+    batch: str | None = None,
+    subject: str | None = None,
+    pipeline: str | None = None,
+) -> list[ReviewRow]:
+    """Review rows from the NVITK database, filtered by whichever keys are given.
+
+    A database that is unreachable or has no review table yields no rows: the portal still
+    renders, every structure simply reads as PENDING.
+    """
+    from nvitk.pipes.pesa_fat.common.db_publish import try_fetch_qc_reviews
     from nvitk.pipes.pesa_fat.qc.review_policy import DEFAULT_REVIEW_ASPECT
 
-    required = {"batch", "subject", "pipeline", "structure", "qc_status"}
-    if not required.issubset(idx.keys()):
-        return []
-    for r in ws.iter_rows(min_row=2, values_only=True):
-        try:
-            batch = str(r[idx["batch"]] or "").strip()
-            subject = str(r[idx["subject"]] or "").strip()
-            pipeline = str(r[idx["pipeline"]] or "").strip()
-            structure = str(r[idx["structure"]] or "").strip()
-            review_aspect = (
-                str(r[idx["review_aspect"]] or DEFAULT_REVIEW_ASPECT).strip().upper()
-                if "review_aspect" in idx
-                else DEFAULT_REVIEW_ASPECT
-            )
-            qc_status = str(r[idx["qc_status"]] or "PENDING").strip().upper()
-            reviewer = str(r[idx.get("reviewer", -1)] or "").strip() if "reviewer" in idx else ""
-            reviewed_at = str(r[idx.get("reviewed_at", -1)] or "").strip() if "reviewed_at" in idx else ""
-            comment = str(r[idx.get("comment", -1)] or "").strip() if "comment" in idx else ""
-            report_relpath = str(r[idx.get("report_relpath", -1)] or "").strip() if "report_relpath" in idx else ""
-        except Exception:
+    records, error = try_fetch_qc_reviews(batch=batch, subject=subject, pipeline=pipeline)
+    if error:
+        log.warning("QC review DB read failed: %s", error)
+
+    rows: list[ReviewRow] = []
+    for r in records:
+        batch_s = str(r.get("batch", "")).strip()
+        subject_s = str(r.get("subject", "")).strip()
+        pipeline_s = str(r.get("pipeline", "")).strip()
+        structure_s = str(r.get("structure", "")).strip()
+        if not batch_s or not subject_s or not pipeline_s or not structure_s:
             continue
-        if not batch or not subject or not pipeline or not structure:
-            continue
-        if qc_status not in {"PENDING", "OK", "FAIL"}:
-            qc_status = "PENDING"
+        status = str(r.get("qc_status", "PENDING")).strip().upper()
+        if status not in {"PENDING", "OK", "FAIL"}:
+            status = "PENDING"
         rows.append(
             ReviewRow(
-                batch=batch,
-                subject=subject,
-                pipeline=pipeline,
-                structure=structure,
-                review_aspect=review_aspect,
-                qc_status=qc_status,
-                reviewer=reviewer,
-                reviewed_at=reviewed_at,
-                comment=comment,
-                report_relpath=report_relpath,
+                batch=batch_s,
+                subject=subject_s,
+                pipeline=pipeline_s,
+                structure=structure_s,
+                review_aspect=str(r.get("review_aspect") or DEFAULT_REVIEW_ASPECT).strip().upper(),
+                qc_status=status,
+                reviewer=str(r.get("reviewer", "")).strip(),
+                reviewed_at=str(r.get("reviewed_at", "")).strip(),
+                comment=str(r.get("comment", "")).strip(),
+                report_relpath=str(r.get("report_relpath", "")).strip(),
             )
         )
     return rows
@@ -593,10 +521,10 @@ def _esc(s: str) -> str:
     )
 
 
-def _dashboard_html(*, results_root: Path, reviews_xlsx: Path) -> str:
+def _dashboard_html(*, results_root: Path) -> str:
     """Render the portal's batch-listing dashboard page (batches, subjects, review status)."""
     batches = _discover_batches(results_root)
-    review_rows = _read_reviews_xlsx(reviews_xlsx)
+    review_rows = _load_review_rows()
 
     # Index reviews by (batch, subject, pipeline)
     by_key: dict[tuple[str, str, str], list[ReviewRow]] = {}
@@ -689,7 +617,7 @@ def _dashboard_html(*, results_root: Path, reviews_xlsx: Path) -> str:
 <body>
   <div class="wrap">
     <h1>nvitk PESA-Fat QC portal</h1>
-    <div class="muted">Serving results root: <code>{_esc(str(results_root))}</code> · Reviews: <code>{_esc(str(reviews_xlsx))}</code></div>
+    <div class="muted">Serving results root: <code>{_esc(str(results_root))}</code> · Reviews stored in the NVITK database</div>
 
     <div class="card">
       <div class="card-h"><h2>Batches</h2><div class="muted">click to open batch QC index</div></div>
@@ -743,6 +671,5 @@ __all__ = [
     "ReviewRow",
     "create_qc_portal_app",
     "review_widget_html",
-    "upsert_review_row_excel",
 ]
 

@@ -264,7 +264,7 @@ def _ensure_pesa_fat_qc_reviews_table(repo: DataRepo) -> None:
     payload: dict[str, Any] = {
         "path": rel_path,
         "kind": "derived",
-        "description": "PESA-Fat QC portal review decisions (mirrors reviews.xlsx).",
+        "description": "PESA-Fat QC portal review decisions.",
         "key_columns": ["batch", "subject_uid", "pipeline", "structure", "review_aspect"],
         "columns": dict(PESA_FAT_QC_REVIEWS_COLUMNS),
         "row_count": 0,
@@ -387,6 +387,79 @@ def publish_qc_review(
         "updated_measurements": updated_measurements,
         "qc_reviews": 1,
     }
+
+
+def fetch_qc_reviews(
+    *,
+    batch: str | None = None,
+    subject: str | None = None,
+    pipeline: str | None = None,
+    repo: DataRepo | None = None,
+) -> list[dict[str, Any]]:
+    """Read QC review rows from :data:`PESA_FAT_QC_REVIEWS_TABLE`, filtered by any key given.
+
+    Returns portal-shaped dicts: the DB column ``subject_uid`` is exposed as ``subject``, the
+    name the QC portal and its widget use throughout. An absent table yields no rows -- that is
+    simply a dataset where nobody has reviewed anything yet.
+    """
+    repo = resolve_repo(repo)
+    if not repo.catalog.table_exists(PESA_FAT_QC_REVIEWS_TABLE):
+        return []
+    df = repo.get(PESA_FAT_QC_REVIEWS_TABLE, cohort_id=False)
+    if df.empty:
+        return []
+
+    wanted = {
+        "batch": str(batch).strip() if batch else None,
+        "subject_uid": str(subject).strip() if subject else None,
+        "pipeline": str(pipeline).strip() if pipeline else None,
+    }
+    for column, value in wanted.items():
+        if value is None or column not in df.columns:
+            continue
+        df = df[df[column].astype("string").fillna("") == value]
+    if df.empty:
+        return []
+
+    def _text(row: Any, column: str) -> str:
+        """Column value of *row* as a stripped string (empty when missing or null)."""
+        value = row.get(column, "")
+        return "" if pd.isna(value) else str(value).strip()
+
+    rows: list[dict[str, Any]] = []
+    for _, row in df.iterrows():
+        rows.append(
+            {
+                "batch": _text(row, "batch"),
+                "subject": _text(row, "subject_uid"),
+                "pipeline": _text(row, "pipeline"),
+                "structure": _text(row, "structure"),
+                "review_aspect": _text(row, "review_aspect"),
+                "qc_status": _text(row, "qc_status") or "PENDING",
+                "reviewer": _text(row, "reviewer"),
+                "reviewed_at": _text(row, "reviewed_at"),
+                "comment": _text(row, "comment"),
+                "report_relpath": _text(row, "report_relpath"),
+            }
+        )
+    return rows
+
+
+def try_fetch_qc_reviews(**kwargs: Any) -> tuple[list[dict[str, Any]], str | None]:
+    """Best-effort :func:`fetch_qc_reviews`; returns ``(rows, error_message)``.
+
+    Read failures degrade to an empty list plus a message rather than raising, so the portal
+    can still render a report when the database is unreachable.
+    """
+    try:
+        return fetch_qc_reviews(**kwargs), None
+    except SettingsError as exc:
+        return [], f"database not configured ({exc})"
+    except TableNotFoundError as exc:
+        return [], str(exc)
+    except Exception as exc:
+        log.warning("QC review DB read failed: %s", exc)
+        return [], str(exc)
 
 
 def sync_qc_reviews_for_report(
@@ -545,6 +618,8 @@ __all__ = [
     "maybe_publish_stage3_on_sge",
     "rebuild_sge_sqlite_index_if_configured",
     "publish_qc_review",
+    "fetch_qc_reviews",
+    "try_fetch_qc_reviews",
     "sync_qc_reviews_for_report",
     "try_publish_qc_review",
     "try_sync_qc_reviews_for_report",

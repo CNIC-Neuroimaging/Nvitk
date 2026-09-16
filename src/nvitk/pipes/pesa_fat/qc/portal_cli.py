@@ -1,4 +1,4 @@
-"""CLI: run the PESA-Fat QC portal (static HTML + Excel/DB-backed reviews)."""
+"""CLI: run the PESA-Fat QC portal (static HTML + database-backed reviews)."""
 
 from __future__ import annotations
 
@@ -26,32 +26,17 @@ DEFAULT_PORT = 8008
 @click.option("--results-root", type=click.Path(path_type=Path), default=DEFAULT_RESULTS_ROOT)
 @click.option("--host", default=DEFAULT_HOST, show_default=True)
 @click.option("--port", type=int, default=DEFAULT_PORT, show_default=True)
-@click.option(
-    "--reviews-xlsx",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Excel file to store reviews (default: RESULTS/res_qc/reviews.xlsx).",
-)
-@click.option(
-    "--no-db",
-    is_flag=True,
-    default=False,
-    help="Skip NVITK database publish on review (Excel only).",
-)
 @click.option("--log-level", default="INFO", show_default=True)
 def main(
     batch: str | None,
     results_root: Path | None,
     host: str,
     port: int,
-    reviews_xlsx: Path | None,
-    no_db: bool,
     log_level: str,
 ) -> None:
-    """Serve QC HTML and accept review updates via POST /review (Excel + DB)."""
+    """Serve QC HTML and accept review updates via POST /review (stored in the NVITK DB)."""
     Logger(level=log_level.upper())
     results_root_eff = (results_root or DEFAULT_RESULTS_ROOT)
-    reviews = reviews_xlsx or (Path(results_root_eff) / RES_QC_DIR / "reviews.xlsx")
 
     if batch:
         lay = layout(batch, results_root=results_root_eff)
@@ -65,10 +50,8 @@ def main(
 
     app = create_qc_portal_app(
         qc_root=qc_root,
-        reviews_xlsx=reviews,
         results_root=Path(results_root_eff),
         default_batch=batch,
-        publish_db=not no_db,
     )
     try:
         import uvicorn
