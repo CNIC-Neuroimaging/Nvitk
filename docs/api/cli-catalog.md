@@ -52,7 +52,6 @@ commands backing the entry points in the table below.
 | `nvitk-pesa-fat-qc-portal` | QC review portal |
 | `nvitk-pesa-fat-sync-measurements` | Publish measurements to the DB |
 | **PESA-Brain cohort pipelines** — see {doc}`../pipelines/qvtpy` | |
-| `nvitk-bbtpy` | BBT-py batch driver |
 | `nvitk-qvtpy` | 4D-flow hemodynamics pipeline |
 | `nvitk-qvtpy-flowshow` | 4D-flow interactive viewer |
 | `nvitk-qvtpy-xnat-upload` | XNAT upload |

@@ -181,6 +181,75 @@ def contrast_window(layer: Any, low: float = 1.0, high: float = 99.0) -> tuple[f
     return lo, hi
 
 
+def ct_window_params(viewer: Any) -> tuple[OpParam, ...]:
+    """Preset picker for :func:`ct_window`, seeded from the active layer."""
+    from nvitk.viz.ct_windows import (
+        DEFAULT_WINDOW_KEY,
+        get_window,
+        suggest_window,
+        window_keys,
+    )
+
+    keys = tuple(window_keys())
+    default = DEFAULT_WINDOW_KEY
+    try:
+        layer = _active(viewer)
+        data = layer_data(layer)
+        suggested = suggest_window(
+            str(getattr(layer, "metadata", {}).get("modality", "") or ""),
+            float(np.nanmin(data)),
+            float(np.nanmax(data)),
+        )
+        if suggested:
+            default = suggested
+    except Exception:  # noqa: BLE001 — a suggestion is a convenience, not a gate
+        pass
+    return (
+        OpParam(
+            "preset",
+            "Window",
+            "choice",
+            default,
+            choices=tuple((get_window(k).label, k) for k in keys),
+            hint="Hounsfield presets. Changes the display window only, never the data.",
+        ),
+        OpParam("apply_all", "Apply to every image layer", "choice", "no",
+                choices=(("no", "no"), ("yes", "yes"))),
+    )
+
+
+def ct_window_limits(preset: str) -> tuple[float, float]:
+    """The contrast limits *preset* maps to, for the live preview."""
+    from nvitk.viz.ct_windows import limits_for
+
+    return tuple(float(v) for v in limits_for(str(preset)))  # type: ignore[return-value]
+
+
+def ct_window(viewer: Any, *, preset: str = "brain", apply_all: str = "no") -> str:
+    """Set the display window to a named CT preset.
+
+    The same presets the Layers tab's *CT display window* panel offers, reachable
+    from the search bar. Like every windowing operation this moves the display
+    range only — the voxels are untouched, so it is always reversible.
+    """
+    from nvitk.viz.ct_windows import get_window
+
+    layer, _data = _require_array_layer(viewer)
+    lo, hi = ct_window_limits(preset)
+    targets = (
+        [l for l in viewer.layers if l.__class__.__name__ == "Image"]
+        if str(apply_all) == "yes"
+        else [layer]
+    )
+    for target in targets:
+        try:
+            target.contrast_limits = (lo, hi)
+        except Exception:  # noqa: BLE001 — a layer whose range excludes the window
+            continue
+    where = f"{len(targets)} image layer(s)" if len(targets) > 1 else f"“{layer.name}”"
+    return f"{get_window(preset).label} applied to {where}."
+
+
 def reset_contrast(viewer: Any) -> str:
     """Restore the active layer's contrast limits to its full data range."""
     layer, data = _require_array_layer(viewer)
@@ -366,6 +435,317 @@ def convert_dtype(viewer: Any, dtype: str = "float32") -> str:
     return f"Converted “{layer.name}” to {dtype}."
 
 
+# ── exposure ──────────────────────────────────────────────────────────────────
+#: How the intensity operations reach scikit-image. ndimage is preferred across
+#: nvitk, but it has no exposure module — no gamma, log, sigmoid or histogram
+#: equalisation — so these are skimage's, moved to host at the boundary.
+def _as_float01(data: np.ndarray) -> tuple[np.ndarray, float, float]:
+    """*data* scaled into ``[0, 1]`` with the window needed to undo it.
+
+    skimage's exposure functions are defined on that range; feeding raw Hounsfield
+    units to ``adjust_gamma`` raises on the negatives and silently distorts
+    everything else.
+    """
+    arr = np.asarray(data, dtype=np.float32)
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        raise ValueError("Layer has no finite voxels.")
+    lo, hi = float(finite.min()), float(finite.max())
+    if hi <= lo:
+        raise ValueError("Layer is constant; there is nothing to adjust.")
+    return np.clip((np.nan_to_num(arr, nan=lo) - lo) / (hi - lo), 0.0, 1.0), lo, hi
+
+
+def adjust_params(_viewer: Any) -> tuple[OpParam, ...]:
+    """Options for :func:`adjust_intensity`."""
+    return (
+        OpParam("method", "Curve", "choice", "gamma",
+                choices=(("Gamma", "gamma"), ("Logarithmic", "log"), ("Sigmoid", "sigmoid"))),
+        OpParam("strength", "Gamma / gain", "float", 1.0, minimum=0.05, maximum=5.0,
+                decimals=2,
+                hint="Gamma: <1 brightens, >1 darkens. Gain for log and sigmoid."),
+        OpParam("cutoff", "Sigmoid cutoff", "float", 0.5, minimum=0.0, maximum=1.0,
+                decimals=2, hint="Where the sigmoid crosses its midpoint. Ignored otherwise."),
+    )
+
+
+def adjusted_intensity(
+    layer: Any, method: str = "gamma", strength: float = 1.0, cutoff: float = 0.5
+) -> np.ndarray:
+    """The adjusted image :func:`adjust_intensity` would produce — used for preview."""
+    from skimage import exposure
+
+    scaled, lo, hi = _as_float01(layer_data(layer))
+    key = str(method).lower()
+    if key == "log":
+        out = exposure.adjust_log(scaled, gain=float(strength))
+    elif key == "sigmoid":
+        out = exposure.adjust_sigmoid(scaled, cutoff=float(cutoff), gain=float(strength) * 10.0)
+    else:
+        out = exposure.adjust_gamma(scaled, gamma=max(float(strength), 1e-3))
+    # Back to the source's own range, so the result is comparable with it. Clipped
+    # first: adjust_log with a gain above 1 runs past 1.0 by design, which would
+    # otherwise push the result outside the range it is meant to be read against.
+    clipped = np.clip(np.asarray(out, dtype=np.float32), 0.0, 1.0)
+    return (clipped * (hi - lo) + lo).astype(np.float32)
+
+
+def adjust_intensity(
+    viewer: Any, *, method: str = "gamma", strength: float = 1.0, cutoff: float = 0.5
+) -> str:
+    """Apply a gamma, logarithmic or sigmoid intensity curve."""
+    from nvitk.core.backend import using
+
+    layer, _data = _require_array_layer(viewer)
+    with using("numpy"):
+        out = adjusted_intensity(layer, method, strength, cutoff)
+    _add(viewer, layer, out, str(method))
+    return f"{str(method).capitalize()} curve applied to “{layer.name}”."
+
+
+def equalize_params(_viewer: Any) -> tuple[OpParam, ...]:
+    """Options for :func:`equalize_histogram`."""
+    return (
+        OpParam("method", "Method", "choice", "clahe",
+                choices=(("CLAHE (adaptive)", "clahe"), ("Global", "global"))),
+        OpParam("clip_limit", "CLAHE clip limit", "float", 0.01, minimum=0.001,
+                maximum=0.2, decimals=3,
+                hint="Higher lifts more contrast, and more noise with it."),
+    )
+
+
+def equalized_histogram(layer: Any, method: str = "clahe", clip_limit: float = 0.01) -> np.ndarray:
+    """The equalised image :func:`equalize_histogram` would produce."""
+    from skimage import exposure
+
+    scaled, lo, hi = _as_float01(layer_data(layer))
+    if str(method).lower() == "global":
+        out = exposure.equalize_hist(scaled)
+    else:
+        out = exposure.equalize_adapthist(scaled, clip_limit=float(clip_limit))
+    return (np.asarray(out, dtype=np.float32) * (hi - lo) + lo).astype(np.float32)
+
+
+def equalize_histogram(viewer: Any, *, method: str = "clahe", clip_limit: float = 0.01) -> str:
+    """Equalise the intensity histogram, globally or adaptively (CLAHE)."""
+    from nvitk.core.backend import using
+
+    layer, _data = _require_array_layer(viewer)
+    with using("numpy"):
+        out = equalized_histogram(layer, method, clip_limit)
+    name = "clahe" if str(method).lower() != "global" else "equalized"
+    _add(viewer, layer, out, name)
+    return f"Histogram equalised ({method}) on “{layer.name}”."
+
+
+def rescale_params(_viewer: Any) -> tuple[OpParam, ...]:
+    """Options for :func:`rescale_intensity`."""
+    return (
+        OpParam("low", "Low percentile", "float", 1.0, minimum=0.0, maximum=49.0, decimals=2),
+        OpParam("high", "High percentile", "float", 99.0, minimum=51.0, maximum=100.0,
+                decimals=2),
+        OpParam("out_max", "Output maximum", "float", 1.0, minimum=1.0, maximum=65535.0,
+                decimals=0, hint="The rescaled data spans 0 to this."),
+    )
+
+
+def rescaled_intensity(
+    layer: Any, low: float = 1.0, high: float = 99.0, out_max: float = 1.0
+) -> np.ndarray:
+    """The rescaled image :func:`rescale_intensity` would produce."""
+    from skimage import exposure
+
+    data = np.asarray(layer_data(layer), dtype=np.float32)
+    finite = data[np.isfinite(data)]
+    if finite.size == 0:
+        raise ValueError("Layer has no finite voxels.")
+    lo, hi = (float(v) for v in np.percentile(finite, (float(low), float(high))))
+    if hi <= lo:
+        raise ValueError("That percentile window is empty.")
+    return np.asarray(
+        exposure.rescale_intensity(data, in_range=(lo, hi), out_range=(0.0, float(out_max))),
+        dtype=np.float32,
+    )
+
+
+def rescale_intensity(
+    viewer: Any, *, low: float = 1.0, high: float = 99.0, out_max: float = 1.0
+) -> str:
+    """Stretch a percentile window of the data onto a fixed output range."""
+    from nvitk.core.backend import using
+
+    layer, _data = _require_array_layer(viewer)
+    with using("numpy"):
+        out = rescaled_intensity(layer, low, high, out_max)
+    _add(viewer, layer, out, "rescaled")
+    return f"Rescaled “{layer.name}” to [0, {float(out_max):g}]."
+
+
+def show_histogram(viewer: Any, *, bins: int = 256) -> str:
+    """Open a window showing the active layer's intensity histogram.
+
+    Read-only: it adds no layer and changes nothing, which is why it is the one
+    quick operation that reports what it drew rather than what it made.
+    """
+    layer, data = _require_array_layer(viewer)
+    arr = np.asarray(data, dtype=np.float64).reshape(-1)
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        raise ValueError("Layer has no finite voxels to histogram.")
+    counts, edges = np.histogram(finite, bins=max(int(bins), 8))
+    from nvitk.gui.viz.histogram_window import show_histogram_window
+
+    show_histogram_window(
+        viewer, counts, edges, title=f"{getattr(layer, 'name', 'layer')} — histogram",
+        limits=tuple(getattr(layer, "contrast_limits", ()) or ()),
+    )
+    return (
+        f"Histogram of “{layer.name}”: {finite.size:,} voxels, "
+        f"range [{finite.min():.4g}, {finite.max():.4g}]."
+    )
+
+
+def histogram_params(_viewer: Any) -> tuple[OpParam, ...]:
+    """Options for :func:`show_histogram`."""
+    return (
+        OpParam("bins", "Bins", "int", 256, minimum=8, maximum=4096),
+    )
+
+
+# ── segmentation helpers ──────────────────────────────────────────────────────
+def contour_params(_viewer: Any) -> tuple[OpParam, ...]:
+    """Options for :func:`find_contours`."""
+    return (
+        OpParam("level", "Level (0 = midpoint)", "float", 0.0, minimum=-1e6, maximum=1e6,
+                decimals=4, hint="Intensity the contour follows. 0 uses the data's midpoint."),
+        OpParam("axis", "Slice axis", "int", 0, minimum=0, maximum=2),
+    )
+
+
+def find_contours(viewer: Any, *, level: float = 0.0, axis: int = 0) -> str:
+    """Trace iso-intensity contours slice by slice into a Shapes layer.
+
+    skimage's marching squares is 2D, so a volume is traced one slice at a time
+    along *axis* — which is also how the result is read back, as planar outlines.
+    """
+    from nvitk.core.backend import using
+    from skimage import measure
+
+    layer, data = _require_array_layer(viewer)
+    arr = np.asarray(data, dtype=np.float32)
+    if arr.ndim not in (2, 3):
+        raise ValueError("Contours need a 2D or 3D layer.")
+    value = float(level)
+    if value == 0.0:
+        finite = arr[np.isfinite(arr)]
+        value = float((finite.min() + finite.max()) / 2.0) if finite.size else 0.0
+
+    paths: list[np.ndarray] = []
+    with using("numpy"):
+        if arr.ndim == 2:
+            paths.extend(measure.find_contours(arr, value))
+        else:
+            ax = int(np.clip(axis, 0, 2))
+            for index in range(arr.shape[ax]):
+                plane = np.take(arr, index, axis=ax)
+                for contour in measure.find_contours(plane, value):
+                    # Marching squares returns 2D rows/cols; put the slice back.
+                    full = np.insert(contour, ax, float(index), axis=1)
+                    paths.append(full)
+    if not paths:
+        raise ValueError(f"No contour at level {value:.4g}.")
+    viewer.add_shapes(
+        paths, shape_type="path", name=f"{layer.name}_contours",
+        edge_color="#ffa400", edge_width=0.5, **layer_spatial_kwargs(layer),
+    )
+    return f"{len(paths)} contour(s) at {value:.4g} from “{layer.name}”."
+
+
+def flood_params(viewer: Any) -> tuple[OpParam, ...]:
+    """Options for :func:`flood_fill_from_cursor`, scaled to the layer's range."""
+    _layer, data = _require_array_layer(viewer)
+    lo, hi = _intensity_range(data)
+    span = max(hi - lo, 1e-6)
+    return (
+        OpParam("tolerance", "Tolerance", "float", span * 0.05, minimum=0.0, maximum=span,
+                decimals=4,
+                hint="How far from the seed's intensity the region may stray. "
+                     "The seed is the viewer's current cursor position."),
+    )
+
+
+def flood_fill_from_cursor(viewer: Any, *, tolerance: float = 0.0) -> str:
+    """Flood the region connected to the cursor, as a mask."""
+    from nvitk.core.backend import using
+    from skimage import segmentation
+
+    layer, data = _require_array_layer(viewer)
+    arr = np.asarray(data)
+    seed = _cursor_index(viewer, layer, arr.shape)
+    with using("numpy"):
+        mask = segmentation.flood(arr, seed, tolerance=float(tolerance))
+    count = int(mask.sum())
+    if count == 0:
+        raise ValueError("The flood filled nothing; try a larger tolerance.")
+    _add(viewer, layer, mask.astype(np.int32), "flood", labels=True)
+    return f"Flood from {seed} filled {count:,} voxel(s) of “{layer.name}”."
+
+
+def _cursor_index(viewer: Any, layer: Any, shape: tuple[int, ...]) -> tuple[int, ...]:
+    """The viewer's cursor as a voxel index into *layer*, clipped to *shape*."""
+    try:
+        position = layer.world_to_data(viewer.cursor.position)
+    except Exception:  # noqa: BLE001 — fall back to the middle of the volume
+        position = [s / 2.0 for s in shape]
+    index = [int(round(float(v))) for v in list(position)[-len(shape):]]
+    return tuple(int(np.clip(v, 0, n - 1)) for v, n in zip(index, shape))
+
+
+def watershed_params(_viewer: Any) -> tuple[OpParam, ...]:
+    """Options for :func:`watershed_split`."""
+    return (
+        OpParam("footprint", "Marker separation (voxels)", "int", 3, minimum=1, maximum=32,
+                hint="Local maxima closer than this merge into one basin."),
+        OpParam("use_gradient", "Flood", "choice", "distance",
+                choices=(("Distance transform", "distance"), ("Intensity", "intensity"))),
+    )
+
+
+def watershed_split(viewer: Any, *, footprint: int = 3, use_gradient: str = "distance") -> str:
+    """Split touching objects with a watershed.
+
+    On a mask the distance transform is the surface to flood — the standard recipe
+    for separating objects that touch. On an intensity image the image itself is,
+    which is what you want for basins already visible in the data.
+    """
+    from nvitk.core.backend import using
+    from scipy import ndimage as host_ndi
+    from skimage import feature, segmentation
+
+    layer, data = _require_array_layer(viewer)
+    arr = np.asarray(data)
+    with using("numpy"):
+        binary = arr > 0
+        if not binary.any():
+            raise ValueError("Nothing to split: the layer is empty.")
+        if str(use_gradient) == "intensity":
+            surface = np.asarray(arr, dtype=np.float32)
+        else:
+            surface = -host_ndi.distance_transform_edt(binary)
+        size = max(int(footprint), 1)
+        peaks = feature.peak_local_max(
+            -surface, footprint=np.ones((size,) * arr.ndim), labels=binary
+        )
+        markers = np.zeros(arr.shape, dtype=np.int32)
+        for i, peak in enumerate(peaks, start=1):
+            markers[tuple(peak)] = i
+        if markers.max() == 0:
+            raise ValueError("No markers found; try a smaller separation.")
+        out = segmentation.watershed(surface, markers, mask=binary)
+    _add(viewer, layer, out.astype(np.int32), "watershed", labels=True)
+    return f"Watershed split “{layer.name}” into {int(out.max())} region(s)."
+
+
 def _is_labels(layer: Any) -> bool:
     """True for a Napari ``Labels`` layer."""
     return type(layer).__name__ == "Labels"
@@ -374,7 +754,27 @@ def _is_labels(layer: Any) -> bool:
 __all__ = [
     "OpParam",
     "auto_contrast",
+    "adjust_intensity",
+    "adjust_params",
+    "adjusted_intensity",
+    "contour_params",
+    "equalize_histogram",
+    "equalize_params",
+    "equalized_histogram",
+    "find_contours",
+    "flood_fill_from_cursor",
+    "flood_params",
+    "histogram_params",
+    "rescale_intensity",
+    "rescale_params",
+    "rescaled_intensity",
+    "show_histogram",
+    "watershed_params",
+    "watershed_split",
     "convert_dtype",
+    "ct_window",
+    "ct_window_limits",
+    "ct_window_params",
     "contrast_window",
     "crop_bounds",
     "cropped_spatial",

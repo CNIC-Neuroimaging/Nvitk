@@ -250,6 +250,10 @@ class VesselCprPanel(QWidget):
         self._station.valueChanged.connect(lambda v: self._emit_station(int(v)))
         self._station_label = QLabel("—")
         self._station_label.setMinimumWidth(150)
+        #: Artists for the station marker, so stepping it does not repaint the
+        #: whole flat image.
+        self._station_line = None
+        self._profile_station_line = None
         self._station_label.setStyleSheet(f"color: {COLOR_MUTED};")
 
         self._show_lumen = QCheckBox("Lumen")
@@ -659,6 +663,35 @@ class VesselCprPanel(QWidget):
         self._status.setText(text)
         self.redraw()
 
+    def move_station_marker(self, station: int) -> None:
+        """Move the station line on the flat image without redrawing it.
+
+        Stepping the station changes one vertical line on a picture whose pixels,
+        contours and calibre trace are all unchanged. Repainting the lot for that
+        is what made dragging the station slider crawl on a large volume.
+        """
+        if self._vessel is None or self._cpr_canvas is None:
+            return
+        with using("cpu"):
+            arc = to_numpy(self._vessel.cpr.arc_length_mm)
+            if not arc.size:
+                return
+            at = float(arc[int(np.clip(station, 0, arc.size - 1))])
+        moved = False
+        for line in (getattr(self, "_station_line", None),
+                     getattr(self, "_profile_station_line", None)):
+            if line is not None:
+                try:
+                    line.set_xdata([at, at])
+                    moved = True
+                except Exception:  # noqa: BLE001 — a stale artist just forces a redraw
+                    moved = False
+                    break
+        if not moved:
+            self.redraw()
+            return
+        self._cpr_canvas.draw_idle()
+
     def redraw(self) -> None:
         """Repaint the flat vessel and its calibre profile for the current vessel."""
         if self._vessel is None:
@@ -728,7 +761,9 @@ class VesselCprPanel(QWidget):
 
         station = self.station()
         if 0 <= station < arc.size:
-            ax.axvline(float(arc[station]), color=STATION_COLOR, lw=1.2)
+            self._station_line = ax.axvline(
+                float(arc[station]), color=STATION_COLOR, lw=1.2
+            )
 
         ax.set_ylabel("across (mm)", fontsize=8)
         ax.tick_params(labelsize=7, labelbottom=False)
@@ -758,7 +793,9 @@ class VesselCprPanel(QWidget):
             ax.fill_between(arc[:n], 0.0, width[:n], color=LUMEN_HEX, alpha=0.18)
             ax.set_ylim(0.0, float(width[:n].max()) * 1.15 or 1.0)
         if 0 <= station < arc.size:
-            ax.axvline(float(arc[station]), color=STATION_COLOR, lw=1.2)
+            self._profile_station_line = ax.axvline(
+                float(arc[station]), color=STATION_COLOR, lw=1.2
+            )
         ax.set_xlabel("along the vessel (mm)", fontsize=8)
         ax.set_ylabel("Ø mm", fontsize=8)
         ax.tick_params(labelsize=7)
@@ -1035,6 +1072,7 @@ def install_vessel_cpr(
     spacing=None,
     step_mm: float = 0.5,
     join_gap_vox: int = DEFAULT_JOIN_GAP_VOX,
+    schema_key: str | None = None,
 ) -> VesselCprPanel:
     """Flatten the requested vessels and wire the panel, overlays and edits.
 
@@ -1074,6 +1112,7 @@ def install_vessel_cpr(
         "spacing": sp,
         "step_mm": float(step_mm),
         "join_gap_vox": int(join_gap_vox),
+        "schema_key": schema_key or None,
         "labels": labels,
         "centerline_mask": None if centerline_mask is None else to_numpy(centerline_mask),
         "spatial": layer_spatial_kwargs(lumen_layer),
@@ -1110,7 +1149,9 @@ def install_vessel_cpr(
             join_gap_vox=state["join_gap_vox"],
         )
         panel.set_failure_reasons(reasons)
-        panel.set_vessels([(lab, vessel_name(lab)) for lab in state["samples"]])
+        panel.set_vessels(
+            [(lab, vessel_name(lab, schema_key=state["schema_key"])) for lab in state["samples"]]
+        )
 
     def _keep_selection(fn) -> None:
         """Run *fn*, then put the viewer's active layer back where it was.
@@ -1150,6 +1191,15 @@ def install_vessel_cpr(
         # An edited centerline replaces the derived one for that vessel.
         panel.set_edited(int(label) in state["edited"])
         samples = state["edited"].get(label, samples)
+        # The calibre profile depends on the centerline and the ray, not on the
+        # cutting angle — so turning the angle reuses the one already measured
+        # rather than resampling the whole vessel's cross-sections again.
+        ray = panel.ray_mm()
+        # Hold the samples object itself, not its id: an id alone would let a
+        # freed centerline's address be reused by a new one and hand back the
+        # wrong calibre.
+        previous = state.get("diameter_cache")
+        key = (int(label), samples, float(ray))
         vessel = build_vessel_cpr(
             state["image"],
             state["mask"],
@@ -1157,9 +1207,19 @@ def install_vessel_cpr(
             samples=samples,
             wall_mask=state["wall"],
             angle_deg=panel.angle_deg(),
-            ray_mm=panel.ray_mm(),
+            ray_mm=ray,
             n_ray=DEFAULT_N_RAY,
+            schema_key=state["schema_key"],
+            diameter=(
+                previous[1]
+                if previous is not None
+                and previous[0][0] == key[0]
+                and previous[0][1] is key[1]
+                and previous[0][2] == key[2]
+                else None
+            ),
         )
+        state["diameter_cache"] = (key, vessel.diameter)
         state["vessel"] = vessel
         panel.show_vessel(vessel)
         _keep_selection(lambda: _update_overlays(vessel))
@@ -1185,7 +1245,7 @@ def install_vessel_cpr(
             lumen_mm=0.0 if here != here else here,
         )
         _keep_selection(lambda: _update_station_overlays(vessel, station))
-        panel.redraw()
+        panel.move_station_marker(station)
 
     # ── overlays ─────────────────────────────────────────────────────────────
 

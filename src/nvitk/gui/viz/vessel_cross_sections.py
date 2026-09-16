@@ -761,6 +761,25 @@ def _neighbor_flow_waveforms(
     return out
 
 
+def _schema_name(label_id: int, schema_key: str | None) -> str:
+    """A readable branch name for *label_id* under *schema_key*, else its number.
+
+    The same vocabulary the label picker is on, so a generic mask segmented by
+    eICAB or TopBrain reads as vessel names rather than bare integers.
+    """
+    if schema_key:
+        try:
+            from nvitk.gui.labels.catalog import get_schema
+
+            schema = get_schema(str(schema_key))
+            name = str((schema.name_for(int(label_id)) if schema else "") or "").strip()
+            if name and "unknown" not in name.lower():
+                return name
+        except Exception:  # noqa: BLE001 — naming is cosmetic
+            pass
+    return str(int(label_id))
+
+
 def install_vessel_cross_sections(
     viewer: Any,
     app_state: dict[str, Any],
@@ -769,6 +788,7 @@ def install_vessel_cross_sections(
     centerline_mask: np.ndarray,
     segmentation: np.ndarray | None,
     params: dict[str, Any],
+    schema_key: str | None = None,
     vx: np.ndarray | None = None,
     vy: np.ndarray | None = None,
     vz: np.ndarray | None = None,
@@ -817,7 +837,9 @@ def install_vessel_cross_sections(
             min_points=5,
         )
         volume_label_by_key = {int(k): int(k) for k in centerlines}
-        branch_name_by_key = {int(k): str(k) for k in centerlines}
+        branch_name_by_key = {
+            int(k): _schema_name(int(k), schema_key) for k in centerlines
+        }
     n_venous = append_venous_centerlines(
         centerlines,
         volume_label_by_key,

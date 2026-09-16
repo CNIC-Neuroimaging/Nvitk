@@ -19,6 +19,12 @@ from nvitk.gui.core.design import clear_layout
 _SUBSET_TASKS = frozenset({"total", "total_mr"})
 
 
+#: Height the ROI list is held to while another panel owns the dock's spare
+#: space, and the ceiling it is allowed once TotalSegmentator is the active tool.
+_COLLAPSED_MAX_HEIGHT = 220
+_EXPANDED_MAX_HEIGHT = 16777215
+
+
 class TotalSegRoiWidget(QGroupBox):
     """Checkbox list of ROI names for a TotalSegmentator subset task (``total``/``total_mr``), with
     All/None select buttons; hidden for tasks that don't support ROI subsetting."""
@@ -35,7 +41,7 @@ class TotalSegRoiWidget(QGroupBox):
         btn_row.addStretch(1)
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
-        self._scroll.setMaximumHeight(160)
+        self._scroll.setMaximumHeight(_COLLAPSED_MAX_HEIGHT)
         self._inner = QWidget()
         self._inner_layout = QVBoxLayout()
         self._inner_layout.setAlignment(Qt.AlignTop)
@@ -79,6 +85,17 @@ class TotalSegRoiWidget(QGroupBox):
         """Uncheck every ROI checkbox."""
         for cb in self._checks:
             cb.setChecked(False)
+
+    def set_expanded(self, expanded: bool) -> None:
+        """Let the ROI list use the dock's spare height when it is the active panel.
+
+        The cap exists so the list does not crowd out the tool form while another
+        panel is showing. When TotalSegmentator *is* the selected tool there is
+        nothing to crowd, and a ~100-entry list in 160 px is most of a scrollbar.
+        """
+        self._scroll.setMaximumHeight(
+            _EXPANDED_MAX_HEIGHT if expanded else _COLLAPSED_MAX_HEIGHT
+        )
 
     def selected_roi_names(self) -> list[str] | None:
         """Names of the checked ROIs, or ``None`` if none are checked (meaning "all ROIs")."""

@@ -536,7 +536,7 @@ def _render_static_submodule(node: CatalogNode) -> Group:
 def _render_static_pipeline_tools(tools: list[ToolEntry]) -> Group:
     """Group pipeline commands by cohort for readability."""
     pesa = [t for t in tools if "pesa-fat" in t.command]
-    brain = [t for t in tools if t.command.startswith(("nvitk-qvtpy", "nvitk-bbtpy", "nvitk-gpetpy"))]
+    brain = [t for t in tools if t.command.startswith("nvitk-qvtpy")]
     other = [t for t in tools if t not in pesa and t not in brain]
 
     def block(label: str, items: list[ToolEntry], cmd_style: str) -> list[RenderableType]:

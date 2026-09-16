@@ -59,6 +59,9 @@ class VesselCpr:
     cpr: CprResult
     lumen: Any
     wall: Any | None
+    #: Inscribed radius per station, from the distance transform. ``None`` unless
+    #: it was asked for: it costs a whole-volume EDT, and the calibre actually
+    #: displayed is the area-equivalent diameter below.
     radius_mm: Any
     samples: CenterlineSamples
     diameter: Any = None
@@ -90,17 +93,30 @@ class VesselCpr:
         return (lumen > 0).sum(axis=1).astype(float) * step
 
 
-def vessel_name(label: int) -> str:
-    """A readable name for *label*, using the qvtpy vocabulary when it knows one."""
-    try:
-        from nvitk.pipes.qvtpy.labels import qvtpy_vessel_name
+def vessel_name(label: int, *, schema_key: str | None = None) -> str:
+    """A readable name for *label* under *schema_key*'s label vocabulary.
 
-        name = str(qvtpy_vessel_name(int(label)) or "").strip()
-        # An unmapped id comes back as the sentinel "QVTPY_UNKNOWN_<id>", which is
-        # an internal token, not a vessel name — fall through to a plain label.
+    The schema registry covers every vocabulary the GUI knows — eICAB, QVTpy,
+    TopBrain's CT/MR/TA36 sets, the TotalSegmentator tasks — so naming follows
+    whatever mapping the label selector is on instead of assuming one pipeline's.
+    Without a schema, or for an id that schema does not name, the answer is the
+    plain ``Label <id>``: inventing a name from the wrong vocabulary is worse than
+    admitting there isn't one.
+    """
+    if not schema_key:
+        return f"Label {int(label)}"
+    try:
+        # Lazy and guarded: the registry is Qt-free data, but it lives under the
+        # GUI package and the library must not require it to be importable.
+        from nvitk.gui.labels.catalog import get_schema
+
+        schema = get_schema(str(schema_key))
+        name = str((schema.name_for(int(label)) if schema else "") or "").strip()
+        # Unmapped ids come back as sentinels like "QVTPY_UNKNOWN_7" in some
+        # vocabularies — an internal token, not a vessel name.
         if name and "unknown" not in name.lower():
             return name
-    except Exception:
+    except Exception:  # noqa: BLE001 — naming is cosmetic, never fatal
         pass
     return f"Label {int(label)}"
 
@@ -377,11 +393,18 @@ def build_vessel_cpr(
     angle_deg: float = 0.0,
     ray_mm: float = DEFAULT_RAY_MM,
     n_ray: int = DEFAULT_N_RAY,
+    schema_key: str | None = None,
+    diameter: Any = None,
+    with_radius: bool = False,
 ) -> VesselCpr:
     """Flatten one vessel, with its lumen, wall and per-station calibre.
 
     The image is sampled linearly and both masks nearest-neighbour, so the overlays
     stay the ids they were segmented as.
+
+    *diameter* lets a caller hand back a calibre profile it already has. Nothing
+    about that measurement depends on the cutting angle, so re-deriving it for
+    every turn of the angle slider is work with a known answer.
     """
     lumen_full = as_backend_array(lumen_mask)
     binary = (lumen_full == int(label)).astype(np.int32)
@@ -399,13 +422,20 @@ def build_vessel_cpr(
 
     return VesselCpr(
         label=int(label),
-        name=vessel_name(label),
+        name=vessel_name(label, schema_key=schema_key),
         cpr=cpr,
         lumen=lumen,
         wall=wall,
-        radius_mm=station_radius_mm(binary, samples),
+        # Both measurements are independent of the cutting angle, and the
+        # inscribed radius is not displayed at all — so neither is recomputed on
+        # an angle change, and the distance transform only runs when asked for.
+        radius_mm=station_radius_mm(binary, samples) if with_radius else None,
         samples=samples,
-        diameter=station_area_diameter_mm(binary, samples, ray_mm=ray_mm),
+        diameter=(
+            diameter
+            if diameter is not None
+            else station_area_diameter_mm(binary, samples, ray_mm=ray_mm)
+        ),
     )
 
 

@@ -88,7 +88,6 @@ each backed by the same functions documented in the {doc}`Main API Reference <..
 | Registration | 6 | FLIRT rigid/apply, ANTsPy register/apply, FireANTs register/apply |
 | Measure | 16 | QVTPy LOCs, LOC/mask hemodynamics, volume, morphometrics, Dice/Jaccard, SUV stats |
 | Lab | 1 | Mouse TOF Circle-of-Willis interactive session |
-| Pipelines | 5 | PESA-Fat CT-PET, PESA-Fat DIXON, QVTPy, BBTPy, GPETPy — each opens a CLI form for the corresponding pipeline command |
 
 The dock (`nvitk.gui.tools.dock`) wires the category/operation form to a label picker (shown
 for label-like layers), a TotalSegmentator ROI checklist (shown only for that tool), a

@@ -94,40 +94,6 @@ def _qvtpy_stages() -> tuple[PipelineStageSpec, ...]:
     )
 
 
-def _bbtpy_stages() -> tuple[PipelineStageSpec, ...]:
-    """Build the GUI stage list for the BBTpy black-blood pipeline."""
-    from nvitk.pipes.bbtpy.run import _DEFAULT_STAGES, _STAGE_LABELS
-
-    order = ("stage1", "stage2")
-    return tuple(
-        PipelineStageSpec(
-            sid,
-            _STAGE_LABELS[sid],
-            _BBT_DESCRIPTIONS.get(sid, ""),
-            default_enabled=_default_enabled(sid, _DEFAULT_STAGES),
-            inputs=_BBT_INPUTS.get(sid, ()),
-        )
-        for sid in order
-    )
-
-
-def _gpetpy_stages() -> tuple[PipelineStageSpec, ...]:
-    """Build the GUI stage list for the GPETpy PET-brain-crop pipeline."""
-    defaults = "stage1"
-    order = ("stage1",)
-    labels = {"stage1": "PET brain crop"}
-    return tuple(
-        PipelineStageSpec(
-            sid,
-            labels[sid],
-            _GPET_DESCRIPTIONS.get(sid, ""),
-            default_enabled=_default_enabled(sid, defaults),
-            inputs=_GPET_INPUTS.get(sid, ()),
-        )
-        for sid in order
-    )
-
-
 def _pesa_ctpet_stages() -> tuple[PipelineStageSpec, ...]:
     """Build the GUI stage list for the PESA-Fat CT-PET pipeline (segment, post-process, measure)."""
     labels = {
@@ -217,33 +183,6 @@ _QVT_INPUTS: dict[str, tuple[StageInputSpec, ...]] = {
     ),
 }
 
-_BBT_DESCRIPTIONS: dict[str, str] = {
-    "stage1": "Rigid FLIRT: eICAB TOF_resampled → native black-blood VWI.",
-    "stage2": "Centerline QC and hypointense BB vessel segmentation.",
-}
-
-_BBT_INPUTS: dict[str, tuple[StageInputSpec, ...]] = {
-    "stage1": (
-        StageInputSpec("vwi_bb", "Black-blood VWI (vwi_bb.nii.gz)"),
-        StageInputSpec("eicab", "eICAB TOF_resampled (from QVTpy)"),
-    ),
-    "stage2": (
-        StageInputSpec("vwi_bb", "Black-blood VWI"),
-        StageInputSpec("eicab_warped", "eICAB warped to VWI", from_stage="stage1"),
-    ),
-}
-
-_GPET_DESCRIPTIONS: dict[str, str] = {
-    "stage1": "Crop PET to brain using CT TotalSegmentator mask.",
-}
-
-_GPET_INPUTS: dict[str, tuple[StageInputSpec, ...]] = {
-    "stage1": (
-        StageInputSpec("pet", "PET volume (PT.nii.gz)"),
-        StageInputSpec("ct", "CT volume (optional, for brain mask)", optional=True),
-    ),
-}
-
 _PESA_CTPET_DESCRIPTIONS: dict[str, str] = {
     "stage1": "TotalSegmentator on CT; writes organ / fat masks.",
     "stage2": "Post-process masks; uses PET for bladder / fat cleanup.",
@@ -300,16 +239,6 @@ PIPELINE_STAGE_DEFS: dict[str, PipelineStageDef] = {
         "nvitk-qvtpy",
         "QVTPy (4DFlows)",
         _qvtpy_stages(),
-    ),
-    "nvitk-bbtpy": PipelineStageDef(
-        "nvitk-bbtpy",
-        "BBTPy",
-        _bbtpy_stages(),
-    ),
-    "nvitk-gpetpy": PipelineStageDef(
-        "nvitk-gpetpy",
-        "GPETPy",
-        _gpetpy_stages(),
     ),
 }
 

@@ -90,7 +90,6 @@ deleted.
 | `defaults` | Baseline SGE project/account/queue/memory for all pipelines |
 | `pipelines.qvtpy`, `pipelines.qvtpy_paths` | {doc}`pipelines/qvtpy` |
 | `pipelines.pesa_fat_ct_pet`, `pipelines.pesa_fat_dixon`, `pipelines.pesa_fat_paths` | {doc}`pipelines/pesa-fat` |
-| `pipelines.bbtpy_paths` | `nvitk-bbtpy` |
 | `pipelines.topbrain`, `pipelines.topbrain_paths` | {doc}`pipelines/topbrain` |
 | `pipelines.eicab`, `pipelines.totalsegmentator` | The external segmentation engines |
 | `pipelines.image_tools` | The `nvitk-morph` / `-filter` / `-measure` / … CLIs under `--submit sge` |

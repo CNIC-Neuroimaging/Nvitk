@@ -86,15 +86,6 @@ PRESET_REGISTRY: tuple[PipelinePresetSpec, ...] = (
         default_batch="",
     ),
     PipelinePresetSpec(
-        "bbtpy",
-        "BBTpy (brain TOF)",
-        "nvitk.pipes.bbtpy.config",
-        layout="flat",
-        subject_globs=("PESA*",),
-        show_batch=False,
-        default_batch="",
-    ),
-    PipelinePresetSpec(
         "pesa_fat",
         "PESA-Fat (Dixon + CT-PET)",
         "nvitk.pipes.pesa_fat.common.paths",

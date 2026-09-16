@@ -50,11 +50,24 @@ PARAM_BUILDERS: dict[str, Callable[[Any], tuple[quick_ops.OpParam, ...]]] = {
     "convert_dtype": quick_ops.dtype_params,
     "crop_to_content": quick_ops.crop_params,
     "auto_contrast": quick_ops.contrast_params,
+    "ct_window": quick_ops.ct_window_params,
+    "adjust_intensity": quick_ops.adjust_params,
+    "equalize_histogram": quick_ops.equalize_params,
+    "rescale_intensity": quick_ops.rescale_params,
+    "show_histogram": quick_ops.histogram_params,
+    "find_contours": quick_ops.contour_params,
+    "flood_fill_from_cursor": quick_ops.flood_params,
+    "watershed_split": quick_ops.watershed_params,
 }
+
+#: Operations that preview by moving the *source* layer's display window rather
+#: than by producing a new layer. They share the save/restore-on-cancel path.
+CONTRAST_OPS: frozenset[str] = frozenset({"auto_contrast", "ct_window"})
 
 #: Operations whose result can be shown while it is being chosen.
 PREVIEWABLE: frozenset[str] = frozenset(
-    {"threshold_at_display", "auto_contrast", "gaussian", "median", "crop_to_content"}
+    {"threshold_at_display", "auto_contrast", "ct_window", "gaussian", "median",
+     "crop_to_content", "adjust_intensity", "rescale_intensity"}
 )
 
 #: Filtering a whole volume per slider step is only interactive up to a point.
@@ -172,7 +185,7 @@ class QuickOpDialog(QDialog):
         # Contrast is previewed on the source itself; remember the window so a
         # cancelled dialog leaves the layer exactly as it was found.
         self._original_limits = None
-        if op_name == "auto_contrast" and self._source is not None:
+        if op_name in CONTRAST_OPS and self._source is not None:
             limits = getattr(self._source, "contrast_limits", None)
             self._original_limits = tuple(limits) if limits else None
 
@@ -244,6 +257,16 @@ class QuickOpDialog(QDialog):
 
         if data.size > _FILTER_PREVIEW_VOXELS:
             return None
+        if self._op_name == "adjust_intensity":
+            return quick_ops.adjusted_intensity(
+                source, str(values["method"]), float(values["strength"]),
+                float(values["cutoff"]),
+            ), spatial, False
+        if self._op_name == "rescale_intensity":
+            return quick_ops.rescaled_intensity(
+                source, float(values["low"]), float(values["high"]),
+                float(values["out_max"]),
+            ), spatial, False
         if self._op_name == "gaussian":
             from scipy.ndimage import gaussian_filter
 
@@ -259,9 +282,12 @@ class QuickOpDialog(QDialog):
     def _preview_contrast(self) -> None:
         """Apply the chosen window to the source layer itself, live."""
         try:
-            lo, hi = quick_ops.contrast_window(
-                self._source, float(self.values()["low"]), float(self.values()["high"])
-            )
+            if self._op_name == "ct_window":
+                lo, hi = quick_ops.ct_window_limits(str(self.values()["preset"]))
+            else:
+                lo, hi = quick_ops.contrast_window(
+                    self._source, float(self.values()["low"]), float(self.values()["high"])
+                )
         except Exception:
             return
         try:
@@ -273,7 +299,7 @@ class QuickOpDialog(QDialog):
         """Refresh the preview for the current values."""
         if self._op_name not in PREVIEWABLE or self._source is None:
             return
-        if self._op_name == "auto_contrast":
+        if self._op_name in CONTRAST_OPS:
             self._preview_contrast()
             return
         try:

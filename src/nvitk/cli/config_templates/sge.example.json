@@ -101,14 +101,6 @@
       "cluster_results_root": "<CLUSTER_RESULTS_ROOT>",
       "cluster_model_root": "<CLUSTER_TOTALSEGMENTATOR_WEIGHTS>"
     },
-    "bbtpy_paths": {
-      "dicom_root": "<LOCAL_DICOM_ROOT>",
-      "nifti_root": "<LOCAL_NIFTI_ROOT>",
-      "results_root": "<BBTPY_RESULTS_ROOT>",
-      "qvtpy_nifti_root": "<QVTPY_NIFTI_ROOT>",
-      "qvtpy_results_root": "<QVTPY_RESULTS_ROOT>",
-      "eicab_results_root": "<EICAB_RESULTS_ROOT>"
-    },
     "pesa_fat_validation": {
       "_comment": "Manual-vs-automatic validation utility (internal).",
       "base_root": "<VISIT_DATA_ROOT>",

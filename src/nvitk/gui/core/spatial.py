@@ -91,13 +91,33 @@ def layer_spacing(layer: Any) -> tuple[float, ...] | None:
 
 
 def layer_spatial_kwargs(layer: Any) -> dict[str, Any]:
-    """Keyword args for ``add_image`` / ``add_labels`` / ``add_surface``."""
-    kwargs = {}
+    """Keyword args for ``add_image`` / ``add_labels`` / ``add_surface``.
+
+    Napari composes its transforms — data, then ``scale``/``translate``, then
+    ``affine``, then world — so reproducing a layer's placement means carrying
+    every part that is set, not just the last one. Returning ``affine`` alone
+    dropped the spacing of any layer whose geometry lives in ``scale``, which is
+    every layer opened with a scale and a default (identity) affine: the copy
+    landed at unit spacing and no longer lined up with its source.
+    """
+    kwargs: dict[str, Any] = {}
+    scale = getattr(layer, "scale", None)
+    if scale is not None:
+        values = tuple(float(x) for x in scale)
+        if any(abs(v - 1.0) > 1e-12 for v in values):
+            kwargs["scale"] = values
+    translate = getattr(layer, "translate", None)
+    if translate is not None:
+        values = tuple(float(x) for x in translate)
+        if any(abs(v) > 1e-12 for v in values):
+            kwargs["translate"] = values
     aff = getattr(layer, "affine", None)
     if aff is not None:
-        kwargs["affine"] = to_numpy(aff).astype(float)
-    elif getattr(layer, "scale", None) is not None:
-        kwargs["scale"] = tuple(float(x) for x in layer.scale)
+        matrix = to_numpy(aff).astype(float)
+        # An identity affine carries nothing; passing it anyway is harmless but
+        # makes the kwargs harder to read when something goes wrong.
+        if matrix.shape[0] and not np.allclose(matrix, np.eye(matrix.shape[0])):
+            kwargs["affine"] = matrix
     return kwargs
 
 

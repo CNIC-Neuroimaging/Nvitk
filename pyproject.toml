@@ -287,8 +287,7 @@ nvitk-pesa-fat-qc = "nvitk.pipes.pesa_fat.common.stage4_qc:main"
 nvitk-pesa-fat-qc-portal = "nvitk.pipes.pesa_fat.qc.portal_cli:main"
 nvitk-pesa-fat-sync-measurements = "nvitk.pipes.pesa_fat.sync_measurements:main"
 
-# ────────────────── PESA-Brain cohort pipelines (bbtpy / gpetpy) ─────────────
-nvitk-bbtpy = "nvitk.pipes.bbtpy.run:main"
+# ────────────────── PESA-Brain cohort pipelines ──────────────────────────────
 nvitk-qvtpy = "nvitk.pipes.qvtpy.run:main"
 nvitk-topbrain = "nvitk.pipes.topbrain.run:main"
 nvitk-topbrain-infer = "nvitk.pipes.topbrain.stage4_infer:main"

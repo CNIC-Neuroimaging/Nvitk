@@ -171,10 +171,14 @@ def _stage4_qc_python_cmd(
             shlex.quote(subjects_csv),
             "--pipelines",
             shlex.quote(pipelines_csv),
+            "--dicom-root",
+            shlex.quote(binds.data),
             "--nifti-root",
             shlex.quote(binds.data),
             "--results-root",
             shlex.quote(binds.output),
+            "--model-dir",
+            shlex.quote(binds.models),
             "--log-level",
             shlex.quote(log_level),
         ]
@@ -686,6 +690,8 @@ def _run_local(
             pipelines=list(pipelines),
             nifti_root=lay.nifti_root,
             results_root=lay.results_root,
+            dicom_root=lay.dicom_root,
+            model_root=lay.model_root,
         )
 
 

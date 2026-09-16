@@ -333,9 +333,17 @@ def run_qc(
     pipelines: list[str],
     nifti_root: Path | None = None,
     results_root: Path | None = None,
+    dicom_root: Path | None = None,
+    model_root: Path | None = None,
     margin_vox: int = 3,
 ) -> Path:
-    """Build per-subject QC reports and a batch index; returns the index path."""
+    """Build per-subject QC reports and a batch index; returns the index path.
+
+    *dicom_root* and *model_root* are unused by QC itself, but accepting them lets a caller
+    resolve every :class:`BatchLayout` root up front. That is what allows this stage to run as
+    an SGE job: inside the container no configuration directory is mounted, so any root left
+    to ``sge.json`` would fail to resolve.
+    """
     from nvitk.pipes.pesa_fat.qc.headless import configure_headless_viz, warn_if_trame_missing
 
     configure_headless_viz()
@@ -344,6 +352,8 @@ def run_qc(
         batch,
         nifti_root=nifti_root or DEFAULT_NIFTI_ROOT,
         results_root=results_root or DEFAULT_RESULTS_ROOT,
+        dicom_root=dicom_root,
+        model_root=model_root,
     )
 
     qc_root = lay.results_dir / RES_QC_DIR
@@ -386,6 +396,18 @@ def run_qc(
 )
 @click.option("--nifti-root", type=click.Path(path_type=Path), default=None)
 @click.option("--results-root", type=click.Path(path_type=Path), default=None)
+@click.option(
+    "--dicom-root",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="DICOM root. Unused by QC, but keeps BatchLayout resolvable without sge.json.",
+)
+@click.option(
+    "--model-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Model root. Unused by QC, but keeps BatchLayout resolvable without sge.json.",
+)
 @click.option("--margin-vox", type=int, default=3, show_default=True, help="Axial crop margin (voxels).")
 @click.option("--log-level", default="INFO", show_default=True)
 def main(
@@ -394,6 +416,8 @@ def main(
     pipelines: str,
     nifti_root: Path | None,
     results_root: Path | None,
+    dicom_root: Path | None,
+    model_dir: Path | None,
     margin_vox: int,
     log_level: str,
 ) -> None:
@@ -405,6 +429,8 @@ def main(
         batch,
         nifti_root=nifti_root or DEFAULT_NIFTI_ROOT,
         results_root=results_root or DEFAULT_RESULTS_ROOT,
+        dicom_root=dicom_root,
+        model_root=model_dir,
     )
     subj_list = parse_subjects(subjects) or list(lay.iter_subjects())
     if not subj_list:
@@ -423,6 +449,8 @@ def main(
         pipelines=pipes,
         nifti_root=nifti_root,
         results_root=results_root,
+        dicom_root=dicom_root,
+        model_root=model_dir,
         margin_vox=margin_vox,
     )
 

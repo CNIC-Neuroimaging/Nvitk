@@ -48,7 +48,7 @@ from nvitk.gui.core.design import (
 )
 from nvitk.gui.core.orientation import layer_orientation_codes
 from nvitk.gui.core.spatial import layer_spacing
-from nvitk.gui.viz.left_dock import install_expand_button
+from nvitk.gui.viz.left_dock import attach_left_inspection_dock
 from nvitk.gui.labels.visibility import (
     get_label_color,
     is_label_like_layer,
@@ -64,6 +64,8 @@ _PLANE_NAMES: dict[str, str] = {
 }
 
 #: Name for the layer nvitk adds to the canvas for each 3D slice plane.
+DOCK_OBJECT_NAME = "nvitk_ortho_dock"
+
 _PLANE_LAYER_SUFFIX = "_ortho_plane"
 _BOX_LAYER_SUFFIX = "_ortho_box"
 
@@ -78,6 +80,12 @@ _OVERLAY_OPACITY = 0.55
 #: Delay before pushing a crosshair move to the 3D canvas. Plane and clipping
 #: updates re-upload volumes, so they are coalesced rather than run per step.
 _CANVAS_SYNC_MS = 90
+
+#: Coalescing window for colour/opacity bursts.
+_STYLE_SYNC_MS = 30
+
+#: Coalescing window for layer-list churn.
+_REBUILD_SYNC_MS = 60
 
 #: Zoom bounds and the factor one Ctrl+wheel notch applies. The floor is "fit to
 #: the view", which is what the panels do without a zoom at all.
@@ -317,6 +325,151 @@ def line_direction_px(
     return (d_row / norm, d_col / norm)
 
 
+#: Ceiling on cached resampled volumes, mirroring the slice-cache budget. One
+#: off-grid layer costs a full copy on the active grid.
+_RESAMPLE_BUDGET_BYTES = 512 * 1024 * 1024
+
+
+@dataclass
+class RenderSource:
+    """One layer as the panel draws it: data on the active grid, plus its style.
+
+    Mutable on purpose. Opacity, contrast and the colour table change on every
+    tick of a slider and must be refreshed without touching ``data`` or ``cache``,
+    which are the expensive parts.
+    """
+
+    layer: Any
+    data: np.ndarray
+    cache: SliceCache | None
+    is_label: bool
+    lut: dict[int, np.ndarray] | None = None
+    table: np.ndarray | None = None
+    contrast: tuple[float, float] | None = None
+    opacity: float = 1.0
+    blending: str = "translucent"
+    gamma: float = 1.0
+    order: int = 1
+    resampled: bool = False
+
+
+#: The only layer types the panel draws. Shapes, Points, Vectors, Surfaces and
+#: Tracks are annotations, not imagery: a tool's centerline paths, station markers
+#: and cut outlines would otherwise be composited over the very anatomy they are
+#: annotating, and hide it.
+DRAWN_LAYER_TYPES: tuple[str, ...] = ("Image", "Labels")
+
+
+def _layer_shape(layer: Any) -> tuple[int, ...] | None:
+    """A layer's array shape, read without materialising the array."""
+    data = getattr(layer, "data", None)
+    shape = getattr(data, "shape", None)
+    if shape is None:
+        # Multiscale layers hold a list of arrays; the first is the full grid.
+        try:
+            shape = data[0].shape
+        except (TypeError, IndexError, KeyError, AttributeError):
+            return None
+    try:
+        return tuple(int(v) for v in shape)
+    except (TypeError, ValueError):
+        return None
+
+
+def is_drawable_layer(layer: Any) -> bool:
+    """Whether the panel should draw *layer*, decided without touching its data.
+
+    Deliberately cheap: this runs for every layer in the viewer every time the
+    layer list changes, and the tools add and move overlay layers constantly.
+    Materialising a volume here — which is what reading the data to find out
+    costs — made every tool that adds a layer pay for every layer on screen.
+    """
+    if type(layer).__name__ not in DRAWN_LAYER_TYPES:
+        return False
+    name = str(getattr(layer, "name", ""))
+    if _PLANE_LAYER_SUFFIX in name or _BOX_LAYER_SUFFIX in name:
+        return False
+    shape = _layer_shape(layer)
+    return shape is not None and len(shape) >= 3
+
+
+def _layer_volume(layer: Any) -> np.ndarray | None:
+    """*layer*'s 3D host array, or ``None`` when it has none to draw.
+
+    One place for the label-source choice, the multiscale unwrap and the 4D
+    reduction, all of which were previously repeated at each call site.
+    """
+    data = getattr(layer, "data", None)
+    if data is None:
+        return None
+    if not hasattr(data, "shape"):
+        # Multiscale layers hold a list of arrays; the first is the full grid.
+        try:
+            data = data[0]
+        except (TypeError, IndexError, KeyError):
+            return None
+    try:
+        arr = to_numpy(label_source_data(layer) if is_label_like_layer(layer) else layer.data)
+    except Exception:  # noqa: BLE001
+        return None
+    arr = np.asarray(arr)
+    if arr.ndim > 3:
+        # A 4D layer contributes its first volume, the way the rest of the panel
+        # treats one.
+        arr = arr[(0,) * (arr.ndim - 3)]
+    return arr if arr.ndim == 3 else None
+
+
+def _same_grid(layer: Any, reference: Any) -> bool:
+    """Whether *layer* already sits on *reference*'s voxel grid.
+
+    Read off the array object and the affine without materialising either: this
+    runs for every layer on every rebind, and the expensive resampler behind it
+    re-checks properly anyway.
+    """
+    from nvitk.gui.core.spatial import layer_affine
+
+    def _shape(obj: Any) -> tuple[int, ...] | None:
+        """Trailing three dimensions of a layer's data, without copying it."""
+        data = getattr(obj, "data", None)
+        shape = getattr(data, "shape", None)
+        if shape is None:
+            try:
+                shape = data[0].shape
+            except (TypeError, IndexError, KeyError, AttributeError):
+                return None
+        return tuple(int(v) for v in shape)[-3:]
+
+    if _shape(layer) != _shape(reference):
+        return False
+    a, b = layer_affine(layer), layer_affine(reference)
+    if a is None or b is None:
+        return a is b or (a is None and b is None)
+    return bool(np.allclose(a, b, atol=1e-3))
+
+
+def resample_layer_to(
+    layer: Any, reference: Any, data: np.ndarray, *, order: int
+) -> np.ndarray | None:
+    """*data* put on *reference*'s grid, or ``None`` when it cannot be.
+
+    ``None`` rather than an exception for the case the aligner refuses — a layer
+    with no affine and a different shape — because a panel that cannot draw one
+    layer should say so and draw the rest.
+    """
+    from nvitk.core.backend import using
+    from nvitk.gui.core.spatial import align_mask_to_reference_layer
+
+    try:
+        with using("cpu"):
+            _ref, aligned, _resampled = align_mask_to_reference_layer(
+                layer, reference, data, order=int(order)
+            )
+        return np.asarray(to_numpy(aligned.data))
+    except Exception:  # noqa: BLE001 — reported by the caller, never raised into paint
+        return None
+
+
 def _slice_of(data: np.ndarray, axis: int, index: int) -> np.ndarray:
     """The 2D slice of *data* at *index* along *axis*, clamped into range."""
     n = int(data.shape[axis])
@@ -440,6 +593,152 @@ def _label_rgb(plane: np.ndarray, layer: Any, lut: dict[int, np.ndarray] | None 
     for lid in present:
         table[lid] = colors.get(lid, np.array([255, 255, 255], dtype=np.uint8))
     return table[np.clip(arr, 0, table.shape[0] - 1)]
+
+
+# ── RGBA pipeline ─────────────────────────────────────────────────────────────
+#: Entries in a tabulated colormap. Matches the size of the texture Napari's own
+#: shader samples, so the two agree to within a quantisation step.
+_COLORMAP_STEPS = 256
+
+
+def layer_colormap(layer: Any) -> Any | None:
+    """*layer*'s colormap, or ``None`` for a label layer or one without.
+
+    Label colormaps map *integers* and raise on float input, so they are
+    deliberately excluded here — labels go through :func:`label_rgba_lut`.
+    """
+    if is_label_like_layer(layer):
+        return None
+    return getattr(layer, "colormap", None)
+
+
+def layer_gamma(layer: Any) -> float:
+    """*layer*'s display gamma, defaulting to 1."""
+    try:
+        return float(getattr(layer, "gamma", 1.0) or 1.0)
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def colormap_table(colormap: Any, gamma: float = 1.0, size: int = _COLORMAP_STEPS) -> np.ndarray:
+    """*colormap* sampled into a ``(size, 4)`` uint8 table, with *gamma* folded in.
+
+    Tabulated once rather than mapped per pixel: ``Colormap.map`` over a 250k-voxel
+    slice costs milliseconds per redraw, and the GPU does exactly this — samples a
+    256-texel texture — so the result matches what the canvas shows.
+    """
+    ramp = np.linspace(0.0, 1.0, int(size), dtype=np.float32) ** max(float(gamma), 1e-6)
+    try:
+        rgba = np.asarray(colormap.map(ramp), dtype=np.float32)
+    except Exception:  # noqa: BLE001 — an unusable colormap falls back to grey
+        rgba = np.repeat(ramp[:, None], 4, axis=1)
+        rgba[:, 3] = 1.0
+    if rgba.ndim != 2 or rgba.shape[1] < 3:
+        rgba = np.repeat(ramp[:, None], 4, axis=1)
+        rgba[:, 3] = 1.0
+    if rgba.shape[1] == 3:
+        rgba = np.concatenate([rgba, np.ones((rgba.shape[0], 1), dtype=np.float32)], axis=1)
+    return (np.clip(rgba, 0.0, 1.0) * 255.0).astype(np.uint8)
+
+
+def image_rgba(
+    plane: np.ndarray, contrast: tuple[float, float] | None, table: np.ndarray
+) -> np.ndarray:
+    """Window a 2D intensity slice and colour it through *table*; ``(H, W, 4)`` uint8."""
+    arr = np.asarray(plane, dtype=np.float32)
+    lo, hi = contrast if contrast is not None else volume_contrast(arr)
+    if hi <= lo:
+        return np.zeros((*arr.shape, 4), dtype=np.uint8)
+    norm = np.clip((np.nan_to_num(arr, nan=lo) - lo) / (hi - lo), 0.0, 1.0)
+    index = (norm * (table.shape[0] - 1)).astype(np.uint16)
+    return table[index]
+
+
+def label_rgba_lut(layer: Any, label_ids: list[int]) -> dict[int, np.ndarray]:
+    """RGBA uint8 per label id, read from the layer's own colours.
+
+    Alpha is kept, unlike :func:`label_lut`: a label nvitk has hidden is stored
+    as fully transparent, and dropping that would paint it solid black instead of
+    leaving what is underneath showing.
+    """
+    lut: dict[int, np.ndarray] = {}
+    for lid in label_ids:
+        rgba = get_label_color(layer, int(lid))
+        lut[int(lid)] = (np.clip(np.asarray(rgba, dtype=float), 0, 1) * 255).astype(np.uint8)
+    return lut
+
+
+def _label_rgba(
+    plane: np.ndarray, layer: Any, lut: dict[int, np.ndarray] | None = None
+) -> np.ndarray:
+    """Colour a 2D label slice to ``(H, W, 4)`` uint8; background transparent."""
+    arr = np.rint(np.asarray(plane, dtype=np.float64)).astype(np.int64, copy=False)
+    present = [int(v) for v in np.unique(arr) if int(v) != 0]
+    if not present:
+        return np.zeros((*arr.shape, 4), dtype=np.uint8)
+    colors = lut if lut is not None else label_rgba_lut(layer, present)
+    table = np.zeros((max(present) + 1, 4), dtype=np.uint8)
+    for lid in present:
+        table[lid] = colors.get(lid, np.array([255, 255, 255, 255], dtype=np.uint8))
+    return table[np.clip(arr, 0, table.shape[0] - 1)]
+
+
+def slice_to_rgba(
+    layer: Any,
+    data: np.ndarray,
+    axis: int,
+    index: int,
+    view: AxisView | None = None,
+    *,
+    contrast: tuple[float, float] | None = None,
+    table: np.ndarray | None = None,
+    lut: dict[int, np.ndarray] | None = None,
+    cache: SliceCache | None = None,
+) -> np.ndarray:
+    """One orthogonal slice as ``(H, W, 4)`` uint8, ready to composite."""
+    raw = cache.slice(axis, index) if cache is not None else _slice_of(data, axis, index)
+    plane = _oriented(raw, axis, view)
+    if is_label_like_layer(layer):
+        return _label_rgba(plane, layer, lut)
+    if table is None:
+        table = colormap_table(layer_colormap(layer), layer_gamma(layer))
+    return image_rgba(plane, contrast, table)
+
+
+def composite(
+    planes: Sequence[np.ndarray],
+    blendings: Sequence[str],
+    opacities: Sequence[float],
+) -> np.ndarray:
+    """Blend RGBA *planes* bottom-to-top into one RGB uint8 image.
+
+    Walks in layer-list order, the way Napari draws, and implements its blending
+    modes (``napari.layers.base._base_constants``). This reproduces the 2D canvas;
+    the depth-test difference between ``translucent`` and ``translucent_no_depth``
+    only shows in 3D.
+    """
+    if not len(planes):
+        return np.zeros((1, 1, 3), dtype=np.uint8)
+    shape = np.asarray(planes[0]).shape[:2]
+    out = np.zeros((*shape, 3), dtype=np.float32)
+    for plane, blending, opacity in zip(planes, blendings, opacities):
+        src = np.asarray(plane, dtype=np.float32)
+        if src.shape[:2] != shape:
+            continue
+        rgb = src[..., :3]
+        alpha = (src[..., 3:4] / 255.0) * float(np.clip(opacity, 0.0, 1.0))
+        mode = str(blending or "translucent")
+        if mode == "opaque":
+            out = np.where(alpha > 0, rgb, out)
+        elif mode == "additive":
+            out = out + rgb * alpha
+        elif mode == "minimum":
+            out = np.minimum(out, np.where(alpha > 0, rgb, out))
+        elif mode == "multiplicative":
+            out = out * (rgb / 255.0)
+        else:  # translucent, translucent_no_depth
+            out = out * (1.0 - alpha) + rgb * alpha
+    return np.clip(out, 0, 255).astype(np.uint8)
 
 
 def _oriented(plane: np.ndarray, axis: int, view: AxisView | None) -> np.ndarray:
@@ -893,24 +1192,48 @@ def _plane_geometry(
     position: tuple[int, int, int],
     shape: tuple[int, ...],
     displayed: list[int],
-) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
-    """``(position, normal)`` for a plane cutting *axis*, in displayed-dims order.
+    frame: PlaneFrame | None = None,
+    spacing: Sequence[float] | None = None,
+) -> tuple[list[float], list[float]]:
+    """``(point, normal)`` for one cut, in Napari's displayed-dims order.
 
-    Napari documents both as "defined in sliced data coordinates (currently
-    displayed dims)". Building them in array-axis order instead puts the plane
-    perpendicular to the wrong axis whenever ``dims.order`` is a permutation —
-    which is why the axial and sagittal planes came out swapped while the coronal
-    one (the axis a swap leaves alone) looked correct.
+    Two frames meet here and must not be confused. ``Plane.position`` and
+    ``Plane.normal`` are data (voxel-index) coordinates *permuted into displayed
+    order* — Napari's own convention. ``PlaneFrame`` holds unit vectors in
+    spacing-scaled millimetre space; a direction converts to voxels by dividing
+    by the spacing, so the plane normal is the cross product of the two converted
+    in-plane directions, permuted **after** the cross product (an odd permutation
+    flips a cross product's sign).
+
+    ``frame=None`` reproduces the axis-aligned behaviour exactly.
     """
-    slot = displayed.index(int(axis))
-    normal = [0.0, 0.0, 0.0]
-    normal[slot] = 1.0
-    point = [
-        float(position[data_axis]) if data_axis == int(axis) else float(shape[data_axis]) / 2.0
-        for data_axis in displayed
-    ]
-    return tuple(point), tuple(normal)
+    if frame is None:
+        slot = displayed.index(int(axis))
+        normal = [0.0, 0.0, 0.0]
+        normal[slot] = 1.0
+        point = [
+            float(position[data_axis])
+            if data_axis == int(axis)
+            else float(shape[data_axis]) / 2.0
+            for data_axis in displayed
+        ]
+        return point, normal
 
+    sp = np.asarray(spacing if spacing is not None else (1.0, 1.0, 1.0), dtype=float)[:3]
+    row_vox = np.asarray(frame.row, dtype=float) / sp
+    col_vox = np.asarray(frame.col, dtype=float) / sp
+    normal_vox = np.cross(row_vox, col_vox)
+    length = float(np.linalg.norm(normal_vox))
+    if length <= 1e-12:
+        normal_vox = np.zeros(3)
+        normal_vox[int(axis)] = 1.0
+    else:
+        normal_vox = normal_vox / length
+    # A turned plane passes through the crosshair, not the volume's middle:
+    # rotating about the centre would slide the cut away from what is on screen.
+    point = [float(position[data_axis]) for data_axis in displayed]
+    normal = [float(normal_vox[data_axis]) for data_axis in displayed]
+    return point, normal
 
 def remove_ortho_planes(viewer: Any, source_name: str) -> int:
     """Drop every 3D plane layer nvitk added for *source_name*; returns how many."""
@@ -932,6 +1255,8 @@ def sync_ortho_planes(
     position: tuple[int, int, int],
     *,
     axes: tuple[int, ...] = (0, 1, 2),
+    frames: Sequence[PlaneFrame] | None = None,
+    spacing: Sequence[float] | None = None,
 ) -> list[Any]:
     """Show *layer* as three ``depiction="plane"`` slices at *position* on the canvas.
 
@@ -951,8 +1276,12 @@ def sync_ortho_planes(
         shape = tuple(int(v) for v in by_name[wanted[0]].data.shape[-3:])
         displayed = displayed_axes(viewer, len(shape))
         out = []
-        for axis, name in zip(axes, wanted):
-            point, normal = _plane_geometry(axis, position, shape, displayed)
+        for i, (axis, name) in enumerate(zip(axes, wanted)):
+            point, normal = _plane_geometry(
+                axis, position, shape, displayed,
+                frames[i] if frames is not None and i < len(frames) else None,
+                spacing,
+            )
             existing = by_name[name]
             existing.plane = {"position": point, "normal": normal, "thickness": 1.0}
             out.append(existing)
@@ -972,10 +1301,14 @@ def sync_ortho_planes(
 
     displayed = displayed_axes(viewer, data.ndim)
     out: list[Any] = []
-    for axis in axes:
+    for i, axis in enumerate(axes):
         name = _plane_layer_name(source_name, axis)
         existing = by_name.get(name)
-        point, normal = _plane_geometry(axis, position, data.shape, displayed)
+        point, normal = _plane_geometry(
+            axis, position, data.shape, displayed,
+            frames[i] if frames is not None and i < len(frames) else None,
+            spacing,
+        )
         if existing is None:
             existing = viewer.add_image(
                 data,
@@ -1029,12 +1362,39 @@ def slice_box_corners(axis: int, index: int, shape: tuple[int, ...]) -> np.ndarr
     return corners
 
 
+def oblique_box_corners(
+    center_vox: Sequence[float],
+    frame: PlaneFrame,
+    half_extent_mm: tuple[float, float],
+    spacing: Sequence[float],
+) -> np.ndarray:
+    """Corners of a turned slice outline, in voxel coordinates.
+
+    The same recipe the CPR plane marker uses: step out along the frame's two
+    in-plane directions, converted from millimetres to voxels by the spacing.
+    """
+    sp = np.asarray(spacing, dtype=float)[:3]
+    centre = np.asarray(center_vox, dtype=float)[:3]
+    row = np.asarray(frame.row, dtype=float) / sp
+    col = np.asarray(frame.col, dtype=float) / sp
+    r, c = float(half_extent_mm[0]), float(half_extent_mm[1])
+    return np.stack([
+        centre - r * row - c * col,
+        centre - r * row + c * col,
+        centre + r * row + c * col,
+        centre + r * row - c * col,
+    ]).astype(float)
+
+
 def sync_ortho_boxes(
     viewer: Any,
     layer: Any,
     position: tuple[int, int, int],
     *,
     axes: tuple[int, ...] = (0, 1, 2),
+    frames: Sequence[PlaneFrame] | None = None,
+    spacing: Sequence[float] | None = None,
+    views: Sequence[AxisView] | None = None,
 ) -> list[Any]:
     """Outline each slice on the canvas instead of drawing the slice itself.
 
@@ -1069,9 +1429,23 @@ def sync_ortho_boxes(
         previously_active = None
 
     out: list[Any] = []
-    for axis in axes:
+    sp = tuple(float(v) for v in (spacing or (1.0, 1.0, 1.0)))[:3]
+    for i, axis in enumerate(axes):
         name = _box_layer_name(source_name, axis)
-        corners = slice_box_corners(axis, int(position[axis]), shape)
+        frame = frames[i] if frames is not None and i < len(frames) else None
+        if frame is None:
+            corners = slice_box_corners(axis, int(position[axis]), shape)
+        else:
+            view = views[i] if views is not None and i < len(views) else None
+            rows = int(shape[view.rows]) if view is not None else int(shape[axis])
+            cols = int(shape[view.cols]) if view is not None else int(shape[axis])
+            # Half the field of view the 2D panel shows, so the outline marks the
+            # same extent the user is looking at.
+            half = (
+                rows * sp[view.rows if view is not None else axis] / 2.0,
+                cols * sp[view.cols if view is not None else axis] / 2.0,
+            )
+            corners = oblique_box_corners(position, frame, half, sp)
         existing = by_name.get(name)
         colour = BOX_AXIS_COLORS[int(axis) % len(BOX_AXIS_COLORS)]
         if existing is None:
@@ -1205,18 +1579,20 @@ class OrthoViewerPanel(QWidget):
         self._views: list[AxisView] = []
         self._position: list[int] = [0, 0, 0]
         self._spacing: tuple[float, ...] = (1.0, 1.0, 1.0)
-        self._contrast: tuple[float, float] | None = None
-        self._lut: dict[int, np.ndarray] | None = None
-        self._cache: SliceCache | None = None
-        self._overlay: Any | None = None
-        self._overlay_data: np.ndarray | None = None
-        self._overlay_lut: dict[int, np.ndarray] | None = None
-        self._overlay_contrast: tuple[float, float] | None = None
-        self._overlay_cache: SliceCache | None = None
-        #: ``(layer, callback)`` for the contrast subscriptions, so a rebind can
-        #: drop the previous one instead of stacking callbacks on old layers.
-        self._contrast_sub: tuple[Any, Any] | None = None
-        self._overlay_contrast_sub: tuple[Any, Any] | None = None
+        #: Every visible layer the panel draws, bottom-to-top in layer-list order.
+        self._sources: list[RenderSource] = []
+        #: ``(emitter, callback)`` for every per-layer subscription, so a rebuild
+        #: can drop them all rather than stacking callbacks on dead layers.
+        self._subs: list[tuple[Any, Any]] = []
+        #: Volumes resampled onto the active grid, keyed by layer and grid.
+        self._resample_cache: dict[tuple, np.ndarray] = {}
+        #: Layers currently carrying a see-inside cut this panel applied.
+        self._clipped: list[Any] = []
+        #: Guards the rebuild against the layer events its own overlays raise.
+        self._suspend_rebuild = False
+        #: RenderSources by layer id, and the grid they were built for.
+        self._source_cache: dict[int, RenderSource] = {}
+        self._source_ref: tuple = ()
         #: Last slice index each view rendered, so an unchanged view is not redrawn.
         self._rendered: dict[int, int] = {}
         #: One plane per view. Equal to the axis-aligned base until a crosshair
@@ -1231,6 +1607,20 @@ class OrthoViewerPanel(QWidget):
         self._canvas_timer.setSingleShot(True)
         self._canvas_timer.setInterval(_CANVAS_SYNC_MS)
         self._canvas_timer.timeout.connect(self._sync_canvas)
+
+        # Napari's sliders emit per mouse-move; without this a contrast drag
+        # re-renders three slices per event.
+        self._style_timer = QTimer(self)
+        self._style_timer.setSingleShot(True)
+        self._style_timer.setInterval(_STYLE_SYNC_MS)
+        self._style_timer.timeout.connect(lambda: self._redraw(force=True))
+
+        # Adding or moving layers arrives in bursts — a tool that drops four
+        # overlays on the canvas fires four inserts. Rebuild once when they stop.
+        self._rebuild_timer = QTimer(self)
+        self._rebuild_timer.setSingleShot(True)
+        self._rebuild_timer.setInterval(_REBUILD_SYNC_MS)
+        self._rebuild_timer.timeout.connect(self._rebuild_sources)
 
         self._status = QLabel("Select a 3D image or labels layer.")
         self._status.setWordWrap(True)
@@ -1265,22 +1655,19 @@ class OrthoViewerPanel(QWidget):
 
     def _build_controls(self) -> QWidget:
         """The fourth quadrant: what the 3D canvas should show."""
-        card_overlay = QHBoxLayout()
-        card_overlay.setSpacing(SPACE_TIGHT)
-        overlay_label = QLabel("Overlay")
-        overlay_label.setStyleSheet(f"color: {COLOR_MUTED};")
-        self._overlay_combo = QComboBox()
-        self._overlay_combo.setToolTip(
-            "Draw a second layer on top of this one — a segmentation over its raw "
-            "image, say. Labels keep their own colours and leave the base showing "
-            "wherever they are empty."
+        # No overlay picker: the panel draws every visible layer, so the layer
+        # list *is* the control surface. This only reports what that came to.
+        self._composite_label = QLabel("—")
+        self._composite_label.setWordWrap(True)
+        self._composite_label.setStyleSheet(f"color: {COLOR_MUTED};")
+        self._composite_label.setToolTip(
+            "Every visible layer on this grid is drawn, in the layer list's own "
+            "order and with each layer's colormap, opacity and blending. Hide a "
+            "layer in the list to take it out."
         )
-        self._overlay_combo.currentIndexChanged.connect(lambda _i: self._on_overlay_changed())
-        card_overlay.addWidget(overlay_label)
-        card_overlay.addWidget(self._overlay_combo, stretch=1)
 
         card = Card("3D view")
-        card.add_layout(card_overlay)
+        card.add(self._composite_label)
 
         self._show_planes = QCheckBox("Show the three slices in 3D")
         self._show_planes.setToolTip(
@@ -1290,22 +1677,16 @@ class OrthoViewerPanel(QWidget):
         self._show_planes.toggled.connect(self._on_show_planes)
         card.add(self._show_planes)
 
-        style_row = QHBoxLayout()
-        style_row.setSpacing(SPACE_TIGHT)
-        style_label = QLabel("As")
-        style_label.setStyleSheet(f"color: {COLOR_MUTED};")
-        self._plane_style = QComboBox()
-        self._plane_style.addItem("slice image", "image")
-        self._plane_style.addItem("outline only", "box")
-        self._plane_style.setToolTip(
-            "“Slice image” draws the cut itself. “Outline only” draws just its "
-            "border — red, green and blue for the three axes — which leaves the "
-            "anatomy behind it visible and costs no texture upload."
+        self._show_slice_image = QCheckBox("…and the slice image, not just its outline")
+        self._show_slice_image.setToolTip(
+            "The coloured outline — red, green and blue for the three axes — is "
+            "always drawn: it says where each cut is without hiding what is behind "
+            "it. Tick this to draw the slice itself as well, which costs a texture "
+            "upload per cut."
         )
-        self._plane_style.currentIndexChanged.connect(lambda _i: self._on_plane_style())
-        style_row.addWidget(style_label)
-        style_row.addWidget(self._plane_style, stretch=1)
-        card.add_layout(style_row)
+        self._show_slice_image.setEnabled(False)
+        self._show_slice_image.toggled.connect(lambda _c: self._on_plane_image_toggled())
+        card.add(self._show_slice_image)
 
         card.add(section_heading("See inside"))
         hint = QLabel(
@@ -1375,14 +1756,10 @@ class OrthoViewerPanel(QWidget):
         self._rendered = {}
         # Windowed once for the volume: per-slice percentiles both cost more and
         # make the same tissue change brightness as you scroll.
-        self._cache = SliceCache(self._data)
-        if is_label_like_layer(layer):
-            self._contrast = None
-            self._lut = label_lut(layer, unique_layer_labels(self._data))
-        else:
-            self._contrast = layer_contrast(layer, self._data)
-            self._lut = None
-        self._watch_contrast(layer)
+        # Per-layer colour state lives on each RenderSource now; this layer is
+        # kept only as the geometry anchor everything else is drawn against.
+        if not same_layer:
+            self._resample_cache.clear()
         spacing = layer_spacing(layer)
         self._spacing = tuple(float(s) for s in (spacing or (1.0, 1.0, 1.0)))[:3]
         if len(self._spacing) < 3:
@@ -1404,49 +1781,226 @@ class OrthoViewerPanel(QWidget):
             self._clip_axis.addItem(view.title, view.axis)
         self._clip_axis.blockSignals(False)
 
-        self._refresh_overlay_choices()
+        self._rebuild_sources()
 
         name = getattr(layer, "name", "layer")
         shape = " x ".join(str(int(s)) for s in self._data.shape)
         self._status.setText(f"{name} - {shape} voxels")
         self._redraw(force=True)
 
-    def _watch_contrast(self, layer: Any, *, overlay: bool = False) -> None:
-        """Redraw when *layer*'s window moves, and drop the previous subscription.
+    # ── render sources ───────────────────────────────────────────────────────
 
-        Without the unsubscribe the panel would keep redrawing for every layer it
-        has ever been pointed at, and each rebind would add another callback to
-        the same layer.
+    def _candidate_layers(self) -> list[Any]:
+        """Layers eligible to be drawn, in the viewer's own order."""
+        return [
+            layer
+            for layer in (getattr(self._viewer, "layers", []) or [])
+            if is_drawable_layer(layer)
+        ]
+
+    def _reference_key(self) -> tuple:
+        """Identity of the grid everything is resampled onto."""
+        from nvitk.gui.core.spatial import layer_affine
+
+        affine = layer_affine(self._layer)
+        return (
+            id(self._layer),
+            tuple(self._data.shape) if self._data is not None else (),
+            None if affine is None else affine.tobytes(),
+        )
+
+    def _aligned_data(self, layer: Any, data: np.ndarray) -> tuple[np.ndarray | None, bool]:
+        """``(data on the active grid, was it resampled)``.
+
+        Cached per layer and grid: the aligner is a whole-volume affine transform,
+        far too heavy to run per slice, and this way hiding and re-showing an
+        off-grid mask costs nothing.
         """
-        key = "_overlay_contrast_sub" if overlay else "_contrast_sub"
-        previous = getattr(self, key, None)
-        if previous is not None:
-            old_layer, callback = previous
-            try:
-                old_layer.events.contrast_limits.disconnect(callback)
-            except Exception:
-                pass
-            setattr(self, key, None)
-        if layer is None or is_label_like_layer(layer):
+        if self._layer is None or _same_grid(layer, self._layer):
+            return data, False
+        key = (id(layer), self._reference_key())
+        hit = self._resample_cache.get(key)
+        if hit is not None:
+            return hit, True
+        budget = sum(int(v.nbytes) for v in self._resample_cache.values())
+        if budget + int(self._data.nbytes) > _RESAMPLE_BUDGET_BYTES:
+            self._status.setText(
+                f"“{getattr(layer, 'name', '?')}” is on another grid and there is no "
+                "room left to resample it; it is not drawn."
+            )
+            return None, False
+        order = 0 if is_label_like_layer(layer) else 1
+        out = resample_layer_to(layer, self._layer, data, order=order)
+        if out is None:
+            self._status.setText(
+                f"“{getattr(layer, 'name', '?')}” is on another grid and has no affine "
+                "to align it by; it is not drawn."
+            )
+            return None, False
+        self._resample_cache[key] = out
+        return out, True
+
+    def _source_for(self, layer: Any) -> RenderSource | None:
+        """Build the draw-time description of *layer*, or ``None`` if it cannot be."""
+        raw = _layer_volume(layer)
+        if raw is None:
+            return None
+        data, resampled = self._aligned_data(layer, raw)
+        if data is None or self._data is None or data.shape != self._data.shape:
+            return None
+        # Short-circuit the label heuristic on the layer class: for an Image it
+        # scans the whole volume, and that is per layer per rebind.
+        is_label = type(layer).__name__ == "Labels" or is_label_like_layer(layer)
+        source = RenderSource(
+            layer=layer,
+            data=data,
+            cache=SliceCache(data),
+            is_label=is_label,
+            opacity=float(getattr(layer, "opacity", 1.0) or 1.0),
+            blending=str(getattr(layer, "blending", "translucent")),
+            gamma=layer_gamma(layer),
+            order=0 if is_label else 1,
+            resampled=resampled,
+        )
+        self._refresh_style(source)
+        return source
+
+    def _refresh_style(self, source: RenderSource) -> None:
+        """Re-read the colour state of one source, leaving its data alone."""
+        layer = source.layer
+        source.opacity = float(getattr(layer, "opacity", 1.0) or 1.0)
+        source.blending = str(getattr(layer, "blending", "translucent"))
+        if source.is_label:
+            source.lut = label_rgba_lut(layer, unique_layer_labels(source.data))
+            source.table = None
+            source.contrast = None
+        else:
+            source.gamma = layer_gamma(layer)
+            source.table = colormap_table(layer_colormap(layer), source.gamma)
+            source.contrast = layer_contrast(layer, source.data)
+
+    def _rebuild_sources(self) -> None:
+        """Rebuild the draw list from the viewer's visible layers."""
+        if self._suspend_rebuild or self._layer is None or self._data is None:
             return
+        # Reuse the description a layer already had. Rebuilds happen whenever the
+        # layer list changes at all, and the expensive parts — the host copy, the
+        # slice cache, any resampling — depend on the layer and the reference
+        # grid, neither of which a reorder or an unrelated insert touches.
+        reference = self._reference_key()
+        keep = self._source_cache if self._source_ref == reference else {}
+        cache: dict[int, RenderSource] = {}
+        sources: list[RenderSource] = []
+        for layer in self._candidate_layers():
+            if not bool(getattr(layer, "visible", True)):
+                continue
+            source = keep.get(id(layer))
+            if source is None or source.layer is not layer:
+                source = self._source_for(layer)
+            if source is not None:
+                self._refresh_style(source)
+                cache[id(layer)] = source
+                sources.append(source)
+        self._source_cache = cache
+        self._source_ref = reference
+        self._sources = sources
+        self._rendered.clear()
+        self._watch_layers()
+        self._update_composite_label()
+        self._redraw(force=True)
+        self._apply_clip()
 
-        def _changed(_event: Any = None, _overlay: bool = overlay) -> None:
-            """Pick the layer's new window up and repaint."""
-            if _overlay:
-                if self._overlay is None or self._overlay_data is None:
-                    return
-                self._overlay_contrast = layer_contrast(self._overlay, self._overlay_data)
-            else:
-                if self._layer is None or self._data is None:
-                    return
-                self._contrast = layer_contrast(self._layer, self._data)
-            self._redraw(force=True)
+    def _update_composite_label(self) -> None:
+        """Say what the composite is currently made of."""
+        if not self._sources:
+            self._composite_label.setText(
+                "Nothing visible to draw — the active layer is hidden."
+                if self._layer is not None and not bool(getattr(self._layer, "visible", True))
+                else "No visible layers on this grid."
+            )
+            return
+        names = [str(getattr(s.layer, "name", "?")) for s in self._sources]
+        extra = sum(1 for s in self._sources if s.resampled)
+        text = f"{len(names)} layer(s): " + " + ".join(names)
+        if extra:
+            text += f"  ·  {extra} resampled onto “{getattr(self._layer, 'name', '?')}”"
+        self._composite_label.setText(text)
 
+    # ── event subscriptions ──────────────────────────────────────────────────
+
+    def _connect(self, emitter: Any, callback: Any) -> None:
+        """Subscribe *callback* to *emitter* and remember it for teardown."""
         try:
-            layer.events.contrast_limits.connect(_changed)
-            setattr(self, key, (layer, _changed))
-        except Exception:
+            emitter.connect(callback)
+            self._subs.append((emitter, callback))
+        except Exception:  # noqa: BLE001
             pass
+
+    def _unwatch_layers(self) -> None:
+        """Drop every per-layer subscription."""
+        for emitter, callback in self._subs:
+            try:
+                emitter.disconnect(callback)
+            except Exception:  # noqa: BLE001 — a removed layer's emitter may be gone
+                pass
+        self._subs = []
+
+    def _watch_layers(self) -> None:
+        """Follow the display state of every layer that could be drawn.
+
+        ``visible`` is watched on every *candidate*, not just the drawn ones — a
+        hidden layer being un-hidden is precisely the event that has to reach the
+        panel, and it cannot if only visible layers are subscribed.
+        """
+        self._unwatch_layers()
+        drawn = {id(s.layer) for s in self._sources}
+        for layer in self._candidate_layers():
+            events = getattr(layer, "events", None)
+            if events is None:
+                continue
+            self._connect(getattr(events, "visible", None), self._on_visible_changed)
+            if id(layer) not in drawn:
+                continue
+            for name in ("opacity", "blending", "colormap", "gamma", "contrast_limits"):
+                emitter = getattr(events, name, None)
+                if emitter is not None:
+                    self._connect(emitter, self._on_style_changed)
+            for name in ("data", "set_data"):
+                emitter = getattr(events, name, None)
+                if emitter is not None:
+                    self._connect(emitter, self._on_layer_data_changed)
+
+    def _on_visible_changed(self, _event: Any = None) -> None:
+        """A layer was shown or hidden: the draw list changed."""
+        self.refresh_sources()
+
+    def _on_style_changed(self, _event: Any = None) -> None:
+        """A colour or opacity moved: refresh the tables, keep the data."""
+        for source in self._sources:
+            self._refresh_style(source)
+        self._style_timer.start()
+
+    def _on_layer_data_changed(self, _event: Any = None) -> None:
+        """A layer's voxels changed: its caches are stale."""
+        self._resample_cache.clear()
+        self._rebuild_sources()
+
+    def _on_layers_renamed(self, _event: Any = None) -> None:
+        """A rename re-keys the 3D cut layers, which are named after the source."""
+        self._rebuild_sources()
+
+    def refresh_sources(self) -> None:
+        """Ask for a rebuild once the layer-list churn settles."""
+        if self._suspend_rebuild:
+            return
+        self._rebuild_timer.start()
+
+    #: Kept under its old name for callers that predate the multi-layer rework.
+    refresh_overlay_choices = refresh_sources
+
+    def bound_layer(self) -> Any | None:
+        """The layer the panel is currently showing, if any."""
+        return self._layer
 
     def is_oblique(self) -> bool:
         """True when any plane has been turned off the volume's axes."""
@@ -1475,43 +2029,44 @@ class OrthoViewerPanel(QWidget):
         )
 
     def _render_view(self, view: AxisView, view_index: int = 0) -> np.ndarray:
-        """The RGB image for *view* at the current crosshair, overlay included."""
+        """The RGB image for *view*: every visible layer, in layer-list order."""
         index = self._position[view.axis]
-        if not self.is_oblique():
-            rgb = slice_to_rgb(
-                self._layer, self._data, view.axis, index, view,
-                contrast=self._contrast, lut=self._lut, cache=self._cache,
-            )
-        else:
-            # Labels are sampled nearest: interpolating ids invents labels that
-            # were never segmented, and the colour table would then show them.
-            plane = self._resample(
-                view, view_index, self._data, 0 if self._lut is not None else 1
-            )
-            rgb = (
-                _label_rgb(plane, self._layer, self._lut)
-                if self._lut is not None
-                else _grayscale_rgb(plane, self._contrast)
-            )
-        if self._overlay_data is not None and self._overlay_data.shape == self._data.shape:
-            if not self.is_oblique():
-                over = slice_to_rgb(
-                    self._overlay, self._overlay_data, view.axis, index, view,
-                    contrast=self._overlay_contrast, lut=self._overlay_lut,
-                    cache=self._overlay_cache,
+        oblique = self.is_oblique()
+        planes: list[np.ndarray] = []
+        blendings: list[str] = []
+        opacities: list[float] = []
+        for source in self._sources:
+            if source.opacity <= 0.0:
+                continue
+            if oblique:
+                plane = self._resample(view, view_index, source.data, source.order)
+                rgba = (
+                    _label_rgba(plane, source.layer, source.lut)
+                    if source.is_label
+                    else image_rgba(
+                        plane,
+                        source.contrast,
+                        source.table
+                        if source.table is not None
+                        else colormap_table(layer_colormap(source.layer), source.gamma),
+                    )
                 )
             else:
-                over_plane = self._resample(
-                    view, view_index, self._overlay_data,
-                    0 if self._overlay_lut is not None else 1,
+                rgba = slice_to_rgba(
+                    source.layer, source.data, view.axis, index, view,
+                    contrast=source.contrast, table=source.table, lut=source.lut,
+                    cache=source.cache,
                 )
-                over = (
-                    _label_rgb(over_plane, self._overlay, self._overlay_lut)
-                    if self._overlay_lut is not None
-                    else _grayscale_rgb(over_plane, self._overlay_contrast)
-                )
-            rgb = blend_overlay(rgb, over, _OVERLAY_OPACITY)
-        return rgb
+            planes.append(rgba)
+            blendings.append(source.blending)
+            opacities.append(source.opacity)
+        if not planes:
+            shape = (
+                int(self._data.shape[view.rows]),
+                int(self._data.shape[view.cols]),
+            )
+            return np.zeros((*shape, 3), dtype=np.uint8)
+        return composite(planes, blendings, opacities)
 
     def _redraw(self, *, force: bool = False) -> None:
         """Refresh the views, re-rendering only those whose slice actually moved.
@@ -1660,19 +2215,21 @@ class OrthoViewerPanel(QWidget):
         except Exception:
             pass
 
-    def _plane_mode(self) -> str:
-        """``"image"`` or ``"box"`` — how the cuts are drawn on the 3D canvas."""
-        return str(self._plane_style.currentData() or "image")
+    def _wants_slice_image(self) -> bool:
+        """Whether the slice image is drawn alongside the always-on outline."""
+        return bool(self._show_slice_image.isChecked())
 
     def _on_show_planes(self, enabled: bool) -> None:
         """Add or remove the 3D cut layers on the canvas."""
         if self._layer is None:
             return
-        name = str(getattr(self._layer, "name", "volume"))
+        name = self._cut_source_name()
         if not enabled:
             remove_ortho_planes(self._viewer, name)
             remove_ortho_boxes(self._viewer, name)
+            self._show_slice_image.setEnabled(False)
             return
+        self._show_slice_image.setEnabled(True)
         try:
             self._draw_cuts()
             self._show_3d()
@@ -1681,111 +2238,56 @@ class OrthoViewerPanel(QWidget):
             self._show_planes.blockSignals(True)
             self._show_planes.setChecked(False)
             self._show_planes.blockSignals(False)
+            self._show_slice_image.setEnabled(False)
 
-    def _on_plane_style(self) -> None:
-        """Swap between drawing the slices and outlining them."""
+    def _on_plane_image_toggled(self) -> None:
+        """Add or drop the slice images; the outlines stay either way."""
         if self._layer is None or not self._show_planes.isChecked():
             return
-        # Drop the other representation, or both would be on the canvas at once.
-        name = str(getattr(self._layer, "name", "volume"))
-        if self._plane_mode() == "box":
-            remove_ortho_planes(self._viewer, name)
-        else:
-            remove_ortho_boxes(self._viewer, name)
+        if not self._wants_slice_image():
+            remove_ortho_planes(self._viewer, self._cut_source_name())
         try:
             self._draw_cuts()
         except Exception as exc:  # noqa: BLE001
             self._status.setText(f"Could not redraw the 3D cuts: {exc}")
 
+    def _cut_source_name(self) -> str:
+        """Name the 3D cut layers are keyed on — the bound layer's."""
+        return str(getattr(self._layer, "name", "volume"))
+
     def _draw_cuts(self) -> None:
-        """Push the three cuts to the canvas in the selected style."""
-        if self._plane_mode() == "box":
-            sync_ortho_boxes(self._viewer, self._layer, tuple(self._position))
-        else:
-            sync_ortho_planes(self._viewer, self._layer, tuple(self._position))
+        """Push the three cuts to the canvas: outlines always, images on request.
+
+        Guarded: adding an overlay layer fires ``layers.events.inserted``, which
+        rebuilds the draw list, which redraws, which lands back here.
+        """
+        self._suspend_rebuild = True
+        try:
+            # Both helpers walk axes (0, 1, 2); self._frames and self._views are
+            # in *view* order, which _axis_views sorts by plane name. Re-key them
+            # by array axis or every cut gets another view's frame.
+            frames = views = None
+            if self._frames and self._views:
+                by_axis = {int(v.axis): i for i, v in enumerate(self._views)}
+                order = [by_axis.get(a) for a in (0, 1, 2)]
+                views = [self._views[i] if i is not None else None for i in order]
+                if self.is_oblique():
+                    frames = [self._frames[i] if i is not None else None for i in order]
+            sync_ortho_boxes(
+                self._viewer, self._layer, tuple(self._position),
+                frames=frames, spacing=self._spacing, views=views,
+            )
+            if self._wants_slice_image():
+                sync_ortho_planes(
+                    self._viewer, self._layer, tuple(self._position),
+                    frames=frames, spacing=self._spacing,
+                )
+        finally:
+            self._suspend_rebuild = False
 
     def _sync_canvas(self) -> None:
         """Push the crosshair to the 3D planes and the clip, once per settle."""
         self._sync_planes()
-        self._apply_clip()
-
-    def refresh_overlay_choices(self) -> None:
-        """Re-list the overlay candidates, keeping the current pick if it survives.
-
-        Called whenever the viewer's layer list changes: a mask produced *after*
-        the panel was opened would otherwise never appear, which left the picker
-        stuck on "none".
-        """
-        self._refresh_overlay_choices()
-
-    def _overlay_candidate(self, other: Any) -> bool:
-        """True if *other* can be drawn over the bound layer."""
-        if other is self._layer or self._data is None:
-            return False
-        if _PLANE_LAYER_SUFFIX in str(getattr(other, "name", "")):
-            return False
-        data = getattr(other, "data", None)
-        shape = getattr(data, "shape", None)
-        if shape is None:
-            # Multiscale layers hold a list of arrays; the first is the full grid.
-            try:
-                shape = getattr(data[0], "shape", None)
-            except (TypeError, IndexError, KeyError):
-                shape = None
-        if shape is None:
-            return False
-        # Same voxel grid, ignoring any leading singleton/time axes.
-        return tuple(int(v) for v in shape)[-3:] == tuple(int(v) for v in self._data.shape)[-3:]
-
-    def _refresh_overlay_choices(self) -> None:
-        """List the layers that could sit on top of the bound one."""
-        previous = str(self._overlay_combo.currentData() or "")
-        self._overlay_combo.blockSignals(True)
-        self._overlay_combo.clear()
-        self._overlay_combo.addItem("none", "")
-        for other in getattr(self._viewer, "layers", []) or []:
-            if self._overlay_candidate(other):
-                name = str(getattr(other, "name", ""))
-                self._overlay_combo.addItem(name, name)
-        index = self._overlay_combo.findData(previous)
-        self._overlay_combo.setCurrentIndex(max(index, 0))
-        self._overlay_combo.blockSignals(False)
-        self._bind_overlay(str(self._overlay_combo.currentData() or ""))
-
-    def _bind_overlay(self, name: str) -> None:
-        """Cache the overlay layer's data, colours and window."""
-        self._overlay = None
-        self._overlay_data = None
-        self._overlay_lut = None
-        self._overlay_contrast = None
-        self._overlay_cache = None
-        if not name:
-            return
-        layer = next(
-            (l for l in self._viewer.layers if str(getattr(l, "name", "")) == name), None
-        )
-        if layer is None:
-            return
-        self._overlay = layer
-        self._overlay_data = to_numpy(
-            label_source_data(layer) if is_label_like_layer(layer) else layer.data
-        )
-        self._overlay_cache = SliceCache(self._overlay_data)
-        if is_label_like_layer(layer):
-            self._overlay_lut = label_lut(layer, unique_layer_labels(self._overlay_data))
-        else:
-            self._overlay_contrast = layer_contrast(layer, self._overlay_data)
-        self._watch_contrast(layer, overlay=True)
-
-    def _on_overlay_changed(self) -> None:
-        """Rebind the overlay and redraw every view with it."""
-        # The layer being dropped keeps whatever cut it was given otherwise, and
-        # nothing in the panel would ever take it off again.
-        previous = self._overlay
-        self._bind_overlay(str(self._overlay_combo.currentData() or ""))
-        if previous is not None and previous is not self._overlay:
-            clear_clip(previous)
-        self._redraw(force=True)
         self._apply_clip()
 
     def _sync_planes(self) -> None:
@@ -1810,9 +2312,13 @@ class OrthoViewerPanel(QWidget):
         axis_data = self._clip_axis.currentData()
         axis = int(axis_data) if axis_data is not None else 0
         displayed = displayed_axes(self._viewer)
-        targets = [self._layer]
-        if self._overlay is not None and self._overlay is not self._layer:
-            targets.append(self._overlay)
+        targets = [s.layer for s in self._sources] or [self._layer]
+        # A layer that dropped out of the composite keeps whatever cut it was
+        # given otherwise, and nothing here would ever take it off again.
+        for stale in self._clipped:
+            if stale not in targets:
+                clear_clip(stale)
+        self._clipped = list(targets)
         for target in targets:
             try:
                 apply_clip(target, axis, self._position[axis], side, displayed)
@@ -1853,10 +2359,19 @@ def attach_ortho_dock(viewer: Any, panel: OrthoViewerPanel) -> Any:
     from nvitk.gui.core.design import apply_theme
 
     apply_theme(panel)
-    dock = viewer.window.add_dock_widget(panel, area="left", name="Orthogonal views")
-    # The same pop-out-and-fill control the inspection docks carry; this one is
-    # added by Napari rather than by that helper, so it needs asking for.
-    install_expand_button(dock, "Orthogonal views")
+    # Not ``viewer.window.add_dock_widget``: that returns a Napari QtViewerDockWidget
+    # whose _on_visibility_changed rebuilds its own title bar on *every* show,
+    # which destroys the nvitk one. The shared helper builds a plain QDockWidget,
+    # installs the pop-out/fullscreen controls itself, and can be tabbed with
+    # Napari's layer-controls dock by name.
+    dock = attach_left_inspection_dock(
+        viewer,
+        panel,
+        object_name=DOCK_OBJECT_NAME,
+        title="Orthogonal views",
+        tabify_with="layer controls",
+        minimum_width=360,
+    )
     panel._nvitk_dock = dock
 
     def _refresh(_event: Any = None) -> None:
@@ -1867,7 +2382,14 @@ def attach_ortho_dock(viewer: Any, panel: OrthoViewerPanel) -> Any:
         own output and reset the crosshair.
         """
         active = viewer.layers.selection.active if viewer.layers else None
-        if active is not None and _PLANE_LAYER_SUFFIX in str(getattr(active, "name", "")):
+        name = str(getattr(active, "name", "")) if active is not None else ""
+        if _PLANE_LAYER_SUFFIX in name or _BOX_LAYER_SUFFIX in name:
+            return
+        # An empty selection is not a reason to unbind. Napari clears it
+        # transiently while a layer is being added, and the panel's own 3D cuts
+        # are layers — so rebinding here threw away the crosshair and the plane
+        # rotation every time those were drawn.
+        if active is None and panel.bound_layer() is not None:
             return
         panel.refresh_from_layer(active)
 
@@ -1876,13 +2398,26 @@ def attach_ortho_dock(viewer: Any, panel: OrthoViewerPanel) -> Any:
         panel.refresh_overlay_choices()
 
     viewer.layers.selection.events.active.connect(_refresh)
-    viewer.layers.events.inserted.connect(_layers_changed)
-    viewer.layers.events.removed.connect(_layers_changed)
+    for name in ("inserted", "removed", "reordered", "moved"):
+        emitter = getattr(viewer.layers.events, name, None)
+        if emitter is not None:
+            emitter.connect(_layers_changed)
+    # A rename re-keys the 3D cut layers, which are named after their source.
+    renamed = getattr(viewer.layers.events, "renamed", None)
+    if renamed is not None:
+        renamed.connect(_layers_changed)
     _refresh()
     return dock
 
 
 __all__ = [
+    "colormap_table",
+    "composite",
+    "image_rgba",
+    "label_rgba_lut",
+    "layer_colormap",
+    "layer_gamma",
+    "slice_to_rgba",
     "AxisView",
     "OrthoViewerPanel",
     "SliceView",
@@ -1890,6 +2425,7 @@ __all__ = [
     "attach_ortho_dock",
     "clear_clip",
     "blend_overlay",
+    "oblique_box_corners",
     "clip_geometry",
     "SliceCache",
     "label_lut",

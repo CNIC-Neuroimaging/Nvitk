@@ -150,6 +150,7 @@ def run_app() -> None:
     image_props_panel = ImagePropertiesPanel()
     ct_window_panel = CTWindowPanel()
     ct_window_panel.set_viewer(viewer)
+    image_props_panel.set_viewer(viewer)
 
     def _on_xnat_inputs_opened(paths: list[str]) -> None:
         """Record newly opened XNAT/data-browser input paths in the app registry."""
@@ -499,6 +500,17 @@ def run_app() -> None:
     apply_theme(log_dock)
     viewer.window.add_dock_widget(log_dock, area="bottom", name="nvitk log")
 
+    # Both nvitk docks now exist, so a saved layout has something to match
+    # against. Napari's own restore ran inside ``napari.Viewer(...)`` far above,
+    # when neither of these existed, and ``restoreState`` silently drops entries
+    # whose objectName it cannot find — hence a second, explicit restore here.
+    try:
+        from nvitk.gui.core.prefs import restore_dock_state
+
+        restore_dock_state(viewer.window._qt_window)
+    except Exception:  # noqa: BLE001 — a stored layout must not block a launch
+        pass
+
     _refresh_layer_list(layer_list, viewer, app_state)
 
     def _refresh_dicom_tags_tab() -> None:
@@ -551,6 +563,14 @@ def run_app() -> None:
 
             shutdown_sge_monitor(app_state)
             shutdown_vessel_cross_sections(app_state)
+            # Saved from the main window, not the viewer this handler hangs off:
+            # the dock layout belongs to the QMainWindow.
+            try:
+                from nvitk.gui.core.prefs import save_dock_state
+
+                save_dock_state(viewer.window._qt_window)
+            except Exception:  # noqa: BLE001 — never block a close on a preference
+                pass
             if _orig_close is not None:
                 _orig_close(event)
 

@@ -440,6 +440,10 @@ def run_gui_tool(
         _run_centerline_to_polyline(viewer, layer, label_ids, params)
         return None
 
+    if tool_id == "viz_cross_sections_generic":
+        _run_cross_sections_generic(viewer, layer, params)
+        return None
+
     if tool_id == "viz_vessel_cross_sections":
         _run_viz_vessel_cross_sections(viewer, layer, params)
         return None
@@ -813,6 +817,9 @@ def run_gui_tool(
                 gamma=float(params.get("hessian_gamma") or 15.0),
             )
             return coerce_tool_output(out.data if hasattr(out, "data") else out)
+
+    if tool_id.startswith("sk_"):
+        return _run_skimage_filter(tool_id, img, params)
 
     if tool_id == "jerman_filter":
         from nvitk.filters.jerman import jerman_filter, parse_sigmas
@@ -2746,6 +2753,113 @@ def _run_totalsegmentator(
     return seg_arr
 
 
+def _run_skimage_filter(tool_id: str, img: Image, params: dict[str, Any]) -> np.ndarray:
+    """Run one of the ``skimage.filters`` wrappers and hand back its array.
+
+    scikit-image is host-only, so every branch runs under ``using("numpy")`` —
+    the same contract the Hessian, Jerman and snakes filters follow.
+    """
+    from nvitk.filters import skimage_filters as skfilters
+    from nvitk.filters.hessian import parse_sigmas
+
+    def f(key: str, default: float) -> float:
+        """A float parameter with its default."""
+        value = params.get(key)
+        return float(default if value is None else value)
+
+    def i(key: str, default: int) -> int:
+        """An int parameter with its default."""
+        value = params.get(key)
+        return int(default if value is None else value)
+
+    method = str(params.get("sk_method") or "")
+    axis = i("sk_axis", 0)
+    # Masks and band indices are label maps; everything else is intensity.
+    labelled = tool_id in (
+        "sk_threshold_global", "sk_threshold_multiotsu",
+        "sk_threshold_local", "sk_threshold_hysteresis",
+    )
+
+    with using("numpy"):
+        if tool_id == "sk_ridge":
+            out = skfilters.ridge_filter(
+                img,
+                method=method or "frangi",
+                sigmas=parse_sigmas(
+                    str(params.get("hessian_sigmas") or ""),
+                    default=skfilters.RIDGE_SIGMAS_DEFAULT,
+                ),
+                black_ridges=bool(params.get("black_ridges", False)),
+            )
+        elif tool_id == "sk_edge":
+            out = skfilters.edge_filter(
+                img, method=method or "sobel",
+                direction=str(params.get("sk_direction") or "magnitude"), axis=axis,
+            )
+        elif tool_id == "sk_laplace":
+            out = skfilters.laplace_filter(img, ksize=i("sk_radius", 3))
+        elif tool_id == "sk_blur":
+            out = skfilters.blur_filter(
+                img, method=method or "gaussian",
+                sigma=f("sk_sigma", 1.0), sigma_high=f("sk_sigma_high", 2.0),
+            )
+        elif tool_id == "sk_median":
+            out = skfilters.median_filter(img, radius=i("sk_radius", 1))
+        elif tool_id == "sk_unsharp":
+            out = skfilters.unsharp_filter(
+                img, radius=f("sk_radius_f", 1.0), amount=f("sk_amount", 1.0)
+            )
+        elif tool_id == "sk_butterworth":
+            out = skfilters.butterworth_filter(
+                img, cutoff=f("sk_cutoff", 0.1), order=i("sk_order", 2),
+                high_pass=bool(params.get("sk_highpass", True)),
+            )
+        elif tool_id == "sk_gabor":
+            out = skfilters.gabor_filter(
+                img, frequency=f("sk_frequency", 0.2), theta=f("sk_theta", 0.0), axis=axis
+            )
+        elif tool_id == "sk_threshold_global":
+            out = skfilters.global_threshold(img, method=method or "otsu")
+        elif tool_id == "sk_threshold_multiotsu":
+            out = skfilters.multiotsu_threshold(img, classes=i("sk_classes", 3))
+        elif tool_id == "sk_threshold_local":
+            out = skfilters.local_threshold(
+                img, method=method or "local", block_size=i("sk_block", 35),
+                offset=f("sk_offset", 0.0), axis=axis,
+            )
+        elif tool_id == "sk_threshold_hysteresis":
+            out = skfilters.hysteresis_threshold(
+                img, low=f("sk_low", 0.0), high=f("sk_high", 0.0)
+            )
+        elif tool_id == "sk_rank":
+            out = skfilters.rank_filter(
+                img, method=method or "mean", radius=i("sk_radius", 2), axis=axis
+            )
+        else:
+            raise ValueError(f"Unknown scikit-image filter tool {tool_id!r}.")
+
+    data = out.data if hasattr(out, "data") else out
+    return coerce_label_output(data) if labelled else coerce_tool_output(data)
+
+
+def _label_schema_for(layer: Any, params: dict[str, Any]) -> str:
+    """The label vocabulary to name ids with: the picker's, or a guess from *layer*.
+
+    The picker sits on "generic" until someone chooses or guesses, and generic
+    names nothing — so fall back to the same guess its own button makes, rather
+    than reporting every vessel as a bare number.
+    """
+    key = str(params.get("label_schema") or "").strip()
+    if key and key != "generic":
+        return key
+    try:
+        from nvitk.gui.labels.catalog import guess_schema_from_layer
+
+        return str(guess_schema_from_layer(layer) or "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _topbrain_channels(model: str, paths: Any) -> int:
     """Input channels *model* was trained on, or 1 when its dataset.json is unreadable."""
     from nvitk.pipes.topbrain.stage4_infer import model_input_channels
@@ -3045,6 +3159,7 @@ def _run_viz_vessel_cpr(
         centerline_mask=centerlines,
         step_mm=float(params.get("step_mm") or 0.5),
         join_gap_vox=int(params.get("join_gap_vox", 8) or 0),
+        schema_key=_label_schema_for(layer, params),
     )
     failed = panel.failure_reasons()
     if failed:
@@ -3351,6 +3466,89 @@ def _run_viz_pet_hotspots(
     notify(
         f"Added {coords.shape[0]} SUV hotspot point(s) in Napari "
         f"(colormap={params.get('cmap') or 'viridis'}; adjust size/symbol in the layer panel)."
+    )
+
+
+def _run_cross_sections_generic(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
+    """Cross-sections for any segmentation, without the 4D-flow apparatus.
+
+    The active layer is the mask. Everything the 4D-flow tool insists on — a
+    complex-difference volume, the AP/RL/FH phase triple, and a qvtpy stage
+    directory to read named branches and venous vocabulary out of — is either
+    optional here or absent, because none of it exists for a segmentation that
+    did not come from that pipeline. What remains is the part that was always
+    generic: skeletonise, pick a point, cut the perpendicular plane, measure it.
+    """
+    from nvitk.gui.labels.visibility import is_label_like_layer
+    from nvitk.gui.viz.vessel_cross_sections import install_vessel_cross_sections
+
+    if int(getattr(layer.data, "ndim", 0)) != 3:
+        raise ValueError(
+            "Cross-sections need a 3D segmentation mask as the active layer "
+            f"(‘{getattr(layer, 'name', '?')}’ is "
+            f"{int(getattr(layer.data, 'ndim', 0))}D)."
+        )
+    if not is_label_like_layer(layer):
+        raise ValueError(
+            f"The active layer ‘{getattr(layer, 'name', '?')}’ is not a label layer. "
+            "Select the segmentation mask, then pick the image under “Intensity image”."
+        )
+
+    seg_img = coerce_label_output(layer_to_image(layer))
+    seg_arr = to_numpy(seg_img.data).astype(np.int32, copy=False)
+
+    # The image is optional: without one the mask is its own backdrop, which is
+    # enough to see the lumen and measure it.
+    intensity_layer = layer
+    image_name = _layer_param(params, "image_layer")
+    if image_name:
+        intensity_layer = _resolve_layer(viewer, image_name)
+        if int(getattr(intensity_layer.data, "ndim", 0)) != 3:
+            raise ValueError(f"‘{image_name}’ is not a 3D image.")
+        _ref, seg_on_image, _ = align_mask_to_reference_layer(layer, intensity_layer, order=0)
+        seg_arr = to_numpy(coerce_label_output(seg_on_image).data).astype(np.int32, copy=False)
+
+    # Centerlines: supplied, or skeletonised from the mask by the engine's own
+    # generic path.
+    cl_name = _layer_param(params, "centerline_layer")
+    if cl_name:
+        cl_layer = _resolve_layer(viewer, cl_name)
+        _ref, cl_img, _ = align_mask_to_reference_layer(cl_layer, intensity_layer, order=0)
+        centerline_arr = to_numpy(coerce_label_output(cl_img).data).astype(np.int32, copy=False)
+    else:
+        from nvitk.morphology.centerline import compute_centerlines
+
+        with using("cpu"):
+            centerline_arr = np.zeros(seg_arr.shape, dtype=np.int32)
+            found = compute_centerlines(seg_arr, min_points=5)
+            for label, points in (found or {}).items():
+                idx = np.rint(to_numpy(points)).astype(int)
+                for axis in range(3):
+                    idx[:, axis] = np.clip(idx[:, axis], 0, centerline_arr.shape[axis] - 1)
+                centerline_arr[idx[:, 0], idx[:, 1], idx[:, 2]] = int(label)
+        if not centerline_arr.any():
+            raise ValueError(
+                "No centerline could be skeletonised from this mask. Supply one "
+                "under “Centerlines”, or check the mask has a vessel in it."
+            )
+
+    app_state = getattr(viewer, "_nvitk_app_state", None)
+    if not isinstance(app_state, dict):
+        app_state = {}
+        viewer._nvitk_app_state = app_state
+
+    install_vessel_cross_sections(
+        viewer,
+        app_state,
+        intensity_layer=intensity_layer,
+        centerline_mask=centerline_arr,
+        segmentation=seg_arr,
+        params=params,
+        schema_key=_label_schema_for(layer, params),
+    )
+    notify(
+        "Cross-sections ready. Click a centerline in the 3D view to measure that "
+        "station. No velocity volumes were given, so flow waveforms are not shown."
     )
 
 

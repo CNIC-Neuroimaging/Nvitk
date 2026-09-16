@@ -45,6 +45,5 @@ Grand Challenge submission container.
 
 ```{note}
 This section currently covers PESA-Fat, QVTPy and TopBrain. Sibling cohort pipelines already exist in
-the codebase (`nvitk-bbtpy`, and a GPETPy tool referenced from the {doc}`Main GUI
 <../gui/index>`'s Pipelines category) and are planned for future documentation passes.
 ```

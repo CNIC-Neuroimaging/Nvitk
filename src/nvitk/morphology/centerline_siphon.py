@@ -82,13 +82,14 @@ from nvitk.morphology.components import (
 )
 from nvitk.types import Image
 
-try:
-    from nvitk.pipes.bbtpy.labels import bb_vessel_name
-except ImportError:
+def siphon_label_name(label_id: int) -> str:
+    """Readable name for a siphon label id.
 
-    def bb_vessel_name(label_id: int) -> str:
-        """Fallback vessel name (``label_<id>``) when the bbtpy label map is unavailable."""
-        return f"label_{int(label_id)}"
+    Numeric: the vessel vocabulary this used to consult belonged to a pipeline
+    that has been removed. Kept as a function so every call site keeps one place
+    to reach for if a vocabulary is wired back in.
+    """
+    return f"label_{int(label_id)}"
 
 setup(globals())
 
@@ -366,7 +367,7 @@ def ica_otsu_mask(
     """
     from skimage.filters import threshold_otsu
 
-    name = bb_vessel_name(int(lid))
+    name = siphon_label_name(int(lid))
     wvi_np = to_numpy(wvi)
     shape = tuple(int(s) for s in wvi_np.shape[:3])
     full_post = np.zeros(shape).astype(bool)
@@ -690,7 +691,7 @@ def _prepare_ica_mask_for_centerline(
     ckpt_dir: Path | None = None,
 ) -> tuple[Any, dict]:
     """ICA path: Otsu+erode → optional donut repair → mask for CL."""
-    name = bb_vessel_name(int(lid))
+    name = siphon_label_name(int(lid))
     log.step(f"--- {name} (id={lid}) ---")
     t0 = time.time()
     eroded_mask, otsu_mask, otsu_info = ica_otsu_mask(wvi, cl_mask, int(lid))
@@ -1374,7 +1375,7 @@ def recover_lumen_thickness_symmetric(
         lid = int(it["lid"])
         m = to_numpy(it["mask"]).astype(bool, copy=False)
         ceil = to_numpy(it["ceiling"]).astype(bool, copy=False)
-        name = str(it.get("label_name", bb_vessel_name(lid)))
+        name = str(it.get("label_name", siphon_label_name(lid)))
         cl = it.get("cl_seeds")
         if cl is not None:
             cl = as_backend_array(cl).astype(bool)
@@ -1394,7 +1395,7 @@ def recover_lumen_thickness_symmetric(
         lid = int(it["lid"])
         m = to_numpy(it["mask"]).astype(bool, copy=False)
         ceil = to_numpy(it["ceiling"]).astype(bool, copy=False)
-        name = str(it.get("label_name", bb_vessel_name(lid)))
+        name = str(it.get("label_name", siphon_label_name(lid)))
         cl = it.get("cl_seeds")
         if cl is not None:
             cl = as_backend_array(cl).astype(bool)
@@ -1702,7 +1703,7 @@ def correct_siphon_centerlines(
 
         log.step("=== ICA Otsu + repair + siphon centerlines ===")
         for lid in correction_ids:
-            name = bb_vessel_name(int(lid))
+            name = siphon_label_name(int(lid))
             if int(lid) not in all_labels:
                 log.warning(f"[{name}] label {lid} not in mask — skipping")
                 continue
@@ -2119,7 +2120,7 @@ def _print_ica_summary_table(
         "-" * width,
     ]
     for lid in correction_ids:
-        name = bb_vessel_name(int(lid))
+        name = siphon_label_name(int(lid))
         info = details.get(int(lid), {})
         prep = info.get("prep") or {}
         otsu_info = prep.get("otsu_info") or {}
@@ -2191,7 +2192,7 @@ def _save_ica_overview_figure(
         axes = np.array([[axes[0]], [axes[1]], [axes[2]]])
 
     for col, lid in enumerate(ids):
-        name = bb_vessel_name(lid)
+        name = siphon_label_name(lid)
         coords_o = np.argwhere(seg_o == lid)
         coords_r = np.argwhere(seg_r == lid)
         if coords_o.shape[0] > 0:
@@ -2256,7 +2257,7 @@ def _save_qc_figure(
     n = max(1, len(correction_ids))
     fig = plt.figure(figsize=(7 * n, 8))
     for col, lid in enumerate(correction_ids):
-        name = bb_vessel_name(int(lid))
+        name = siphon_label_name(int(lid))
         ax = fig.add_subplot(1, n, col + 1, projection="3d")
         ax.set_title(
             f"{name}: surface (light blue) + skeleton (green) + centerline (red)"

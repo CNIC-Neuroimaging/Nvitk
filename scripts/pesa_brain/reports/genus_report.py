@@ -17,13 +17,15 @@ from nvitk.core.array import to_numpy
 from nvitk.core.logger import Logger
 from nvitk.core.backend import set_global_backend
 from nvitk.io.imageio import imread
-from nvitk.morphology.centerline_siphon import compute_mask_genus
-from nvitk.pipes.bbtpy.labels import EICAB_LICA, EICAB_RICA, bb_vessel_name
+from nvitk.morphology.centerline_siphon import compute_mask_genus, siphon_label_name
 from nvitk.util.colors import bcolors
 
 log = Logger()
 set_global_backend("cpu")
 
+#: eICAB's left and right ICA label ids, inlined now that the black-blood label
+#: module that defined them has been removed.
+EICAB_LICA, EICAB_RICA = 1, 2
 ICA_IDS = (EICAB_LICA, EICAB_RICA)
 
 EICAB_MASK_CANDIDATES = (
@@ -83,7 +85,7 @@ def log_ica_genus_report(
 
         vol = to_numpy(imread(str(mask_path)).data)
         for lid in ica_ids:
-            name = bb_vessel_name(int(lid))
+            name = siphon_label_name(int(lid))
             rep = compute_mask_genus(vol == int(lid), label_name=name)
             if rep.n_voxels == 0:
                 status = "empty"

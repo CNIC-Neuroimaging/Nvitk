@@ -34,16 +34,4 @@ PIPELINE_TOOLS: tuple[PipelineGuiSpec, ...] = (
         "nvitk-qvtpy",
         "XNAT/DICOM → centerlines → 4D flow segmentation.",
     ),
-    PipelineGuiSpec(
-        "pipeline_bbtpy",
-        "BBTPy",
-        "nvitk-bbtpy",
-        "Black-blood TOF registration and segmentation.",
-    ),
-    PipelineGuiSpec(
-        "pipeline_gpetpy",
-        "GPETPy",
-        "nvitk-gpetpy",
-        "PET brain crop pipeline.",
-    ),
 )

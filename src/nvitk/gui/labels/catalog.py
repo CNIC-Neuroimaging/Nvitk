@@ -37,8 +37,7 @@ def _invert(name_to_id: Mapping[str, int]) -> dict[int, str]:
 
 def _build_pipeline_schemas() -> dict[str, LabelSchema]:
     """Build the registry of :class:`LabelSchema` entries for every known pipeline label vocabulary
-    (eICAB, QVTpy, BBTpy, PESA-FAT, Dixon)."""
-    from nvitk.pipes.bbtpy.labels import BB_ARTERIAL_ID_TO_NAME
+    (eICAB, QVTpy, PESA-FAT, Dixon)."""
     from nvitk.pipes.pesa_fat.ct_pet_v5.labels import (
         BODY_LABELS,
         FAT_BATCH_LABELS,
@@ -72,13 +71,6 @@ def _build_pipeline_schemas() -> dict[str, LabelSchema]:
             "Pipelines / QVTpy",
             dict(QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID),
             "seg_4dflow.nii, centerlines_mask.nii, LOCs.",
-        ),
-        "bbtpy-bb": LabelSchema(
-            "bbtpy-bb",
-            "BBTpy — black-blood arterial",
-            "Pipelines / BBTpy",
-            dict(BB_ARTERIAL_ID_TO_NAME),
-            "Stage-2 BB segmentation after eICAB→BB relabel.",
         ),
         "pesa-fat-mo": LabelSchema(
             "pesa-fat-mo",
@@ -216,9 +208,9 @@ def schema_keys() -> list[str]:
         """Sort key placing schema *k* by its display group order, then title, alphabetically."""
         s = schemas[k]
         order = {"General": 0, "Segmentation / vessels": 1, "Pipelines / QVTpy": 2,
-                 "Pipelines / BBTpy": 3, "Pipelines / TopBrain": 4,
-                 "Pipelines / PESA-FAT": 5, "Pipelines / PESA-FAT Dixon": 6,
-                 "TotalSegmentator": 7}
+                 "Pipelines / TopBrain": 3,
+                 "Pipelines / PESA-FAT": 4, "Pipelines / PESA-FAT Dixon": 5,
+                 "TotalSegmentator": 6}
         return (order.get(s.group, 99), s.title)
 
     return sorted(schemas.keys(), key=_sort_key)

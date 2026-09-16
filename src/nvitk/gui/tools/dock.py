@@ -98,11 +98,18 @@ def _cap_form_labels(native: QWidget) -> None:
     resolves max < min in favour of min — so the floor has to be cleared first.
     Re-applied whenever the form changes, because magicgui re-runs that alignment.
     """
+    # A word-wrapped label only reports the height of the lines it actually needs
+    # if its size policy says its height depends on its width. Without this the
+    # label reports one line, the row is laid out one line tall, and the second
+    # line is drawn outside it — which is also why the heightForWidth branch in
+    # _fit_tool_scroll never fired.
+    policy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+    policy.setHeightForWidth(True)
     for label in native.findChildren(QLabel):
         label.setWordWrap(True)
         label.setMinimumWidth(0)
         label.setMaximumWidth(_TOOL_LABEL_MAX_WIDTH)
-        label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        label.setSizePolicy(policy)
 
 
 def _style_operation_help(panel: Any) -> None:
@@ -285,6 +292,7 @@ def build_tools_dock(
         on_layers_changed=on_layers_changed,
         record_step=record_step,
         get_label_ids=_get_label_ids,
+        get_label_schema=lambda: label_selector.schema_key(),
         get_pipeline_argv_builder=lambda: pipeline_form,
         get_totalseg_roi=_get_totalseg_roi,
         label_selector=label_selector,
@@ -325,13 +333,16 @@ def build_tools_dock(
             pipeline_form.set_script(spec.cli_command)
             pipeline_form.refresh_layer_combos()
 
-        _update_aux_panel_layout(show_labels)
-
+        # Visibility first: _update_aux_panel_layout decides who gets the dock's
+        # spare height from isVisible(), so setting it afterwards left the ROI
+        # list reading the *previous* tool's state and never winning the stretch.
         totalseg_roi.setVisible(is_ts)
         if is_ts:
             task = getattr(tool_panel, "task", None)
             task_val = str(task.value if task is not None else "total")
             totalseg_roi.set_task(task_val)
+
+        _update_aux_panel_layout(show_labels)
 
         _sync_sge_button()
         _fit_timer.start()
@@ -622,9 +633,6 @@ def build_tools_dock(
         widget) the stretch factor in the dock layout, collapsing the others."""
         is_pipeline = pipeline_form.isVisible()
         is_ts = totalseg_roi.isVisible()
-        label_selector.set_expanded(show_labels)
-        pipeline_form.set_expanded(is_pipeline)
-
         expand_row = None
         if show_labels:
             expand_row = _row_label
@@ -632,6 +640,12 @@ def build_tools_dock(
             expand_row = _row_pipeline
         elif is_ts:
             expand_row = _row_totalseg
+
+        # Only the panel that actually gets the stretch is allowed to grow; two
+        # panels both expanding would fight over the same spare height.
+        label_selector.set_expanded(show_labels)
+        pipeline_form.set_expanded(is_pipeline)
+        totalseg_roi.set_expanded(expand_row == _row_totalseg)
 
         for i in range(layout.count()):
             layout.setStretch(i, 1 if i == expand_row else 0)

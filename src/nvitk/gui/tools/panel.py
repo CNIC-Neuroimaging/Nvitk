@@ -60,6 +60,24 @@ def _set_param_visibility(widget: Any, tool_id: str) -> None:
         "smf",
         "shift_hm",
         "hessian_sigmas",
+        "sk_method",
+        "sk_direction",
+        "sk_axis",
+        "sk_radius",
+        "sk_radius_f",
+        "sk_amount",
+        "sk_sigma",
+        "sk_sigma_high",
+        "sk_cutoff",
+        "sk_order",
+        "sk_highpass",
+        "sk_frequency",
+        "sk_theta",
+        "sk_classes",
+        "sk_block",
+        "sk_offset",
+        "sk_low",
+        "sk_high",
         "black_ridges",
         "hessian_alpha",
         "hessian_beta",
@@ -290,6 +308,30 @@ def _layer_param_names() -> tuple[str, ...]:
     return tuple(names)
 
 
+def _update_choice_params(widget: Any, tool_id: str) -> None:
+    """Point every choice widget at the options *tool_id* declares for it.
+
+    Parameter names are shared across tools — several filters ask for a
+    ``method`` — so a picker built with one tool's options would otherwise keep
+    them when another is selected, and offer choices that tool cannot honour.
+    """
+    from nvitk.gui.tools.registry import params_for_tool
+
+    for spec in params_for_tool(tool_id):
+        if spec.kind != "choice":
+            continue
+        ref = getattr(widget, spec.name, None)
+        if ref is None:
+            continue
+        choices = [str(c) for c in (spec.choices or ())]
+        if not choices:
+            continue
+        if list(getattr(ref, "choices", []) or []) != choices:
+            ref.choices = choices
+        if str(ref.value) not in choices:
+            ref.value = str(spec.default) if str(spec.default) in choices else choices[0]
+
+
 def _update_reference_layers(widget: Any, viewer: Any) -> None:
     """Refresh every reference/barrier/mask layer-picker widget on *widget* with the viewer's current
     layer names, adding a "(none)" option for the optional pickers and re-validating each widget's
@@ -350,6 +392,7 @@ def build_tool_panel(
     on_layers_changed: Callable[[], None],
     record_step = None,
     get_label_ids = None,
+    get_label_schema = None,
     get_pipeline_argv_builder = None,
     get_totalseg_roi = None,
     label_selector = None,
@@ -393,6 +436,27 @@ def build_tool_panel(
         smf={"label": "Sliding smooth win", "min": 1, "max": 200, "value": 10},
         shift_hm={"label": "Shift HM (half-max curvature)", "value": True},
         hessian_sigmas={"label": "Hessian sigmas (comma-separated)", "value": "1,3,5,7,9"},
+        sk_method={"label": "Method", "widget_type": "ComboBox", "choices": ["otsu"], "value": "otsu"},
+        sk_direction={"label": "Direction", "widget_type": "ComboBox",
+                      "choices": ["magnitude"], "value": "magnitude"},
+        sk_axis={"label": "Slice axis", "min": 0, "max": 3, "value": 0},
+        sk_radius={"label": "Radius (voxels)", "min": 1, "max": 32, "value": 2},
+        sk_radius_f={"label": "Radius", "min": 0.1, "max": 64.0, "step": 0.5, "value": 1.0},
+        sk_amount={"label": "Amount", "min": 0.0, "max": 10.0, "step": 0.1, "value": 1.0},
+        sk_sigma={"label": "Sigma", "min": 0.0, "max": 64.0, "step": 0.5, "value": 1.0},
+        sk_sigma_high={"label": "High sigma (DoG)", "min": 0.0, "max": 128.0, "step": 0.5,
+                       "value": 2.0},
+        sk_cutoff={"label": "Cutoff", "min": 0.001, "max": 0.499, "step": 0.01, "value": 0.1},
+        sk_order={"label": "Order", "min": 1, "max": 16, "value": 2},
+        sk_highpass={"label": "High pass", "value": True},
+        sk_frequency={"label": "Frequency", "min": 0.01, "max": 2.0, "step": 0.05, "value": 0.2},
+        sk_theta={"label": "Orientation (degrees)", "min": 0.0, "max": 180.0, "step": 5.0,
+                  "value": 0.0},
+        sk_classes={"label": "Classes", "min": 2, "max": 8, "value": 3},
+        sk_block={"label": "Window size (odd)", "min": 3, "max": 999, "value": 35},
+        sk_offset={"label": "Offset", "min": -1000000.0, "max": 1000000.0, "value": 0.0},
+        sk_low={"label": "Low", "min": -1000000.0, "max": 1000000.0, "value": 0.0},
+        sk_high={"label": "High", "min": -1000000.0, "max": 1000000.0, "value": 0.0},
         black_ridges={"label": "Black ridges (else bright)", "value": False},
         hessian_alpha={"label": "Hessian alpha", "value": 0.5, "min": 0.01, "max": 10.0},
         hessian_beta={"label": "Hessian beta", "value": 0.5, "min": 0.01, "max": 10.0},
@@ -893,6 +957,24 @@ def build_tool_panel(
         smf: int,
         shift_hm: bool,
         hessian_sigmas: str,
+        sk_method: str,
+        sk_direction: str,
+        sk_axis: int,
+        sk_radius: int,
+        sk_radius_f: float,
+        sk_amount: float,
+        sk_sigma: float,
+        sk_sigma_high: float,
+        sk_cutoff: float,
+        sk_order: int,
+        sk_highpass: bool,
+        sk_frequency: float,
+        sk_theta: float,
+        sk_classes: int,
+        sk_block: int,
+        sk_offset: float,
+        sk_low: float,
+        sk_high: float,
         black_ridges: bool,
         hessian_alpha: float,
         hessian_beta: float,
@@ -1119,6 +1201,13 @@ def build_tool_panel(
         if correction_ids and tool_id == "siphon_correct":
             params["correction_ids"] = correction_ids
         params["selected_label_ids"] = ids
+        # Which vocabulary the label picker is on, so a tool can name label ids
+        # the same way the picker does instead of assuming one pipeline's.
+        if get_label_schema is not None:
+            try:
+                params["label_schema"] = str(get_label_schema() or "")
+            except Exception:  # noqa: BLE001 — naming is cosmetic
+                params["label_schema"] = ""
         if ids and tool_id in ("seg_combine_labels", "seg_remove_labels"):
             params["label_ids"] = ",".join(str(i) for i in ids)
 
@@ -1245,6 +1334,7 @@ def build_tool_panel(
         tid = tool_id_from_label(cat, tool_panel.operation.value)
         if tid:
             _set_param_visibility(tool_panel, tid)
+            _update_choice_params(tool_panel, tid)
         _sync_operation_help()
 
     @tool_panel.operation.changed.connect
@@ -1254,6 +1344,7 @@ def build_tool_panel(
         tid = tool_id_from_label(tool_panel.category.value, _signal_value(event))
         if tid:
             _set_param_visibility(tool_panel, tid)
+            _update_choice_params(tool_panel, tid)
         _update_reference_layers(tool_panel, viewer)
         if tid == "viz_vessel_cross_sections":
             _prefill_vessel_cross_section_layers(tool_panel, viewer)
@@ -1262,6 +1353,7 @@ def build_tool_panel(
     tid0 = tool_id_from_label(default_category(), default_operation(default_category()))
     if tid0:
         _set_param_visibility(tool_panel, tid0)
+        _update_choice_params(tool_panel, tid0)
         _update_reference_layers(tool_panel, viewer)
         _update_phase_layers(tool_panel, viewer)
     _sync_operation_help()

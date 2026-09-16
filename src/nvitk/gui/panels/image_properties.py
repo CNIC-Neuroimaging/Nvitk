@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
+    QComboBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -169,10 +170,27 @@ class ImagePropertiesPanel(QWidget):
         self._btn_refresh = QPushButton("Refresh")
         self._btn_copy = QPushButton("Copy")
         self._btn_copy.setToolTip("Copy the full plain-text report to the clipboard")
+
+        # The one editable thing in an otherwise read-only panel: the dtype is
+        # already reported as a badge, so the control to change it belongs here
+        # rather than buried in the tool list.
+        dtype_label = QLabel("Type")
+        dtype_label.setStyleSheet(f"color: {COLOR_MUTED};")
+        self._dtype_combo = QComboBox()
+        self._dtype_combo.setToolTip(
+            "Convert the layer to another data type, as a new layer. Integer "
+            "targets rescale into range rather than truncating."
+        )
+        self._btn_convert = QPushButton("Convert")
+        self._btn_convert.setToolTip("Add a converted copy of this layer.")
+
         btn_row = QHBoxLayout()
         btn_row.addWidget(self._btn_refresh)
         btn_row.addWidget(self._btn_copy)
         btn_row.addStretch(1)
+        btn_row.addWidget(dtype_label)
+        btn_row.addWidget(self._dtype_combo)
+        btn_row.addWidget(self._btn_convert)
 
         root = QVBoxLayout()
         root.setContentsMargins(0, 0, 0, 0)
@@ -184,7 +202,63 @@ class ImagePropertiesPanel(QWidget):
 
         self._btn_refresh.clicked.connect(self._refresh_last_layer)
         self._btn_copy.clicked.connect(self._copy_report)
+        self._btn_convert.clicked.connect(self._convert_dtype)
         self._last_layer: Any | None = None
+        self._viewer: Any | None = None
+        self._fill_dtype_choices()
+
+    # ── dtype conversion ─────────────────────────────────────────────────────
+
+    def set_viewer(self, viewer: Any) -> None:
+        """Give the panel the viewer it needs to add a converted layer."""
+        self._viewer = viewer
+        self._sync_convert_enabled()
+
+    def _fill_dtype_choices(self) -> None:
+        """Offer the same targets the quick-op conversion supports."""
+        from nvitk.gui.tools.quick_ops import dtype_params
+
+        self._dtype_combo.blockSignals(True)
+        self._dtype_combo.clear()
+        try:
+            for spec in dtype_params(None):
+                for label, value in spec.choices:
+                    self._dtype_combo.addItem(str(label), str(value))
+        except Exception:  # noqa: BLE001 — an empty picker is better than no panel
+            pass
+        self._dtype_combo.blockSignals(False)
+        self._sync_convert_enabled()
+
+    def _sync_convert_enabled(self) -> None:
+        """Conversion needs both a viewer to add to and a layer to convert."""
+        ready = self._viewer is not None and self._last_layer is not None
+        self._dtype_combo.setEnabled(ready)
+        self._btn_convert.setEnabled(ready and self._dtype_combo.count() > 0)
+
+    def _convert_dtype(self) -> None:
+        """Add a copy of the current layer in the selected type.
+
+        Delegates to the quick op rather than casting here: that one already
+        rescales into range for integer targets instead of clipping almost
+        everything to the extremes, and carries the layer's spatial metadata over.
+        """
+        from nvitk.gui.tools.quick_ops import convert_dtype
+
+        if self._viewer is None or self._last_layer is None:
+            return
+        target = str(self._dtype_combo.currentData() or "")
+        if not target:
+            return
+        # The quick op works on the active layer; make sure that is the one the
+        # panel is showing, not whatever the selection happens to be.
+        try:
+            self._viewer.layers.selection.active = self._last_layer
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self._status.setText(convert_dtype(self._viewer, dtype=target))
+        except Exception as exc:  # noqa: BLE001 — report, do not raise into Qt
+            self._status.setText(f"Could not convert: {exc}")
 
     # ── internals ────────────────────────────────────────────────────────────
 
@@ -276,6 +350,7 @@ class ImagePropertiesPanel(QWidget):
         """Display *layer*'s spatial properties (spacing, FOV, origin, affine), or a placeholder
         message if *layer* is ``None`` or its properties can't be read."""
         self._last_layer = layer
+        self._sync_convert_enabled()
         self._clear_body()
         if layer is None:
             self._title.setText("")

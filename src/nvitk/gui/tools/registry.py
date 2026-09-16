@@ -80,6 +80,7 @@ TOOL_IDS_USING_LABEL_PICKER: frozenset[str] = frozenset({
     "centerline_to_polyline",
     "viz_pet_hotspots",
     "viz_vessel_cpr",
+    "viz_cross_sections_generic",
     "viz_ortho_views",
     "viz_flowshow",
     "viz_flow_streamlines",
@@ -104,6 +105,20 @@ _LABEL_IDS = ParamSpec("label_ids", "Label id(s) comma-separated", "str", "1")
 _NEW_ID = ParamSpec("new_id", "Output label id", "int", 1, min=0, max=9999)
 _OUTPUT_DIR = ParamSpec("output_dir", "Output directory", "str", "")
 _WORKING_DIR = ParamSpec("working_dir", "Working directory", "str", "")
+
+
+def _sk(name: str) -> tuple[str, ...]:
+    """A method list from :mod:`nvitk.filters.skimage_filters`, by constant name.
+
+    Read from the implementation so the picker cannot offer a variant the wrapper
+    does not handle, or miss one it does.
+    """
+    try:
+        from nvitk.filters import skimage_filters as _f
+
+        return tuple(getattr(_f, name))
+    except Exception:  # noqa: BLE001 — the registry must import without skimage
+        return ("otsu",)
 
 
 def _totalseg_task_choices() -> tuple[str, ...]:
@@ -255,6 +270,139 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("snakes_axis", "3D slice axis", "int", 0, min=0, max=2),
         ),
         needs_reference_layer=True,
+    ),
+    GuiToolSpec(
+        "sk_ridge", "Filters", "Ridge / vesselness (skimage)",
+        (
+            ParamSpec("sk_method", "Method", "choice", "frangi", choices=_sk("RIDGE_METHODS")),
+            ParamSpec("hessian_sigmas", "Sigma scales (comma-separated)", "str", ""),
+            ParamSpec("black_ridges", "Dark ridges on a bright background", "bool", False),
+        ),
+        description=(
+            "Frangi, Sato or Meijering ridge enhancement. Bright ridges by "
+            "default, which is the contrast-filled-vessel case."
+        ),
+    ),
+    GuiToolSpec(
+        "sk_edge", "Filters", "Edges (skimage)",
+        (
+            ParamSpec("sk_method", "Operator", "choice", "sobel", choices=_sk("EDGE_METHODS")),
+            ParamSpec("sk_direction", "Direction", "choice", "magnitude",
+                      choices=_sk("EDGE_DIRECTIONS")),
+            ParamSpec("sk_axis", "Slice axis (2D-only variants)", "int", 0, min=0, max=3),
+        ),
+        description=(
+            "Sobel, Scharr, Prewitt, Roberts or Farid. The gradient magnitude runs "
+            "in 3D; the directional variants are 2D in scikit-image, so those are "
+            "applied plane by plane along the slice axis."
+        ),
+    ),
+    GuiToolSpec(
+        "sk_laplace", "Filters", "Laplacian (skimage)",
+        (ParamSpec("sk_radius", "Kernel size", "int", 3, min=1, max=31),),
+        description="Second-derivative edge and blob response.",
+    ),
+    GuiToolSpec(
+        "sk_blur", "Filters", "Gaussian / difference of Gaussians (skimage)",
+        (
+            ParamSpec("sk_method", "Method", "choice", "gaussian", choices=_sk("BLUR_METHODS")),
+            ParamSpec("sk_sigma", "Sigma", "float", 1.0, min=0.0, max=64.0),
+            ParamSpec("sk_sigma_high", "High sigma (DoG)", "float", 2.0, min=0.0, max=128.0),
+        ),
+        description=(
+            "Gaussian smoothing, or a band-pass between two Gaussians. The high "
+            "sigma must exceed the low one."
+        ),
+    ),
+    GuiToolSpec(
+        "sk_median", "Filters", "Median (skimage)",
+        (ParamSpec("sk_radius", "Radius (voxels)", "int", 1, min=1, max=32),),
+        description="Median over a cube of the given radius; removes salt-and-pepper noise.",
+    ),
+    GuiToolSpec(
+        "sk_unsharp", "Filters", "Unsharp mask (skimage)",
+        (
+            ParamSpec("sk_radius_f", "Radius", "float", 1.0, min=0.1, max=64.0),
+            ParamSpec("sk_amount", "Amount", "float", 1.0, min=0.0, max=10.0),
+        ),
+        description="Sharpen by adding back a scaled high-frequency residual.",
+    ),
+    GuiToolSpec(
+        "sk_butterworth", "Filters", "Butterworth (skimage)",
+        (
+            ParamSpec("sk_cutoff", "Cutoff (fraction of Nyquist)", "float", 0.1,
+                      min=0.001, max=0.499),
+            ParamSpec("sk_order", "Order", "int", 2, min=1, max=16),
+            ParamSpec("sk_highpass", "High pass", "bool", True),
+        ),
+        description="Frequency-domain high- or low-pass with a smooth roll-off.",
+    ),
+    GuiToolSpec(
+        "sk_gabor", "Filters", "Gabor (skimage)",
+        (
+            ParamSpec("sk_frequency", "Frequency", "float", 0.2, min=0.01, max=2.0),
+            ParamSpec("sk_theta", "Orientation (degrees)", "float", 0.0, min=0.0, max=180.0),
+            ParamSpec("sk_axis", "Slice axis", "int", 0, min=0, max=3),
+        ),
+        description=(
+            "Oriented texture response, as the magnitude of the two quadrature "
+            "filters. 2D in scikit-image, so a volume is filtered plane by plane."
+        ),
+    ),
+    GuiToolSpec(
+        "sk_threshold_global", "Filters", "Global threshold (skimage)",
+        (ParamSpec("sk_method", "Rule", "choice", "otsu", choices=_sk("GLOBAL_THRESHOLDS")),),
+        multilabel=True,
+        description=(
+            "Binarise with one automatically-chosen cut: Otsu, Li, Yen, IsoData, "
+            "mean, minimum or triangle."
+        ),
+    ),
+    GuiToolSpec(
+        "sk_threshold_multiotsu", "Filters", "Multi-Otsu threshold (skimage)",
+        (ParamSpec("sk_classes", "Classes", "int", 3, min=2, max=8),),
+        multilabel=True,
+        description="Split the intensities into several bands; the output is the band index.",
+    ),
+    GuiToolSpec(
+        "sk_threshold_local", "Filters", "Local threshold (skimage)",
+        (
+            ParamSpec("sk_method", "Rule", "choice", "local", choices=_sk("LOCAL_THRESHOLDS")),
+            ParamSpec("sk_block", "Window size (odd)", "int", 35, min=3, max=999),
+            ParamSpec("sk_offset", "Offset", "float", 0.0, min=-1e6, max=1e6),
+            ParamSpec("sk_axis", "Slice axis", "int", 0, min=0, max=3),
+        ),
+        multilabel=True,
+        description=(
+            "Threshold against a locally-computed surface — Gaussian mean, Niblack "
+            "or Sauvola — which holds up where uneven illumination defeats a single "
+            "global cut."
+        ),
+    ),
+    GuiToolSpec(
+        "sk_threshold_hysteresis", "Filters", "Hysteresis threshold (skimage)",
+        (
+            ParamSpec("sk_low", "Low", "float", 0.0, min=-1e6, max=1e6),
+            ParamSpec("sk_high", "High", "float", 0.0, min=-1e6, max=1e6),
+        ),
+        multilabel=True,
+        description=(
+            "Keep everything above the low cut that connects to something above the "
+            "high one. Both zero picks Otsu for the high cut and half of it for the low."
+        ),
+    ),
+    GuiToolSpec(
+        "sk_rank", "Filters", "Rank filter (skimage)",
+        (
+            ParamSpec("sk_method", "Filter", "choice", "mean", choices=_sk("RANK_METHODS")),
+            ParamSpec("sk_radius", "Radius (voxels)", "int", 2, min=1, max=32),
+            ParamSpec("sk_axis", "Slice axis", "int", 0, min=0, max=3),
+        ),
+        description=(
+            "Local-rank statistics over a footprint — mean, median, entropy, "
+            "gradient, autolevel and the rest. Computed on an 8-bit copy, plane by "
+            "plane."
+        ),
     ),
     GuiToolSpec(
         "img_mask_keep_inside",
@@ -988,6 +1136,36 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         needs_reference_layer=True,
         needs_3d=True,
         run_mode="notify",
+    ),
+    GuiToolSpec(
+        "viz_cross_sections_generic",
+        "Visualization",
+        "Cross-sections (mask + image)",
+        (
+            ParamSpec("image_layer", "Intensity image (optional)", "layer", ""),
+            ParamSpec("centerline_layer", "Centerlines (optional)", "layer", ""),
+            ParamSpec("cross_section_radius_vox", "Plane half-size (vox)", "float", 12.0,
+                      min=2.0, max=200.0),
+            ParamSpec("cross_section_res", "Plane resolution (0=auto)", "int", 0, min=0, max=1024),
+            ParamSpec("interp_vals", "Samples per voxel (auto res)", "int", 4, min=1, max=16),
+            ParamSpec("measure_resegment", "Resegment in cross-section plane", "bool", False),
+            ParamSpec("cs_supersampling", "Supersample plane (~4x)", "bool", True),
+            ParamSpec("thr_algorithm", "2D threshold method", "choice", "lsthr",
+                      choices=("lsthr", "otsu", "lthr")),
+            ParamSpec("centerline_window", "Tangent window", "choice", "5", choices=("5", "3")),
+            ParamSpec("show_segmentation_3d", "Show segmentation in 3D", "bool", True),
+        ),
+        needs_3d=True,
+        run_mode="notify",
+        description=(
+            "Click a centerline in 3D to measure the vessel's true perpendicular "
+            "cross-section. The active layer is the segmentation mask; the image "
+            "and ready-made centerlines are optional — without centerlines they "
+            "are skeletonised from the mask. Unlike the 4D-flow tool this needs no "
+            "phase volumes and reads nothing off disk, so it works on any "
+            "segmentation. Branches are named through the label mapping, and flow "
+            "waveforms are simply absent since there is no velocity to measure."
+        ),
     ),
     GuiToolSpec(
         "viz_vessel_cross_sections",
