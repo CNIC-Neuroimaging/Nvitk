@@ -141,7 +141,7 @@ def review_widget_html(
     syncBtn.disabled = true;
     status.textContent = 'Rebuilding database index (may take a moment)...';
     try {{
-      const res = await fetch('/review/reindex', {{
+      const res = await fetch('/review/sync-db', {{
         method: 'POST',
         headers: {{'Content-Type': 'application/json'}},
         body: JSON.stringify(ctx),
@@ -221,7 +221,7 @@ def create_qc_portal_app(
     - `GET /files/...` static file server rooted at `results_root`
     - `POST /review` upserts one review into the NVITK DB
     - `GET /review/state` returns saved reviews for a report, read from the DB
-    - `POST /review/reindex` re-asserts a report's reviews and rebuilds the SQLite index
+    - `POST /review/sync-db` re-asserts a report's reviews and rebuilds the SQLite index
     """
     try:
         from fastapi import FastAPI
@@ -361,9 +361,9 @@ def create_qc_portal_app(
             log.warning("review write failed: %s", exc)
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
-    @app.post("/review/reindex")
-    async def reindex_review_db(payload: dict[str, Any]):
-        """``POST /review/reindex``: re-assert this report's stored reviews and rebuild the index.
+    @app.post("/review/sync-db")
+    async def sync_review_db(payload: dict[str, Any]):
+        """``POST /review/sync-db``: re-assert this report's stored reviews and rebuild the index.
 
         Every ``POST /review`` already writes the audit row and stamps ``image_measurements``,
         so this is not what makes a review durable. What it adds is the SQLite index rebuild,

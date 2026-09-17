@@ -169,8 +169,9 @@ def embedded_review_panel_js(dom_id: str, review_ctx: dict) -> str:
       headers: {{'Content-Type': 'application/json'}},
       body: JSON.stringify(body),
     }});
-    if (!res.ok) {{
-      reviewStatus.textContent = 'Save failed.';
+    const data = await res.json().catch(() => ({{}}));
+    if (!res.ok || !data.ok) {{
+      reviewStatus.textContent = 'Save failed: ' + (data.db_error || data.error || res.status);
       return;
     }}
     reviewState[structure] = reviewState[structure] || {{}};
