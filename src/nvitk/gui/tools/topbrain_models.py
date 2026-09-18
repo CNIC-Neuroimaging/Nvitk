@@ -61,18 +61,20 @@ def container_overrides() -> dict[str, Path]:
 def host_layout() -> tuple[Any, str]:
     """``(paths, origin)`` for the roots this host should read.
 
-    Inside an SGE container the configured cluster paths are host paths that were
-    never mounted, so the bind target exported by the job wins. ``layout_local``
-    rather than ``layout_cluster`` because only the local half treats a passed
-    root as authoritative — the cluster half deliberately lets config override a
-    flag, which here would hand back the unmounted path the override exists to
-    replace.
+    Inside an SGE container the bind targets the job exported are the *only* source. The
+    configured cluster paths are host paths that were never mounted, and ``sge.json`` itself
+    is a workstation file the job cannot see — reading it there used to fail the run on a
+    ``local_*`` key describing a machine that is not involved.
+    :func:`~nvitk.pipes.topbrain.util.paths.layout_container` therefore resolves nothing it
+    was not handed.
+
+    Off the cluster, fall back to the usual cluster-then-local probing.
     """
-    from nvitk.pipes.topbrain.util.paths import layout_auto, layout_local
+    from nvitk.pipes.topbrain.util.paths import layout_auto, layout_container
 
     overrides = container_overrides()
     if overrides:
-        return layout_local(**overrides), "container"
+        return layout_container(**overrides), "container"
     return layout_auto()
 
 

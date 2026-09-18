@@ -436,6 +436,33 @@ def layout_auto(**overrides: Path | None) -> tuple[TopBrainPaths, str]:
     return local, "local"
 
 
+#: Stand-in for a root the enclosing SGE container did not bind.
+#:
+#: Inference reads four roots. The training-time ones -- the challenge release, the nnssl
+#: trees, the pre-training checkpoints, the corpus -- are not mounted into an inference job,
+#: and there is no configuration on the cluster to resolve them from anyway. Pointing them
+#: here keeps :class:`TopBrainPaths` constructible while making any code that does reach for
+#: one fail on a path that is obviously not real, rather than on a config key describing a
+#: workstation the job never touches.
+UNAVAILABLE_ROOT: Path = Path("/nonexistent/topbrain-root-not-bound-in-container")
+
+
+def layout_container(**overrides: Path | None) -> TopBrainPaths:
+    """Roots for running *inside* an SGE container, from the job's bind targets alone.
+
+    Deliberately reads no configuration. ``sge.json`` is a workstation file and is not mounted
+    into the job, so consulting it here made a GUI cluster launch die on
+    ``pipelines.topbrain_paths.local_challenge_root`` -- a key naming a machine that is not
+    involved in the run. The job exports the roots it actually bound (see
+    :data:`nvitk.gui.tools.topbrain_models.CONTAINER_ROOT_ENV`); every other root is marked
+    :data:`UNAVAILABLE_ROOT` instead of being resolved.
+    """
+    supplied = {key: Path(value) for key, value in overrides.items() if value is not None}
+    return TopBrainPaths(
+        **{key: supplied.get(key, UNAVAILABLE_ROOT / key) for key in ROOT_KEYS}
+    )
+
+
 def layout_local(**overrides: Path | None) -> TopBrainPaths:
     """Roots for running on the analysis workstation (``local_*`` config keys).
 
@@ -454,6 +481,7 @@ def layout_cluster(**overrides: Path | None) -> TopBrainPaths:
 
 
 __all__ = [
+    "UNAVAILABLE_ROOT",
     "CORPUS_DATASET_ID",
     "CORPUS_DATASET_IDS",
     "CORPUS_DATASET_SUFFIXES",
@@ -479,6 +507,7 @@ __all__ = [
     "iter_release_cases",
     "layout_auto",
     "layout_cluster",
+    "layout_container",
     "layout_local",
     "tree_visible",
     "parse_case_id",
