@@ -8,6 +8,7 @@ from pathlib import Path
 
 from nvitk.cluster.sge import (
     ClusterPaths,
+    SgeResourceOverrides,
     SgeResources,
     SingularityBinds,
     StageSpec,
@@ -42,24 +43,25 @@ def cluster_paths(
     )
 
 
-def default_resources(*, gpu: bool = False) -> SgeResources:
-    """Default :class:`~nvitk.cluster.sge.SgeResources` for a CLI job, requesting a GPU slot when
-    *gpu* is True (else CPU-only)."""
-    if gpu:
-        return SgeResources(
-            project=cfg.SGE_PROJECT,
-            account=cfg.SGE_ACCOUNT,
-            ngpu=max(1, int(cfg.SGE_NGPU) or 1),
-            h_vmem=cfg.SGE_H_VMEM,
-            queue=cfg.SGE_QUEUE,
-        )
-    return SgeResources(
+def default_resources(
+    *,
+    gpu: bool = False,
+    overrides: SgeResourceOverrides | None = None,
+) -> SgeResources:
+    """Configured :class:`~nvitk.cluster.sge.SgeResources` for a CLI job, GPU or CPU-only.
+
+    *overrides* replaces individual fields for this one submission -- what the GUI submit
+    dialog sends when the operator picks a different project or memory size. The configured
+    values stay the default, so a caller that passes nothing behaves exactly as before.
+    """
+    base = SgeResources(
         project=cfg.SGE_PROJECT,
         account=cfg.SGE_ACCOUNT,
-        ngpu=0,
+        ngpu=max(1, int(cfg.SGE_NGPU) or 1) if gpu else 0,
         h_vmem=cfg.SGE_H_VMEM,
         queue=cfg.SGE_QUEUE,
     )
+    return overrides.apply(base) if overrides is not None else base
 
 
 def build_worker_command(
@@ -95,6 +97,7 @@ def submit_tool_job(
     emit: object | None = None,
     models: Path | None = None,
     extra_env: dict[str, str] | None = None,
+    overrides: SgeResourceOverrides | None = None,
 ) -> str | None:
     """Submit (or, if *emit* is given, append to that script file handle instead of submitting) one
     SGE stage running *python_cmd* under Singularity, using default resources/binds for *gpu*.
@@ -113,7 +116,7 @@ def submit_tool_job(
     spec = StageSpec(
         job_name=job_name,
         python_cmd=python_cmd,
-        resources=default_resources(gpu=gpu),
+        resources=default_resources(gpu=gpu, overrides=overrides),
         binds=binds,
         use_nv=gpu,
         extra_env=env,
@@ -130,9 +133,10 @@ def emit_submit_script(
     gpu: bool = False,
     models: Path | None = None,
     extra_env: dict[str, str] | None = None,
+    overrides: SgeResourceOverrides | None = None,
 ) -> Path:
     """Write a qsub shell script at *script_path* containing one job stage per ``(job_name,
-    python_cmd)`` in *stages*, sharing the header and cluster paths."""
+    python_cmd)`` in *stages*, sharing the header, cluster paths and resource request."""
     script_path.parent.mkdir(parents=True, exist_ok=True)
     paths = cluster_paths(data_root=data_root, output_root=output_root, models=models)
     with open(script_path, "w", encoding="utf-8") as fh:
@@ -152,6 +156,7 @@ def emit_submit_script(
                 emit=fh,
                 models=models,
                 extra_env=extra_env,
+                overrides=overrides,
             )
     return script_path
 

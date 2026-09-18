@@ -71,6 +71,10 @@ def sge_scripts_dir() -> str:
 #: Default local base for sshfs mountpoints when ``paths.sshfs_mount_root`` is unset.
 DEFAULT_SSHFS_MOUNT_ROOT = "~/.cache/nvitk/sshfs"
 
+#: Seconds an idle sshfs mount is kept alive before being torn down
+#: (``paths.sshfs_idle_ttl_seconds``).
+DEFAULT_SSHFS_IDLE_TTL_SECONDS: float = 300.0
+
 #: ``-o`` options applied to every sshfs mount when ``paths.sshfs_options`` is unset.
 #: ``reconnect`` plus the keepalives matter for long pipeline runs: without them a transient
 #: network drop leaves a mountpoint whose every syscall fails until it is unmounted by hand.
@@ -87,6 +91,52 @@ def sshfs_mount_root() -> Path:
     if raw is None or not str(raw).strip():
         raw = DEFAULT_SSHFS_MOUNT_ROOT
     return Path(os.path.expanduser(str(raw).strip()))
+
+
+def resolve_host_alias(host: str) -> str:
+    """Resolve a short cluster name (``samwise``) through ``paths.cluster_host_aliases``.
+
+    Lives here rather than in :mod:`nvitk.cluster.remote_transfer` because
+    :mod:`nvitk.cluster.sshfs` needs it too, and that module cannot import ``remote_transfer``
+    without a cycle. ``remote_transfer.resolve_cluster_host`` delegates to this.
+    """
+    key = str(host or "").strip()
+    if not key:
+        return key
+    aliases = merge_cluster_host_aliases({}, paths_section(), {})
+    return aliases.get(key, key)
+
+
+def sshfs_reuse_existing_mounts() -> bool:
+    """Whether to reuse an sshfs mount somebody else already made (``paths.sshfs_reuse_existing_mounts``).
+
+    On by default. A workstation that already keeps cluster storage mounted -- say
+    ``samwise:/BIOIT_IMAGE`` under ``~/NetVolumes`` -- should not gain a second connection to
+    the same tree just because nvitk wants a subdirectory of it.
+    """
+    raw = paths_section().get("sshfs_reuse_existing_mounts")
+    if raw is None or not str(raw).strip():
+        return True
+    return str(raw).strip().lower() not in {"0", "false", "no", "off"}
+
+
+def sshfs_idle_ttl_seconds() -> float:
+    """Seconds an unused sshfs mount is kept before it is torn down.
+
+    Mounting costs a full SSH handshake plus FUSE setup -- one to three seconds. Anything that
+    checks the cluster on a timer (the GUI polls ``output/.done`` every five seconds) would
+    otherwise remount on every tick. Keeping an idle mount briefly makes those checks free;
+    the TTL stops a long-lived process from holding mounts it has finished with.
+
+    ``0`` restores unmount-as-soon-as-unused.
+    """
+    raw = paths_section().get("sshfs_idle_ttl_seconds")
+    if raw is None or not str(raw).strip():
+        return DEFAULT_SSHFS_IDLE_TTL_SECONDS
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return DEFAULT_SSHFS_IDLE_TTL_SECONDS
 
 
 def sshfs_options() -> list[str]:

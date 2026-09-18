@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from nvitk.cli._sge import emit_submit_script
-from nvitk.cluster.sge import SingularityBinds, gui_sge_worker_argv
+from nvitk.cluster.sge import SgeResourceOverrides, SingularityBinds, gui_sge_worker_argv
 from nvitk.gui.core.spatial import layer_to_image
 from nvitk.gui.tools.registry import params_for_tool
 from nvitk.io import imsave
@@ -251,8 +251,13 @@ def emit_gui_sge_script(
     *,
     local_staging: Path,
     remote_job_root: str,
+    overrides: SgeResourceOverrides | None = None,
 ) -> Path:
-    """Write ``submit.sh`` into *local_staging* with cluster-side bind paths."""
+    """Write ``submit.sh`` into *local_staging* with cluster-side bind paths.
+
+    *overrides* carries any resource change the submit dialog collected; ``None`` keeps the
+    request ``sge.json`` resolved for ``image_tools``.
+    """
     data_root, output_root, _remote_script = build_remote_paths(remote_job_root)
     job_arg = shlex.quote("/nvitk/data/job.json")
     python_cmd = " ".join([*gui_sge_worker_argv(), "--job", job_arg])
@@ -267,6 +272,7 @@ def emit_gui_sge_script(
         gpu=job.gpu,
         models=models,
         extra_env=extra_env,
+        overrides=overrides,
     )
     return script_path
 

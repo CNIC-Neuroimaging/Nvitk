@@ -89,6 +89,51 @@ class SgeResources:
     pe_smp: int | None = None
 
 
+#: Accepted ``h_vmem`` spellings: a number with an optional SGE size suffix (``30G``, ``4096M``).
+_H_VMEM_PATTERN = re.compile(r"^\d+(\.\d+)?[kKmMgGtT]?$")
+
+
+def is_valid_h_vmem(value: str) -> bool:
+    """Whether *value* is a memory request ``qsub`` will accept (e.g. ``30G``, ``4096M``)."""
+    return bool(_H_VMEM_PATTERN.match(str(value or "").strip()))
+
+
+@dataclass(frozen=True)
+class SgeResourceOverrides:
+    """Per-submission changes to the configured SGE resource request.
+
+    Every field is ``None`` by default, meaning "keep what ``sge.json`` resolved". That is what
+    lets a caller offer a few knobs -- the GUI submit dialog offers project, account and memory
+    -- without having to know or restate the rest of the request.
+
+    Changing the project can change the GPU flag as a side effect: ``qsub_l_resource_args``
+    derives ``-l lgpu|sgpu|xsgpu`` from the project name, so moving a job from ``SGPU`` to
+    ``LGPU`` moves it to the matching virtual-GPU resource on its own.
+    """
+
+    project: str | None = None
+    account: str | None = None
+    h_vmem: str | None = None
+    queue: str | None = None
+
+    def apply(self, base: SgeResources) -> SgeResources:
+        """*base* with every set field replaced; unset fields are left alone."""
+        h_vmem = self.h_vmem if self.h_vmem else base.h_vmem
+        if self.h_vmem and not is_valid_h_vmem(self.h_vmem):
+            raise ValueError(
+                f"Invalid h_vmem {self.h_vmem!r}. Use a number with an optional size "
+                f"suffix, e.g. '30G' or '4096M'."
+            )
+        return SgeResources(
+            project=self.project or base.project,
+            account=self.account or base.account,
+            ngpu=base.ngpu,
+            h_vmem=h_vmem,
+            queue=self.queue if self.queue is not None else base.queue,
+            pe_smp=base.pe_smp,
+        )
+
+
 @dataclass
 class ClusterPaths:
     """Host-side paths that must exist before submission."""
@@ -886,6 +931,7 @@ def submit_chain(
 __all__ = [
     "ArrayTaskSpec",
     "ClusterPaths",
+    "SgeResourceOverrides",
     "SgeResources",
     "SingularityBinds",
     "StageSpec",
@@ -902,6 +948,7 @@ __all__ = [
     "sge_project_uses_virtual_gpu_resource",
     "sge_project_uses_xsgpu_resource",
     "sge_project_omits_ngpu_request",
+    "is_valid_h_vmem",
     "qsub_l_resource_args",
     "emit_sge_submission_summary_to_terminal",
     "format_sge_submission_summary",

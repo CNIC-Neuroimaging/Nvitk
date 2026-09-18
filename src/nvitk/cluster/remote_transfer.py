@@ -46,12 +46,7 @@ log = Logger()
 
 def resolve_cluster_host(host: str) -> str:
     """Resolve short names (e.g. ``samwise``) via ``.nvitk/sge.json`` aliases."""
-    key = str(host or "").strip()
-    if not key:
-        return key
-    paths = sge_json.paths_section()
-    aliases = sge_json.merge_cluster_host_aliases({}, paths, {})
-    return aliases.get(key, key)
+    return sge_json.resolve_host_alias(host)
 
 
 def _require_paramiko() -> None:

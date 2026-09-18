@@ -204,6 +204,7 @@ def submit_gui_sge(
             job,
             local_staging=staging,
             remote_job_root=remote_job_root,
+            overrides=conn.overrides,
         )
         host = resolve_cluster_host(conn.host)
         notify(f"Uploading job {job.job_id} to {host}:{remote_job_root} …")
@@ -223,6 +224,9 @@ def submit_gui_sge(
             conn.user,
             conn.password,
             script_path=remote_script,
+            # The summary reads the script; remote_script is a cluster path this host cannot
+            # open, so point it at the staged copy the upload came from.
+            local_script_path=staging / "submit.sh",
         )
         if ok:
             pending = SgePendingJob(
