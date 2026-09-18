@@ -1507,7 +1507,7 @@ def main(
     #     if not save_dicoms:
     #         log.info(
     #             "--from-source xnat with --submit sge: per-subject XNAT download -> "
-    #             f"cluster SFTP ({cluster_paths.dicom_root}), then delete local staging."
+    #             f"cluster upload ({cluster_paths.dicom_root}), then delete local staging."
     #         )
 
     log.info(f"qvtpy | stages={','.join(stages)} | submit={submit}")

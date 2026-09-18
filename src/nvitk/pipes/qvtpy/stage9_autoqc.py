@@ -1555,7 +1555,7 @@ def _open_repo(dataset: Any = None) -> Any:
     show_default=True,
     help=(
         "Where to recover measurements the dataset is missing from. 'local' reads the results root "
-        "on this machine; 'sge' fetches the stage-6 CSVs from the cluster over SFTP; 'xnat' "
+        "on this machine; 'sge' fetches the stage-6 CSVs from the cluster over sshfs; 'xnat' "
         "downloads each session's qvtpy resource. Both remote modes stage into a temporary "
         "directory that is removed afterwards."
     ),

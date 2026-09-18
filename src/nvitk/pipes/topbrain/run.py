@@ -23,7 +23,8 @@ A workstation has no ``qsub``. ``--submit sge`` therefore emits the whole run as
 driver script — every stage's ``singularity exec`` payload and ``qsub`` invocation, with the
 ``-hold_jid`` chain resolved through shell variables — and then executes that script where
 ``qsub`` exists: locally if this *is* a submit host, otherwise over SSH to a login node
-(SFTP the script, ``bash`` it, parse the job ids back). ``--remote-host`` / ``--remote-user``
+(copy the script over sshfs, ``bash`` it, parse the job ids back). ``--remote-host`` /
+``--remote-user``
 skip the prompts; the password is always prompted for. ``--no-remote`` stops after writing.
 
 Data layout
@@ -500,7 +501,7 @@ def _submit_via_login_node(
         Run it locally — you are already on a submit host, and prompting for a password would
         be pointless.
     otherwise
-        SFTP it to ``SGE_SCRIPTS_DIR`` and ``bash`` it over SSH.
+        copy it to ``SGE_SCRIPTS_DIR`` over sshfs and ``bash`` it over SSH.
     ``--no-remote``
         Write it and stop, printing the command to run by hand.
 
@@ -1016,7 +1017,7 @@ def main(**kw: Any) -> None:
         label_set=label_set, port=kw["tensorboard_port"],
         interval=kw["tensorboard_interval"],
     )
-    # One prompt, two uses: the submission SFTPs the driver script and the log sync reads the
+    # One prompt, two uses: the submission uploads the driver script and the log sync reads the
     # results tree, both on the same login node.
     serving_over_ssh = (
         serve_mode == "ssh" and kw["tensorboard"]

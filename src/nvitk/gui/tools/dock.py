@@ -601,7 +601,7 @@ def build_tools_dock(
         reason = sge_block_reason(tid)
         btn_run_sge.setToolTip(
             reason
-            or "Export layer, upload via SFTP, and submit Singularity job on the cluster."
+            or "Export layer, upload over sshfs, and submit Singularity job on the cluster."
         )
 
     def _on_run_sge() -> None:

@@ -15,6 +15,7 @@ instead of only at its surface.
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -351,6 +352,12 @@ class RenderSource:
     gamma: float = 1.0
     order: int = 1
     resampled: bool = False
+    #: Distinct label ids in ``data``, computed once. Finding them is a full
+    #: ``np.unique`` over the volume (~24 ms on a 50 MB mask) and they cannot
+    #: change without ``data`` changing, which rebuilds the source anyway — so
+    #: recomputing it on every style event was the single largest cost of
+    #: clicking a layer in the list.
+    label_ids: list[int] | None = None
 
 
 #: The only layer types the panel draws. Shapes, Points, Vectors, Surfaces and
@@ -1799,12 +1806,18 @@ class OrthoViewerPanel(QWidget):
         ]
 
     def _reference_key(self) -> tuple:
-        """Identity of the grid everything is resampled onto."""
+        """Identity of the grid everything is resampled onto.
+
+        The grid, not the layer that happens to define it. Keying on the bound
+        layer's identity threw away every cached source — host copies, slice
+        caches, resampled volumes — each time the user clicked a different layer,
+        even when the new one sat on exactly the same shape and affine and every
+        one of those caches was still valid.
+        """
         from nvitk.gui.core.spatial import layer_affine
 
         affine = layer_affine(self._layer)
         return (
-            id(self._layer),
             tuple(self._data.shape) if self._data is not None else (),
             None if affine is None else affine.tobytes(),
         )
@@ -1871,7 +1884,9 @@ class OrthoViewerPanel(QWidget):
         source.opacity = float(getattr(layer, "opacity", 1.0) or 1.0)
         source.blending = str(getattr(layer, "blending", "translucent"))
         if source.is_label:
-            source.lut = label_rgba_lut(layer, unique_layer_labels(source.data))
+            if source.label_ids is None:
+                source.label_ids = unique_layer_labels(source.data)
+            source.lut = label_rgba_lut(layer, source.label_ids)
             source.table = None
             source.contrast = None
         else:
@@ -1968,7 +1983,12 @@ class OrthoViewerPanel(QWidget):
             for name in ("data", "set_data"):
                 emitter = getattr(events, name, None)
                 if emitter is not None:
-                    self._connect(emitter, self._on_layer_data_changed)
+                    # Bound to the layer: the handler has to know *whose* cached
+                    # description to throw away, and the event does not say.
+                    self._connect(
+                        emitter,
+                        functools.partial(self._on_layer_data_changed, layer=layer),
+                    )
 
     def _on_visible_changed(self, _event: Any = None) -> None:
         """A layer was shown or hidden: the draw list changed."""
@@ -1980,9 +2000,20 @@ class OrthoViewerPanel(QWidget):
             self._refresh_style(source)
         self._style_timer.start()
 
-    def _on_layer_data_changed(self, _event: Any = None) -> None:
-        """A layer's voxels changed: its caches are stale."""
+    def _on_layer_data_changed(self, _event: Any = None, *, layer: Any = None) -> None:
+        """A layer's voxels changed: its cached description is stale.
+
+        Dropping it from the source cache is what makes the rebuild real.
+        Without this, ``_rebuild_sources`` finds the layer by ``id`` and reuses
+        the old ``RenderSource`` wholesale, so replacing ``layer.data`` left the
+        panel drawing the previous volume, and an edit that introduced a new
+        label id drew it with no colour of its own.
+        """
         self._resample_cache.clear()
+        if layer is None:
+            self._source_cache.clear()
+        else:
+            self._source_cache.pop(id(layer), None)
         self._rebuild_sources()
 
     def _on_layers_renamed(self, _event: Any = None) -> None:
@@ -2390,6 +2421,12 @@ def attach_ortho_dock(viewer: Any, panel: OrthoViewerPanel) -> Any:
         # are layers — so rebinding here threw away the crosshair and the plane
         # rotation every time those were drawn.
         if active is None and panel.bound_layer() is not None:
+            return
+        # Napari emits `active` twice for a single click, with the same layer
+        # both times. Re-binding is not free — it re-materialises the volume,
+        # rebuilds every render source and forces a redraw — so the second one
+        # is pure waste. Data and layer-list changes arrive on their own events.
+        if active is not None and active is panel.bound_layer():
             return
         panel.refresh_from_layer(active)
 

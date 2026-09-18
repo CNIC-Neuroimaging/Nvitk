@@ -775,7 +775,7 @@ def main(
                 log.warning(f"[{subj}] stage1 eICAB skipped: {exc}")
         return
 
-    # SGE: emit locally, upload via SFTP, then SSH-run on the cluster.
+    # SGE: emit locally, upload over sshfs, then SSH-run on the cluster.
     label = subjects[0] if len(subjects) == 1 else f"batch_{len(subjects)}"
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     local_script_path, remote_script_path = resolve_sge_script_paths(

@@ -5,7 +5,7 @@ long-form rows into ``image_measurements``, and rebuilds the SQLite catalog inde
 at the end.
 
 Use ``--from-source local`` for workstation result roots (``layout_local``) or
-``--from-source sge`` to SFTP files from cluster storage (``layout_cluster``) into
+``--from-source sge`` to pull files from cluster storage (``layout_cluster``) over sshfs into
 the local mirror before publishing.
 """
 
@@ -20,10 +20,10 @@ from typing import Literal
 import click
 
 from nvitk.cluster.remote_transfer import (
+    cluster_session,
     download_remote_file,
     remote_path_exists,
     resolve_cluster_host,
-    sftp_session,
 )
 from nvitk.core.logger import Logger
 from nvitk.pipes.pesa_fat.common.db_publish import publish_stage3_excel, resolve_repo
@@ -110,7 +110,7 @@ def _download_measurements_from_cluster(
     password: str,
     dry_run: bool,
 ) -> tuple[list[tuple[str, PesaFatQcPipeline, Path]], SyncResult]:
-    """SFTP stage-3 workbooks from cluster paths into the local results mirror."""
+    """Pull stage-3 workbooks from cluster paths into the local results mirror over sshfs."""
     result = SyncResult()
     ready: list[tuple[str, PesaFatQcPipeline, Path]] = []
     remote_pairs = _measurement_pairs(cluster_lay, subjects, pipelines)
@@ -127,19 +127,19 @@ def _download_measurements_from_cluster(
         result.downloaded = len(ready)
         return ready, result
 
-    with sftp_session(host=host, user=user, password=password) as (_client, sftp):
+    with cluster_session(host=host, user=user, password=password) as session:
         for (subject, pipeline, remote_path), (_subject2, _pipeline2, local_path) in zip(
             remote_pairs, local_pairs, strict=True
         ):
             remote_s = str(remote_path)
-            if not remote_path_exists(sftp, remote_s):
+            if not remote_path_exists(session, remote_s):
                 msg = f"{subject} / {pipeline}: remote file missing ({remote_s})"
                 log.warning(msg)
                 result.errors.append(msg)
                 result.skipped += 1
                 continue
             try:
-                download_remote_file(sftp, remote_s, local_path)
+                download_remote_file(session, remote_s, local_path)
                 result.downloaded += 1
                 ready.append((subject, pipeline, local_path))
                 log.info("Downloaded %s -> %s", remote_s, local_path)
@@ -307,7 +307,7 @@ def sync_measurements(
     type=click.Choice(["local", "sge"]),
     default="local",
     show_default=True,
-    help="Read measurements from local result roots or download from cluster via SFTP.",
+    help="Read measurements from local result roots or download from cluster over sshfs.",
 )
 @click.option(
     "--results-root",
@@ -317,7 +317,7 @@ def sync_measurements(
 )
 @click.option("--remote-host", default=None, help="Cluster SSH host (alias ok; or NVITK_SGE_SSH_HOST).")
 @click.option("--remote-user", default=None, help="Cluster SSH user (or NVITK_SGE_SSH_USER).")
-@click.option("--dry-run", is_flag=True, help="Log actions without SFTP or DB writes.")
+@click.option("--dry-run", is_flag=True, help="Log actions without transfers or DB writes.")
 @click.option("--skip-db", is_flag=True, help="Download/verify files only; do not publish to DB.")
 @click.option(
     "--no-aggregate",

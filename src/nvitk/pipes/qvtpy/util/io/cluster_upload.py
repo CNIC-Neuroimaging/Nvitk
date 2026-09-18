@@ -1,9 +1,8 @@
-"""SFTP upload of qvtpy DICOM trees from workstation to cluster storage."""
+"""Upload qvtpy DICOM trees from the workstation to cluster storage over sshfs."""
 
 from __future__ import annotations
 
 import getpass
-import os
 import shutil
 from pathlib import Path
 from typing import Any, Iterable
@@ -11,11 +10,12 @@ from typing import Any, Iterable
 import click
 
 from nvitk.cluster.remote_transfer import (
-    ensure_remote_dir,
+    cluster_session,
+    remote_listdir,
     remote_path_exists,
     resolve_cluster_host,
-    sftp_session,
     upload_directory,
+    upload_directory_tree,
 )
 from nvitk.core.logger import Logger
 from nvitk.db.xnat_config import XnatConnectionConfig
@@ -53,10 +53,10 @@ def verify_ssh_connection(
     password: str,
     port: int = 22,
 ) -> None:
-    """Open and close an SSH/SFTP session to confirm cluster access."""
+    """Open and close a cluster session, to confirm SSH access before any transfer."""
     host_resolved = resolve_cluster_host(host)
     log.info(f"Verifying SSH connection to {user}@{host_resolved} ...")
-    with sftp_session(host=host, user=user, password=password, port=port):
+    with cluster_session(host=host, user=user, password=password, port=port):
         log.info(f"SSH connection OK ({host_resolved})")
 
 
@@ -75,14 +75,11 @@ def local_subject_has_dicoms(local_subject_dir: Path) -> bool:
         return False
 
 
-def remote_subject_has_dicoms(sftp, remote_subject_dir: str) -> bool:
-    """True if *remote_subject_dir* exists on the SFTP connection and is non-empty."""
-    if not remote_path_exists(sftp, remote_subject_dir):
+def remote_subject_has_dicoms(session, remote_subject_dir: str) -> bool:
+    """True if *remote_subject_dir* exists on the cluster and is non-empty."""
+    if not remote_path_exists(session, remote_subject_dir):
         return False
-    try:
-        return bool(sftp.listdir(remote_subject_dir))
-    except OSError:
-        return False
+    return bool(remote_listdir(session, remote_subject_dir))
 
 
 def remove_local_subject_dicoms(local_subject_dir: Path) -> None:
@@ -94,38 +91,19 @@ def remove_local_subject_dicoms(local_subject_dir: Path) -> None:
     shutil.rmtree(local_subject_dir)
 
 
-def upload_directory_sftp(
-    sftp: Any,
-    local_root: Path,
-    remote_root: str,
-) -> None:
-    """Recursively upload *local_root* to *remote_root* using an open SFTP handle."""
-    ensure_remote_dir(sftp, remote_root.rstrip("/"))
-    local_root = local_root.resolve()
-    for dirpath, _dirnames, filenames in os.walk(local_root):
-        rel = Path(dirpath).relative_to(local_root)
-        remote_dir = f"{remote_root.rstrip('/')}/{rel.as_posix()}".rstrip("/")
-        if remote_dir:
-            ensure_remote_dir(sftp, remote_dir)
-        for name in filenames:
-            lp = Path(dirpath) / name
-            rp = f"{remote_dir}/{name}" if remote_dir else f"{remote_root.rstrip('/')}/{name}"
-            sftp.put(str(lp), rp)
-
-
-def upload_subject_dicoms_sftp(
-    sftp: Any,
+def upload_subject_dicoms_session(
+    session: Any,
     local_subject_dir: Path,
     remote_dicom_root: Path,
     subject: str,
 ) -> None:
-    """Upload one subject DICOM tree via an existing SFTP session."""
+    """Upload one subject DICOM tree through an already-open cluster session."""
     local_subject_dir = Path(local_subject_dir)
     if not local_subject_has_dicoms(local_subject_dir):
         raise FileNotFoundError(f"No local DICOM data under {local_subject_dir}")
     remote_subj = remote_subject_dicom_dir(remote_dicom_root, subject)
     log.info(f"[{subject}] uploading DICOM -> {remote_subj}")
-    upload_directory_sftp(sftp, local_subject_dir, remote_subj)
+    upload_directory_tree(session, local_subject_dir, remote_subj)
 
 
 def upload_subject_dicoms(
@@ -148,8 +126,8 @@ def upload_subject_dicoms(
     host_resolved = resolve_cluster_host(host)
 
     if skip_if_remote_nonempty:
-        with sftp_session(host=host, user=user, password=password, port=port) as (_ssh, sftp):
-            if remote_subject_has_dicoms(sftp, remote_subj):
+        with cluster_session(host=host, user=user, password=password, port=port) as session:
+            if remote_subject_has_dicoms(session, remote_subj):
                 log.info(
                     f"[{subject}] cluster DICOM already present at {remote_subj} — skip upload"
                 )
@@ -210,10 +188,10 @@ def stream_subjects_xnat_to_cluster(
     delete_local_after_upload: bool = True,
     port: int = 22,
 ) -> dict[str, dict[str, list[Path]]]:
-    """Per subject: XNAT download → cluster SFTP upload → delete local DICOM staging.
+    """Per subject: XNAT download → cluster upload over sshfs → delete local DICOM staging.
 
-    SSH is verified before any XNAT download. A single SFTP session is reused for
-    the full subject loop.
+    SSH is verified before any XNAT download. A single cluster session -- so a single sshfs
+    mount -- is reused for the full subject loop.
     """
     from nvitk.db.xnat import connect_xnat
     from nvitk.pipes.qvtpy.stage0_download import (
@@ -239,14 +217,14 @@ def stream_subjects_xnat_to_cluster(
     skipped_remote = 0
     failed: list[str] = []
 
-    with sftp_session(host=host, user=user, password=password, port=port) as (_ssh, sftp):
+    with cluster_session(host=host, user=user, password=password, port=port) as session:
         with connect_xnat(xnat_config) as xnat_session:
             for subject in subjects:
                 local_dir = local_paths.subject_dicom_dir(subject)
                 remote_subj = remote_subject_dicom_dir(cluster_paths.dicom_root, subject)
 
                 try:
-                    if skip_existing and remote_subject_has_dicoms(sftp, remote_subj):
+                    if skip_existing and remote_subject_has_dicoms(session, remote_subj):
                         log.info(
                             f"[{subject}] cluster DICOM present — skip download/upload"
                         )
@@ -280,8 +258,8 @@ def stream_subjects_xnat_to_cluster(
                         failed.append(subject)
                         continue
 
-                    upload_subject_dicoms_sftp(
-                        sftp,
+                    upload_subject_dicoms_session(
+                        session,
                         local_dir,
                         cluster_paths.dicom_root,
                         subject,
@@ -322,8 +300,8 @@ def remote_subject_results_dir(remote_results_root: Path | str, subject: str) ->
     return f"{str(remote_results_root).rstrip('/')}/{subject}"
 
 
-def fetch_subject_results_sftp(
-    sftp: Any,
+def fetch_subject_results_session(
+    session: Any,
     *,
     remote_results_root: Path | str,
     local_subject_root: Path,
@@ -333,7 +311,7 @@ def fetch_subject_results_sftp(
 
     Returns ``{resource_label: n_files_downloaded}``.
     """
-    from nvitk.cluster.remote_transfer import download_directory_sftp, remote_path_exists
+    from nvitk.cluster.remote_transfer import download_directory_tree, remote_path_exists
     from nvitk.pipes.qvtpy import config as qcfg
 
     remote_subj = remote_subject_results_dir(remote_results_root, subject)
@@ -342,11 +320,11 @@ def fetch_subject_results_sftp(
     for label in (qcfg.STAGE1_EICAB_DIR, qcfg.QVT_SUBDIR):
         remote_dir = f"{remote_subj}/{label}"
         local_dir = local_subject_root / label
-        if not remote_path_exists(sftp, remote_dir):
+        if not remote_path_exists(session, remote_dir):
             counts[label] = 0
             continue
-        log.info(f"[{subject}] SFTP fetch {remote_dir} -> {local_dir}")
-        counts[label] = download_directory_sftp(sftp, remote_dir, local_dir)
+        log.info(f"[{subject}] fetch {remote_dir} -> {local_dir}")
+        counts[label] = download_directory_tree(session, remote_dir, local_dir)
     return counts
 
 
@@ -360,7 +338,7 @@ def remove_local_subject_results(local_subject_root: Path) -> None:
 
 
 __all__ = [
-    "fetch_subject_results_sftp",
+    "fetch_subject_results_session",
     "local_subject_has_dicoms",
     "prompt_ssh_credentials",
     "remote_subject_dicom_dir",

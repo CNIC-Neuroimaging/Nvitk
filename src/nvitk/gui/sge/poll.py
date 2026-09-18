@@ -1,11 +1,11 @@
-"""Poll cluster jobs via ``output/.done`` marker (SFTP)."""
+"""Poll cluster jobs via the ``output/.done`` marker, read over sshfs."""
 
 from __future__ import annotations
 
 import json
 from typing import Any, Callable
 
-from nvitk.cluster.remote_transfer import read_remote_text, remote_path_exists, sftp_session
+from nvitk.cluster.remote_transfer import cluster_session, read_remote_text, remote_path_exists
 from nvitk.gui.sge.models import SgeDoneMarker, SgePendingJob, SgeConnection, remote_done_path
 
 try:
@@ -40,10 +40,10 @@ def read_done_marker(
 ) -> SgeDoneMarker | None:
     """Return parsed ``output/.done`` when present, else ``None``."""
     done_path = remote_done_path(remote_job_root)
-    with sftp_session(host=host, user=user, password=password, port=port) as (_c, sftp):
-        if not remote_path_exists(sftp, done_path):
+    with cluster_session(host=host, user=user, password=password, port=port) as session:
+        if not remote_path_exists(session, done_path):
             return None
-        raw = read_remote_text(sftp, done_path)
+        raw = read_remote_text(session, done_path)
     data = json.loads(raw)
     if not isinstance(data, dict):
         return None

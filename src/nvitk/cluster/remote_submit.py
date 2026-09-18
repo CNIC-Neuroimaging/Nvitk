@@ -1,8 +1,8 @@
 """SSH helpers to run an emitted SGE bash script on a login node.
 
 Workstations do not have ``qsub``: SGE submission goes through a login node. The pipelines
-therefore emit their whole submission as a bash driver script, SFTP it to the cluster, and run
-it there — see :mod:`nvitk.cluster.sge_remote` for the staging half.
+therefore emit their whole submission as a bash driver script, copy it to the cluster over
+sshfs, and run it there — see :mod:`nvitk.cluster.sge_remote` for the staging half.
 
 :func:`prompt_ssh_credentials` is the shared entry point for obtaining the host, user and
 password, so every pipeline asks for them the same way and resolves the same host aliases.

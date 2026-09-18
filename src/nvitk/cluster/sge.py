@@ -15,7 +15,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Sequence, TextIO
+from typing import Any, Iterable, Sequence, TextIO
 
 # Longest prefix first so ``XSGPU`` matches ``XS``, not ``S``.
 _VIRTUAL_GPU_PROJECT_PREFIXES: tuple[tuple[str, str], ...] = (
@@ -102,9 +102,28 @@ class ClusterPaths:
     err_dir: Path
 
     def ensure_dirs(self) -> None:
-        """Create the SGE stdout/stderr log directories for this run if they don't exist."""
+        """Create this run's SGE stdout/stderr log directories on the *local* filesystem.
+
+        Valid only where these are real local paths -- that is, when submitting from the
+        cluster itself with ``subprocess.run(qsub ...)``. Called from a workstation it would
+        create empty directories in the local filesystem while the job still had nowhere to
+        write its logs, because cluster storage is not mounted here.
+
+        The emit path does not need this at all: :func:`write_script_header` writes a
+        ``mkdir -p`` for the same directories into the driver script, so the cluster creates
+        them when the script runs there.
+        """
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.err_dir.mkdir(parents=True, exist_ok=True)
+
+    def ensure_dirs_remote(self, session: Any) -> None:
+        """Create the log/err directories on the cluster through an open cluster session.
+
+        For the rare caller that needs them to exist before the driver script runs. Ordinary
+        submission does not, since the script creates them itself.
+        """
+        for directory in (self.log_dir, self.err_dir):
+            session.local(directory).mkdir(parents=True, exist_ok=True)
 
 
 @dataclass

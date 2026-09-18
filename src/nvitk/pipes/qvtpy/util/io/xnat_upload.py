@@ -8,7 +8,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
 
-from nvitk.cluster.remote_transfer import remote_path_exists, sftp_session
+from nvitk.cluster.remote_transfer import remote_path_exists, cluster_session
 from nvitk.core.logger import Logger
 from nvitk.db.xnat import connect_xnat
 from nvitk.db.xnat_config import XnatConnectionConfig
@@ -32,7 +32,7 @@ from nvitk.pipes.qvtpy.stage1_eicab import _output_has_segmentation
 from nvitk.pipes.qvtpy.util.io.qc_report import check_subject_stages, parse_stages
 
 from nvitk.pipes.qvtpy.util.io.cluster_upload import (
-    fetch_subject_results_sftp,
+    fetch_subject_results_session,
     remote_subject_results_dir,
 )
 
@@ -418,7 +418,7 @@ def _upload_subject_from_staging(
     skip_existing: bool,
     dry_run: bool,
 ) -> UploadResult:
-    """Upload *subject*'s resources from a local staging tree (e.g. after SFTP fetch from
+    """Upload *subject*'s resources from a local staging tree (e.g. after a cluster fetch from
     the cluster), delegating to :func:`upload_subject_to_xnat`."""
     return upload_subject_to_xnat(
         subject,
@@ -437,7 +437,7 @@ def _upload_subject_from_staging(
 def _cluster_dry_run_subject(
     subject: str,
     *,
-    sftp: Any,
+    session: Any,
     remote_results_root: Path,
     upload_eicab: bool,
     upload_qvtpy: bool,
@@ -447,14 +447,14 @@ def _cluster_dry_run_subject(
     remote_subj = remote_subject_results_dir(remote_results_root, subject)
     if upload_eicab:
         remote_eicab = f"{remote_subj}/{XNAT_RESOURCE_EICAB}"
-        exists = remote_path_exists(sftp, remote_eicab)
+        exists = remote_path_exists(session, remote_eicab)
         log.info(
             f"[{subject}] [dry-run] would fetch eicab from {remote_eicab} "
             f"(exists={exists})"
         )
     if upload_qvtpy:
         remote_qvtpy = f"{remote_subj}/{XNAT_RESOURCE_QVTPY}"
-        exists = remote_path_exists(sftp, remote_qvtpy)
+        exists = remote_path_exists(session, remote_qvtpy)
         log.info(
             f"[{subject}] [dry-run] would fetch qvtpy from {remote_qvtpy} "
             f"(exists={exists})"
@@ -510,21 +510,21 @@ def run_xnat_upload(
 
     if cluster_mode and dry_run:
         for subject in subjects:
-            with sftp_session(
+            with cluster_session(
                 host=ssh_host,
                 user=ssh_user,
                 password=ssh_password,
-            ) as (_ssh, sftp):
+            ) as session:
                 _cluster_dry_run_subject(
                     subject,
-                    sftp=sftp,
+                    session=session,
                     remote_results_root=remote_results_root,
                     upload_eicab=upload_eicab,
                     upload_qvtpy=upload_qvtpy,
                 )
         return summary
 
-    with connect_xnat(xnat_config) as session:
+    with connect_xnat(xnat_config) as xnat_session:
         for subject in subjects:
             if cluster_mode:
                 with tempfile.TemporaryDirectory(
@@ -532,13 +532,13 @@ def run_xnat_upload(
                 ) as tmp:
                     staging_root = Path(tmp)
                     local_subject_root = staging_root / subject
-                    with sftp_session(
+                    with cluster_session(
                         host=ssh_host,
                         user=ssh_user,
                         password=ssh_password,
-                    ) as (_ssh, sftp):
-                        fetch_subject_results_sftp(
-                            sftp,
+                    ) as session:
+                        fetch_subject_results_session(
+                            session,
                             remote_results_root=remote_results_root,
                             local_subject_root=local_subject_root,
                             subject=subject,
@@ -546,7 +546,7 @@ def run_xnat_upload(
                     result = _upload_subject_from_staging(
                         subject,
                         staging_root=staging_root,
-                        xnat_session=session,
+                        xnat_session=xnat_session,
                         project_id=xnat_config.project,
                         required_stages=stages,
                         upload_eicab=upload_eicab,
@@ -559,7 +559,7 @@ def run_xnat_upload(
                 result = upload_subject_to_xnat(
                     subject,
                     output_root=output_root,
-                    xnat_session=session,
+                    xnat_session=xnat_session,
                     project_id=xnat_config.project,
                     required_stages=stages,
                     upload_eicab=upload_eicab,

@@ -14,11 +14,11 @@ produced, so the scoring path does not care where the numbers came from.
 Where the results live
 ----------------------
 ``--submit local``  the results root on this machine.
-``--submit sge``    the cluster's results root, fetched over SFTP into a temporary directory that is
+``--submit sge``    the cluster's results root, fetched over sshfs into a temporary directory that is
                     removed afterwards. Only the stage-6 CSVs are pulled, not whole subject trees —
                     a QC pass has no business moving gigabytes of NIfTI.
 ``--submit xnat``   each session's ``qvtpy`` resource, downloaded into a temporary directory. XNAT
-                    serves a resource as one archive, so unlike the SFTP path this cannot fetch a
+                    serves a resource as one archive, so unlike the cluster path this cannot fetch a
                     single file — the whole resource comes down and is discarded afterwards.
 
 Units
@@ -245,7 +245,11 @@ def fetch_stage6_csvs(
 
     The caller must call :meth:`ResultsSource.cleanup` — or use :func:`open_results` — to remove it.
     """
-    from nvitk.cluster.remote_transfer import remote_path_exists, sftp_session
+    from nvitk.cluster.remote_transfer import (
+        cluster_session,
+        download_remote_file,
+        remote_path_exists,
+    )
 
     root = source.root()
     source.cleanup()      # a second fetch on the same source must not orphan the first staging
@@ -253,12 +257,10 @@ def fetch_stage6_csvs(
     source._staged = staged
     n_files = 0
 
-    # ``sftp_session`` yields ``(ssh_client, sftp)``; binding it as one name gave the tuple, whose
-    # ``listdir`` does not exist — the cluster looked empty rather than erroring.
-    with sftp_session(
+    with cluster_session(
         host=source.host, user=source.user, password=source.password, port=source.port
-    ) as (_ssh, sftp):
-        names = list(subjects) if subjects is not None else _remote_subjects(sftp, root)
+    ) as session:
+        names = list(subjects) if subjects is not None else _remote_subjects(session, root)
         log.info("Fetching stage-6 measurements for %d subject(s) from %s", len(names), root)
         for subject in names:
             for filename in STAGE6_FETCH_FILES:
@@ -266,12 +268,12 @@ def fetch_stage6_csvs(
                     f"{str(root).rstrip('/')}/{subject}/{cfg.QVT_SUBDIR}/"
                     f"{cfg.STAGE6_MEASURE_DIR}/{filename}"
                 )
-                if not remote_path_exists(sftp, remote):
+                if not remote_path_exists(session, remote):
                     continue
                 local = stage6_dir(staged, subject) / filename
                 local.parent.mkdir(parents=True, exist_ok=True)
                 try:
-                    sftp.get(remote, str(local))
+                    download_remote_file(session, remote, local)
                 except Exception as exc:
                     log.warning("Could not fetch %s (%s) — skipping.", remote, exc)
                     continue
@@ -294,7 +296,7 @@ def fetch_stage6_xnat(
     """
     Download each session's ``qvtpy`` resource from XNAT and keep only the stage-6 measurements.
 
-    XNAT serves a resource as a single archive, so — unlike the SFTP path — there is no way to ask
+    XNAT serves a resource as a single archive, so — unlike the cluster path — there is no way to ask
     for one file. The whole ``qvtpy`` resource comes down per session into a scratch directory, the
     stage-6 CSV is copied into the mirrored layout, and the rest is deleted immediately. That keeps
     peak disk to one subject rather than a cohort.
@@ -361,10 +363,12 @@ def fetch_stage6_xnat(
     return staged
 
 
-def _remote_subjects(sftp: Any, results_root: Path) -> list[str]:
+def _remote_subjects(session: Any, results_root: Path) -> list[str]:
     """Subject directories directly under the remote results root."""
+    from nvitk.cluster.remote_transfer import remote_listdir
+
     try:
-        return sorted(sftp.listdir(str(results_root)))
+        return remote_listdir(session, results_root)
     except Exception as exc:
         log.warning("Could not list %s (%s).", results_root, exc)
         return []

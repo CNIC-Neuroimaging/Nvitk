@@ -1,4 +1,4 @@
-"""Stage SGE driver scripts locally and publish them on the cluster via SFTP."""
+"""Stage SGE driver scripts locally and publish them on the cluster over sshfs."""
 
 from __future__ import annotations
 
@@ -96,12 +96,20 @@ def publish_sge_driver_script(
         log.info(f"On the cluster login node: bash {remote_path}")
         return str(local_path)
 
-    from nvitk.cluster.remote_transfer import resolve_cluster_host, sftp_session, upload_file
+    from nvitk.cluster.remote_transfer import cluster_session, resolve_cluster_host, upload_file
+    from nvitk.cluster.sshfs import assert_no_mountpoint_leak
 
+    # The cluster runs this script. A workstation sshfs mountpoint inside it would name a
+    # directory that does not exist on the compute node, and the job would die with a
+    # misleading "no such file" hours later. Fail here, where the message can say why.
+    assert_no_mountpoint_leak(
+        local_path.read_text(encoding="utf-8", errors="replace"),
+        what=f"SGE driver script {local_path.name}",
+    )
     host_resolved = resolve_cluster_host(host)
-    log.info(f"Uploading SGE script via SFTP -> {user}@{host_resolved}:{remote_path}")
-    with sftp_session(host=host, user=user, password=password, port=port) as (_ssh, sftp):
-        upload_file(sftp, local_path, remote_path)
+    log.info(f"Uploading SGE script over sshfs -> {user}@{host_resolved}:{remote_path}")
+    with cluster_session(host=host, user=user, password=password, port=port) as session:
+        upload_file(session, local_path, remote_path)
     log.info(f"SGE script uploaded: {remote_path}")
     return remote_path
 

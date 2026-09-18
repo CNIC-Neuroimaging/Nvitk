@@ -7,6 +7,7 @@ to interpret its contents.
 from __future__ import annotations
 
 import os
+import posixpath
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -65,6 +66,94 @@ def sge_scripts_dir() -> str:
     if raw is None or not str(raw).strip():
         return ""
     return str(raw).strip().rstrip("/")
+
+
+#: Default local base for sshfs mountpoints when ``paths.sshfs_mount_root`` is unset.
+DEFAULT_SSHFS_MOUNT_ROOT = "~/.cache/nvitk/sshfs"
+
+#: ``-o`` options applied to every sshfs mount when ``paths.sshfs_options`` is unset.
+#: ``reconnect`` plus the keepalives matter for long pipeline runs: without them a transient
+#: network drop leaves a mountpoint whose every syscall fails until it is unmounted by hand.
+DEFAULT_SSHFS_OPTIONS: tuple[str, ...] = (
+    "reconnect",
+    "ServerAliveInterval=15",
+    "ServerAliveCountMax=3",
+)
+
+
+def sshfs_mount_root() -> Path:
+    """Local directory sshfs mountpoints are created under (``paths.sshfs_mount_root``)."""
+    raw = paths_section().get("sshfs_mount_root")
+    if raw is None or not str(raw).strip():
+        raw = DEFAULT_SSHFS_MOUNT_ROOT
+    return Path(os.path.expanduser(str(raw).strip()))
+
+
+def sshfs_options() -> list[str]:
+    """``-o`` options for every sshfs mount (``paths.sshfs_options``, else the defaults)."""
+    raw = paths_section().get("sshfs_options")
+    if not isinstance(raw, (list, tuple)) or not raw:
+        return list(DEFAULT_SSHFS_OPTIONS)
+    return [str(opt).strip() for opt in raw if str(opt).strip()]
+
+
+def _cluster_root(value: Any) -> str:
+    """Normalise a configured *cluster* path to an absolute POSIX root, or ``""``.
+
+    Non-absolute values are dropped rather than expanded. ``~`` on a cluster path would
+    expand to the *workstation's* home directory here, which is exactly the local/remote
+    confusion the sshfs layer exists to remove. ``/`` itself is dropped too: it is never a
+    legitimate mount root.
+    """
+    text = str(value or "").strip().replace("\\", "/")
+    if not text.startswith("/"):
+        return ""
+    normalised = posixpath.normpath(text)
+    return "" if normalised == "/" else normalised
+
+
+def sshfs_extra_roots() -> list[str]:
+    """Extra cluster roots the sshfs layer may mount (``paths.sshfs_extra_roots``).
+
+    An escape hatch for cluster directories no ``sge.json`` key names, so adding one does
+    not require a code change.
+    """
+    raw = paths_section().get("sshfs_extra_roots")
+    if not isinstance(raw, (list, tuple)):
+        return []
+    return [root for root in (_cluster_root(item) for item in raw) if root]
+
+
+def cluster_working_roots() -> list[str]:
+    """Every cluster directory nvitk is configured to touch, longest path first.
+
+    This is the allowlist the sshfs layer mounts from. Only roots that appear in
+    ``sge.json`` are reachable, so a stray path can never end up mounting the cluster's
+    whole filesystem. Collected from the SGE ``paths`` block, from every
+    ``pipelines.*.cluster_*`` data root, and from :func:`sshfs_extra_roots`.
+
+    Sorted longest-first so :func:`nvitk.cluster.sshfs.resolve_mount_root` picks the
+    narrowest root containing a path rather than the first one that happens to match.
+    """
+    roots: set[str] = set()
+    paths = paths_section()
+    for key in ("gui_sge_job_root", "sge_scripts_dir", "sge_log_root", "sge_err_root"):
+        root = _cluster_root(paths.get(key))
+        if root:
+            roots.add(root)
+    pipes = load_sge_document().get("pipelines")
+    if isinstance(pipes, dict):
+        for section in pipes.values():
+            if not isinstance(section, dict):
+                continue
+            for key, value in section.items():
+                if not str(key).startswith("cluster_"):
+                    continue
+                root = _cluster_root(value)
+                if root:
+                    roots.add(root)
+    roots.update(sshfs_extra_roots())
+    return sorted(roots, key=lambda root: (-len(root), root))
 
 
 def resolve_nvitk_container(

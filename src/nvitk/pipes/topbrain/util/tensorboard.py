@@ -260,14 +260,14 @@ class RemoteLogSync:
             self._thread.join(timeout=10.0)
             self._thread = None
 
-    def sync_once(self, client: object, sftp: object) -> tuple[int, int]:
+    def sync_once(self, session: object) -> tuple[int, int]:
         """One pass over every root. Returns cumulative ``(seen, fetched)``."""
         from nvitk.cluster.remote_transfer import sync_remote_glob
 
         seen = fetched = 0
         for remote_root, local_root in self.roots.items():
             found, got = sync_remote_glob(
-                client, sftp, remote_root=remote_root, local_root=local_root,
+                session, remote_root=remote_root, local_root=local_root,
                 pattern=self.pattern,
             )
             seen += found
@@ -275,15 +275,15 @@ class RemoteLogSync:
         return seen, fetched
 
     def _run(self) -> None:
-        from nvitk.cluster.remote_transfer import sftp_session
+        from nvitk.cluster.remote_transfer import cluster_session
 
         while not self._stop.is_set():
             try:
-                with sftp_session(
+                with cluster_session(
                     host=self.host, user=self.user, password=self.password, port=self.port
-                ) as (client, sftp):
+                ) as session:
                     while not self._stop.is_set():
-                        seen, fetched = self.sync_once(client, sftp)
+                        seen, fetched = self.sync_once(session)
                         if not self._announced:
                             # The first pass is the one that tells you whether the remote roots
                             # were right; silence here means an empty TensorBoard later.

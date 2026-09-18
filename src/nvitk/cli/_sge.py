@@ -102,8 +102,10 @@ def submit_tool_job(
     *models* adds a ``-B`` bind for a weights directory the tool needs, and
     *extra_env* exports additional variables inside the container — a tool whose
     weights live outside ``image_tools`` (TotalSegmentator) needs both."""
+    # No ensure_dirs() here: these are cluster paths and cluster storage is not mounted
+    # locally. submit_stage() creates them on the direct (on-cluster) submission path, and
+    # write_script_header() emits the mkdir -p for the emit path.
     paths = cluster_paths(data_root=data_root, output_root=output_root, models=models)
-    paths.ensure_dirs()
     binds = SingularityBinds()
     env = dict(sge_backend_env(binds.src, "cupy" if gpu else "numpy"))
     if extra_env:
@@ -133,7 +135,6 @@ def emit_submit_script(
     python_cmd)`` in *stages*, sharing the header and cluster paths."""
     script_path.parent.mkdir(parents=True, exist_ok=True)
     paths = cluster_paths(data_root=data_root, output_root=output_root, models=models)
-    paths.ensure_dirs()
     with open(script_path, "w", encoding="utf-8") as fh:
         write_script_header(
             fh,
@@ -156,8 +157,14 @@ def emit_submit_script(
 
 
 def default_emit_path(tool: str, subcommand: str) -> Path:
-    """Timestamped default path for an emitted submit script for *tool*/*subcommand* under
-    ``cfg.SGE_SCRIPTS_DIR``."""
+    """Timestamped *local* path for an emitted submit script for *tool*/*subcommand*.
+
+    Deliberately not ``cfg.SGE_SCRIPTS_DIR``: that is a cluster directory, and cluster storage
+    is not mounted on the workstation, so creating it here would make a local directory of the
+    same name and the cluster would never see the script. The script is written locally and
+    published with :func:`nvitk.cluster.sge_remote.publish_sge_driver_script`.
+    """
+    from nvitk.cluster.sge_remote import local_sge_staging_dir
+
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    cfg.SGE_SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
-    return cfg.SGE_SCRIPTS_DIR / f"submit_{cfg.SGE_JOB_PREFIX}_{tool}_{subcommand}_{ts}.sh"
+    return local_sge_staging_dir() / f"submit_{cfg.SGE_JOB_PREFIX}_{tool}_{subcommand}_{ts}.sh"

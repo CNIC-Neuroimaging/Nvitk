@@ -58,7 +58,8 @@ from nvitk.pipes.pesa_fat.common.paths import (
     DEFAULT_NVITK_SRC_DIR,
     DEFAULT_RESULTS_ROOT,
     BatchLayout,
-    default_submit_script_path,
+    cluster_sge_scripts_dir,
+    default_submit_script_basename,
     group_subjects_by_batch,
     layout,
     layout_cluster,
@@ -66,6 +67,7 @@ from nvitk.pipes.pesa_fat.common.paths import (
     parse_subjects,
 )
 from nvitk.cluster.remote_submit import run_sge_script_ssh
+from nvitk.cluster.sge_remote import publish_sge_driver_script, resolve_sge_script_paths
 from nvitk.cluster.remote_transfer import resolve_cluster_host, ssh_exec
 from nvitk.cluster.sge import (
     ClusterPaths,
@@ -353,7 +355,8 @@ def _write_sge_script(
     pipelines_sel: list[str],
     stages_sel: list[str],
     *,
-    script_path: Path,
+    emit_script: Path | None,
+    default_basename: str,
     backend: str,
     device: str,
     model_dir: Path | None,
@@ -364,10 +367,20 @@ def _write_sge_script(
     dry_run: bool,
     log_level: str,
     exclude_ureter: bool,
-) -> Path:
-    """Write the full batch submission script (header + all SGE stages) to *script_path*."""
-    script_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(script_path, "w", encoding="utf-8") as fh:
+) -> tuple[Path, str]:
+    """Write the batch submission script locally; return ``(local_path, cluster_path)``.
+
+    The two are different paths. Cluster storage is not mounted on the workstation, so the
+    script is staged here and published to the cluster separately. Writing straight to the
+    cluster path -- which this used to do -- created a local file the cluster could not see,
+    and the remote ``bash`` then failed on a missing script.
+    """
+    local_script, remote_script = resolve_sge_script_paths(
+        emit_script,
+        remote_scripts_dir=cluster_sge_scripts_dir(),
+        default_basename=default_basename,
+    )
+    with open(local_script, "w", encoding="utf-8") as fh:
         write_script_header(
             fh,
             log_dir=ctpet_cfg.SGE_LOG_DIR,
@@ -392,23 +405,34 @@ def _write_sge_script(
             emit=fh,
             exclude_ureter=exclude_ureter,
         )
-    log.info("PESA-Fat batch '%s' script written: %s", lay.batch, script_path)
-    return script_path
+    log.info("PESA-Fat batch '%s' script written: %s", lay.batch, local_script)
+    return local_script, remote_script
 
 
 def _ssh_run_scripts(
     host: str,
     user: str,
     password: str,
-    script_paths: list[Path],
+    scripts: list[tuple[Path, str]],
 ) -> bool:
-    """Run one or more submission scripts on the cluster login node over SSH; True on success."""
-    if not script_paths:
+    """Publish *scripts* to the cluster, then run them there over SSH; True on success.
+
+    *scripts* is ``(local_path, cluster_path)`` pairs. Publishing is a separate step from
+    running because the two paths differ: the script is written on the workstation and has to
+    be copied across before ``bash`` on the login node can find it.
+    """
+    if not scripts:
         return True
-    if len(script_paths) == 1:
-        return run_sge_script_ssh(host, user, password, script_paths[0])
-    joined = " && ".join(f"bash {shlex.quote(str(p))}" for p in script_paths)
-    log.info("SSH remote exec (%d scripts): %s", len(script_paths), joined)
+    published = [
+        publish_sge_driver_script(local, remote, host=host, user=user, password=password)
+        for local, remote in scripts
+    ]
+    if len(published) == 1:
+        return run_sge_script_ssh(
+            host, user, password, published[0], local_script_path=scripts[0][0]
+        )
+    joined = " && ".join(f"bash {shlex.quote(str(p))}" for p in published)
+    log.info("SSH remote exec (%d scripts): %s", len(published), joined)
     code, out, err = ssh_exec(host=host, user=user, password=password, command=joined)
     if out.strip():
         log.info("SSH stdout (tail):\n%s", out[-2000:])
@@ -443,7 +467,7 @@ def _run_xnat_then_sge(
     remote_user: str | None,
     exclude_ureter: bool,
 ) -> None:
-    """Download from XNAT locally, SFTP DICOMs to cluster, emit and run SGE per batch."""
+    """Download from XNAT locally, copy DICOMs to the cluster, emit and run SGE per batch."""
     _require_paramiko()
     local_storage = layout_local(
         batch,
@@ -478,7 +502,8 @@ def _run_xnat_then_sge(
         request=req,
     )
     by_batch = group_subjects_by_batch(dl)
-    script_paths: list[Path] = []
+    # (local_path, cluster_path) per batch: written here, published to the cluster later.
+    scripts: list[tuple[Path, str]] = []
 
     for batch_name in sorted(by_batch.keys()):
         subjects_for_batch = by_batch[batch_name]
@@ -513,17 +538,16 @@ def _run_xnat_then_sge(
             password=password,
         )
 
-        if emit_script is not None and len(by_batch) == 1:
-            script_path = emit_script
-        else:
-            script_path = default_submit_script_path(batch_name)
-        script_paths.append(
+        # --emit-script names one file, so it can only apply when there is one batch.
+        batch_emit = emit_script if (emit_script is not None and len(by_batch) == 1) else None
+        scripts.append(
             _write_sge_script(
                 cluster_lay,
                 subjects_for_batch,
                 pipelines_sel,
                 stages_sel,
-                script_path=script_path,
+                emit_script=batch_emit,
+                default_basename=default_submit_script_basename(batch_name),
                 backend=backend,
                 device=device,
                 model_dir=model_dir,
@@ -538,14 +562,17 @@ def _run_xnat_then_sge(
         )
 
     log.info("=" * 78)
-    log.info("On the cluster login node: %s", " && ".join(f"bash {p}" for p in script_paths))
+    log.info(
+        "On the cluster login node: %s",
+        " && ".join(f"bash {remote}" for _local, remote in scripts),
+    )
     log.info("=" * 78)
 
     if no_remote:
         return
 
     log.reset(restart_progress=False)
-    ok = _ssh_run_scripts(host, user, password, script_paths)
+    ok = _ssh_run_scripts(host, user, password, scripts)
     if not ok:
         log.warning(
             "Remote execution did not complete successfully. Run manually on the cluster."
@@ -1110,13 +1137,13 @@ def main(
         model_root=model_dir,
     )
 
-    script_path = emit_script if emit_script is not None else default_submit_script_path(batch)
-    _write_sge_script(
+    local_script, remote_script = _write_sge_script(
         lay_cluster,
         subj_list,
         pipelines_sel,
         stages_sel,
-        script_path=script_path,
+        emit_script=emit_script,
+        default_basename=default_submit_script_basename(batch),
         backend=backend,
         device=device,
         model_dir=model_dir,
@@ -1129,21 +1156,27 @@ def main(
         exclude_ureter=exclude_ureter,
     )
     log.info("=" * 78)
-    log.info("On the cluster login node: bash %s", script_path)
+    log.info("On the cluster login node: bash %s", remote_script)
     log.info("=" * 78)
 
     if no_remote:
+        log.info("Not published (--no-remote). The script is at %s", local_script)
         return
 
     _require_paramiko()
     log.reset(restart_progress=False)
     host, user, password = _prompt_ssh_credentials(remote_host, remote_user)
-    ok = run_sge_script_ssh(host, user, password, script_path)
+    cluster_exec = publish_sge_driver_script(
+        local_script, remote_script, host=host, user=user, password=password
+    )
+    ok = run_sge_script_ssh(
+        host, user, password, cluster_exec, local_script_path=local_script
+    )
     if not ok:
         log.warning(
             "Remote execution did not complete successfully. Run manually on the "
             "cluster: bash %s",
-            script_path,
+            cluster_exec,
         )
 
 

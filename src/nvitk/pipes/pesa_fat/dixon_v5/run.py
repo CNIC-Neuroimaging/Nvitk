@@ -4,6 +4,13 @@ Entry point for the whole Dixon v5 pipeline (stages 1-3). Same shape as
 :mod:`nvitk.pipes.pesa_fat.ct_pet_v5.run`: dispatches each stage either
 locally (in-process loop) or on SGE (one array job per subject; tasks =
 stages with ``-tc 1`` + done-markers). ``--base-hold`` should be set when a
+
+How ``--submit sge`` reaches the cluster
+----------------------------------------
+Cluster storage is not mounted on the workstation, so the driver script is written to a
+local staging directory, published to ``paths.sge_scripts_dir`` over sshfs, and run there
+with ``bash`` over SSH. ``--emit-script`` only chooses where the local copy goes;
+``--no-remote`` stops after writing it, and ``--dry-run`` does the same without prompting.
 stage 0 job is already in queue so every subject's array waits on its stage 0.
 """
 
@@ -18,13 +25,18 @@ import click
 from nvitk.core.click_backend import backend_click_option
 from nvitk.core.logger import Logger
 from nvitk.pipes.pesa_fat.common.paths import (
+    CLUSTER_HOST_ALIASES,
     DEFAULT_DICOM_ROOT,
     DEFAULT_NIFTI_ROOT,
     DEFAULT_RESULTS_ROOT,
     BatchLayout,
+    cluster_sge_scripts_dir,
+    default_submit_script_basename,
     layout,
     parse_subjects,
 )
+from nvitk.cluster.remote_submit import prompt_ssh_credentials, run_sge_script_ssh
+from nvitk.cluster.sge_remote import publish_sge_driver_script, resolve_sge_script_paths
 from nvitk.pipes.pesa_fat.common import stage0_convert
 from nvitk.pipes.pesa_fat.common.xnat_inputs import XnatPesaFatRequest, download_pesa_fat_dicoms_from_xnat
 from nvitk.pipes.pesa_fat.common.db_publish import publish_stage3_excel
@@ -456,9 +468,24 @@ def _run_sge(
     "--emit-script",
     type=click.Path(path_type=Path),
     default=None,
-    help="(sge) Write a self-contained bash submission script to this path "
-         "instead of submitting. Run it on the cluster login node with "
-         "`bash <script>`; only qsub + singularity are required there.",
+    help="(sge) Local path for the emitted bash submission script (default: a local "
+         "staging directory). It is published to the cluster scripts directory and run "
+         "there over SSH unless --no-remote is given.",
+)
+@click.option(
+    "--no-remote",
+    is_flag=True,
+    help="(sge) After writing the script, do not publish it or run it over SSH.",
+)
+@click.option(
+    "--remote-host",
+    default=None,
+    help="(sge) SSH hostname or alias from CLUSTER_HOST_ALIASES (else prompt).",
+)
+@click.option(
+    "--remote-user",
+    default=None,
+    help="(sge) SSH username (else prompt).",
 )
 @click.option("--log-level", default="INFO", show_default=True)
 @click.option("--debug", is_flag=True, help="Debug mode.")
@@ -483,6 +510,9 @@ def main(
     src_dir: Path | None,
     dry_run: bool,
     emit_script: Path | None,
+    no_remote: bool,
+    remote_host: str | None,
+    remote_user: str | None,
     log_level: str,
     debug: bool,
 ) -> None:
@@ -565,49 +595,68 @@ def main(
     if src_dir is None:
         raise click.UsageError("--src-dir is required for --submit sge")
 
-    if emit_script is not None:
-        emit_script.parent.mkdir(parents=True, exist_ok=True)
-        with open(emit_script, "w", encoding="utf-8") as fh:
-            write_script_header(
-                fh,
-                log_dir=cfg.SGE_LOG_DIR,
-                err_dir=cfg.SGE_ERR_DIR,
-                title=f"dixon-v5 batch={batch}",
-            )
-            _run_sge(
-                lay,
-                subj_list,
-                stages_sel,
-                backend=backend,
-                device=device,
-                model_dir=model_dir,
-                overwrite=overwrite,
-                regions=region_tuple,
-                container=container,
-                src_dir=src_dir,
-                base_hold=base_hold,
-                dry_run=False,
-                log_level=log_level,
-                emit=fh,
-            )
-        log.info(f"Wrote submission script: {emit_script}")
+    # Always stage the driver script locally, then publish it. Cluster storage is not
+    # mounted here, so writing straight to the cluster scripts directory would leave a local
+    # file the login node cannot see, and `bash <that path>` would fail there.
+    local_script, remote_script = resolve_sge_script_paths(
+        emit_script,
+        remote_scripts_dir=cluster_sge_scripts_dir(),
+        default_basename=default_submit_script_basename(batch),
+    )
+    with open(local_script, "w", encoding="utf-8") as fh:
+        write_script_header(
+            fh,
+            log_dir=cfg.SGE_LOG_DIR,
+            err_dir=cfg.SGE_ERR_DIR,
+            title=f"dixon-v5 batch={batch}",
+        )
+        _run_sge(
+            lay,
+            subj_list,
+            stages_sel,
+            backend=backend,
+            device=device,
+            model_dir=model_dir,
+            overwrite=overwrite,
+            regions=region_tuple,
+            container=container,
+            src_dir=src_dir,
+            base_hold=base_hold,
+            dry_run=False,
+            log_level=log_level,
+            emit=fh,
+        )
+    log.info(f"Wrote submission script: {local_script}")
+    log.info(f"Cluster path once published: {remote_script}")
+
+    if dry_run:
+        log.info("Dry-run: script written; skipping publish and submission.")
         return
 
-    _run_sge(
-        lay,
-        subj_list,
-        stages_sel,
-        backend=backend,
-        device=device,
-        model_dir=model_dir,
-        overwrite=overwrite,
-        regions=region_tuple,
-        container=container,
-        src_dir=src_dir,
-        base_hold=base_hold,
-        dry_run=dry_run,
-        log_level=log_level,
+    if no_remote:
+        # The script exists only here, so name the local path first; the cluster path is
+        # where it would have landed.
+        log.info(
+            f"Not published (--no-remote). The script is at {local_script}; copy it to "
+            f"{remote_script} on the cluster and run: bash {remote_script}"
+        )
+        return
+
+    host, user, password = prompt_ssh_credentials(
+        remote_host=remote_host,
+        remote_user=remote_user,
+        host_aliases=CLUSTER_HOST_ALIASES,
     )
+    cluster_exec = publish_sge_driver_script(
+        local_script, remote_script, host=host, user=user, password=password
+    )
+    if not run_sge_script_ssh(
+        host, user, password, cluster_exec, local_script_path=local_script
+    ):
+        raise click.ClickException(
+            f"Remote submission did not complete successfully. "
+            f"Run manually on the cluster: bash {cluster_exec}"
+        )
 
 
 if __name__ == "__main__":

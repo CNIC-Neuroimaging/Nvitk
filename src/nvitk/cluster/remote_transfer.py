@@ -1,15 +1,47 @@
-"""SSH/SFTP helpers for uploading GUI SGE jobs to a cluster login node."""
+"""Cluster data transfer over sshfs, and SSH command execution for job control.
+
+Cluster storage is isolated: it is not mounted on the workstation, so no local path ever
+names a cluster file. Every read and write therefore goes through an sshfs mount of a
+*configured* cluster root -- see :mod:`nvitk.cluster.sshfs`. There is deliberately no SFTP
+fallback; one transport means one set of failure modes.
+
+Two planes
+----------
+*Data* moves through the mount: :class:`ClusterSession` maps a cluster path to its local view
+and ordinary filesystem calls do the rest. *Commands* still go over SSH, because sshfs cannot
+run ``qsub``, ``qstat`` or ``bash submit.sh``. :func:`ssh_exec` is that half, and it is also
+why ``paramiko`` is still a dependency.
+
+Mount roots are opened lazily
+-----------------------------
+A session does not mount anything until a path is requested, then mounts the narrowest
+configured root containing it and keeps it for the session's lifetime. Callers that touch
+several roots get several mounts without asking for them; callers that touch one path pay for
+one mount. Mounts are reference counted globally, so nesting sessions over the same root
+mounts it once.
+"""
 
 from __future__ import annotations
 
 import os
 import shlex
-import stat
-from contextlib import contextmanager
+import shutil
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
 from nvitk.cluster import sge_json
+from nvitk.cluster.sshfs import (
+    SshfsError,
+    SshfsMount,
+    SshfsRootNotAllowed,
+    assert_no_mountpoint_leak,
+    cluster_mount,
+    resolve_mount_root,
+)
+from nvitk.core.logger import Logger
+
+log = Logger()
 
 
 def resolve_cluster_host(host: str) -> str:
@@ -22,201 +54,338 @@ def resolve_cluster_host(host: str) -> str:
     return aliases.get(key, key)
 
 
-def _require_paramiko():
-    """Raise a clear install hint unless ``paramiko`` is available (needed for remote SGE transfer)."""
+def _require_paramiko() -> None:
+    """Raise a clear install hint unless ``paramiko`` is available (needed for SSH exec)."""
     try:
         import paramiko  # noqa: F401
     except ImportError as exc:
         raise ImportError(
-            "paramiko is required for remote SGE upload (pip install 'nvitk[cluster]')."
+            "paramiko is required to run commands on the cluster login node "
+            "(pip install 'nvitk[cluster]')."
         ) from exc
 
 
+def _copy_file(source: Path, destination: Path) -> None:
+    """Copy *source* to *destination*, preserving mtime where the server permits it.
+
+    ``copystat`` is best-effort on purpose: some SSH servers refuse ``chmod``/``utime`` through
+    sshfs, and failing the whole transfer over a timestamp would be absurd. The mtime matters
+    only to the size/mtime skip logic in :func:`upload_files` and :func:`sync_remote_glob`,
+    which both degrade to "copy it again" rather than to anything incorrect.
+    """
+    shutil.copyfile(str(source), str(destination))
+    try:
+        shutil.copystat(str(source), str(destination))
+    except OSError:
+        pass
+
+
+class ClusterSession:
+    """Credentials plus the sshfs mounts opened to serve them.
+
+    Replaces the old ``sftp_session`` handle. Where that yielded an SFTP channel, this yields
+    a path mapper: :meth:`local` turns a cluster path into the local path that reads and
+    writes it, and everything else in this module is built on that.
+    """
+
+    def __init__(self, *, host: str, user: str, password: str, port: int = 22) -> None:
+        """Record the connection; mounts are opened on first use, not here."""
+        self.host = resolve_cluster_host(host)
+        self.user = str(user)
+        self.port = int(port)
+        self._password = password
+        self._stack = ExitStack()
+        self._mounts: dict[str, SshfsMount] = {}
+
+    def mount_for(self, remote_path: str | Path) -> SshfsMount:
+        """The mount serving *remote_path*, opening it if this session has not yet."""
+        root = resolve_mount_root(remote_path)
+        handle = self._mounts.get(root)
+        if handle is None:
+            handle = self._stack.enter_context(
+                cluster_mount(
+                    host=self.host,
+                    user=self.user,
+                    password=self._password,
+                    remote_root=root,
+                )
+            )
+            self._mounts[root] = handle
+        return handle
+
+    def local(self, remote_path: str | Path) -> Path:
+        """Local path that reads and writes the cluster path *remote_path*."""
+        return self.mount_for(remote_path).local(remote_path)
+
+    def mounts(self) -> list[SshfsMount]:
+        """Mounts this session currently holds."""
+        return list(self._mounts.values())
+
+    def close(self) -> None:
+        """Release every mount this session opened."""
+        self._stack.close()
+        self._mounts.clear()
+
+    def __enter__(self) -> "ClusterSession":
+        """Enter the session; mounts are still opened lazily."""
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        """Release the session's mounts."""
+        self.close()
+
+
 @contextmanager
-def sftp_session(
+def cluster_session(
     *,
     host: str,
     user: str,
     password: str,
     port: int = 22,
-    timeout: float | None = None,
-) -> Iterator[tuple[Any, Any]]:
-    """Yield ``(ssh_client, sftp)`` connected to the cluster login node."""
-    _require_paramiko()
-    import paramiko
+    remote_root: str | Path | None = None,
+) -> Iterator[ClusterSession]:
+    """Yield a :class:`ClusterSession` for the cluster login node.
 
-    host_resolved = resolve_cluster_host(host)
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(
-        hostname=host_resolved,
-        port=port,
-        username=user,
-        password=password,
-        timeout=timeout,
-        allow_agent=False,
-        look_for_keys=False,
-    )
+    *remote_root* pre-mounts one root when the caller already knows which it needs, so the
+    first failure is a mount error at the top of the operation rather than partway through a
+    loop. Omit it to let each path mount its own root on demand.
+    """
+    session = ClusterSession(host=host, user=user, password=password, port=port)
     try:
-        sftp = client.open_sftp()
-        try:
-            yield client, sftp
-        finally:
-            sftp.close()
+        if remote_root is not None:
+            session.mount_for(remote_root)
+        yield session
     finally:
-        client.close()
+        session.close()
 
 
-def ensure_remote_dir(sftp: Any, remote_path: str) -> None:
-    """Create *remote_path* on the server if missing (POSIX, best-effort)."""
-    parts = [p for p in remote_path.replace("\\", "/").split("/") if p]
-    cur = ""
-    if remote_path.startswith("/"):
-        cur = "/"
-    for part in parts:
-        cur = f"{cur.rstrip('/')}/{part}"
-        try:
-            sftp.stat(cur)
-        except OSError:
-            sftp.mkdir(cur)
+def ensure_remote_dir(session: ClusterSession, remote_path: str | Path) -> Path:
+    """Create *remote_path* on the cluster (parents included); return its local path."""
+    local = session.local(remote_path)
+    local.mkdir(parents=True, exist_ok=True)
+    return local
 
 
-def remote_path_exists(sftp: Any, remote_path: str) -> bool:
-    """True if *remote_path* exists on the SFTP server."""
+def remote_path_exists(session: ClusterSession, remote_path: str | Path) -> bool:
+    """True if *remote_path* exists on the cluster.
+
+    A path outside every configured mount root raises rather than returning False: that is a
+    configuration error, not an absent file, and silently reporting "missing" would send the
+    caller looking in the wrong place.
+    """
+    local = session.local(remote_path)
     try:
-        sftp.stat(remote_path)
-        return True
+        return local.exists()
     except OSError:
         return False
 
 
-def read_remote_text(sftp: Any, remote_path: str) -> str:
-    """Read a remote text file's full contents (UTF-8, replacing undecodable bytes)."""
-    with sftp.open(remote_path, "r") as fh:
-        return fh.read().decode("utf-8", errors="replace")
+def remote_listdir(session: ClusterSession, remote_path: str | Path) -> list[str]:
+    """Entry names directly under *remote_path*, or ``[]`` when it is absent or unreadable."""
+    try:
+        return sorted(entry.name for entry in session.local(remote_path).iterdir())
+    except OSError:
+        return []
+
+
+def read_remote_text(session: ClusterSession, remote_path: str | Path) -> str:
+    """Read a cluster text file in full (UTF-8, replacing undecodable bytes)."""
+    return session.local(remote_path).read_text(encoding="utf-8", errors="replace")
 
 
 def upload_file(
-    sftp: Any,
+    session: ClusterSession,
     local_path: Path,
-    remote_path: str,
+    remote_path: str | Path,
 ) -> None:
     """Upload *local_path* to *remote_path*, creating the remote parent directory if needed."""
-    parent = remote_path.rsplit("/", 1)[0]
-    if parent:
-        ensure_remote_dir(sftp, parent)
-    sftp.put(str(local_path), remote_path)
+    destination = session.local(remote_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    _copy_file(Path(local_path), destination)
 
 
-def download_remote_file(sftp: Any, remote_path: str, local_path: Path) -> None:
+def download_remote_file(
+    session: ClusterSession,
+    remote_path: str | Path,
+    local_path: Path,
+) -> None:
     """Download *remote_path* to *local_path*, creating the local parent directory if needed."""
-    local_path.parent.mkdir(parents=True, exist_ok=True)
-    sftp.get(remote_path, str(local_path))
+    destination = Path(local_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    _copy_file(session.local(remote_path), destination)
+
+
+def upload_files(
+    session: ClusterSession,
+    pairs: Sequence[tuple[Path, str]],
+    *,
+    skip_existing: bool = True,
+    on_progress: Any = None,
+) -> tuple[int, int]:
+    """Upload an explicit ``(local, remote)`` list; return ``(uploaded, skipped)``.
+
+    Neither other helper fits a filtered transfer: :func:`upload_file` takes one path, and
+    :func:`upload_directory` sends a whole tree with no skip logic. A cohort analysis selects
+    a few hundred volumes out of several thousand in the same directory, so the *list* is the
+    unit.
+
+    ``skip_existing`` compares the remote size against the local one. Re-running the same
+    cohort for a second contrast would otherwise re-send every volume -- minutes of transfer
+    for files that are already there. Size rather than checksum: a stat through the mount is
+    one round trip, hashing a few hundred volumes is not.
+
+    ``on_progress(done, total)`` is called as the transfer advances; a silent twenty-minute
+    upload is indistinguishable from a hang.
+    """
+    total = len(pairs)
+    uploaded = skipped = 0
+    seen_dirs: set[Path] = set()
+
+    for index, (local_path, remote_path) in enumerate(pairs, start=1):
+        source = Path(local_path)
+        if not source.is_file():
+            raise FileNotFoundError(f"Cannot upload, not a file: {source}")
+
+        destination = session.local(remote_path)
+        parent = destination.parent
+        if parent not in seen_dirs:
+            parent.mkdir(parents=True, exist_ok=True)
+            seen_dirs.add(parent)
+
+        if skip_existing:
+            try:
+                if destination.stat().st_size == source.stat().st_size:
+                    skipped += 1
+                    if on_progress is not None:
+                        on_progress(index, total)
+                    continue
+            except OSError:
+                pass  # not there, or unstatable -- upload it
+
+        _copy_file(source, destination)
+        uploaded += 1
+        if on_progress is not None:
+            on_progress(index, total)
+
+    return uploaded, skipped
+
+
+def upload_directory_tree(
+    session: ClusterSession,
+    local_root: Path,
+    remote_root: str | Path,
+) -> int:
+    """Recursively upload *local_root* into *remote_root*. Returns the file count."""
+    source_root = Path(local_root).resolve()
+    if not source_root.is_dir():
+        raise FileNotFoundError(f"Not a directory: {source_root}")
+    destination_root = session.local(remote_root)
+    destination_root.mkdir(parents=True, exist_ok=True)
+
+    count = 0
+    for dirpath, _dirnames, filenames in os.walk(source_root):
+        relative = Path(dirpath).relative_to(source_root)
+        target_dir = destination_root if relative == Path(".") else destination_root / relative
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for name in filenames:
+            _copy_file(Path(dirpath) / name, target_dir / name)
+            count += 1
+    return count
+
+
+def download_directory_tree(
+    session: ClusterSession,
+    remote_root: str | Path,
+    local_root: Path,
+) -> int:
+    """Recursively download *remote_root* into *local_root*. Returns the file count."""
+    source_root = session.local(remote_root)
+    if not source_root.is_dir():
+        return 0
+    destination_root = Path(local_root).resolve()
+    destination_root.mkdir(parents=True, exist_ok=True)
+
+    count = 0
+    for dirpath, _dirnames, filenames in os.walk(source_root):
+        relative = Path(dirpath).relative_to(source_root)
+        target_dir = destination_root if relative == Path(".") else destination_root / relative
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for name in filenames:
+            _copy_file(Path(dirpath) / name, target_dir / name)
+            count += 1
+    return count
+
+
+#: Retained name for :func:`download_directory_tree`. The old SFTP-handle spelling is still
+#: imported in a few pipelines; the transport changed but the operation did not.
+download_directory_sftp = download_directory_tree
 
 
 def sync_remote_glob(
-    client: Any,
-    sftp: Any,
+    session: ClusterSession,
     *,
-    remote_root: str,
+    remote_root: str | Path,
     local_root: Path,
     pattern: str,
 ) -> tuple[int, int]:
     """Mirror files matching *pattern* under *remote_root* into *local_root*.
 
-    Enumeration is a single ``find`` over the SSH channel rather than a recursive SFTP walk,
-    which costs a round trip per directory and would be painful on a results tree that is one
-    directory per dataset per run per fold. Only files whose size or mtime differs from the
-    local copy are fetched, so a caller polling on an interval re-downloads the handful of logs
-    that actually grew.
-
-    Relative paths are preserved, so the local tree has the same shape as the remote one and
-    anything that discovers runs by structure keeps working against it.
+    Only files whose size or mtime differs from the local copy are fetched, so a caller
+    polling on an interval re-downloads the handful of logs that actually grew rather than
+    the whole tree. Relative paths are preserved, so the local tree has the same shape as the
+    remote one and anything that discovers runs by structure keeps working against it.
 
     Returns
     -------
     tuple
         ``(seen, fetched)`` -- files matched remotely, and of those, files transferred.
     """
-    root = _normalize_remote_path(remote_root).rstrip("/")
-    command = (
-        f"find {shlex.quote(root)} -name {shlex.quote(pattern)} -type f "
-        f"-printf '%s\\t%T@\\t%p\\n'"
-    )
-    _stdin, stdout, _stderr = client.exec_command(command)
-    payload = stdout.read().decode(errors="replace")
-    # find exits non-zero for any unreadable subtree it walked past; the paths it *did* print
-    # are still good, so the status is deliberately not checked.
-    stdout.channel.recv_exit_status()
+    source_root = session.local(remote_root)
+    destination_root = Path(local_root)
+    if not source_root.is_dir():
+        return 0, 0
 
     seen = fetched = 0
-    for line in payload.splitlines():
-        fields = line.split("\t", 2)
-        if len(fields) != 3:
-            continue
-        raw_size, raw_mtime, remote_path = fields
+    for remote_file in sorted(source_root.rglob(pattern)):
         try:
-            size, mtime = int(raw_size), float(raw_mtime)
-        except ValueError:
+            if not remote_file.is_file():
+                continue
+            stat = remote_file.stat()
+        except OSError:
             continue
         seen += 1
-        destination = Path(local_root) / remote_path[len(root):].lstrip("/")
+        destination = destination_root / remote_file.relative_to(source_root)
         try:
             existing = destination.stat()
-            if existing.st_size == size and existing.st_mtime >= mtime:
+            if existing.st_size == stat.st_size and existing.st_mtime >= stat.st_mtime:
                 continue
         except OSError:
             pass  # absent locally, or unreadable -- either way, fetch it
-        download_remote_file(sftp, remote_path, destination)
-        os.utime(destination, (mtime, mtime))
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        _copy_file(remote_file, destination)
+        try:
+            os.utime(destination, (stat.st_mtime, stat.st_mtime))
+        except OSError:
+            pass
         fetched += 1
     return seen, fetched
 
 
-def download_directory_sftp(sftp: Any, remote_root: str, local_root: Path) -> int:
-    """Recursively download *remote_root* into *local_root*. Returns file count."""
-    remote_root = remote_root.rstrip("/")
-    if not remote_path_exists(sftp, remote_root):
-        return 0
-    local_root = local_root.resolve()
-    local_root.mkdir(parents=True, exist_ok=True)
-    n_files = 0
-    for dirpath, _dirnames, filenames in _walk_remote(sftp, remote_root):
-        rel = (
-            Path(".")
-            if dirpath.rstrip("/") == remote_root
-            else Path(dirpath).relative_to(remote_root)
-        )
-        for name in filenames:
-            remote_path = f"{dirpath.rstrip('/')}/{name}"
-            local_path = local_root / rel / name
-            download_remote_file(sftp, remote_path, local_path)
-            n_files += 1
-    return n_files
-
-
-def _walk_remote(sftp: Any, remote_root: str) -> Iterator[tuple[str, list[str], list[str]]]:
-    """Yield ``(dirpath, dirnames, filenames)`` tuples like :func:`os.walk`."""
-    pending: list[str] = [remote_root.rstrip("/")]
-    while pending:
-        current = pending.pop()
-        try:
-            entries = sftp.listdir_attr(current)
-        except OSError:
-            continue
-        dirnames: list[str] = []
-        filenames: list[str] = []
-        for entry in entries:
-            name = entry.filename
-            if name in (".", ".."):
-                continue
-            remote_path = f"{current.rstrip('/')}/{name}"
-            if stat.S_ISDIR(entry.st_mode):
-                dirnames.append(name)
-                pending.append(remote_path)
-            else:
-                filenames.append(name)
-        yield current, dirnames, filenames
+def upload_directory(
+    *,
+    host: str,
+    user: str,
+    password: str,
+    local_root: Path,
+    remote_root: str,
+    port: int = 22,
+    timeout: float | None = None,
+) -> int:
+    """Recursively upload *local_root* to *remote_root* over sshfs. Returns the file count."""
+    with cluster_session(
+        host=host, user=user, password=password, port=port, remote_root=remote_root
+    ) as session:
+        return upload_directory_tree(session, Path(local_root), remote_root)
 
 
 def download_directory(
@@ -229,15 +398,11 @@ def download_directory(
     port: int = 22,
     timeout: float | None = None,
 ) -> int:
-    """Recursively download *remote_root* to *local_root* via SFTP."""
-    with sftp_session(
-        host=host,
-        user=user,
-        password=password,
-        port=port,
-        timeout=timeout,
-    ) as (_client, sftp):
-        return download_directory_sftp(sftp, remote_root, local_root)
+    """Recursively download *remote_root* to *local_root* over sshfs. Returns the file count."""
+    with cluster_session(
+        host=host, user=user, password=password, port=port, remote_root=remote_root
+    ) as session:
+        return download_directory_tree(session, remote_root, Path(local_root))
 
 
 def download_remote_files(
@@ -248,94 +413,10 @@ def download_remote_files(
     remote_files: list[tuple[str, Path]],
     port: int = 22,
 ) -> None:
-    """Download ``(remote_path, local_path)`` pairs via SFTP."""
-    with sftp_session(host=host, user=user, password=password, port=port) as (_client, sftp):
+    """Download ``(remote_path, local_path)`` pairs over sshfs."""
+    with cluster_session(host=host, user=user, password=password, port=port) as session:
         for remote_path, local_path in remote_files:
-            download_remote_file(sftp, remote_path, local_path)
-
-
-def upload_directory(
-    *,
-    host: str,
-    user: str,
-    password: str,
-    local_root: Path,
-    remote_root: str,
-    port: int = 22,
-    timeout: float | None = None,
-) -> None:
-    """Recursively upload *local_root* to *remote_root* via SFTP."""
-    with sftp_session(
-        host=host,
-        user=user,
-        password=password,
-        port=port,
-        timeout=timeout,
-    ) as (_client, sftp):
-        ensure_remote_dir(sftp, remote_root.rstrip("/"))
-        local_root = local_root.resolve()
-        for dirpath, _dirnames, filenames in os.walk(local_root):
-            rel = Path(dirpath).relative_to(local_root)
-            remote_dir = f"{remote_root.rstrip('/')}/{rel.as_posix()}".rstrip("/")
-            if remote_dir:
-                ensure_remote_dir(sftp, remote_dir)
-            for name in filenames:
-                lp = Path(dirpath) / name
-                rp = f"{remote_dir}/{name}" if remote_dir else f"{remote_root.rstrip('/')}/{name}"
-                sftp.put(str(lp), rp)
-
-
-def upload_files(
-    sftp: Any,
-    pairs: Sequence[tuple[Path, str]],
-    *,
-    skip_existing: bool = True,
-    on_progress: Any = None,
-) -> tuple[int, int]:
-    """Upload an explicit ``(local, remote)`` list; return ``(uploaded, skipped)``.
-
-    Neither existing helper fits a filtered transfer: :func:`upload_file` takes one path, and
-    :func:`upload_directory` sends a whole tree with no skip logic. A cohort analysis selects a few
-    hundred volumes out of several thousand in the same directory, so the *list* is the unit.
-
-    ``skip_existing`` compares the remote size against the local one. Re-running the same cohort
-    for a second contrast would otherwise re-send every volume — minutes of transfer for files that
-    are already there. Size rather than checksum: an SFTP stat is one round trip, hashing a few
-    hundred volumes is not.
-
-    ``on_progress(done, total)`` is called as the transfer advances; a silent twenty-minute upload
-    is indistinguishable from a hang.
-    """
-    total = len(pairs)
-    uploaded = skipped = 0
-    seen_dirs: set[str] = set()
-
-    for index, (local_path, remote_path) in enumerate(pairs, start=1):
-        local = Path(local_path)
-        if not local.is_file():
-            raise FileNotFoundError(f"Cannot upload, not a file: {local}")
-
-        parent = remote_path.rsplit("/", 1)[0]
-        if parent and parent not in seen_dirs:
-            ensure_remote_dir(sftp, parent)
-            seen_dirs.add(parent)
-
-        if skip_existing:
-            try:
-                if sftp.stat(remote_path).st_size == local.stat().st_size:
-                    skipped += 1
-                    if on_progress is not None:
-                        on_progress(index, total)
-                    continue
-            except IOError:
-                pass  # not there, or unstatable — upload it
-
-        sftp.put(str(local), remote_path)
-        uploaded += 1
-        if on_progress is not None:
-            on_progress(index, total)
-
-    return uploaded, skipped
+            download_remote_file(session, remote_path, local_path)
 
 
 def upload_staged_job(
@@ -350,31 +431,56 @@ def upload_staged_job(
 ) -> None:
     """Upload a GUI job staging tree to the cluster job directory.
 
-    *remote_script_path* additionally places ``submit.sh`` there, which is how the
-    GUI keeps its driver scripts in the configured ``sge_scripts_dir`` alongside
-    every pipeline's rather than scattering one copy per job directory. The copy
-    inside the job root is kept as well: it is what makes a failed job
-    reproducible by hand from the directory that holds its inputs.
+    *remote_script_path* additionally places ``submit.sh`` there, which is how the GUI keeps
+    its driver scripts in the configured ``sge_scripts_dir`` alongside every pipeline's rather
+    than scattering one copy per job directory. The copy inside the job root is kept as well:
+    it is what makes a failed job reproducible by hand from the directory that holds its
+    inputs.
     """
-    upload_directory(
-        host=host,
-        user=user,
-        password=password,
-        local_root=local_staging,
-        remote_root=remote_job_root.rstrip("/"),
-        port=port,
-    )
-    if not remote_script_path:
-        return
-    script = Path(local_staging) / "submit.sh"
-    if not script.is_file():
-        return
-    destination = _normalize_remote_path(str(remote_script_path))
-    with sftp_session(host=host, user=user, password=password, port=port) as (_c, sftp):
-        parent = destination.rsplit("/", 1)[0]
-        if parent:
-            ensure_remote_dir(sftp, parent)
-        sftp.put(str(script), destination)
+    root = _normalize_remote_path(remote_job_root)
+    with cluster_session(host=host, user=user, password=password, port=port) as session:
+        upload_directory_tree(session, Path(local_staging), root)
+        if not remote_script_path:
+            return
+        script = Path(local_staging) / "submit.sh"
+        if not script.is_file():
+            return
+        upload_file(session, script, _normalize_remote_path(str(remote_script_path)))
+
+
+@contextmanager
+def ssh_client(
+    *,
+    host: str,
+    user: str,
+    password: str,
+    port: int = 22,
+    timeout: float | None = None,
+) -> Iterator[Any]:
+    """Yield a connected Paramiko ``SSHClient`` for running commands on the login node.
+
+    Command execution is the one thing sshfs cannot do, so this is the only remaining use of
+    Paramiko: ``qsub``, ``qstat``, ``bash submit.sh`` and ``rm -rf`` of a job tree. It moves
+    no file data.
+    """
+    _require_paramiko()
+    import paramiko
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(
+            hostname=resolve_cluster_host(host),
+            port=port,
+            username=user,
+            password=password,
+            timeout=timeout,
+            allow_agent=False,
+            look_for_keys=False,
+        )
+        yield client
+    finally:
+        client.close()
 
 
 def ssh_exec(
@@ -387,13 +493,9 @@ def ssh_exec(
     timeout: float | None = None,
 ) -> tuple[int, str, str]:
     """Run *command* on the login node; return ``(exit_code, stdout, stderr)``."""
-    with sftp_session(
-        host=host,
-        user=user,
-        password=password,
-        port=port,
-        timeout=timeout,
-    ) as (client, _sftp):
+    with ssh_client(
+        host=host, user=user, password=password, port=port, timeout=timeout
+    ) as client:
         _stdin, stdout, stderr = client.exec_command(command)
         out_b = stdout.read()
         err_b = stderr.read()
@@ -430,7 +532,12 @@ def remove_remote_job_tree(
     remote_job_root: str,
     port: int = 22,
 ) -> tuple[int, str, str]:
-    """Delete a remote job directory after verified retrieval (path guard enforced)."""
+    """Delete a remote job directory after verified retrieval (path guard enforced).
+
+    Deletion runs as ``rm -rf`` over SSH rather than a recursive unlink through the mount:
+    it executes on the cluster, so it needs no mount at all, and it costs one round trip
+    instead of one per file.
+    """
     root = _normalize_remote_path(remote_job_root)
     if not root:
         raise ValueError("Remote job path is empty.")
@@ -443,19 +550,28 @@ def remove_remote_job_tree(
 
 
 __all__ = [
+    "ClusterSession",
+    "SshfsError",
+    "SshfsRootNotAllowed",
+    "assert_no_mountpoint_leak",
+    "cluster_session",
     "download_directory",
     "download_directory_sftp",
+    "download_directory_tree",
     "download_remote_file",
     "download_remote_files",
     "ensure_remote_dir",
     "is_safe_gui_job_root",
     "read_remote_text",
+    "remote_listdir",
     "remote_path_exists",
     "remove_remote_job_tree",
     "resolve_cluster_host",
-    "sftp_session",
+    "ssh_client",
     "ssh_exec",
+    "sync_remote_glob",
     "upload_directory",
+    "upload_directory_tree",
     "upload_file",
     "upload_files",
     "upload_staged_job",

@@ -20,6 +20,9 @@ NVITK_LAYER_METADATA_KEYS = frozenset(
         _NVITK_COLORMAP_KEY,
     }
 )
+#: Voxels sampled for the cheap rejection in :func:`_compute_is_label_like`.
+_LABEL_LIKE_SAMPLE = 200_000
+
 _MAX_LABEL_LIKE_IDS = 64
 
 
@@ -86,14 +89,39 @@ def _compute_is_label_like(layer: Any) -> bool:
     if flat.size == 0:
         return False
 
+    # Reject from a stride sample before touching the whole volume. Every layer
+    # added to the viewer is tested, and the exact test on an intensity image
+    # costs ~100 ms on a 50 MB volume: it materialises a finite-only copy and
+    # sorts twelve million values only to conclude "not a mask". Both rejections
+    # are sound on a subsample -- a sample can only *under*-count distinct
+    # values, so more than the cap in the sample means more than the cap
+    # overall, and a fractional value in the sample is a fractional value in the
+    # array. Neither can turn a real label map away, so the accepting path below
+    # is unchanged and still exact.
+    if flat.size > _LABEL_LIKE_SAMPLE:
+        sample = flat[:: max(int(flat.size // _LABEL_LIKE_SAMPLE), 1)]
+        if np.issubdtype(arr.dtype, np.floating):
+            sample = sample[np.isfinite(sample)]
+            if sample.size and not np.allclose(sample, np.round(sample), rtol=0, atol=1e-3):
+                return False
+        if sample.size and np.unique(sample).size > _MAX_LABEL_LIKE_IDS:
+            return False
+
     if np.issubdtype(arr.dtype, np.floating):
         finite = flat[np.isfinite(flat)]
         if finite.size == 0:
             return False
-        if np.unique(finite).size > _MAX_LABEL_LIKE_IDS:
+        values = np.unique(finite)
+        if values.size > _MAX_LABEL_LIKE_IDS:
             return False
-        if not np.allclose(finite, np.round(finite), rtol=0, atol=1e-3):
+        # Test the distinct values, not every voxel: each voxel equals one of
+        # them, so the answer is identical and the comparison runs over at most
+        # 64 numbers instead of the whole volume. The ids then come from the
+        # same array rather than a second full ``np.unique`` pass.
+        if not np.allclose(values, np.round(values), rtol=0, atol=1e-3):
             return False
+        ids = {int(round(float(v))) for v in values} - {0}
+        return 0 < len(ids) <= _MAX_LABEL_LIKE_IDS
 
     labels = unique_layer_labels(arr, max_labels=_MAX_LABEL_LIKE_IDS + 1)
     return 0 < len(labels) <= _MAX_LABEL_LIKE_IDS

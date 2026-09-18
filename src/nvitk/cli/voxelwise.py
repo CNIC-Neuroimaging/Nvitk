@@ -84,10 +84,10 @@ def _ssh_credentials(remote_host: str | None, remote_user: str | None) -> tuple[
 
 def _verify_ssh(host: str, user: str, password: str) -> None:
     """Open and close one session, so a bad password fails now rather than after an upload."""
-    from nvitk.cluster.remote_transfer import sftp_session
+    from nvitk.cluster.remote_transfer import cluster_session
 
     try:
-        with sftp_session(host=host, user=user, password=password) as (_ssh, _sftp):
+        with cluster_session(host=host, user=user, password=password) as session:
             pass
     except Exception as exc:  # noqa: BLE001
         raise click.ClickException(f"Cannot reach {user}@{host}: {exc}") from None
@@ -178,7 +178,7 @@ def _upload_inputs(
     password: str,
 ) -> None:
     """Send the selected volumes, the mask and the exclusion list to ``{out}/inputs/``."""
-    from nvitk.cluster.remote_transfer import sftp_session, upload_files
+    from nvitk.cluster.remote_transfer import cluster_session, upload_files
 
     pairs: list[tuple[Path, str]] = [
         (im.path, f"{remote_inputs}/{im.path.name}") for im in images
@@ -197,8 +197,8 @@ def _upload_inputs(
         if done % step == 0 or done == total:
             log.info(f"  … {done}/{total}")
 
-    with sftp_session(host=host, user=user, password=password) as (_ssh, sftp):
-        uploaded, skipped = upload_files(sftp, pairs, on_progress=report)
+    with cluster_session(host=host, user=user, password=password) as session:
+        uploaded, skipped = upload_files(session, pairs, on_progress=report)
     log.info(f"Upload complete: {uploaded} sent, {skipped} already present")
 
 
@@ -224,7 +224,7 @@ def _submit_sge(
     the analysis and the SGE path cannot drift from the local one.
 
     ``qsub`` does not exist on a workstation, so this never shells out to it directly: the script
-    is written locally, SFTP-published, and executed over SSH — the same six steps the qvtpy and
+    is written locally, published over sshfs, and executed over SSH — the same six steps the qvtpy and
     pesa_fat pipelines take.
     """
     from nvitk.cluster import sge_json as sj
@@ -930,7 +930,7 @@ def cmd_fetch(
     remote_dir: str, local_dir: Path, fetch_all: bool,
     remote_host: str | None, remote_user: str | None,
 ) -> None:
-    """Download a finished results folder from the cluster over SFTP.
+    """Download a finished results folder from the cluster over sshfs.
 
     ``run --submit sge`` returns as soon as the job is queued, so the maps appear on the cluster
     minutes or hours later. This is the other half of that round trip.
@@ -938,9 +938,10 @@ def cmd_fetch(
     import fnmatch
 
     from nvitk.cluster.remote_transfer import (
-        download_directory_sftp,
+        cluster_session,
+        download_directory_tree,
         download_remote_file,
-        sftp_session,
+        remote_listdir,
     )
 
     host, user, password = _ssh_credentials(remote_host, remote_user)
@@ -949,16 +950,15 @@ def cmd_fetch(
     local_dir.mkdir(parents=True, exist_ok=True)
 
     if fetch_all:
-        with sftp_session(host=host, user=user, password=password) as (_ssh, sftp):
-            count = download_directory_sftp(sftp, remote, local_dir)
+        with cluster_session(host=host, user=user, password=password) as session:
+            count = download_directory_tree(session, remote, local_dir)
         click.echo(f"Downloaded {count} file(s) → {local_dir}")
         return
 
-    with sftp_session(host=host, user=user, password=password) as (_ssh, sftp):
-        try:
-            names = sftp.listdir(remote)
-        except IOError as exc:
-            raise click.ClickException(f"Cannot list {remote}: {exc}") from None
+    with cluster_session(host=host, user=user, password=password) as session:
+        names = remote_listdir(session, remote)
+        if not names:
+            raise click.ClickException(f"Cannot list {remote}, or it is empty.")
         wanted = [
             n for n in sorted(names)
             if any(fnmatch.fnmatch(n, pattern) for pattern in FETCH_PATTERNS)
@@ -969,7 +969,7 @@ def cmd_fetch(
                 f"Use --all to pull the folder as-is."
             )
         for name in wanted:
-            download_remote_file(sftp, f"{remote}/{name}", local_dir / name)
+            download_remote_file(session, f"{remote}/{name}", local_dir / name)
             log.info(f"  {name}")
 
     click.echo(f"Downloaded {len(wanted)} file(s) → {local_dir}")

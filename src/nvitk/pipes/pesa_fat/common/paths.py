@@ -180,9 +180,27 @@ class BatchLayout:
             yield d.name
 
 
+def cluster_sge_scripts_dir() -> Path:
+    """The *cluster* directory emitted submit scripts are published to.
+
+    Cluster storage is not mounted on the workstation, so this is where a script lands after
+    upload -- never where it is written. Resolve both halves with
+    :func:`nvitk.cluster.sge_remote.resolve_sge_script_paths`.
+    """
+    return _sge_scripts_dir()
+
+
+def default_submit_script_basename(batch: str) -> str:
+    """Filename ``submit_<batch>.sh`` for a batch's emitted submit script."""
+    return f"submit_{batch}.sh"
+
+
 def default_submit_script_path(batch: str) -> Path:
-    """Return ``SCRIPTS_CLUSTER/submit_<batch>.sh`` under :data:`DEFAULT_SGE_SCRIPTS_DIR`."""
-    return _sge_scripts_dir() / f"submit_{batch}.sh"
+    """Return the *cluster* path ``<sge_scripts_dir>/submit_<batch>.sh``.
+
+    Not a local write target: see :func:`cluster_sge_scripts_dir`.
+    """
+    return cluster_sge_scripts_dir() / default_submit_script_basename(batch)
 
 
 def layout(
@@ -283,7 +301,7 @@ def layout_cluster(
     results_root: Path | str | None = None,
     model_root: Path | str | None = None,
 ) -> BatchLayout:
-    """Cluster-side :class:`BatchLayout` for SGE binds and SFTP upload targets.
+    """Cluster-side :class:`BatchLayout` for SGE binds and cluster upload targets.
 
     Reads ``pipelines.pesa_fat_paths`` from ``.nvitk/sge.json`` when set;
     otherwise falls back to CLI ``--*-root`` flags or :data:`DEFAULT_*_ROOT`.
@@ -336,6 +354,8 @@ __all__ = [
     "DEFAULT_SGE_SCRIPTS_DIR",
     "SUBJECT_GLOB",
     "NIFTI_EXTS",
+    "cluster_sge_scripts_dir",
+    "default_submit_script_basename",
     "default_submit_script_path",
     "group_subjects_by_batch",
     "layout",

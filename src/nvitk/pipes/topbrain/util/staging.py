@@ -153,12 +153,12 @@ def upload_inputs(
     Names are preserved: stage 4 derives case ids from them, so renaming here would rename the
     outputs too.
     """
-    from nvitk.cluster.remote_transfer import ensure_remote_dir, sftp_session, upload_file
+    from nvitk.cluster.remote_transfer import ensure_remote_dir, cluster_session, upload_file
 
-    with sftp_session(host=host, user=user, password=password) as (_ssh, sftp):
-        ensure_remote_dir(sftp, remote_input)
+    with cluster_session(host=host, user=user, password=password) as session:
+        ensure_remote_dir(session, remote_input)
         for volume in volumes:
-            upload_file(sftp, Path(volume), posixpath.join(remote_input, Path(volume).name))
+            upload_file(session, Path(volume), posixpath.join(remote_input, Path(volume).name))
     log.ok(f"uploaded {len(volumes)} volume(s) -> {remote_input}")
     return len(volumes)
 
@@ -167,11 +167,11 @@ def retrieve_outputs(
     remote_output: str, local_output: Path, *, host: str, user: str, password: str
 ) -> int:
     """Download everything under *remote_output* into *local_output*; returns the file count."""
-    from nvitk.cluster.remote_transfer import download_directory_sftp, sftp_session
+    from nvitk.cluster.remote_transfer import download_directory_sftp, cluster_session
 
     Path(local_output).mkdir(parents=True, exist_ok=True)
-    with sftp_session(host=host, user=user, password=password) as (_ssh, sftp):
-        count = download_directory_sftp(sftp, remote_output, Path(local_output))
+    with cluster_session(host=host, user=user, password=password) as session:
+        count = download_directory_sftp(session, remote_output, Path(local_output))
     log.ok(f"retrieved {count} file(s) -> {local_output}")
     return int(count)
 

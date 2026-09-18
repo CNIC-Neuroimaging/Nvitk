@@ -1,13 +1,14 @@
-"""SFTP upload of PESA-Fat DICOM trees to cluster storage."""
+"""Upload PESA-Fat DICOM trees to cluster storage over sshfs."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from nvitk.cluster.remote_transfer import (
+    cluster_session,
+    remote_listdir,
     remote_path_exists,
     resolve_cluster_host,
-    sftp_session,
     upload_directory,
 )
 from nvitk.core.logger import Logger
@@ -34,14 +35,11 @@ def local_subject_has_dicoms(local_subject_dir: Path) -> bool:
         return False
 
 
-def remote_subject_has_dicoms(sftp, remote_subject_dir: str) -> bool:
-    """True if *remote_subject_dir* exists on the SFTP connection and is non-empty."""
-    if not remote_path_exists(sftp, remote_subject_dir):
+def remote_subject_has_dicoms(session, remote_subject_dir: str) -> bool:
+    """True if *remote_subject_dir* exists on the cluster and is non-empty."""
+    if not remote_path_exists(session, remote_subject_dir):
         return False
-    try:
-        return bool(sftp.listdir(remote_subject_dir))
-    except OSError:
-        return False
+    return bool(remote_listdir(session, remote_subject_dir))
 
 
 def upload_subject_dicoms(
@@ -68,8 +66,8 @@ def upload_subject_dicoms(
     host_resolved = resolve_cluster_host(host)
 
     if skip_if_remote_nonempty:
-        with sftp_session(host=host, user=user, password=password, port=port) as (_ssh, sftp):
-            if remote_subject_has_dicoms(sftp, remote_subj):
+        with cluster_session(host=host, user=user, password=password, port=port) as session:
+            if remote_subject_has_dicoms(session, remote_subj):
                 log.info(
                     "[%s] cluster DICOM already present at %s — skip upload",
                     subject,

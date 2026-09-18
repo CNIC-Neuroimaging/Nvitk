@@ -18,6 +18,7 @@ from nvitk.core.click_backend import backend_click_option
 from nvitk.core.logger import Logger
 from nvitk.cluster.remote_submit import run_sge_script_ssh
 from nvitk.cluster.sge import SgeResources, write_script_header
+from nvitk.cluster.sge_remote import publish_sge_driver_script, resolve_sge_script_paths
 
 from .class_maps import AVAILABLE_TASKS
 from .cluster import ClusterPaths, SegmentationJob
@@ -30,11 +31,15 @@ from nvitk.core.click_config import config_dir_click_option
 log = Logger()
 
 
-def _default_emit_script(task: str) -> Path:
-    """Default, timestamped SGE submit-script path for a TotalSegmentator *task*."""
-    ts_cfg.DEFAULT_SGE_SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+def _default_emit_basename(task: str) -> str:
+    """Timestamped submit-script filename for a TotalSegmentator *task*.
+
+    A basename, not a path: where it is written locally and where it lands on the cluster are
+    two different places now that cluster storage is not mounted here.
+    :func:`~nvitk.cluster.sge_remote.resolve_sge_script_paths` resolves both.
+    """
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return ts_cfg.DEFAULT_SGE_SCRIPTS_DIR / f"submit_totalseg_{task}_{ts}.sh"
+    return f"submit_totalseg_{task}_{ts}.sh"
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
@@ -320,9 +325,12 @@ def main(
         click.echo(jid)
         return
 
-    script_path = Path(emit_script) if emit_script is not None else _default_emit_script(task)
-    script_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(script_path, "w", encoding="utf-8") as fh:
+    local_script, remote_script = resolve_sge_script_paths(
+        Path(emit_script) if emit_script is not None else None,
+        remote_scripts_dir=Path(str(ts_cfg.DEFAULT_SGE_SCRIPTS_DIR)),
+        default_basename=_default_emit_basename(task),
+    )
+    with open(local_script, "w", encoding="utf-8") as fh:
         write_script_header(
             fh,
             log_dir=log_p,
@@ -337,16 +345,21 @@ def main(
             dry_run=False,
             emit=fh,
         )
-    log.info("Wrote SGE submission script: %s", script_path)
+    log.info("Wrote SGE submission script: %s", local_script)
 
     if dry_run:
-        log.info("Dry-run: script written; skipping SSH execution.")
+        log.info("Dry-run: script written; skipping publish and SSH execution.")
         return
 
     if no_remote:
+        # Nothing was uploaded, so the script exists only here. Naming the cluster path it
+        # would have taken makes the manual copy unambiguous.
         log.info(
-            "Skipping remote SSH (--no-remote). Run on the login node: bash %s",
-            script_path,
+            "Skipping publish and remote SSH (--no-remote). The script is at %s; "
+            "copy it to %s on the cluster and run: bash %s",
+            local_script,
+            remote_script,
+            remote_script,
         )
         return
 
@@ -355,11 +368,16 @@ def main(
     host_resolved = ts_cfg.CLUSTER_HOST_ALIASES.get(host_key, host_key)
     user = remote_user or click.prompt("SSH user")
     password = getpass.getpass("SSH password: ")
-    ok = run_sge_script_ssh(host_resolved, user, password, script_path)
+    cluster_exec = publish_sge_driver_script(
+        local_script, remote_script, host=host_resolved, user=user, password=password
+    )
+    ok = run_sge_script_ssh(
+        host_resolved, user, password, cluster_exec, local_script_path=local_script
+    )
     if not ok:
         log.warning(
             "Remote execution did not complete successfully. Run manually: bash %s",
-            script_path,
+            cluster_exec,
         )
 
 

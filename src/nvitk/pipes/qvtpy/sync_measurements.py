@@ -1,7 +1,7 @@
 """Publish qvtpy stage-6 measurements into ``image_measurements`` (pipeline ``4dflow_v3``).
 
 Scans an ``--output-root`` for subjects with stage-6 CSV outputs and upserts them into
-the DB. Use ``--from-sge`` to SFTP ``loc_measurements.csv`` and
+the DB. Use ``--from-sge`` to fetch ``loc_measurements.csv`` over sshfs and
 ``vessel_hemodynamics.csv`` from the cluster results tree into a temporary local
 directory (removed after publish). ``--from-source`` selects which DataRepo to write
 to (``local`` settings repo vs. the ``sge`` cluster dataset root).
@@ -25,7 +25,7 @@ from nvitk.cluster.remote_transfer import (
     download_remote_file,
     remote_path_exists,
     resolve_cluster_host,
-    sftp_session,
+    cluster_session,
 )
 from nvitk.core.logger import Logger
 from nvitk.pipes.qvtpy import config as cfg
@@ -111,9 +111,9 @@ def _download_stage6_from_sge(
     user: str,
     password: str,
 ) -> list[str]:
-    """SFTP stage-6 CSVs into ``local_temp_root``; return subjects with at least one file."""
+    """Fetch stage-6 CSVs into ``local_temp_root``; return subjects with at least one file."""
     ready: list[str] = []
-    with sftp_session(host=host, user=user, password=password) as (_client, sftp):
+    with cluster_session(host=host, user=user, password=password) as session:
         for subject in subjects:
             remote_dir = _stage6_dir(cluster_results_root, subject)
             local_dir = _stage6_dir(local_temp_root, subject)
@@ -121,12 +121,12 @@ def _download_stage6_from_sge(
             got_any = False
             for name in _STAGE6_FILES:
                 remote_s = str(remote_dir / name)
-                if not remote_path_exists(sftp, remote_s):
+                if not remote_path_exists(session, remote_s):
                     log.warning("[%s] remote missing: %s", subject, remote_s)
                     continue
                 local_path = local_dir / name
                 try:
-                    download_remote_file(sftp, remote_s, local_path)
+                    download_remote_file(session, remote_s, local_path)
                     got_any = True
                     log.info("Downloaded %s -> %s", remote_s, local_path)
                 except OSError as exc:
@@ -147,9 +147,9 @@ def _download_stage6_and_stage7_from_sge(
     user: str,
     password: str,
 ) -> list[str]:
-    """SFTP stage-6 CSVs and stage-7 Excel into ``local_temp_root``."""
+    """Fetch stage-6 CSVs and stage-7 Excel into ``local_temp_root``."""
     ready: list[str] = []
-    with sftp_session(host=host, user=user, password=password) as (_client, sftp):
+    with cluster_session(host=host, user=user, password=password) as session:
         for subject in subjects:
             got_any = False
             remote_s6 = _stage6_dir(cluster_results_root, subject)
@@ -157,11 +157,11 @@ def _download_stage6_and_stage7_from_sge(
             local_s6.mkdir(parents=True, exist_ok=True)
             for name in _STAGE6_FILES:
                 remote_s = str(remote_s6 / name)
-                if not remote_path_exists(sftp, remote_s):
+                if not remote_path_exists(session, remote_s):
                     continue
                 local_path = local_s6 / name
                 try:
-                    download_remote_file(sftp, remote_s, local_path)
+                    download_remote_file(session, remote_s, local_path)
                     got_any = True
                     log.info("Downloaded %s -> %s", remote_s, local_path)
                 except OSError as exc:
@@ -172,11 +172,11 @@ def _download_stage6_and_stage7_from_sge(
             local_s7.mkdir(parents=True, exist_ok=True)
             for name in _STAGE7_FILES:
                 remote_s = str(remote_s7 / name)
-                if not remote_path_exists(sftp, remote_s):
+                if not remote_path_exists(session, remote_s):
                     continue
                 local_path = local_s7 / name
                 try:
-                    download_remote_file(sftp, remote_s, local_path)
+                    download_remote_file(session, remote_s, local_path)
                     got_any = True
                     log.info("Downloaded %s -> %s", remote_s, local_path)
                 except OSError as exc:
@@ -214,7 +214,7 @@ def _download_stage6_and_stage7_from_sge(
     is_flag=True,
     default=False,
     help=(
-        "SFTP stage6 CSVs from the cluster results tree into a temporary local "
+        "Fetch stage6 CSVs from the cluster results tree into a temporary local "
         "directory, publish, then delete the temp files."
     ),
 )
@@ -238,7 +238,7 @@ def main(
     build_sqlite_index: bool,
 ) -> None:
     """CLI entry point (``qvtpy-sync-measurements``): publish stage-6 measurement CSVs (optionally
-    fetched from the cluster over SFTP first) into ``image_measurements``."""
+    fetched from the cluster over sshfs first) into ``image_measurements``."""
     Logger()
     subject_list = [s.strip() for s in subjects.split(",") if s.strip()]
     temp_root: Path | None = None
@@ -263,7 +263,7 @@ def main(
                 remote_user=remote_user,
             )
             temp_root = Path(tempfile.mkdtemp(prefix="nvitk_qvtpy_sync_sge_"))
-            log.info("SFTP staging directory: %s", temp_root)
+            log.info("Cluster staging directory: %s", temp_root)
             subject_list = _download_stage6_from_sge(
                 subjects=subject_list,
                 cluster_results_root=remote_results,
@@ -306,7 +306,7 @@ def main(
     finally:
         if temp_root is not None and temp_root.exists():
             shutil.rmtree(temp_root, ignore_errors=True)
-            log.info("Removed temporary SFTP staging directory %s", temp_root)
+            log.info("Removed temporary cluster staging directory %s", temp_root)
 
 
 __all__ = ["main"]

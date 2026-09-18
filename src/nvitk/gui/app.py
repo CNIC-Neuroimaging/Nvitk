@@ -473,7 +473,7 @@ def run_app() -> None:
     tabs.addTab(_scrollable_tab(xnat_panel), data_tab_label)
     tabs.addTab(_scrollable_tab(qc_panel), "QC")
     tabs.addTab(_scrollable_tab(statmodels_panel), "Statmodels")
-    tabs.addTab(_scrollable_tab(image_props_panel), "Image properties")
+    image_props_tab_index = tabs.addTab(_scrollable_tab(image_props_panel), "Image properties")
     dicom_tab_index = tabs.addTab(_scrollable_tab(dicom_tags_panel), "DICOM tags")
     tabs.addTab(_scrollable_tab(mesh_panel.native), "Mesh")
     tabs.addTab(_scrollable_tab(layers_tab), "Layers")
@@ -517,15 +517,22 @@ def run_app() -> None:
 
     _refresh_layer_list(layer_list, viewer, app_state)
 
-    def _refresh_dicom_tags_tab() -> None:
+    def _refresh_dicom_tags_tab(force: bool = False) -> None:
         """Update the DICOM tags tab for the active layer, enabling the tab only when it has tags."""
         layer = (
             viewer.layers.selection.active
             if viewer.layers
             else None
         )
-        dicom_tags_panel.refresh_from_layer(layer)
         has_tags = layer_has_dicom_tags(layer)
+        # The enabled state is a visible property of the tab bar, so it is kept
+        # current even while the tab's own contents wait to be looked at.
+        if not force and tabs.currentIndex() != dicom_tab_index:
+            _stale_tabs.add(dicom_tab_index)
+            tabs.setTabEnabled(dicom_tab_index, has_tags)
+            return
+        _stale_tabs.discard(dicom_tab_index)
+        dicom_tags_panel.refresh_from_layer(layer)
         tabs.setTabEnabled(dicom_tab_index, has_tags)
         if has_tags:
             tabs.setTabToolTip(
@@ -533,10 +540,31 @@ def run_app() -> None:
                 "DICOM metadata for the active layer",
             )
 
-    def _refresh_image_properties_tab() -> None:
+    # Tabs whose contents are rebuilt from the active layer. Refreshing one that
+    # nobody is looking at is pure latency on every click in the layer list, so
+    # a hidden tab only records that it is out of date and catches up when it is
+    # next selected. The panels themselves still refresh on demand, so direct
+    # callers (and tests) are unaffected.
+    _stale_tabs: set[int] = set()
+
+    def _refresh_image_properties_tab(force: bool = False) -> None:
         """Update the Image properties tab for the active layer."""
+        if not force and tabs.currentIndex() != image_props_tab_index:
+            _stale_tabs.add(image_props_tab_index)
+            return
+        _stale_tabs.discard(image_props_tab_index)
         layer = viewer.layers.selection.active if viewer.layers else None
         image_props_panel.refresh_from_layer(layer)
+
+    def _on_tab_changed(index: int) -> None:
+        """Bring a tab up to date the moment it becomes the one on screen."""
+        if index in _stale_tabs:
+            if index == image_props_tab_index:
+                _refresh_image_properties_tab(force=True)
+            elif index == dicom_tab_index:
+                _refresh_dicom_tags_tab(force=True)
+
+    tabs.currentChanged.connect(_on_tab_changed)
 
     @viewer.layers.selection.events.active.connect
     def _on_active_layer_changed(_event: Any) -> None:
