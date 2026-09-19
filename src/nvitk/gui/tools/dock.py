@@ -277,9 +277,9 @@ def build_tools_dock(
             if picked:
                 return picked
         if layer is not None:
-            from nvitk.gui.labels.visibility import label_source_data, unique_layer_labels
+            from nvitk.gui.labels.visibility import layer_label_ids
 
-            return unique_layer_labels(label_source_data(layer))
+            return layer_label_ids(layer)
         return []
 
     def _get_totalseg_roi() -> list[str] | None:

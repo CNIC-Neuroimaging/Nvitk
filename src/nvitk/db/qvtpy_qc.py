@@ -180,20 +180,29 @@ def subject_qc_status_summary(
     repo = resolve_repo(repo)
     if not repo.catalog.table_exists("image_measurements"):
         return {}
+    qc_vars: set[str] = set()
+    for vars_ in QC_METRIC_VARIABLES.values():
+        qc_vars.update(vars_)
+    # Filter in SQL, not in pandas. The GUI calls this every time the QC tab is
+    # opened, and pulling every measurement row across to discard all but the QC
+    # variables was ~2 s of a 2.1 s load on a real dataset.
+    filters: dict[str, object] = {"pipeline_id": str(pipeline_id)}
+    if qc_vars:
+        filters["variable_id"] = sorted(qc_vars)
     try:
         df = repo.get(
             "image_measurements",
             cohort_id=False,
             columns=["subject_uid", "pipeline_id", "variable_id", "qc_status"],
+            filters=filters,
         )
     except Exception:
         return {}
     if df.empty:
         return {}
+    # Re-applied on the returned rows: the SQL comparison is on the stored type,
+    # while these are the string comparisons this function has always promised.
     df = df[df["pipeline_id"].astype(str) == str(pipeline_id)]
-    qc_vars = set()
-    for vars_ in QC_METRIC_VARIABLES.values():
-        qc_vars.update(vars_)
     if qc_vars:
         df = df[df["variable_id"].astype(str).isin(qc_vars)]
     if df.empty:

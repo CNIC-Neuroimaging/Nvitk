@@ -51,6 +51,83 @@ def unique_layer_labels(data: np.ndarray, *, max_labels: int = 500) -> list[int]
     return labels
 
 
+#: Attribute holding a layer's cached label ids, and the flag saying we have
+#: already subscribed to that layer's data event to clear them.
+_IDS_ATTR = "_nvitk_label_ids"
+_HOOK_ATTR = "_nvitk_label_ids_hooked"
+
+
+def _hook_label_id_cache(layer: Any) -> None:
+    """Clear *layer*'s cached ids whenever its voxels change.
+
+    Through a weak reference: the emitter outlives nothing here, but a callback
+    holding the layer would keep a discarded volume alive for the session.
+    """
+    if getattr(layer, _HOOK_ATTR, False):
+        return
+    events = getattr(layer, "events", None)
+    # Both signals: an assignment to ``layer.data`` emits ``data``, while a
+    # brush stroke emits ``paint`` and nothing else. Listening only for the
+    # first left the ids from before the stroke in place.
+    emitters = [e for e in (getattr(events, "data", None), getattr(events, "paint", None))
+                if e is not None]
+    if not emitters:
+        return
+    import weakref
+
+    ref = weakref.ref(layer)
+
+    def _clear(*_args: Any) -> None:
+        target = ref()
+        if target is not None:
+            try:
+                setattr(target, _IDS_ATTR, None)
+            except Exception:  # noqa: BLE001 — a layer that rejects attributes
+                pass          # simply recomputes, which is only slower.
+
+    try:
+        for emitter in emitters:
+            emitter.connect(_clear)
+        setattr(layer, _HOOK_ATTR, True)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def invalidate_label_ids(layer: Any) -> None:
+    """Forget *layer*'s cached label ids.
+
+    For callers that already know the voxels changed. The cache also clears
+    itself from the layer's own ``data``/``paint`` events, but Napari does not
+    order its listeners, so a panel rebuilding on the same event could otherwise
+    read the ids from before the edit.
+    """
+    try:
+        setattr(layer, _IDS_ATTR, None)
+    except Exception:  # noqa: BLE001 — a layer that rejects attributes never cached
+        pass
+
+
+def layer_label_ids(layer: Any, *, max_labels: int = 500) -> list[int]:
+    """Distinct non-zero label ids in *layer*, cached until its voxels change.
+
+    The uncached form is a full ``np.unique`` over the volume — 75 ms on a
+    151 MB mask — and it was being run again for every layer click, every
+    visibility toggle and every panel that wanted to know what was in the mask.
+    The ids cannot change without the data changing, and the data change clears
+    the cache, so the answer is the same one the scan would have given.
+    """
+    cached = getattr(layer, _IDS_ATTR, None)
+    if cached is not None:
+        return list(cached)
+    ids = unique_layer_labels(label_source_data(layer), max_labels=max_labels)
+    try:
+        setattr(layer, _IDS_ATTR, list(ids))
+        _hook_label_id_cache(layer)
+    except Exception:  # noqa: BLE001 — caching is an optimisation, not a contract
+        pass
+    return ids
+
+
 def _layer_metadata(layer: Any) -> dict[str, Any]:
     """A copy of *layer*'s metadata dict, or ``{}`` if it has none / isn't a dict."""
     meta = getattr(layer, "metadata", None)
@@ -152,7 +229,7 @@ def infer_target_mode(
         return "raw"
 
     ids = [int(x) for x in (label_ids or [])]
-    all_ids = unique_layer_labels(label_source_data(layer))
+    all_ids = layer_label_ids(layer)
     if not all_ids:
         return "raw"
 
@@ -313,8 +390,7 @@ def _apply_labels_color_visibility(layer: Any, selected_ids: list[int]) -> None:
         _apply_image_data_visibility(layer, selected_ids)
         return
 
-    src = label_source_data(layer)
-    all_ids = unique_layer_labels(src)
+    all_ids = layer_label_ids(layer)
     selected = set(int(x) for x in selected_ids)
     meta = _layer_metadata(layer)
     backup = meta.get(_NVITK_COLOR_BACKUP_KEY)
@@ -406,7 +482,7 @@ def apply_label_colormap(
     if not supports_per_label_color(layer):
         raise TypeError("Per-label colours require a Napari Labels layer.")
 
-    all_ids = unique_layer_labels(label_source_data(layer))
+    all_ids = layer_label_ids(layer)
     if not all_ids:
         return 0
 
@@ -511,7 +587,7 @@ def set_label_color(
     meta = _layer_metadata(layer)
     backup = meta.get(_NVITK_COLOR_BACKUP_KEY)
     if backup is None:
-        all_ids = unique_layer_labels(label_source_data(layer))
+        all_ids = layer_label_ids(layer)
         backup = _snapshot_label_colors(layer, all_ids)
     backup = {int(k): _normalize_rgba(v) for k, v in dict(backup).items()}
     backup[lid] = color
@@ -670,6 +746,8 @@ __all__ = [
     "is_label_like_layer",
     "label_colormap_colors",
     "label_source_data",
+    "invalidate_label_ids",
+    "layer_label_ids",
     "layer_in_viewer",
     "restore_label_visibility",
     "stored_label_colormap",

@@ -292,11 +292,11 @@ def multilabel_selection(
     if mode == "label":
         ids = [int(x) for x in (label_ids or [])]
     elif mode == "all_labels":
-        from nvitk.gui.labels.visibility import label_source_data
+        from nvitk.gui.labels.visibility import layer_label_ids
 
-        ids = [int(x) for x in (label_ids or [])] or _unique_labels(
-            as_backend_array(label_source_data(layer))
-        )
+        # Through the layer's cache: this is a full np.unique over the mask
+        # (~75 ms on a 151 MB label map) and it runs on every multi-label tool.
+        ids = [int(x) for x in (label_ids or [])] or layer_label_ids(layer)
     else:
         return []
     return ids if len(ids) > 1 else []
@@ -385,7 +385,13 @@ def prepare_layer_data(
     if mode == "label":
         if not label_ids:
             raise ValueError("Label mode requires one or more label ids.")
-        mask = np.isin(arr, _label_ids_array(label_ids))
+        # ``np.isin`` builds a sorted lookup over the whole volume; for the
+        # single-label case that every per-label sweep takes, an equality test
+        # is the same answer for a fraction of the work.
+        if len(label_ids) == 1:
+            mask = arr == int(label_ids[0])
+        else:
+            mask = np.isin(arr, _label_ids_array(label_ids))
         if not mask.any():
             raise ValueError(f"No voxels found for label id(s): {label_ids}")
         return mask.astype(np.uint8), f"label_{'_'.join(str(i) for i in label_ids)}"

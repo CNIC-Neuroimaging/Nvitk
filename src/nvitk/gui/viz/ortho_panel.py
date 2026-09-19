@@ -54,7 +54,8 @@ from nvitk.gui.labels.visibility import (
     get_label_color,
     is_label_like_layer,
     label_source_data,
-    unique_layer_labels,
+    invalidate_label_ids,
+    layer_label_ids,
 )
 
 #: Axis codes → the plane you are looking at when you slice along that axis.
@@ -100,7 +101,18 @@ _HANDLE_TOL_PX = 10.0
 _HANDLE_MIN_FRACTION = 0.55
 
 #: Largest volume for which a per-axis contiguous copy is worth its memory.
-_SLICE_CACHE_BUDGET = 512 * 1024 * 1024
+#:
+#: Measured, rather than guessed. On a 419 MB volume a strided read of the last
+#: axis takes 0.94 ms against 0.04 ms from a reordered copy — a real speedup, but
+#: one that costs 458 ms to build and only repays after ~500 slices on that axis,
+#: while 0.94 ms was already far inside a frame. The old 512 MB ceiling let every
+#: layer reorder itself: five layers of a 241 MB study built 2.4 GB of copies on
+#: panel open. Small volumes still take the fast path, where it is nearly free.
+_SLICE_CACHE_BUDGET = 64 * 1024 * 1024
+
+#: Total reordered bytes allowed across every layer the panel draws. The
+#: per-array limit above says nothing about how many arrays there are.
+_SLICE_CACHE_TOTAL = 256 * 1024 * 1024
 
 
 #: Anatomical opposite of each axis code.
@@ -358,6 +370,9 @@ class RenderSource:
     #: recomputing it on every style event was the single largest cost of
     #: clicking a layer in the list.
     label_ids: list[int] | None = None
+    #: ``(max_id + 1, 4)`` uint8 lookup built once per style refresh, so a slice
+    #: render is a single fancy-index instead of a per-slice unique + rebuild.
+    label_table: np.ndarray | None = None
 
 
 #: The only layer types the panel draws. Shapes, Points, Vectors, Surfaces and
@@ -365,6 +380,27 @@ class RenderSource:
 #: and cut outlines would otherwise be composited over the very anatomy they are
 #: annotating, and hide it.
 DRAWN_LAYER_TYPES: tuple[str, ...] = ("Image", "Labels")
+
+
+def _grid_key(layer: Any) -> tuple:
+    """The sampling grid a layer sits on: shape plus world placement.
+
+    Two layers with the same key produce the same slices at the same crosshair,
+    so swapping which one is *bound* cannot change a single pixel.
+    """
+    from nvitk.gui.core.spatial import layer_affine
+
+    shape = _layer_shape(layer)
+    affine = layer_affine(layer)
+    raw_scale = getattr(layer, "scale", None)
+    # Explicitly against None: a layer's scale is a NumPy array, and ``or`` on
+    # one raises rather than falling back.
+    scale = () if raw_scale is None else tuple(float(s) for s in raw_scale)
+    return (
+        None if shape is None else tuple(int(v) for v in shape[-3:]),
+        None if affine is None else affine.tobytes(),
+        scale,
+    )
 
 
 def _layer_shape(layer: Any) -> tuple[int, ...] | None:
@@ -492,32 +528,66 @@ class SliceCache:
     which is exactly why scrolling axial felt heavier than the others. Reordering
     that axis into its own contiguous copy makes every axis equally cheap.
 
-    The copy is built lazily, on the first scroll of that axis, and only when it
-    fits :attr:`budget_bytes` — a large volume keeps the strided read rather than
-    silently doubling the session's memory.
+    The copy is built lazily, on the first scroll of that axis, and only for the
+    *last* axis: that is the one whose slice is a gather with a stride between
+    every element. A middle axis still yields contiguous rows, and measures no
+    faster reordered than read directly — so reordering it was pure memory.
+
+    Panels share a *pool* so that the ceiling is on the session rather than on
+    each array: the per-array limit alone said nothing about how many arrays
+    there would be, and one study with five layers open built gigabytes.
     """
 
-    def __init__(self, data: np.ndarray, *, budget_bytes: int = _SLICE_CACHE_BUDGET) -> None:
+    def __init__(
+        self,
+        data: np.ndarray,
+        *,
+        budget_bytes: int = _SLICE_CACHE_BUDGET,
+        pool: dict[str, int] | None = None,
+    ) -> None:
         """Wrap *data*, reordering nothing until an axis is actually asked for."""
         self._data = data
         self._budget = int(budget_bytes)
+        self._pool = pool
         self._reordered: dict[int, np.ndarray | None] = {}
+
+    def _worth_reordering(self, axis: int, arr: np.ndarray) -> bool:
+        """Whether a contiguous copy of *axis* would earn its memory."""
+        # Axis 0 of a C-ordered array is already contiguous; nothing to gain.
+        if axis == 0 and bool(arr.flags.c_contiguous):
+            return False
+        # Only the innermost axis is genuinely slow to slice.
+        if axis != arr.ndim - 1:
+            return False
+        if arr.nbytes > self._budget:
+            return False
+        if self._pool is not None:
+            if self._pool["used"] + arr.nbytes > self._pool["cap"]:
+                return False
+        return True
 
     def _fast_axis(self, axis: int) -> np.ndarray | None:
         """A contiguous copy with *axis* first, or ``None`` if it is not worth making."""
         if axis in self._reordered:
             return self._reordered[axis]
         arr = self._data
-        # Axis 0 of a C-ordered array is already contiguous; nothing to gain.
-        already_fast = axis == 0 and bool(arr.flags.c_contiguous)
-        if already_fast or arr.nbytes > self._budget:
+        if not self._worth_reordering(axis, arr):
             self._reordered[axis] = None
             return None
         try:
             self._reordered[axis] = np.ascontiguousarray(np.moveaxis(arr, axis, 0))
+            if self._pool is not None:
+                self._pool["used"] += int(arr.nbytes)
         except (MemoryError, ValueError):
             self._reordered[axis] = None
         return self._reordered[axis]
+
+    def release(self) -> None:
+        """Give the reordered copies back to the pool."""
+        for arr in self._reordered.values():
+            if arr is not None and self._pool is not None:
+                self._pool["used"] = max(self._pool["used"] - int(arr.nbytes), 0)
+        self._reordered.clear()
 
     def slice(self, axis: int, index: int) -> np.ndarray:
         """The 2D slice at *index* along *axis*."""
@@ -656,9 +726,15 @@ def image_rgba(
     lo, hi = contrast if contrast is not None else volume_contrast(arr)
     if hi <= lo:
         return np.zeros((*arr.shape, 4), dtype=np.uint8)
-    norm = np.clip((np.nan_to_num(arr, nan=lo) - lo) / (hi - lo), 0.0, 1.0)
-    index = (norm * (table.shape[0] - 1)).astype(np.uint16)
-    return table[index]
+    # Windowed in place. Each of ``nan_to_num``, the subtraction, the division
+    # and the clip used to allocate its own copy of the slice; on a 512x512
+    # float64 CT that is five megabytes of churn per view per redraw.
+    scale = float(table.shape[0] - 1) / (hi - lo)
+    norm = np.subtract(arr, lo, dtype=np.float32)
+    np.nan_to_num(norm, copy=False, nan=0.0, posinf=hi - lo, neginf=0.0)
+    np.multiply(norm, scale, out=norm)
+    np.clip(norm, 0.0, float(table.shape[0] - 1), out=norm)
+    return table[norm.astype(np.uint16, copy=False)]
 
 
 def label_rgba_lut(layer: Any, label_ids: list[int]) -> dict[int, np.ndarray]:
@@ -676,18 +752,45 @@ def label_rgba_lut(layer: Any, label_ids: list[int]) -> dict[int, np.ndarray]:
 
 
 def _label_rgba(
-    plane: np.ndarray, layer: Any, lut: dict[int, np.ndarray] | None = None
+    plane: np.ndarray,
+    layer: Any,
+    lut: dict[int, np.ndarray] | None = None,
+    table: np.ndarray | None = None,
 ) -> np.ndarray:
     """Colour a 2D label slice to ``(H, W, 4)`` uint8; background transparent."""
-    arr = np.rint(np.asarray(plane, dtype=np.float64)).astype(np.int64, copy=False)
-    present = [int(v) for v in np.unique(arr) if int(v) != 0]
-    if not present:
+    raw = np.asarray(plane)
+    # An integer label slice is already what the lookup wants. Rounding it
+    # through float64 and back cost two full-size temporaries per view per
+    # redraw for a value that could not have changed.
+    if np.issubdtype(raw.dtype, np.integer):
+        arr = raw
+    else:
+        arr = np.rint(np.asarray(raw, dtype=np.float64)).astype(np.int64, copy=False)
+    if table is None:
+        present = [int(v) for v in np.unique(arr) if int(v) != 0]
+        if not present:
+            return np.zeros((*arr.shape, 4), dtype=np.uint8)
+        table = label_color_table(present, lut if lut is not None else label_rgba_lut(layer, present))
+    if table.shape[0] <= 1:
         return np.zeros((*arr.shape, 4), dtype=np.uint8)
-    colors = lut if lut is not None else label_rgba_lut(layer, present)
-    table = np.zeros((max(present) + 1, 4), dtype=np.uint8)
-    for lid in present:
-        table[lid] = colors.get(lid, np.array([255, 255, 255, 255], dtype=np.uint8))
-    return table[np.clip(arr, 0, table.shape[0] - 1)]
+    idx = np.clip(arr, 0, table.shape[0] - 1)
+    return table[idx]
+
+
+def label_color_table(label_ids: Sequence[int], lut: dict[int, np.ndarray]) -> np.ndarray:
+    """A ``(max_id + 1, 4)`` uint8 lookup table for *label_ids*.
+
+    Built once per layer rather than per slice: it depends only on the ids and
+    their colours, neither of which changes while scrolling.
+    """
+    ids = [int(v) for v in label_ids if int(v) != 0]
+    if not ids:
+        return np.zeros((1, 4), dtype=np.uint8)
+    table = np.zeros((max(ids) + 1, 4), dtype=np.uint8)
+    white = np.array([255, 255, 255, 255], dtype=np.uint8)
+    for lid in ids:
+        table[lid] = lut.get(lid, white)
+    return table
 
 
 def slice_to_rgba(
@@ -701,12 +804,13 @@ def slice_to_rgba(
     table: np.ndarray | None = None,
     lut: dict[int, np.ndarray] | None = None,
     cache: SliceCache | None = None,
+    label_table: np.ndarray | None = None,
 ) -> np.ndarray:
     """One orthogonal slice as ``(H, W, 4)`` uint8, ready to composite."""
     raw = cache.slice(axis, index) if cache is not None else _slice_of(data, axis, index)
     plane = _oriented(raw, axis, view)
     if is_label_like_layer(layer):
-        return _label_rgba(plane, layer, lut)
+        return _label_rgba(plane, layer, lut, label_table)
     if table is None:
         table = colormap_table(layer_colormap(layer), layer_gamma(layer))
     return image_rgba(plane, contrast, table)
@@ -728,24 +832,38 @@ def composite(
         return np.zeros((1, 1, 3), dtype=np.uint8)
     shape = np.asarray(planes[0]).shape[:2]
     out = np.zeros((*shape, 3), dtype=np.float32)
+    # Written in place throughout. Every arithmetic step here used to allocate a
+    # fresh (H, W, 3) float array, so a two-layer composite of a 512x512 slice
+    # churned tens of megabytes per view per redraw for a result of 768 KB.
+    scratch = np.empty((*shape, 3), dtype=np.float32)
+    alpha = np.empty((*shape, 1), dtype=np.float32)
     for plane, blending, opacity in zip(planes, blendings, opacities):
-        src = np.asarray(plane, dtype=np.float32)
+        src = np.asarray(plane)
         if src.shape[:2] != shape:
             continue
         rgb = src[..., :3]
-        alpha = (src[..., 3:4] / 255.0) * float(np.clip(opacity, 0.0, 1.0))
+        np.multiply(src[..., 3:4], float(np.clip(opacity, 0.0, 1.0)) / 255.0, out=alpha,
+                    dtype=np.float32, casting="unsafe")
         mode = str(blending or "translucent")
         if mode == "opaque":
-            out = np.where(alpha > 0, rgb, out)
+            np.copyto(out, rgb, where=alpha > 0, casting="unsafe")
         elif mode == "additive":
-            out = out + rgb * alpha
+            np.multiply(rgb, alpha, out=scratch, dtype=np.float32, casting="unsafe")
+            np.add(out, scratch, out=out)
         elif mode == "minimum":
-            out = np.minimum(out, np.where(alpha > 0, rgb, out))
+            np.copyto(scratch, out)
+            np.copyto(scratch, rgb, where=alpha > 0, casting="unsafe")
+            np.minimum(out, scratch, out=out)
         elif mode == "multiplicative":
-            out = out * (rgb / 255.0)
+            np.multiply(rgb, 1.0 / 255.0, out=scratch, dtype=np.float32, casting="unsafe")
+            np.multiply(out, scratch, out=out)
         else:  # translucent, translucent_no_depth
-            out = out * (1.0 - alpha) + rgb * alpha
-    return np.clip(out, 0, 255).astype(np.uint8)
+            np.multiply(rgb, alpha, out=scratch, dtype=np.float32, casting="unsafe")
+            np.subtract(1.0, alpha, out=alpha)
+            np.multiply(out, alpha, out=out)
+            np.add(out, scratch, out=out)
+    np.clip(out, 0, 255, out=out)
+    return out.astype(np.uint8, copy=False)
 
 
 def _oriented(plane: np.ndarray, axis: int, view: AxisView | None) -> np.ndarray:
@@ -1393,6 +1511,19 @@ def oblique_box_corners(
     ]).astype(float)
 
 
+def _same_corners(shapes_layer: Any, corners: Any) -> bool:
+    """Whether *shapes_layer* already outlines exactly *corners*."""
+    try:
+        current = shapes_layer.data
+        if len(current) != 1:
+            return False
+        old = np.asarray(current[0], dtype=float)
+        new = np.asarray(corners, dtype=float)
+        return old.shape == new.shape and bool(np.array_equal(old, new))
+    except Exception:  # noqa: BLE001 — an unreadable layer is simply rewritten
+        return False
+
+
 def sync_ortho_boxes(
     viewer: Any,
     layer: Any,
@@ -1467,7 +1598,12 @@ def sync_ortho_boxes(
             )
             existing.editable = False
         else:
-            existing.data = [corners]
+            # Only write when the outline actually moved. Assigning ``data`` on a
+            # Shapes layer runs Napari's whole event cascade — re-validating the
+            # model, recomputing the world extent — for ~11 ms, and dragging one
+            # crosshair leaves the other two planes exactly where they were.
+            if not _same_corners(existing, corners):
+                existing.data = [corners]
         out.append(existing)
 
     if previously_active is not None:
@@ -1593,6 +1729,12 @@ class OrthoViewerPanel(QWidget):
         self._subs: list[tuple[Any, Any]] = []
         #: Volumes resampled onto the active grid, keyed by layer and grid.
         self._resample_cache: dict[tuple, np.ndarray] = {}
+        #: Reordered-slice memory shared by every layer this panel draws, so the
+        #: ceiling is on the panel rather than on each layer separately.
+        self._slice_pool: dict[str, int] = {"used": 0, "cap": _SLICE_CACHE_TOTAL}
+        #: Layers whose voxels changed, waiting for the next event-loop turn.
+        self._dirty_layers: list[Any] = []
+        self._dirty_all = False
         #: Layers currently carrying a see-inside cut this panel applied.
         self._clipped: list[Any] = []
         #: Guards the rebuild against the layer events its own overlays raise.
@@ -1624,6 +1766,13 @@ class OrthoViewerPanel(QWidget):
 
         # Adding or moving layers arrives in bursts — a tool that drops four
         # overlays on the canvas fires four inserts. Rebuild once when they stop.
+        # Zero-interval: the point is not to wait but to land *after* the write
+        # that the event announced, and to fold a drag's many events into one.
+        self._data_timer = QTimer(self)
+        self._data_timer.setSingleShot(True)
+        self._data_timer.setInterval(0)
+        self._data_timer.timeout.connect(self._flush_dirty_data)
+
         self._rebuild_timer = QTimer(self)
         self._rebuild_timer.setSingleShot(True)
         self._rebuild_timer.setInterval(_REBUILD_SYNC_MS)
@@ -1755,23 +1904,44 @@ class OrthoViewerPanel(QWidget):
         # Re-binding the layer already shown (a refresh, a selection round-trip)
         # keeps the crosshair where the user put it.
         same_layer = layer is self._layer and self._data is not None
+        # Binding a *different* layer that sits on the same grid changes nothing
+        # anyone can see: the composite is drawn from every visible layer, not
+        # from the bound one, and the bound layer only supplies the geometry —
+        # which is, by definition, identical. Clicking between a CT and its
+        # segmentation was re-slicing and re-compositing all three views for a
+        # pixel-for-pixel identical result, ~60 ms of it on a whole-body study.
+        same_grid = (
+            not same_layer
+            and self._layer is not None
+            and self._data is not None
+            and _grid_key(layer) == _grid_key(self._layer)
+        )
         self._layer = layer
         self._data = to_numpy(
             label_source_data(layer) if is_label_like_layer(layer) else layer.data
         )
         self._views = _axis_views(layer)
-        self._rendered = {}
+        # Keep what stays valid. On the same grid the rendered slices are the
+        # ones already on screen, so clearing them would force a redraw that
+        # reproduces them exactly — and resetting the crosshair below would
+        # leave the panel claiming a position it is not showing.
+        if not same_grid:
+            self._rendered = {}
         # Windowed once for the volume: per-slice percentiles both cost more and
         # make the same tissue change brightness as you scroll.
         # Per-layer colour state lives on each RenderSource now; this layer is
         # kept only as the geometry anchor everything else is drawn against.
-        if not same_layer:
-            self._resample_cache.clear()
+        # The resample cache is deliberately *not* cleared here. Its key already
+        # carries the reference grid, so an entry for another grid can never be
+        # returned by mistake — and throwing it away meant that switching to a
+        # layer on a different grid and back re-ran a whole-volume affine
+        # transform each way, seconds at a time on a large study. The budget
+        # below evicts instead.
         spacing = layer_spacing(layer)
         self._spacing = tuple(float(s) for s in (spacing or (1.0, 1.0, 1.0)))[:3]
         if len(self._spacing) < 3:
             self._spacing = (1.0, 1.0, 1.0)
-        if not same_layer or len(self._position) != self._data.ndim:
+        if not (same_layer or same_grid) or len(self._position) != self._data.ndim:
             self._position = [int(s) // 2 for s in self._data.shape]
         else:
             self._position = [
@@ -1779,7 +1949,7 @@ class OrthoViewerPanel(QWidget):
             ]
 
         self._base_frames = [base_frame(view, self._spacing) for view in self._views]
-        if not same_layer or len(self._frames) != len(self._base_frames):
+        if not (same_layer or same_grid) or len(self._frames) != len(self._base_frames):
             self._frames = list(self._base_frames)
 
         self._clip_axis.blockSignals(True)
@@ -1788,11 +1958,14 @@ class OrthoViewerPanel(QWidget):
             self._clip_axis.addItem(view.title, view.axis)
         self._clip_axis.blockSignals(False)
 
-        self._rebuild_sources()
-
         name = getattr(layer, "name", "layer")
         shape = " x ".join(str(int(s)) for s in self._data.shape)
         self._status.setText(f"{name} - {shape} voxels")
+        if same_grid:
+            # Sources, crosshair and rendered slices all still stand.
+            self._update_composite_label()
+            return
+        self._rebuild_sources()
         self._redraw(force=True)
 
     # ── render sources ───────────────────────────────────────────────────────
@@ -1835,8 +2008,8 @@ class OrthoViewerPanel(QWidget):
         hit = self._resample_cache.get(key)
         if hit is not None:
             return hit, True
-        budget = sum(int(v.nbytes) for v in self._resample_cache.values())
-        if budget + int(self._data.nbytes) > _RESAMPLE_BUDGET_BYTES:
+        self._evict_resamples(int(self._data.nbytes))
+        if int(self._data.nbytes) > _RESAMPLE_BUDGET_BYTES:
             self._status.setText(
                 f"“{getattr(layer, 'name', '?')}” is on another grid and there is no "
                 "room left to resample it; it is not drawn."
@@ -1853,6 +2026,25 @@ class OrthoViewerPanel(QWidget):
         self._resample_cache[key] = out
         return out, True
 
+    def _evict_resamples(self, incoming_bytes: int) -> None:
+        """Make room for *incoming_bytes*, oldest entry first.
+
+        Entries for the grid currently on screen are spared until nothing else
+        is left: those are the ones about to be drawn, and dropping them would
+        mean resampling the same volumes again on the very next paint.
+        """
+        reference = self._reference_key()
+        used = sum(int(v.nbytes) for v in self._resample_cache.values())
+        if used + incoming_bytes <= _RESAMPLE_BUDGET_BYTES:
+            return
+        for spare_current in (True, False):
+            for key in list(self._resample_cache):
+                if used + incoming_bytes <= _RESAMPLE_BUDGET_BYTES:
+                    return
+                if spare_current and key[1] == reference:
+                    continue
+                used -= int(self._resample_cache.pop(key).nbytes)
+
     def _source_for(self, layer: Any) -> RenderSource | None:
         """Build the draw-time description of *layer*, or ``None`` if it cannot be."""
         raw = _layer_volume(layer)
@@ -1867,7 +2059,7 @@ class OrthoViewerPanel(QWidget):
         source = RenderSource(
             layer=layer,
             data=data,
-            cache=SliceCache(data),
+            cache=SliceCache(data, pool=self._slice_pool),
             is_label=is_label,
             opacity=float(getattr(layer, "opacity", 1.0) or 1.0),
             blending=str(getattr(layer, "blending", "translucent")),
@@ -1885,8 +2077,14 @@ class OrthoViewerPanel(QWidget):
         source.blending = str(getattr(layer, "blending", "translucent"))
         if source.is_label:
             if source.label_ids is None:
-                source.label_ids = unique_layer_labels(source.data)
+                # Asked of the *layer*, not of ``source.data``: that cache
+                # survives this source being rebuilt (hiding and re-showing a
+                # layer used to rescan the whole volume), and a nearest-neighbour
+                # resample can only ever contain a subset of the layer's ids, so
+                # the LUT it builds still covers everything that can be drawn.
+                source.label_ids = layer_label_ids(layer)
             source.lut = label_rgba_lut(layer, source.label_ids)
+            source.label_table = label_color_table(source.label_ids, source.lut)
             source.table = None
             source.contrast = None
         else:
@@ -1916,6 +2114,11 @@ class OrthoViewerPanel(QWidget):
                 self._refresh_style(source)
                 cache[id(layer)] = source
                 sources.append(source)
+        # Hand back the reordered copies of anything no longer drawn, or the pool
+        # stays full of layers the user has hidden or removed.
+        for layer_id, old_source in self._source_cache.items():
+            if cache.get(layer_id) is not old_source and old_source.cache is not None:
+                old_source.cache.release()
         self._source_cache = cache
         self._source_ref = reference
         self._sources = sources
@@ -1980,7 +2183,16 @@ class OrthoViewerPanel(QWidget):
                 emitter = getattr(events, name, None)
                 if emitter is not None:
                     self._connect(emitter, self._on_style_changed)
-            for name in ("data", "set_data"):
+            # ``data`` (the array was replaced) and ``paint`` (a brush stroke),
+            # but deliberately **not** ``set_data``. Despite the name, Napari
+            # emits set_data from ``Layer._refresh_sync(data_displayed=True)`` —
+            # every slice refresh, so once per scroll of its own canvas. Acting
+            # on it rebuilt every render source and redrew all three views on
+            # each notch of the main viewer's scrollbar, which on a whole-body
+            # CT made the entire GUI feel broken from the moment this panel was
+            # opened. Those two events cover every real edit: a brush stroke
+            # fires paint, an assignment fires data, a scroll fires neither.
+            for name in ("data", "paint"):
                 emitter = getattr(events, name, None)
                 if emitter is not None:
                     # Bound to the layer: the handler has to know *whose* cached
@@ -2001,19 +2213,47 @@ class OrthoViewerPanel(QWidget):
         self._style_timer.start()
 
     def _on_layer_data_changed(self, _event: Any = None, *, layer: Any = None) -> None:
-        """A layer's voxels changed: its cached description is stale.
+        """Queue *layer*'s caches for invalidation on the next event-loop turn.
 
-        Dropping it from the source cache is what makes the rebuild real.
+        Deferred, not immediate, because ``paint`` is emitted *before* the
+        voxels are written: Napari's ``Labels.data_setitem`` saves the undo atom
+        (which fires the event) and only then assigns into the array. Acting on
+        it straight away re-read the volume as it was before the stroke and
+        cached that. One turn later the write has landed. A drag emits an event
+        per mouse move, so this coalesces them too.
+        """
+        if layer is not None:
+            self._dirty_layers.append(layer)
+        else:
+            self._dirty_all = True
+        self._data_timer.start()
+
+    def _flush_dirty_data(self) -> None:
+        """Drop the cached descriptions of every layer whose voxels changed.
+
+        Dropping them from the source cache is what makes the rebuild real.
         Without this, ``_rebuild_sources`` finds the layer by ``id`` and reuses
         the old ``RenderSource`` wholesale, so replacing ``layer.data`` left the
         panel drawing the previous volume, and an edit that introduced a new
         label id drew it with no colour of its own.
         """
-        self._resample_cache.clear()
-        if layer is None:
+        dirty, self._dirty_layers = self._dirty_layers, []
+        all_dirty, self._dirty_all = self._dirty_all, False
+        if not dirty and not all_dirty:
+            return
+        if all_dirty:
+            self._resample_cache.clear()
             self._source_cache.clear()
         else:
-            self._source_cache.pop(id(layer), None)
+            for layer in dirty:
+                # Explicitly, not by waiting for the shared cache's own
+                # listener: Napari does not order event handlers, so the
+                # rebuild below could otherwise re-read the ids from before
+                # this edit.
+                invalidate_label_ids(layer)
+                for key in [k for k in self._resample_cache if k[0] == id(layer)]:
+                    self._resample_cache.pop(key, None)
+                self._source_cache.pop(id(layer), None)
         self._rebuild_sources()
 
     def _on_layers_renamed(self, _event: Any = None) -> None:
@@ -2086,7 +2326,7 @@ class OrthoViewerPanel(QWidget):
                 rgba = slice_to_rgba(
                     source.layer, source.data, view.axis, index, view,
                     contrast=source.contrast, table=source.table, lut=source.lut,
-                    cache=source.cache,
+                    cache=source.cache, label_table=source.label_table,
                 )
             planes.append(rgba)
             blendings.append(source.blending)

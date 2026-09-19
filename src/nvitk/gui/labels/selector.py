@@ -40,7 +40,7 @@ from nvitk.gui.labels.visibility import (
     stored_label_colormap,
     stored_visible_ids,
     supports_per_label_color,
-    unique_layer_labels,
+    layer_label_ids,
 )
 
 LABEL_SELECTOR_SCROLL_MIN = 80
@@ -354,7 +354,7 @@ class LabelSelectorWidget(QGroupBox):
             return
 
         schema = get_schema(self._schema_key)
-        layer_ids = unique_layer_labels(label_source_data(layer))
+        layer_ids = layer_label_ids(layer)
         self._layer_ids = list(layer_ids)
         if self._show_full.isChecked() and schema and schema.id_to_name:
             ids = sorted(set(schema.id_to_name.keys()) | set(layer_ids))
