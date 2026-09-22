@@ -733,7 +733,14 @@ def bin_interval_labels(cut_points: Sequence[float], *, right: bool = True) -> l
     return out
 
 
-def suggest_cut_points(series: pd.Series, *, method: str, n_bins: int = 4) -> tuple[float, ...]:
+def suggest_cut_points(
+    series: pd.Series,
+    *,
+    method: str,
+    n_bins: int = 4,
+    exclude_at_or_below: float | None = None,
+    keep_excluded_group: bool = True,
+) -> tuple[float, ...]:
     """
     Propose interior cut points for *series*.
 
@@ -741,16 +748,45 @@ def suggest_cut_points(series: pd.Series, *, method: str, n_bins: int = 4) -> tu
     every load: cut points derived live from the data would shift whenever a filter changed, so the
     same named group would mean different things between two fits.
 
+    Zero inflation
+    --------------
+    Quantiles of a zero-inflated column are mostly zero. A plaque volume where 45% of subjects have
+    none puts the 33rd *and* 67th percentile at 0, so "tertiles" collapses to a single cut point and
+    silently produces two groups instead of three — the tertiles are of the whole cohort, not of the
+    subjects who actually have plaque. *exclude_at_or_below* takes the quantiles over the values
+    above a threshold instead, which is nearly always the intended question, and
+    *keep_excluded_group* then keeps the threshold itself as the first cut point so the excluded
+    rows form their own reference group rather than being merged into the lowest tertile.
+
     Parameters
     ----------
     method : {"quantile", "equal_width"}
     n_bins : int
-        Number of bins wanted; ``n_bins - 1`` interior cut points are returned.
+        Number of bins wanted **among the included values**; ``n_bins - 1`` interior cut points come
+        from the distribution, plus the threshold when *keep_excluded_group* is set.
+    exclude_at_or_below : float or None
+        Hold values ``<= this`` out of the quantile / range computation. ``0.0`` is the common case.
+    keep_excluded_group : bool
+        Emit the threshold as an extra, lowest cut point so the held-out rows keep their own bin.
+
+    Raises
+    ------
+    ValueError
+        If the column is empty, or is too concentrated to yield *n_bins* distinct groups — the
+        message names the exclusion option, since that is usually the fix.
     """
     values = pd.to_numeric(series, errors="coerce").dropna()
     if values.empty:
         raise ValueError("The column has no numeric values to derive cut points from.")
     n_bins = max(2, int(n_bins))
+
+    threshold = None if exclude_at_or_below is None else float(exclude_at_or_below)
+    if threshold is not None:
+        values = values[values > threshold]
+        if values.empty:
+            raise ValueError(
+                f"Every value is at or below {threshold:g}, so there is nothing left to split."
+            )
 
     if method == "quantile":
         quantiles = [i / n_bins for i in range(1, n_bins)]
@@ -764,16 +800,77 @@ def suggest_cut_points(series: pd.Series, *, method: str, n_bins: int = 4) -> tu
 
     # Round to something a person would type, then drop duplicates a skewed column can produce.
     rounded = sorted({float(f"{p:.4g}") for p in points})
+    if threshold is not None:
+        # A point rounded onto (or below) the threshold would duplicate the threshold cut and make
+        # an empty bin; the collapse check below then reports the real problem.
+        rounded = [p for p in rounded if p > threshold]
+
     if len(rounded) < len(points):
-        log.warning(
-            "Cut points collapsed from %d to %d — the column is too concentrated for %d bins.",
-            len(points),
-            len(rounded),
-            n_bins,
+        detail = (
+            f"{len(points)} cut point(s) for {n_bins} bins collapsed to {len(rounded)} distinct "
+            f"value(s) — the column is too concentrated"
         )
+        if threshold is None:
+            raise ValueError(
+                f"{detail}. If it is zero-inflated, tick 'exclude values at or below' so the "
+                "quantiles are taken over the non-zero values only."
+            )
+        raise ValueError(f"{detail} above {threshold:g} for {n_bins} bins. Ask for fewer bins.")
     if not rounded:
         raise ValueError("Could not derive distinct cut points from this column.")
+
+    if threshold is not None and keep_excluded_group:
+        rounded = [threshold, *rounded]
     return tuple(rounded)
+
+
+def binarize_series(
+    series: pd.Series, *, threshold: float, op: str = "gt"
+) -> pd.Series:
+    """
+    Collapse a continuous column to 0/1 either side of *threshold*.
+
+    The degenerate case of :func:`cut_into_bins`, kept separate because the answer wanted is a
+    number rather than a label: "has any plaque at all" is a covariate you multiply by a
+    coefficient, where ``plaque_group`` is a factor that spends a contrast per level.
+
+    Parameters
+    ----------
+    op : {"gt", "ge", "lt", "le"}
+        Which side scores **1**: ``gt`` is ``value > threshold`` (so at-or-below becomes 0), ``le``
+        is its mirror image. ``ge`` / ``lt`` move the boundary itself to the other group.
+
+    Returns
+    -------
+    pandas.Series
+        Float 0.0 / 1.0, with missing input left missing — not an integer dtype, so a row with no
+        value is dropped by a fit rather than silently counted as a zero.
+    """
+    values = pd.to_numeric(series, errors="coerce")
+    cut = float(threshold)
+    if op == "gt":
+        hit = values > cut
+    elif op == "ge":
+        hit = values >= cut
+    elif op == "lt":
+        hit = values < cut
+    elif op == "le":
+        hit = values <= cut
+    else:
+        raise ValueError(f"Unknown binarize comparison {op!r}.")
+    return hit.astype(float).where(values.notna())
+
+
+#: Comparison that scores 1 for ``kind="binarize"``, and how to say it in a sentence.
+BINARIZE_OPS: dict[str, str] = {
+    "gt": "> threshold → 1   (at or below → 0)",
+    "ge": "≥ threshold → 1   (below → 0)",
+    "lt": "< threshold → 1   (at or above → 0)",
+    "le": "≤ threshold → 1   (above → 0)",
+}
+
+#: Symbol for each comparison, for compact labels.
+BINARIZE_SYMBOLS: dict[str, str] = {"gt": ">", "ge": "≥", "lt": "<", "le": "≤"}
 
 
 def cut_into_bins(
@@ -854,11 +951,13 @@ class DerivedColumn:
     ----------
     name : str
         Output column name. Must be a valid identifier — see :data:`IDENTIFIER_RE`.
-    kind : {"transform", "expression", "bins", "merge"}
+    kind : {"transform", "expression", "bins", "binarize", "merge"}
         ``transform`` applies :data:`TRANSFORMS`\\ ``[transform]`` to *source*;
         ``expression`` evaluates *expression* via :func:`evaluate_expression`;
         ``bins`` cuts *source* into an ordered categorical at *cut_points*, the
         ``tacsctot`` → ``tacsctot_group`` pattern;
+        ``binarize`` collapses *source* to numeric 0/1 either side of *threshold*, the
+        ``plaque_vol`` → ``has_plaque`` pattern;
         ``merge`` pools levels of a categorical *source* into fewer groups via *mapping*, the
         ``apoe`` → ``E4_carrier`` / ``E2_carrier`` / ``E3E3`` pattern.
     mapping : tuple of (level, group)
@@ -872,6 +971,10 @@ class DerivedColumn:
         gives four groups: ``≤ 0``, ``(0, 25]``, ``(25, 100]``, ``> 100``.
     labels : tuple of str
         Explicit bin labels. When empty, ``label_prefix`` + index is used.
+    threshold : float
+        For ``kind="binarize"``: the boundary between the 0 and 1 groups.
+    binarize_op : {"gt", "ge", "lt", "le"}
+        For ``kind="binarize"``: which side of *threshold* scores 1. See :data:`BINARIZE_OPS`.
     """
 
     name: str
@@ -884,6 +987,9 @@ class DerivedColumn:
     labels: tuple[str, ...] = ()
     label_prefix: str = "g"
     right: bool = True
+    # ---- kind="binarize" -------------------------------------------------------
+    threshold: float = 0.0
+    binarize_op: str = "gt"
     # ---- kind="merge" ----------------------------------------------------------
     mapping: tuple[tuple[str, str], ...] = ()
     unmapped: str = "keep"
@@ -912,6 +1018,9 @@ class DerivedColumn:
         if self.kind == "bins":
             points = ", ".join(f"{c:g}" for c in self.cut_points)
             return f"{self.name} = bins({self.source}: {points}) → {', '.join(self.bin_labels())}"
+        if self.kind == "binarize":
+            symbol = BINARIZE_SYMBOLS.get(self.binarize_op, "?")
+            return f"{self.name} = binarize({self.source} {symbol} {self.threshold:g} → 1)"
         if self.kind == "merge":
             groups = self.merge_groups()
             shown = "; ".join(f"{g} ← {'+'.join(v)}" for g, v in list(groups.items())[:3])
@@ -949,6 +1058,13 @@ class DerivedColumn:
                 )
             if len(set(labels)) != len(labels):
                 return "Bin labels must be unique."
+        elif self.kind == "binarize":
+            if not self.source:
+                return "No source column selected."
+            if self.binarize_op not in BINARIZE_OPS:
+                return f"Unknown binarize comparison {self.binarize_op!r}."
+            if not np.isfinite(float(self.threshold)):
+                return "The threshold must be a finite number."
         elif self.kind == "merge":
             if not self.source:
                 return "No source column selected."
@@ -979,6 +1095,8 @@ class DerivedColumn:
             "labels": list(self.labels),
             "label_prefix": self.label_prefix,
             "right": bool(self.right),
+            "threshold": float(self.threshold),
+            "binarize_op": self.binarize_op,
             "mapping": [[str(a), str(b)] for a, b in self.mapping],
             "unmapped": self.unmapped,
         }
@@ -996,6 +1114,8 @@ class DerivedColumn:
             labels=tuple(str(v) for v in (data.get("labels") or ())),
             label_prefix=str(data.get("label_prefix") or "g"),
             right=bool(data.get("right", True)),
+            threshold=float(data.get("threshold") or 0.0),
+            binarize_op=str(data.get("binarize_op") or "gt"),
             mapping=tuple(
                 (str(pair[0]), str(pair[1]))
                 for pair in (data.get("mapping") or ())
@@ -1050,6 +1170,12 @@ def apply_derived_columns(
                     out[spec.source], spec.cut_points, spec.bin_labels(), right=spec.right
                 )
                 continue
+            elif spec.kind == "binarize":
+                if spec.source not in out.columns:
+                    raise ValueError(f"source column {spec.source!r} is not in the frame")
+                series = binarize_series(
+                    out[spec.source], threshold=spec.threshold, op=spec.binarize_op
+                )
             else:
                 series = evaluate_expression(out, spec.expression)
         except Exception as exc:
@@ -1063,6 +1189,8 @@ def apply_derived_columns(
 
 
 __all__ = [
+    "BINARIZE_OPS",
+    "BINARIZE_SYMBOLS",
     "DEFAULT_IQR_K",
     "FILTER_OPS",
     "IDENTIFIER_RE",
@@ -1078,6 +1206,7 @@ __all__ = [
     "apply_iqr_filter",
     "apply_row_filter",
     "bin_counts",
+    "binarize_series",
     "cast_column",
     "merge_levels",
     "bin_interval_labels",

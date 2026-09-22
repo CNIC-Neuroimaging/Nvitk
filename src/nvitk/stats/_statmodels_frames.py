@@ -13,6 +13,7 @@ from typing import Any, Literal, Mapping, Sequence
 import pandas as pd
 
 from nvitk.core.logger import Logger
+from nvitk.db.repo import _visit_label
 from nvitk.pipes.qvtpy.common.morpho_db_publish import _SCALAR_VARS as _MORPHO_SCALAR_VARS
 
 log = Logger()
@@ -987,6 +988,7 @@ def collapse_visits_to_subject(
     policy: str = "latest",
     subject_key: str = "subject_uid",
     visit_key: str = "visit_id",
+    visit_overrides: Mapping[str, str] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, list[str]]]:
     """
     Collapse a per-visit measurement frame to one row per subject, combining across visits.
@@ -1004,6 +1006,12 @@ def collapse_visits_to_subject(
     ----------
     policy : {"latest", "earliest"}
         Which visit wins for a variable recorded at more than one. ``latest`` takes the most recent.
+    visit_overrides : mapping, optional
+        ``{column: visit_id}`` pinning a named column to one visit, whatever *policy* says. This is
+        what makes "plaque volume as measured at visit 3" a different model from "…at visit 4"
+        rather than an accident of which visit happens to be last. A pinned column is **missing**
+        for a subject with no value at that visit — falling back to another visit would silently
+        mix the two, which is the thing being pinned against.
 
     Returns
     -------
@@ -1013,6 +1021,25 @@ def collapse_visits_to_subject(
     """
     if frame.empty or subject_key not in frame.columns or visit_key not in frame.columns:
         return frame, {}
+
+    # Blank the off-visit values before anything else looks at the frame, so the collapse, the
+    # early return below and the provenance all see the same pinned data.
+    pinned = {
+        str(column): str(visit)
+        for column, visit in (visit_overrides or {}).items()
+        if str(column) in frame.columns and str(column) not in {subject_key, visit_key}
+    }
+    if pinned:
+        frame = frame.copy()
+        visit_labels = frame[visit_key].map(_visit_label)
+        for column, visit in pinned.items():
+            frame.loc[visit_labels != _visit_label(visit), column] = pd.NA
+        log.info(
+            "Pinned %s to a single visit each: %s",
+            len(pinned),
+            ", ".join(f"{c}@{v}" for c, v in sorted(pinned.items())),
+        )
+
     if not frame[subject_key].duplicated().any():
         return frame.drop(columns=[visit_key], errors="ignore"), {}
 
@@ -1045,6 +1072,7 @@ def resolve_covariate_frame(
     clinical_vars: list[str] | None = None,
     cognitive_vars: list[str] | None = None,
     visit_policy: str = "latest",
+    visit_overrides: Mapping[str, str] | None = None,
 ) -> tuple[pd.DataFrame, list[str]]:
     """
     Subject-level covariate frame assembled from the clinical / subjects / image / cognitive tables.
@@ -1052,6 +1080,12 @@ def resolve_covariate_frame(
     Each source is collapsed to one row per subject (see :func:`collapse_visits_to_subject`) *before*
     the sources are merged, so variables recorded at different visits combine rather than
     multiplying rows or shadowing one another.
+
+    Parameters
+    ----------
+    visit_overrides : mapping, optional
+        ``{variable_id: visit_id}`` pinning a covariate to one visit instead of letting
+        *visit_policy* choose. Passed straight through to :func:`collapse_visits_to_subject`.
 
     Returns
     -------
@@ -1084,7 +1118,9 @@ def resolve_covariate_frame(
         """Collapse a source to one row per subject, then queue it for merging."""
         if frame is None or frame.empty:
             return
-        collapsed, source_provenance = collapse_visits_to_subject(frame, policy=visit_policy)
+        collapsed, source_provenance = collapse_visits_to_subject(
+            frame, policy=visit_policy, visit_overrides=visit_overrides
+        )
         provenance.update(source_provenance)
         frames.append(collapsed)
 
@@ -1441,8 +1477,9 @@ def melt_subject_frame(
     restores that column while leaving every *other* column repeated down the rows, so the eTIV and
     the covariates ride along and stay usable as predictors.
 
-    Only the named family moves. Melting two at once would need their regions to correspond, which
-    is exactly the assumption the subject grain exists to avoid.
+    Only the named family moves. To melt several families together, use
+    :func:`melt_subject_families` — regions are aligned on ``(subject, territory)``, with missing
+    values where a family lacks a region column.
 
     Parameters
     ----------
@@ -1498,6 +1535,98 @@ def melt_subject_frame(
     # the same region. A capped table preview then shows a handful of regions and looks as though
     # the rest were lost. Interleaving by subject makes the preview representative of the whole.
     sort_keys = [c for c in ("subject_uid", region_column) if c in long.columns]
+    if sort_keys:
+        long = long.sort_values(sort_keys, kind="stable")
+    return long.reset_index(drop=True)
+
+
+def melt_subject_families(
+    df: pd.DataFrame,
+    families: Sequence[str],
+    *,
+    region_column: str = "territory",
+    subject_column: str = "subject_uid",
+) -> pd.DataFrame:
+    """
+    Melt several ``value__region`` measurement families to the same long grain.
+
+    Each family is spread into its own value column on rows keyed by
+    ``(subject_column, region_column)``. When families share the same region labels the result
+    matches melting them one at a time and joining; when they differ, the row set is the *union*
+    of regions and values are missing where a family has no column for that region.
+
+    Parameters
+    ----------
+    families : sequence of str
+        Measurement prefixes, e.g. ``("pi", "flow_mean")`` for ``pi__LICA``, ``flow_mean__LICA``, …
+
+    See Also
+    --------
+    melt_subject_frame
+        Single-family melt; this function delegates to it when *families* has one entry.
+    """
+    ordered = [str(f).strip() for f in families if str(f).strip()]
+    ordered = list(dict.fromkeys(ordered))
+    if not ordered:
+        return df
+    if len(ordered) == 1:
+        return melt_subject_frame(df, family=ordered[0], region_column=region_column)
+
+    if subject_column not in df.columns:
+        for candidate in ("subject_uid", "patient_id", "subject_id"):
+            if candidate in df.columns:
+                subject_column = candidate
+                break
+        else:
+            raise ValueError(
+                "Cannot melt several families: the frame needs a subject identifier column "
+                "(subject_uid, patient_id, or subject_id)."
+            )
+
+    prefixes = {f: f"{f}__" for f in ordered}
+    value_columns = [
+        c for c in df.columns if any(str(c).startswith(p) for p in prefixes.values())
+    ]
+    if not value_columns:
+        available = ", ".join(subject_measurement_families(df)) or "none"
+        raise ValueError(
+            f"No column matches the requested families {ordered!r}. "
+            f"Measurement families in this frame: {available}."
+        )
+    id_columns = [c for c in df.columns if c not in value_columns]
+
+    for family in ordered:
+        if family in df.columns:
+            raise ValueError(
+                f"{family!r} is already a column of this frame; melting would produce two columns "
+                f"of that name. Rename the measurement's output column first."
+            )
+        prefix = prefixes[family]
+        if not any(str(c).startswith(prefix) for c in value_columns):
+            raise ValueError(
+                f"No column starts with {prefix!r}, so {family!r} cannot be melted."
+            )
+
+    long: pd.DataFrame | None = None
+    join_keys = [subject_column, region_column]
+    for family in ordered:
+        prefix = prefixes[family]
+        family_cols = [c for c in value_columns if str(c).startswith(prefix)]
+        piece = df.melt(
+            id_vars=id_columns,
+            value_vars=family_cols,
+            var_name=region_column,
+            value_name=family,
+        )
+        piece[region_column] = piece[region_column].astype(str).str.slice(len(prefix))
+        if long is None:
+            long = piece
+        else:
+            long = long.merge(piece[join_keys + [family]], on=join_keys, how="outer")
+
+    assert long is not None
+    long["group_key"] = long[region_column].astype(str)
+    sort_keys = [c for c in join_keys if c in long.columns]
     if sort_keys:
         long = long.sort_values(sort_keys, kind="stable")
     return long.reset_index(drop=True)
@@ -1650,6 +1779,7 @@ def build_multi_feature_analysis_frame(
     join: str = "inner",
     grain: str = "territory",
     attach_qc: bool = True,
+    visit_overrides: Mapping[str, str] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """
     Analysis frame combining one or more image measurements plus subject covariates.
@@ -1666,6 +1796,10 @@ def build_multi_feature_analysis_frame(
     ----------
     join : {"inner", "outer", "left"}
         How successive measurement frames are combined.
+    visit_overrides : mapping, optional
+        ``{variable_id: visit_id}`` pinning a covariate to one visit rather than letting the
+        collapse policy pick. Only meaningful for a variable recorded at more than one visit; see
+        :meth:`~nvitk.db.repo.DataRepo.variable_visits`.
     grain : {"territory", "subject"}
         What a row is. ``"territory"`` keeps the long shape and joins on the shared
         ``(subject, territory)`` cell — right when the measurements share a parcellation, and the
@@ -1777,7 +1911,10 @@ def build_multi_feature_analysis_frame(
 
     # ---- 4. Covariates once, then the shared finalization ----------------------
     covariates, present = resolve_covariate_frame(
-        repo, clinical_vars=clinical_vars, cognitive_vars=cognitive_vars
+        repo,
+        clinical_vars=clinical_vars,
+        cognitive_vars=cognitive_vars,
+        visit_overrides=visit_overrides,
     )
     if present and not covariates.empty and not wide.empty:
         before = len(wide)

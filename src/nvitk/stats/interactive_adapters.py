@@ -320,7 +320,14 @@ def r_model_geometry(
     Predictions round-trip through R for the same reason the static plots do: R names a factor
     contrast ``territoryPCA`` where patsy names it ``C(territory)[T.PCA]``, so a locally rebuilt
     design matrix would silently zero every contrast.
+
+    Per-level curves are built exactly as :func:`~nvitk.stats.r_mixedlm.plot_lme4_params` builds
+    them, through the same two helpers: the level goes into every column carrying it (so a plot
+    grouped by ``group_key`` moves the ``territory`` a random term names), and the fit's other
+    grouping factors are averaged over instead of being pinned to a modal level.
     """
+    from .r_mixedlm import _grid_level_columns, _grid_marginal_columns, _MARGINAL_LEVEL
+
     if mode == "auto":
         mode = "continuous" if pd.api.types.is_numeric_dtype(df[x]) else "categorical"
     grouped = bool(group) and group in df.columns and group != x
@@ -337,17 +344,28 @@ def r_model_geometry(
         x_values = _x_grid(df[x])
 
     base = _reference_row(df, exclude=(x, y))
+    level_columns = _grid_level_columns(df, group if grouped else "", exclude=(x, y))
+    marginal_columns = _grid_marginal_columns(model, df, keep=[*level_columns, x, y])
 
-    def predict(level: str | None) -> np.ndarray | None:
-        """Prediction along the grid for one level, or the population."""
-        grid = pd.DataFrame([{**base, x: value} for value in x_values])
-        if grouped and level is not None:
-            grid[group] = str(level)
+    def call(grid: pd.DataFrame, level: str | None) -> np.ndarray | None:
         try:
             return predict_fn(model, grid, use_random_effects=level is not None)
         except Exception as exc:
             log.debug("Prediction failed for %s=%s: %s", group, level, exc)
             return None
+
+    def predict(level: str | None) -> np.ndarray | None:
+        """Prediction along the grid for one level, or the population."""
+        grid = pd.DataFrame([{**base, x: value} for value in x_values])
+        if not (grouped and level is not None):
+            return call(grid, None)
+        for column in level_columns:
+            grid[column] = str(level)
+        if marginal_columns:
+            curve = call(grid.assign(**{c: _MARGINAL_LEVEL for c in marginal_columns}), level)
+            if curve is not None:
+                return curve
+        return call(grid, level)
 
     rows: list[pd.DataFrame] = []
     population = predict(None)

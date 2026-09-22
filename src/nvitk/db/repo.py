@@ -321,6 +321,34 @@ def _normalize_visit_like_for_key(series: pd.Series) -> pd.Series:
     return out
 
 
+def _visit_label(value: Any) -> str:
+    """
+    One visit id as a plain string, with ``4``, ``4.0`` and ``"4"`` all reading ``"4"``.
+
+    The scalar counterpart of :func:`_normalize_visit_like_for_key`: the same normalization has to
+    reach any code that *displays* or *matches on* a single visit, or a choice made against ``"4"``
+    silently fails to match a column stored as ``4.0``.
+    """
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        number = float(text)
+    except (TypeError, ValueError):
+        return text
+    return str(int(number)) if number == round(number) else text
+
+
+def _visit_sort_key(label: str) -> tuple[int, float, str]:
+    """Sort visit labels numerically when they are numbers, alphabetically when they are not."""
+    try:
+        return (0, float(label), "")
+    except (TypeError, ValueError):
+        return (1, 0.0, str(label))
+
+
 def _normalize_frame_index_for_key(series: pd.Series, *, index: pd.Index) -> pd.Series:
     """Format ``frame_index`` as a string for entity-key composition; non-zero values become their
     rounded integer string, missing/zero values become ``""`` (frame 0 is treated as "no frame")."""
@@ -846,6 +874,47 @@ class DataRepo:
             out = self._rename_measurement_wide_columns(
                 out, table_name="cognitive_measurements", canonical_to_alias=alias_map
             )
+        return out
+
+    #: Measurement table backing each covariate domain, for :meth:`variable_visits`.
+    _DOMAIN_TABLES: dict[str, str] = {
+        "clinical": "clinical_measurements",
+        "cognitive": "cognitive_measurements",
+        "image": "image_measurements",
+    }
+
+    def variable_visits(self, *, domain: str = "clinical") -> dict[str, list[str]]:
+        """
+        Visits at which each variable of *domain* actually has values.
+
+        A cohort does not measure everything at every visit: carotid plaque was collected at visits
+        3 and 4 while the rest of the clinical panel exists only at 4. Anything that collapses a
+        per-visit table to one row per subject therefore has to decide which visit a variable comes
+        from, and this is what makes that choice offerable rather than implicit — see
+        :func:`~nvitk.stats._statmodels_frames.collapse_visits_to_subject`.
+
+        Returns
+        -------
+        dict
+            ``{variable_id: [visit_id, …]}``, visits sorted, numeric-looking ids sorted as numbers
+            so ``"10"`` follows ``"9"``. Empty when the table or its ``visit_id`` column is absent.
+        """
+        table = self._DOMAIN_TABLES.get(str(domain))
+        if not table or not self.catalog.table_exists(table):
+            return {}
+        try:
+            frame = self._load_table_frame(table, columns=["variable_id", "visit_id"])
+        except Exception as exc:
+            log.debug("Could not read visits for domain %r: %s", domain, exc)
+            return {}
+        if frame.empty or not {"variable_id", "visit_id"} <= set(frame.columns):
+            return {}
+
+        frame = frame.dropna(subset=["variable_id", "visit_id"])
+        out: dict[str, list[str]] = {}
+        for variable, group in frame.groupby("variable_id", sort=True):
+            visits = {_visit_label(v) for v in group["visit_id"].unique()}
+            out[str(variable)] = sorted(visits - {""}, key=_visit_sort_key)
         return out
 
     def clinical(

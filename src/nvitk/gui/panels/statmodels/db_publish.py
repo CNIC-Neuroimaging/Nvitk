@@ -133,7 +133,9 @@ def resolve_publish_target(
         if spec is None:
             return {name}
         seen = seen | {name}
-        if spec.kind in {"transform", "bins"} and spec.source:
+        # Every single-source kind traces back the same way — transform, bins, binarize and merge
+        # all wrap exactly one column. Only an expression can name several.
+        if spec.kind != "expression" and spec.source:
             return sources_of(spec.source, seen)
         # An expression can name any number of columns; only the identifiers that are real columns
         # of the frame count as sources.

@@ -8,13 +8,23 @@ between two pipelines' measurements — as **real columns**. That matters becaus
 transform (``log(pi) ~ …``) only exists inside patsy: it cannot be plotted, filtered on, or used as
 a mediation variable. A derived column can do all three.
 
-Three kinds:
+Five kinds:
 
 ``transform``   a canned function (:data:`~nvitk.stats.frame_ops.TRANSFORMS`) applied to one column
 ``expression``  a free-form expression over the frame's columns, e.g. ``pi / flow_mean``
 ``bins``        a continuous column cut into labelled groups — the ``tacsctot`` → ``tacsctot_group``
                 pattern, e.g. left carotid plaque volume into ``cp0`` (= 0), ``cp1`` (0–25],
                 ``cp2`` (25–100], ``cp3`` (> 100)
+``binarize``    the same column collapsed to numeric 0/1 either side of a threshold, for when the
+                question is "any plaque at all" rather than "how much"
+``merge``       levels of a categorical column pooled into fewer groups, e.g. a six-level APOE
+                genotype folded to ``E4_carrier`` / ``E2_carrier`` / ``E3E3``
+
+Bin cut points are stored as explicit numbers, never as a rule: a rule would be recomputed against
+whatever rows are loaded, so the same label would silently mean a different range once a filter
+changed. The generator on the bins page writes numbers into the field, and can take its quantiles
+over the values above a threshold — without which a zero-inflated column's tertiles are mostly the
+zero, and "tertiles" quietly yields two groups.
 
 Names are constrained to Python identifiers because
 :func:`~nvitk.stats.mixedlm.fit_or_load_mixedlm` sanitizes column names before fitting — a column
@@ -35,7 +45,9 @@ from qtpy.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -49,15 +61,19 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from nvitk.gui.core.design import SPACE_TIGHT
 from nvitk.stats.r_mmrm import COVARIANCE_STRUCTURES, covariance_term
 from nvitk.stats.regression import SPLINE_TERMS, spline_term
 
 from nvitk.stats.frame_ops import (
+    BINARIZE_OPS,
+    BINARIZE_SYMBOLS,
     TRANSFORM_LABELS,
     DerivedColumn,
     apply_derived_columns,
     bin_counts,
     bin_interval_labels,
+    binarize_series,
     default_bin_name,
     default_derived_name,
     parse_cut_points,
@@ -167,6 +183,7 @@ class DerivedColumnsDialog(QDialog):
         self._kind.addItem("Transform of a column", "transform")
         self._kind.addItem("Expression", "expression")
         self._kind.addItem("Grouped bins (categorical)", "bins")
+        self._kind.addItem("Binarize at a threshold (0/1)", "binarize")
         self._kind.addItem("Merge categorical levels", "merge")
         self._kind.currentIndexChanged.connect(self._on_kind_changed)
         self._name = QLineEdit()
@@ -202,7 +219,9 @@ class DerivedColumnsDialog(QDialog):
         expression_lay.addStretch(1)
         self._stack.addWidget(expression_page)
 
+        # Page order must match the kind combo's, since _on_kind_changed indexes one by the other.
         self._stack.addWidget(self._build_bins_page())
+        self._stack.addWidget(self._build_binarize_page())
         self._stack.addWidget(self._build_merge_page())
 
         lay.addWidget(self._stack)
@@ -368,24 +387,140 @@ class DerivedColumnsDialog(QDialog):
         form.addRow("", self._bin_right)
         lay.addLayout(form)
 
-        suggest_row = QHBoxLayout()
-        suggest_row.addWidget(QLabel("Suggest:"))
+        # ---- cut-point generator ------------------------------------------------
+        # Quantiles of a zero-inflated column are mostly the zero, so "tertiles" of a plaque volume
+        # where half the cohort has none returns one usable cut point and quietly makes two groups.
+        # The exclusion threshold takes the quantiles over the values above it and keeps the
+        # excluded rows as the reference bin, which is the split that was actually meant.
+        gen = QGroupBox("Generate cut points")
+        gen_lay = QVBoxLayout(gen)
+        gen_lay.setContentsMargins(SPACE_TIGHT, SPACE_TIGHT, SPACE_TIGHT, SPACE_TIGHT)
+
+        method_row = QHBoxLayout()
+        self._bin_method = QComboBox()
+        self._bin_method.addItem("Quantiles (equal counts)", "quantile")
+        self._bin_method.addItem("Equal width", "equal_width")
+        self._bin_method.setToolTip(
+            "Quantiles put the same number of rows in each group; equal width splits the value "
+            "range evenly, so a skewed column gets very uneven counts."
+        )
+        method_row.addWidget(self._bin_method, stretch=1)
+        method_row.addWidget(QLabel("Groups"))
+        self._bin_n = QSpinBox()
+        self._bin_n.setRange(2, 20)
+        self._bin_n.setValue(3)
+        self._bin_n.setToolTip(
+            "How many groups to split the included values into — 3 for tertiles, 4 for quartiles, "
+            "and so on. With an exclusion threshold set, the excluded rows are an extra group on "
+            "top of these."
+        )
+        method_row.addWidget(self._bin_n)
+        gen_lay.addLayout(method_row)
+
+        exclude_row = QHBoxLayout()
+        self._bin_exclude = QCheckBox("Exclude values at or below")
+        self._bin_exclude.setToolTip(
+            "Compute the quantiles over the values above the threshold only. Tick this for a "
+            "zero-inflated column: without it, a cohort that is 45% zeros has its 33rd and 67th "
+            "percentile both at 0, so the tertiles collapse into a single cut point."
+        )
+        self._bin_exclude.stateChanged.connect(self._on_bin_exclude_toggled)
+        exclude_row.addWidget(self._bin_exclude)
+        self._bin_threshold = QDoubleSpinBox()
+        self._bin_threshold.setRange(-1e12, 1e12)
+        self._bin_threshold.setDecimals(4)
+        self._bin_threshold.setValue(0.0)
+        self._bin_threshold.setEnabled(False)
+        self._bin_threshold.setToolTip("Values ≤ this are held out of the quantile computation.")
+        exclude_row.addWidget(self._bin_threshold)
+        exclude_row.addStretch(1)
+        gen_lay.addLayout(exclude_row)
+
+        self._bin_keep_excluded = QCheckBox("Keep the excluded values as their own group")
+        self._bin_keep_excluded.setChecked(True)
+        self._bin_keep_excluded.setEnabled(False)
+        self._bin_keep_excluded.setToolTip(
+            "Adds the threshold itself as the lowest cut point, so 'no plaque' is a group rather "
+            "than being folded into the lowest tertile of those who have some."
+        )
+        gen_lay.addWidget(self._bin_keep_excluded)
+
+        button_row = QHBoxLayout()
+        compute = QPushButton("Compute")
+        compute.setToolTip("Write the cut points for the settings above into the field.")
+        compute.clicked.connect(self._on_compute_cuts)
+        button_row.addWidget(compute)
+        button_row.addWidget(QLabel("Quick:"))
+        # The presets are the same generator with the group count filled in — kept because three
+        # clicks of a spin box to reach quartiles is three clicks too many.
         for text, method, n_bins in (
             ("Tertiles", "quantile", 3),
             ("Quartiles", "quantile", 4),
             ("Quintiles", "quantile", 5),
-            ("Equal width ×4", "equal_width", 4),
+            ("Deciles", "quantile", 10),
+            ("Width ×4", "equal_width", 4),
         ):
             btn = QPushButton(text)
-            btn.clicked.connect(lambda _=False, m=method, n=n_bins: self._on_suggest_cuts(m, n))
-            suggest_row.addWidget(btn)
-        suggest_row.addStretch(1)
-        lay.addLayout(suggest_row)
+            btn.clicked.connect(lambda _=False, m=method, n=n_bins: self._on_preset_cuts(m, n))
+            button_row.addWidget(btn)
+        button_row.addStretch(1)
+        gen_lay.addLayout(button_row)
+        lay.addWidget(gen)
 
         self._bin_preview = QLabel("")
         self._bin_preview.setWordWrap(True)
         self._bin_preview.setStyleSheet(muted_label_style())
         lay.addWidget(self._bin_preview)
+        lay.addStretch(1)
+        return page
+
+    def _build_binarize_page(self) -> QWidget:
+        """
+        Collapse a continuous column to 0/1 either side of a threshold.
+
+        The degenerate bins case, given its own page because the answer wanted is a number rather
+        than a set of labels: "has any plaque at all" is one coefficient, where a four-level
+        ``plaque_group`` spends three contrasts on a question nobody asked.
+        """
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+
+        form = QFormLayout()
+        self._bz_source = QComboBox()
+        self._bz_source.currentIndexChanged.connect(self._on_binarize_source_changed)
+        self._bz_threshold = QDoubleSpinBox()
+        self._bz_threshold.setRange(-1e12, 1e12)
+        self._bz_threshold.setDecimals(4)
+        self._bz_threshold.setValue(0.0)
+        self._bz_threshold.valueChanged.connect(self._on_binarize_changed)
+        self._bz_op = QComboBox()
+        for key, label in BINARIZE_OPS.items():
+            self._bz_op.addItem(label, key)
+        self._bz_op.setToolTip(
+            "Which side of the threshold scores 1. The other side scores 0, and a row with no "
+            "value stays missing rather than counting as a zero."
+        )
+        self._bz_op.currentIndexChanged.connect(self._on_binarize_changed)
+
+        form.addRow("Source", self._bz_source)
+        form.addRow("Threshold", self._bz_threshold)
+        form.addRow("Rule", self._bz_op)
+        lay.addLayout(form)
+
+        preset_row = QHBoxLayout()
+        preset_row.addWidget(QLabel("Threshold from:"))
+        for text, key in (("Zero", "zero"), ("Median", "median"), ("Mean", "mean")):
+            btn = QPushButton(text)
+            btn.clicked.connect(lambda _=False, k=key: self._on_binarize_preset(k))
+            preset_row.addWidget(btn)
+        preset_row.addStretch(1)
+        lay.addLayout(preset_row)
+
+        self._bz_preview = QLabel("")
+        self._bz_preview.setWordWrap(True)
+        self._bz_preview.setStyleSheet(muted_label_style())
+        lay.addWidget(self._bz_preview)
         lay.addStretch(1)
         return page
 
@@ -423,20 +558,111 @@ class DerivedColumnsDialog(QDialog):
             self._name.setText(default_bin_name(source))
         self._on_bins_changed()
 
-    def _on_suggest_cuts(self, method: str, n_bins: int) -> None:
-        """Fill the cut-point field with values derived from the source column's distribution."""
+    def _on_bin_exclude_toggled(self) -> None:
+        """Enable the threshold controls only while an exclusion is actually wanted."""
+        on = self._bin_exclude.isChecked()
+        self._bin_threshold.setEnabled(on)
+        self._bin_keep_excluded.setEnabled(on)
+
+    def _on_preset_cuts(self, method: str, n_bins: int) -> None:
+        """Set the generator to a named split (tertiles, quartiles, …) and run it."""
+        midx = self._bin_method.findData(method)
+        if midx >= 0:
+            self._bin_method.setCurrentIndex(midx)
+        self._bin_n.setValue(int(n_bins))
+        self._on_compute_cuts()
+
+    def _on_compute_cuts(self) -> None:
+        """
+        Fill the cut-point field from the source column's distribution.
+
+        The numbers are written into the field rather than stored as a rule: a rule would be
+        recomputed against whatever rows are loaded, so the same label would mean a different range
+        after a filter changed. Edit them afterwards if you want round numbers.
+        """
         source = self._bin_source.currentText()
         if not source or source not in self._preview_frame.columns:
             return
+        excluding = self._bin_exclude.isChecked()
         try:
             points = suggest_cut_points(
-                self._preview_frame[source], method=method, n_bins=n_bins
+                self._preview_frame[source],
+                method=str(self._bin_method.currentData() or "quantile"),
+                n_bins=int(self._bin_n.value()),
+                exclude_at_or_below=float(self._bin_threshold.value()) if excluding else None,
+                keep_excluded_group=self._bin_keep_excluded.isChecked(),
             )
         except Exception as exc:
             self._error.setText(str(exc))
             return
         self._error.setText("")
         self._bin_cuts.setText(", ".join(f"{p:g}" for p in points))
+        # Explicit labels written for a different number of groups would now be the wrong length,
+        # and the validator would reject the definition with a message about label counts rather
+        # than about what just changed. Clearing them falls back to the prefix.
+        expected = len(points) + 1
+        current_labels = [t for t in self._bin_labels.text().split(",") if t.strip()]
+        if current_labels and len(current_labels) != expected:
+            self._bin_labels.clear()
+
+    # ---- binarize --------------------------------------------------------------
+    def _on_binarize_source_changed(self) -> None:
+        """Suggest a name from the source, mirroring ``lcp`` → ``lcp_bin``."""
+        source = self._bz_source.currentText()
+        if not source:
+            return
+        current = self._name.text().strip()
+        numeric = self._numeric_columns()
+        known = {f"{c}_bin" for c in numeric} | {default_bin_name(c) for c in numeric}
+        if not current or current in known:
+            self._name.setText(f"{source}_bin")
+        self._on_binarize_changed()
+
+    def _on_binarize_preset(self, key: str) -> None:
+        """Set the threshold to zero, or to the source column's median / mean."""
+        source = self._bz_source.currentText()
+        if key == "zero":
+            self._bz_threshold.setValue(0.0)
+            return
+        if not source or source not in self._preview_frame.columns:
+            return
+        values = pd.to_numeric(self._preview_frame[source], errors="coerce").dropna()
+        if values.empty:
+            self._error.setText(f"{source!r} has no numeric values.")
+            return
+        self._error.setText("")
+        self._bz_threshold.setValue(float(values.median() if key == "median" else values.mean()))
+
+    def _on_binarize_changed(self, *_args) -> None:
+        """Refresh the 0/1 split preview for the definition being edited."""
+        source = self._bz_source.currentText()
+        if not source or source not in self._preview_frame.columns:
+            self._bz_preview.setText("")
+            return
+        threshold = float(self._bz_threshold.value())
+        op = str(self._bz_op.currentData() or "gt")
+        symbol = BINARIZE_SYMBOLS.get(op, ">")
+        try:
+            values = binarize_series(
+                self._preview_frame[source], threshold=threshold, op=op
+            )
+        except Exception as exc:
+            self._bz_preview.setText(str(exc))
+            return
+        ones = int((values == 1).sum())
+        zeros = int((values == 0).sum())
+        missing = int(values.isna().sum())
+        lines = [
+            f"1  ({source} {symbol} {threshold:g}):  {ones} rows",
+            f"0  (otherwise):  {zeros} rows",
+        ]
+        if missing:
+            lines.append(f"(missing): {missing} rows with no value")
+        if not ones or not zeros:
+            lines.append(
+                "⚠ One side is empty — a constant column carries no information for a model."
+            )
+        self._bz_preview.setText("\n".join(lines))
 
     def _on_bins_changed(self, *_args) -> None:
         """Refresh the interval/count preview for the bin definition being edited."""
@@ -515,6 +741,17 @@ class DerivedColumnsDialog(QDialog):
             self._bin_source.setCurrentIndex(bidx)
         self._bin_source.blockSignals(False)
 
+        # Binarizing needs a number line too — the same candidates as the bins page.
+        current_bz = self._bz_source.currentText()
+        self._bz_source.blockSignals(True)
+        self._bz_source.clear()
+        for name in self._numeric_columns():
+            self._bz_source.addItem(name)
+        zidx = self._bz_source.findText(current_bz)
+        if zidx >= 0:
+            self._bz_source.setCurrentIndex(zidx)
+        self._bz_source.blockSignals(False)
+
     def _refresh_list(self) -> None:
         """Redraw the list of derived columns."""
         current = self._list.currentRow()
@@ -582,6 +819,7 @@ class DerivedColumnsDialog(QDialog):
             source=(
                 self._source.currentText() if kind == "transform"
                 else self._bin_source.currentText() if kind == "bins"
+                else self._bz_source.currentText() if kind == "binarize"
                 else self._merge_source.currentText() if kind == "merge"
                 else ""
             ),
@@ -591,6 +829,8 @@ class DerivedColumnsDialog(QDialog):
             labels=labels,
             label_prefix=self._bin_prefix.text().strip() or "g",
             right=self._bin_right.isChecked(),
+            threshold=float(self._bz_threshold.value()) if kind == "binarize" else 0.0,
+            binarize_op=str(self._bz_op.currentData() or "gt") if kind == "binarize" else "gt",
             mapping=mapping,
             unmapped=str(self._merge_unmapped.currentData() or "keep"),
         )
@@ -601,6 +841,8 @@ class DerivedColumnsDialog(QDialog):
         kind = self._kind.currentData()
         if kind == "bins":
             self._on_bin_source_changed()
+        elif kind == "binarize":
+            self._on_binarize_source_changed()
         elif kind == "merge":
             self._on_merge_source_changed()
         else:
@@ -720,6 +962,37 @@ class DerivedColumnsDialog(QDialog):
                                self._bin_labels, self._bin_right):
                     widget.blockSignals(False)
             self._on_bins_changed()
+        elif spec.kind == "binarize":
+            for widget in (self._bz_source, self._bz_threshold, self._bz_op):
+                widget.blockSignals(True)
+            try:
+                sidx = self._bz_source.findText(spec.source)
+                if sidx >= 0:
+                    self._bz_source.setCurrentIndex(sidx)
+                self._bz_threshold.setValue(float(spec.threshold))
+                oidx = self._bz_op.findData(spec.binarize_op)
+                if oidx >= 0:
+                    self._bz_op.setCurrentIndex(oidx)
+            finally:
+                for widget in (self._bz_source, self._bz_threshold, self._bz_op):
+                    widget.blockSignals(False)
+            self._on_binarize_changed()
+        elif spec.kind == "merge":
+            # Point the combo at the saved source first: rebuilding the level rows reads the combo,
+            # so doing it the other way round would lay out whichever column happened to be shown.
+            self._merge_source.blockSignals(True)
+            midx = self._merge_source.findText(spec.source)
+            if midx >= 0:
+                self._merge_source.setCurrentIndex(midx)
+            self._merge_source.blockSignals(False)
+            self._on_merge_source_changed()
+            uidx = self._merge_unmapped.findData(spec.unmapped)
+            if uidx >= 0:
+                self._merge_unmapped.setCurrentIndex(uidx)
+            for level, group in spec.mapping:
+                edit = self._merge_edits.get(str(level))
+                if edit is not None:
+                    edit.setText(str(group))
         else:
             self._expression.setText(spec.expression)
         self._error.setText("")

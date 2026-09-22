@@ -20,7 +20,15 @@ from nvitk.gui.io.napari_io import (
     open_paths_with_nvitk,
 )
 from nvitk.gui.core.spatial import attach_orientation_status, find_spatial_reference_layer, layer_spatial_kwargs
-from nvitk.gui.core.design import SPACE, SPACE_TIGHT, apply_theme, register_napari_theme
+from nvitk.gui.core.design import (
+    SPACE,
+    SPACE_TIGHT,
+    apply_theme,
+    register_napari_theme,
+    set_theme,
+    stored_theme,
+    theme_toggle_button,
+)
 from nvitk.gui.core.log_panel import build_log_dock_widget
 from nvitk.gui.tools.runner import notify
 from nvitk.gui.panels.dicom_tags import DicomTagsPanel, layer_has_dicom_tags
@@ -107,6 +115,10 @@ def run_app() -> None:
         QWidget,
     )
 
+    # The theme the last session chose, in force before a single widget exists:
+    # every panel then builds from the palette it will be shown in, rather than
+    # being restyled after the fact.
+    set_theme(stored_theme())
     # Register before the viewer exists so its chrome is painted from the nvitk
     # palette on the first frame, rather than flashing Napari's default dark.
     theme_id = register_napari_theme()
@@ -489,6 +501,10 @@ def run_app() -> None:
     export_tab.setLayout(export_layout)
     tabs.addTab(_scrollable_tab(export_tab), "Export")
     tabs.addTab(_scrollable_tab(export_panel.native), "Pipeline")
+    # In the tab bar's own corner: visible from every tab, costs no vertical space
+    # in a dock that never has enough, and sits inside the nvitk stylesheet rather
+    # than in Napari's title bar, which clamps its buttons to 12px.
+    tabs.setCornerWidget(theme_toggle_button(viewer, tabs), Qt.TopRightCorner)
     layout.addWidget(tabs, stretch=1)
     dock.setLayout(layout)
     dock.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)

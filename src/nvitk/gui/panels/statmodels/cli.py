@@ -146,6 +146,12 @@ def main(argv: list[str] | None = None) -> int:
             "Install it with: pip install PyQt6-WebEngine"
         )
     app = QApplication.instance() or QApplication(sys.argv[:1])
+    # The theme the GUI last settled on, in force before the window is built, so a
+    # standalone explorer opens in the same interface as the docks do. Launched
+    # from the GUI instead, run_app has already done this.
+    from nvitk.gui.core.design import set_theme, stored_theme
+
+    set_theme(stored_theme())
     try:
         window = StatmodelsWindow(initial_pipeline_kind=args.kind)
     except Exception as exc:

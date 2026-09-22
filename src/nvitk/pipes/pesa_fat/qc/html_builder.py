@@ -169,8 +169,11 @@ def build_ctpet_report_html(
     measurements_table: str,
     measurements_download: str = "",
 ) -> str:
-    """Assemble the full single-file CT-PET v5 QC report page (mask overviews, hotspot gallery, CT and
-    PET axial slice viewers, and the measurements table)."""
+    """Assemble the full single-file CT-PET v5 QC report page.
+
+    Panels run in reading order: the 3D segmentation overview, then the CT and PET axial slice
+    viewers, then the measurements table, then the hotspot gallery. Anatomy first, numbers second,
+    the outlier hunt last."""
     masks = _join_iframes(masks_html)
     ax = "\n".join(axial_html) if axial_html else "<p><em>No slice QC.</em></p>"
     pet_ax_parts = pet_axial_html or []
@@ -193,18 +196,17 @@ def build_ctpet_report_html(
   <div class="card-b">{masks}</div>
 </div>
 
+<div class="card">
+  <div class="card-h"><h3>Slice views</h3><div class="muted">CT underlay</div></div>
+  <div class="card-b">{ax}</div>
+</div>
+{pet_ax_card}
 {measurements}
 
 <div class="card">
   <div class="card-h"><h3>Hotspots</h3><div class="muted">interactive</div></div>
   <div class="card-b">{hotspot_gallery}</div>
 </div>
-
-<div class="card">
-  <div class="card-h"><h3>Slice views</h3><div class="muted">CT underlay</div></div>
-  <div class="card-b">{ax}</div>
-</div>
-{pet_ax_card}
 </section>
 """
     return _base_doc(
@@ -230,8 +232,12 @@ def build_dixon_report_html(
     measurements_download: str = "",
     extra_sections_html: str = "",
 ) -> str:
-    """Assemble the full single-file Dixon v5 QC report page (mask overviews, hotspot gallery, axial
-    slice viewers, measurements table, and any extra sections)."""
+    """Assemble the full single-file Dixon v5 QC report page.
+
+    Panels run in reading order: the 3D segmentation overview, then the axial slice viewers followed
+    by *extra_sections_html* (the measurement heatmap, which reads as a continuation of them), then
+    the measurements table. The hotspot gallery trails at the end and is omitted when empty, which
+    is the Dixon default."""
     masks = _join_iframes(masks_html)
     ax = "\n".join(axial_html) if axial_html else "<p><em>No slice QC.</em></p>"
     measurements = _measurements_card(measurements_table, measurements_download)
@@ -255,16 +261,16 @@ def build_dixon_report_html(
   <div class=\"card-b\">{masks}</div>
 </div>
 
-{measurements}
-
-{hotspot_block}
-
 <div class=\"card\">
   <div class=\"card-h\"><h3>Slice views</h3><div class=\"muted\">axial</div></div>
   <div class=\"card-b\">{ax}</div>
 </div>
 
 {extra_sections_html}
+
+{measurements}
+
+{hotspot_block}
 </section>
 """
     return _base_doc(

@@ -628,7 +628,10 @@ def lmrob_predict(fit: Any, newdata: pd.DataFrame, *, use_random_effects: bool =
         from rpy2.robjects import conversion
 
         r_new = conversion.get_conversion().py2rpy(frame)
-        return np.asarray(globalenv[".nvitk_lmrob_predict"](fit, r_new), dtype=float)
+        # ``np.array``, not ``np.asarray``: the result wraps R's memory, which R reuses on later
+        # calls, and the plotters keep these arrays for the life of the figure. See
+        # :func:`~nvitk.stats.r_mixedlm.lme4_predict`.
+        return np.array(globalenv[".nvitk_lmrob_predict"](fit, r_new), dtype=float)
 
 
 def lmrob_emmeans(

@@ -16,10 +16,6 @@ acvl-utils>=0.2
 einops
 tqdm
 
-# Reached transitively at inference and easy to miss, because nnU-Net resolves the trainer class
-# with recursive_find_python_class, which *imports every module* under training/nnUNetTrainer/ to
-# find it. That drags in the training logger and the resampling helpers even though neither runs.
-# Each line names the module that imports it, so a future trim can check rather than guess.
 matplotlib       # nnunetv2/training/logging/nnunet_logger.py
 seaborn          # nnunetv2/training/logging/nnunet_logger.py
 scikit-learn     # nnunetv2/preprocessing/resampling/default_resampling.py, utilities/crossval_split.py

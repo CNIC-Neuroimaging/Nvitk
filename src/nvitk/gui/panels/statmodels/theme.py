@@ -27,10 +27,13 @@ from nvitk.gui.core.design import (
     COLOR_WELL,
     SIGNIFICANCE_COLORS,
     STYLESHEET,
+    active_theme,
     apply_theme,
     clear_layout,
     muted_label_style,
     style_figure,
+    theme_toggle_button,
+    toggle_theme,
 )
 
 # Names the explorer grew up with, kept so its modules read unchanged.
@@ -63,10 +66,13 @@ __all__ = [
     "COLOR_WINDOW",
     "DARK_STYLESHEET",
     "SIGNIFICANCE_COLORS",
+    "active_theme",
     "apply_dark_theme",
     "apply_theme",
     "clear_layout",
     "muted_label_style",
     "style_figure",
+    "theme_toggle_button",
+    "toggle_theme",
     "whiten_figure",
 ]

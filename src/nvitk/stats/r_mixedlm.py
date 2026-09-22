@@ -879,7 +879,8 @@ def lme4_fixef_vcov(model: Any) -> pd.DataFrame | None:
 
         matrix = R_["as.matrix"](R_["vcov"](r_model))
         with localconverter(default_converter + pandas2ri.converter):
-            values = np.asarray(matrix)
+            # Copied out of R's memory rather than viewed into it; see :func:`lme4_predict`.
+            values = np.array(matrix, dtype=float)
         names = list(lme4_coef_frame(model)["parameter"])
         if values.shape[0] != len(names):
             return None
@@ -1032,21 +1033,42 @@ def lme4_predict(
     fitted group deviations. 0.9 passes straight through to R's ``predict`` (where the switch is
     ``re.form=NA`` for population level); 0.8 spelled it ``use_rfx``. Each is tried in turn, so the
     call works on either.
+
+    A random-effects prediction also asks for ``allow.new.levels=TRUE``. lme4 gives a grouping level
+    it never saw a zero deviation and refuses the prediction outright without that flag, which is
+    what lets a caller marginalize over one grouping factor while drawing another (see
+    :data:`_MARGINAL_LEVEL`). For a grid whose levels the fit has all seen it changes nothing.
     """
     predict = getattr(model, "predict", None)
     if predict is None:
         raise ValueError("This model object cannot predict.")
 
-    # 0.9 wants polars; 0.8 wanted pandas. Hand over whatever the installed version accepts.
-    for frame in (_to_polars(grid), grid):
-        for kwargs in (
-            {} if use_random_effects else {"re_form": _r_na()},
-            {"use_rfx": use_random_effects, "verify_predictions": False},
-            {"use_rfx": use_random_effects},
+    if use_random_effects:
+        attempts: tuple[dict[str, Any], ...] = (
+            {"allow_new_levels": True},
+            {"use_rfx": True, "allow_new_levels": True, "verify_predictions": False},
+            {"use_rfx": True, "allow_new_levels": True},
+            {"use_rfx": True},
             {},
-        ):
+        )
+    else:
+        attempts = (
+            {"re_form": _r_na()},
+            {"use_rfx": False, "verify_predictions": False},
+            {"use_rfx": False},
+            {},
+        )
+
+    # 0.9 wants polars; 0.8 wanted pandas. Hand over whatever the installed version accepts.
+    #
+    # ``np.array`` rather than ``np.asarray``: what comes back wraps R's own memory (``owndata`` is
+    # False, the base is a buffer), and R is free to reuse that block on any later call. A caller
+    # that keeps the array — a matplotlib line holds the array it was given, it does not copy —
+    # would then draw whatever R put there since. The copy is what makes the values ours.
+    for frame in (_to_polars(grid), grid):
+        for kwargs in attempts:
             try:
-                return np.asarray(predict(frame, **kwargs), dtype=float)
+                return np.array(predict(frame, **kwargs), dtype=float)
             except TypeError:
                 continue
             except Exception:
@@ -1059,6 +1081,68 @@ def _r_na():
     from rpy2.robjects import NA_Logical
 
     return NA_Logical
+
+
+#: Level given to a grouping factor a curve is *not* drawing. ``predict(allow.new.levels=TRUE)``
+#: assigns a level the fit never saw a zero deviation, so a territory curve reads "in an average
+#: subject" instead of "in whichever subject happened to be the modal one in the frame".
+_MARGINAL_LEVEL = "__nvitk_marginal_level__"
+
+
+def _grid_level_columns(
+    df: pd.DataFrame, group: str, *, exclude: Sequence[str] = ()
+) -> list[str]:
+    """
+    *group*, plus every column of *df* that carries the same labels.
+
+    A prediction grid has to write the level into all of them. The analysis frame carries the region
+    twice — ``territory`` and ``group_key`` hold identical labels (see
+    :func:`~nvitk.stats._statmodels_frames.finalize_analysis_frame`) — and the plot groups by
+    whichever of the two the user picked. Setting only that one leaves the column the *model* names
+    at its reference value, so every level predicts the modal region's curve and the per-level lines
+    coincide, one drawn over another.
+
+    Matching on the labels rather than on a list of known aliases keeps a renamed or melted column
+    working, and leaves ``region_id`` alone: it holds the published ids the region was collapsed
+    from, not the same labels, so assigning a level to it would be wrong.
+    """
+    if not group or group not in df.columns:
+        return []
+    keys = df[group].astype(str)
+    levels = df[group].nunique()
+    held = {str(group), *(str(c) for c in exclude)}
+    out = [str(group)]
+    for column in df.columns:
+        name = str(column)
+        if name in held:
+            continue
+        # The label count is a cheap gate: a full row-wise comparison of every column of a large
+        # frame costs more than the prediction it is preparing. Counted on the raw column, as
+        # *levels* is, so a grouping column with missing values gates the same on both sides.
+        if df[column].nunique() != levels:
+            continue
+        if bool(keys.eq(df[column].astype(str)).all()):
+            out.append(name)
+    return out
+
+
+def _grid_marginal_columns(model: Any, df: pd.DataFrame, *, keep: Sequence[str] = ()) -> list[str]:
+    """
+    Random grouping factors of *model* that a curve should average over rather than fix.
+
+    A ``(1 + age_c | territory) + (1 | subject_uid)`` fit predicts per (territory, subject). Holding
+    ``subject_uid`` at its modal level — what a reference row does with any other categorical column
+    — offsets every territory curve by that one subject's deviation, an arbitrary shift of whichever
+    subject contributed most rows. Predicting at :data:`_MARGINAL_LEVEL` instead drops the term.
+
+    Empty for a fit with no random structure (``lmrob``), whose curves have nothing to marginalize.
+    """
+    try:
+        factors = lme4_grouping_factors(str(getattr(model, "formula", "") or ""))
+    except Exception:  # a model object that does not carry a readable formula
+        return []
+    held = {str(k) for k in keep}
+    return [f for f in factors if f in df.columns and f not in held]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1098,6 +1182,12 @@ def plot_lme4_params(
     Mirrors :func:`~nvitk.stats.mixedlm.plot_mixedlm_params` visually — dashed black population
     curve, one coloured curve per group, observed data in a lighter tone — but gets its numbers from
     R rather than from a locally rebuilt design matrix.
+
+    Each coloured curve is that level's own fit — the fixed effects plus its estimated deviation —
+    with the covariates at their reference values and the fit's *other* grouping factors averaged
+    over rather than held at a level (see :data:`_MARGINAL_LEVEL`). The level is written into every
+    column carrying it, not only into *group*, so grouping the plot by ``group_key`` separates the
+    curves of a model whose random term names ``territory`` (see :func:`_grid_level_columns`).
 
     Parameters
     ----------
@@ -1179,20 +1269,53 @@ def plot_lme4_params(
     positions = np.arange(len(x_values)) if mode == "categorical" else x_values
 
     predict_fn = predict_fn or lme4_predict
+    # Which columns a per-level grid has to set, and which it has to average over. Resolved once:
+    # both read the whole frame.
+    level_columns = _grid_level_columns(df, group if grouped else "", exclude=(x, y))
+    marginal_columns = _grid_marginal_columns(model, df, keep=[*level_columns, x, y])
 
-    def predict_at(level: str | None) -> np.ndarray | None:
-        """Prediction along the grid, for one group level or for the population."""
-        grid = pd.DataFrame([{**base, x: value} for value in x_values])
-        if grouped and level is not None:
-            grid[group] = str(level)
+    def call(grid: pd.DataFrame, level: str | None) -> np.ndarray | None:
         try:
             return predict_fn(model, grid, use_random_effects=level is not None)
         except Exception as exc:
             log.debug("%s prediction failed for %s=%s: %s", population_label, group, level, exc)
             return None
 
+    def predict_at(level: str | None) -> np.ndarray | None:
+        """Prediction along the grid, for one group level or for the population."""
+        grid = pd.DataFrame([{**base, x: value} for value in x_values])
+        if not (grouped and level is not None):
+            return call(grid, None)
+        for column in level_columns:
+            grid[column] = str(level)
+        if marginal_columns:
+            curve = call(grid.assign(**{c: _MARGINAL_LEVEL for c in marginal_columns}), level)
+            if curve is not None:
+                return curve
+            # An lme4 that will not predict at an unseen level (pymer4 0.8) leaves the reference
+            # row's own levels in place: the curve is then offset by the modal subject's deviation,
+            # which still separates the levels from one another.
+            log.debug("Marginal prediction unavailable; holding %s at reference.", marginal_columns)
+        return call(grid, level)
+
     errors: dict[str, str] = {}
     population = predict_at(None)
+
+    # Every level is predicted up front rather than inside the drawing: a grouped display would
+    # otherwise have no way to tell that the curves it is about to stack are all the same one.
+    curves: dict[str, np.ndarray] = {}
+    for level in levels:
+        curve = predict_at(level)
+        if curve is not None:
+            curves[str(level)] = curve
+    if len(curves) > 1:
+        stack = np.vstack(list(curves.values()))
+        if bool(np.isfinite(stack).all() and np.allclose(stack, stack[0])):
+            errors["group_error"] = (
+                f"Every {group} level predicts the same curve, so the coloured lines coincide. This "
+                f"fit has no term over {group}: put it in the formula — as a fixed factor or as a "
+                f"random grouping — to separate them."
+            )
 
     # Intervals from emmeans, keyed by group level (or ``None`` for a single population band).
     # Computed once for every level; each panel then reads the keys it owns.
@@ -1298,7 +1421,7 @@ def plot_lme4_params(
             draw_band(bands[None], "black", f"{int(round(ci_level * 100))}% CI (emmeans)")
 
         for level in panel_levels:
-            curve = predict_at(level)
+            curve = curves.get(str(level))
             if curve is None:
                 continue
             ax.plot(positions, curve, color=cmap[str(level)], lw=2, alpha=0.9,

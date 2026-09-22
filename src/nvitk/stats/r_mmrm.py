@@ -485,6 +485,25 @@ _R_HELPERS = """
   em <- emmeans::emmeans(fit, specs = stats::as.formula(specs))
   as.data.frame(em)
 }
+
+.nvitk_mmrm_predict <- function(fit, newdata) {
+  # ``conditional = FALSE`` is the marginal (fixed-effects) prediction, which is what a population
+  # or per-level curve means. The conditional form borrows the subject's own observed residuals, so
+  # every curve would be bent towards whichever subject the reference row happened to come from.
+  p <- stats::predict(fit, newdata = newdata, conditional = FALSE)
+  # predict() drops rows whose covariates it cannot evaluate, and names what it returns by row.
+  # Re-align by name so a dropped row becomes NA rather than shifting the rest of the curve.
+  out <- rep(NA_real_, nrow(newdata))
+  names_p <- names(p)
+  if (is.null(names_p)) {
+    if (length(p) == nrow(newdata)) out <- as.numeric(p)
+  } else {
+    pos <- match(names_p, rownames(newdata))
+    keep <- !is.na(pos)
+    out[pos[keep]] <- as.numeric(p)[keep]
+  }
+  out
+}
 """
 
 _HELPERS_LOADED = False
@@ -810,7 +829,14 @@ def mmrm_info_dict(
 # ──────────────────────────────────────────────────────────────────────────────
 # Least-squares means and plotting
 # ──────────────────────────────────────────────────────────────────────────────
-def mmrm_emmeans(fit: Any, specs: str) -> pd.DataFrame:
+def mmrm_emmeans(
+    fit: Any,
+    specs: str,
+    *,
+    at_name: str = "",
+    at_values: Sequence[float] | None = None,
+    ci_level: float = 0.95,
+) -> pd.DataFrame:
     """
     Least-squares means from ``emmeans``, as a tidy frame.
 
@@ -819,6 +845,12 @@ def mmrm_emmeans(fit: Any, specs: str) -> pd.DataFrame:
     specs : str
         An emmeans specification formula, e.g. ``"~ territory"`` or
         ``"~ tacsctot_group | territory"``.
+    at_name, at_values
+        Evaluate a *continuous* predictor over a grid rather than at its mean — the confidence band
+        along a fitted line. Without them ``emmeans`` collapses a continuous covariate to a single
+        point, which is a marginal mean and not a curve.
+    ci_level : float
+        Confidence level for the returned interval. Only consulted on the gridded path.
 
     Returns
     -------
@@ -830,7 +862,138 @@ def mmrm_emmeans(fit: Any, specs: str) -> pd.DataFrame:
             "Least-squares means need the R package 'emmeans'.\n"
             "conda install -c conda-forge r-emmeans"
         )
-    return _call_r(".nvitk_mmrm_emmeans", fit, specs)
+    if not at_name and at_values is None:
+        # The plain categorical call is left on this module's own helper so the LS-means table is
+        # byte-for-byte what it always was.
+        return _call_r(".nvitk_mmrm_emmeans", fit, specs)
+
+    # The gridded call reuses lme4's helper — ``emmeans`` takes any model it supports, and an mmrm
+    # fit *is* the R object, exactly as an lmrob fit is. See :func:`.r_robust.lmrob_emmeans`.
+    from rpy2.robjects import FloatVector, globalenv
+    from rpy2.robjects import r as R_
+
+    from . import r_mixedlm
+
+    if not r_mixedlm._EMMEANS_HELPER_LOADED:
+        R_(r_mixedlm._R_EMMEANS_HELPER)
+        r_mixedlm._EMMEANS_HELPER_LOADED = True
+
+    values = FloatVector([float(v) for v in (at_values or [])])
+    with _converter():
+        return pd.DataFrame(
+            globalenv[".nvitk_lme4_emmeans"](
+                fit, str(specs), str(at_name), values, float(ci_level)
+            )
+        )
+
+
+def mmrm_predict(fit: Any, newdata: pd.DataFrame, *, use_random_effects: bool = False) -> np.ndarray:
+    """
+    Marginal predictions at *newdata*, evaluated by R so factor contrasts keep R's own encoding.
+
+    ``use_random_effects`` exists only to match the signature the shared plotting code expects. An
+    MMRM has no random effects to add — its subject structure lives in the residual covariance — so
+    both settings give the same marginal curve and it is ignored.
+    """
+    del use_random_effects
+    _ensure_helpers()
+    from rpy2.robjects import globalenv
+
+    frame = newdata.reset_index(drop=True).copy()
+    for column in frame.columns:
+        if not pd.api.types.is_numeric_dtype(frame[column]):
+            frame[column] = _as_factor_preserving_order(frame[column])
+    with _converter():
+        from rpy2.robjects import conversion
+
+        r_new = conversion.get_conversion().py2rpy(frame)
+        # ``np.array``, not ``np.asarray``: the result wraps R's memory, which R reuses on later
+        # calls, and the plotters keep these arrays for the life of the figure. See
+        # :func:`~nvitk.stats.r_mixedlm.lme4_predict`.
+        return np.array(globalenv[".nvitk_mmrm_predict"](fit, r_new), dtype=float)
+
+
+def _mmrm_band(
+    fit: Any,
+    *,
+    x: str,
+    x_values: Any,
+    group: str,
+    levels: Sequence[str],
+    continuous: bool,
+    fixed_formula: str,
+    ci_level: float,
+) -> dict[str | None, pd.DataFrame] | None:
+    """Confidence bands from ``emmeans``, in the shape the shared plotter consumes."""
+    from .r_mixedlm import _emmeans_band
+
+    # Engine-independent: the band only needs marginal means keyed by x and group, so it is shared
+    # with lme4 and lmrob with this module's emmeans call substituted in.
+    return _emmeans_band(
+        fit,
+        x=x,
+        x_values=x_values,
+        group=group,
+        levels=levels,
+        continuous=continuous,
+        fixed_formula=fixed_formula,
+        ci_level=ci_level,
+        emmeans_fn=mmrm_emmeans,
+    )
+
+
+def plot_mmrm_params(
+    *,
+    fit: Any,
+    df_fit: pd.DataFrame,
+    x: str,
+    y: str,
+    group: str = "",
+    mode: str = "auto",
+    group_order: Sequence[str] | None = None,
+    restrict_to_orders: bool = False,
+    include_points: bool = True,
+    errorbar: bool = False,
+    ci_level: float = 0.95,
+    fixed_formula: str = "",
+    palette: str = "tab10",
+    display: str = "overview",
+    title: str = "MMRM",
+    x_label: str | None = None,
+    y_label: str | None = None,
+) -> Any:
+    """
+    Fitted curves against a *continuous* x, predicted through R.
+
+    The companion to :func:`plot_mmrm_emmeans`, which answers the categorical question. Least-squares
+    means hold every other predictor at one point, so asking them about a continuous covariate
+    returns a single estimate at that covariate's mean — three dots in a column rather than three
+    lines. This draws the curve instead, and is what the plot-mode picker selects between.
+    """
+    from .r_mixedlm import plot_lme4_params
+
+    return plot_lme4_params(
+        model=fit,
+        df_fit=df_fit,
+        x=x,
+        y=y,
+        group=group,
+        mode=mode,
+        group_order=group_order,
+        restrict_to_orders=restrict_to_orders,
+        include_points=include_points,
+        errorbar=errorbar,
+        ci_level=ci_level,
+        fixed_formula=fixed_formula or "",
+        palette=palette,
+        display=display,
+        title=title,
+        x_label=x_label,
+        y_label=y_label,
+        predict_fn=mmrm_predict,
+        band_fn=_mmrm_band,
+        population_label="MMRM (population)",
+    )
 
 
 def plot_mmrm_emmeans(
@@ -1028,8 +1191,10 @@ __all__ = [
     "mmrm_formula",
     "parse_mmrm_covariance",
     "mmrm_info_dict",
+    "mmrm_predict",
     "mmrm_random_effects_frame",
     "plot_mmrm_correlation",
     "plot_mmrm_emmeans",
+    "plot_mmrm_params",
     "validate_mmrm_data",
 ]

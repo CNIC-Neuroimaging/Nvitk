@@ -20,7 +20,7 @@ from __future__ import annotations
 # ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
 # ──────────────────────────────────────────────────────────────────────────────
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import pandas as pd
 from qtpy.QtCore import QThread, Qt, Signal
@@ -767,6 +767,7 @@ class FrameLoadWorker(QThread):
         join: str,
         grain: str = "territory",
         attach_qc: bool = True,
+        visit_overrides: Mapping[str, str] | None = None,
     ) -> None:
         """Store the query parameters; the repo is only touched from :meth:`run`."""
         super().__init__()
@@ -777,6 +778,7 @@ class FrameLoadWorker(QThread):
         self._join = join
         self._grain = grain
         self._attach_qc = attach_qc
+        self._visit_overrides = dict(visit_overrides or {})
 
     def run(self) -> None:
         """Build the frame and emit it, or report the failure."""
@@ -790,6 +792,7 @@ class FrameLoadWorker(QThread):
                 join=self._join,
                 grain=self._grain,
                 attach_qc=self._attach_qc,
+                visit_overrides=self._visit_overrides,
             )
         except Exception as exc:
             log.exception("Analysis frame load failed.")

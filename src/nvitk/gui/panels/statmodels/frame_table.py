@@ -24,11 +24,19 @@ from __future__ import annotations
 # ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
 # ──────────────────────────────────────────────────────────────────────────────
+from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 import pandas as pd
-from qtpy.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt, Signal
-from qtpy.QtGui import QColor
+from qtpy.QtCore import (
+    QAbstractTableModel,
+    QEvent,
+    QModelIndex,
+    QSortFilterProxyModel,
+    Qt,
+    Signal,
+)
+from qtpy.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -53,6 +61,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from nvitk.db.importers import TABULAR_SUFFIXES
 from nvitk.stats.frame_ops import (
     COLUMN_TYPES,
     DEFAULT_IQR_K,
@@ -606,6 +615,7 @@ class AnalysisFrameView(QWidget):
     typeChangeRequested(column, kind) recast a column (numeric / factor / …)
     referenceRequested(column, level) make a level the model's reference
     subjectPlotRequested(subject_uid) open the per-subject viewer for one subject
+    fileDropped(path)                a spreadsheet was dragged onto the table
     """
 
     filtersRequested = Signal(str)
@@ -622,6 +632,7 @@ class AnalysisFrameView(QWidget):
     typeChangeRequested = Signal(str, str)
     referenceRequested = Signal(str, str)
     subjectPlotRequested = Signal(str)
+    fileDropped = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         """Build the table view over a sorting proxy and wire the header context menu."""
@@ -655,8 +666,74 @@ class AnalysisFrameView(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self._table)
 
+        # Dropping a spreadsheet here loads it as the analysis frame. The table view is where the
+        # pointer actually is, and a child that does not accept drops swallows the event before it
+        # reaches this widget — so the filter below forwards the table's drag events up.
+        self.setAcceptDrops(True)
+        self._table.setAcceptDrops(True)
+        self._table.viewport().setAcceptDrops(True)
+        self._table.setDragDropMode(QAbstractItemView.DropOnly)
+        self._table.viewport().installEventFilter(self)
+
         self._filtered: set[str] = set()
         self._derived: set[str] = set()
+
+    # ---- drag and drop --------------------------------------------------------
+    @staticmethod
+    def _dropped_table_path(event: Any) -> str:
+        """
+        The single local spreadsheet a drag carries, or ``""`` if it carries anything else.
+
+        One file only: two dropped workbooks would be two different analysis frames, and silently
+        taking the first is worse than declining the drop.
+        """
+        mime = event.mimeData()
+        if mime is None or not mime.hasUrls():
+            return ""
+        urls = [u for u in mime.urls() if u.isLocalFile()]
+        if len(urls) != 1:
+            return ""
+        path = Path(urls[0].toLocalFile())
+        return str(path) if path.suffix.lower() in TABULAR_SUFFIXES else ""
+
+    def eventFilter(self, obj: Any, event: Any) -> bool:
+        """Forward the table viewport's drag events, which would otherwise never reach this widget."""
+        kind = event.type()
+        if obj is self._table.viewport():
+            if kind in (QEvent.DragEnter, QEvent.DragMove):
+                if self._dropped_table_path(event):
+                    event.acceptProposedAction()
+                    return True
+            elif kind == QEvent.Drop:
+                path = self._dropped_table_path(event)
+                if path:
+                    event.acceptProposedAction()
+                    self.fileDropped.emit(path)
+                    return True
+        return super().eventFilter(obj, event)
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        """Accept a drag carrying one spreadsheet, ignore everything else."""
+        if self._dropped_table_path(event):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        """Keep the drop cursor while the drag stays over the table."""
+        if self._dropped_table_path(event):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        """Hand the dropped path to the panel, which decides how to read it."""
+        path = self._dropped_table_path(event)
+        if not path:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        self.fileDropped.emit(path)
 
     def set_frame(
         self,

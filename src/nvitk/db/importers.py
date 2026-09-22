@@ -382,15 +382,60 @@ def _region_id(value: str | None) -> str | None:
     return normalize_variable_id(text)
 
 
+#: Extensions :func:`read_tabular_source` accepts, grouped by the reader that handles them.
+EXCEL_SUFFIXES: frozenset[str] = frozenset({".xlsx", ".xls", ".xlsm", ".xltx", ".ods"})
+DELIMITED_SUFFIXES: frozenset[str] = frozenset({".csv", ".tsv", ".tab", ".txt", ".dat"})
+TABULAR_SUFFIXES: frozenset[str] = (
+    EXCEL_SUFFIXES | DELIMITED_SUFFIXES | frozenset({".parquet", ".json"})
+)
+
+
 def read_tabular_source(path: str | Path, *, sheet_name: str | int = 0, header: int = 0) -> pd.DataFrame:
-    """Read a tabular source file (Excel or CSV) by extension into a DataFrame."""
+    """
+    Read a tabular source file into a DataFrame, choosing the reader by extension.
+
+    Parameters
+    ----------
+    sheet_name, header
+        Excel only. *header* is the 0-based row holding the column names.
+
+    Notes
+    -----
+    ``.tsv`` / ``.tab`` are read tab-separated; ``.txt`` / ``.dat`` have their delimiter sniffed,
+    since a text export can be comma-, tab- or semicolon-separated and the extension does not say.
+    """
     source = Path(path)
     suffix = source.suffix.lower()
-    if suffix in {".xlsx", ".xls"}:
+    if suffix in EXCEL_SUFFIXES:
         return pd.read_excel(source, sheet_name=sheet_name, header=header)
     if suffix == ".csv":
-        return pd.read_csv(source)
-    raise ValueError(f"Unsupported source format: {source}")
+        return pd.read_csv(source, header=header)
+    if suffix in {".tsv", ".tab"}:
+        return pd.read_csv(source, sep="\t", header=header)
+    if suffix in {".txt", ".dat"}:
+        # ``sep=None`` asks the python engine to sniff the delimiter from the first lines.
+        return pd.read_csv(source, sep=None, engine="python", header=header)
+    if suffix == ".parquet":
+        return pd.read_parquet(source)
+    if suffix == ".json":
+        return pd.read_json(source)
+    raise ValueError(
+        f"Unsupported source format {suffix or '(no extension)'!r}: {source.name}. "
+        f"Expected one of {', '.join(sorted(TABULAR_SUFFIXES))}."
+    )
+
+
+def tabular_sheet_names(path: str | Path) -> list[str]:
+    """
+    Sheet names of an Excel workbook, or ``[]`` for a single-table format.
+
+    Lets a caller offer a sheet picker only when there is a choice to make.
+    """
+    source = Path(path)
+    if source.suffix.lower() not in EXCEL_SUFFIXES:
+        return []
+    with pd.ExcelFile(source) as workbook:
+        return [str(name) for name in workbook.sheet_names]
 
 
 def list_excel_sources(base_path: str | Path) -> list[Path]:

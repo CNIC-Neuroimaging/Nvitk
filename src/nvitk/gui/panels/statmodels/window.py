@@ -9,7 +9,8 @@ A floating, maximizable window laid out in three draggable rows:
 * **middle** — the plot and the model report, which get most of the height
 * **bottom** — clinical / cognitive covariate pickers and the analysis dataframe
 
-The frame flows one way: measurements → ``_analysis_df`` (raw, never mutated) → derived columns →
+The frame flows one way: measurements → ``_analysis_df`` (raw, never mutated) → region combinations →
+derived columns (after melt/wide when those are active, so names like ``pi`` match the table) →
 filter rules → ``_working_df`` (what gets fitted). Both derivation and filtering are recomputed from
 the raw frame every time, so toggling one never compounds on the other's output, and a reload keeps
 the whole set applied.
@@ -28,8 +29,11 @@ import numpy as np
 import pandas as pd
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
@@ -39,6 +43,7 @@ from qtpy.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QDockWidget,
     QMainWindow,
     QMessageBox,
@@ -129,6 +134,7 @@ from nvitk.stats import (
     plot_lme4_params,
     plot_lmrob_params,
     plot_mmrm_emmeans,
+    plot_mmrm_params,
     plot_lmrob_weights,
     plot_mmrm_correlation,
     mmrm_correlation_matrix,
@@ -140,6 +146,7 @@ from nvitk.stats import (
     subject_attribute_entries,
     subject_image_annotation_entries,
 )
+from nvitk.db.importers import read_tabular_source, tabular_sheet_names
 from nvitk.stats.frame_ops import (
     COLUMN_TYPES,
     DerivedColumn,
@@ -149,6 +156,7 @@ from nvitk.stats.frame_ops import (
     apply_reference_levels,
     apply_filter_rules,
     default_derived_name,
+    ensure_unique_columns,
     filtered_columns,
 )
 from nvitk.stats.mediation import (
@@ -209,6 +217,7 @@ from .export import build_provenance_frame, export_analysis_frame, export_group_
 from .frame_table import AnalysisFrameView, ColumnFilterDialog, FilterChipBar
 from .helpers import (
     checked_variable_ids,
+    checked_variable_visits,
     dropped_rows_note,
     filter_list_widget,
     open_repo,
@@ -216,6 +225,7 @@ from .helpers import (
     populate_checklist,
     resolve_outcome_column,
     set_checked_variable_ids,
+    set_variable_visits,
     statmodels_root,
 )
 from .measurements import FrameLoadWorker, MeasurementForm, MeasurementsWidget
@@ -223,7 +233,7 @@ from .mediation_panel import MediationFormPanel, MediationWorker
 from .plot_view import PlotPanel
 from .report import ModelReportPanel
 from nvitk.gui.core.design import SPACE, SPACE_TIGHT
-from .theme import apply_dark_theme, muted_label_style
+from .theme import apply_dark_theme, muted_label_style, theme_toggle_button
 
 log = Logger()
 
@@ -362,13 +372,20 @@ class StatmodelsWindow(QMainWindow):
         self._derived: list[DerivedColumn] = []
         self._combinations: list[RegionCombination] = []
         self._filter_report: list[dict[str, Any]] = []
+        # Set when the frame came from a saved training dataset: the recipe below (combinations,
+        # derived columns, filters, reshape) is already baked into those rows, so re-applying it
+        # would append a second copy of every ``mode="row"`` combination. Cleared by Reload data.
+        self._prebuilt_frame: bool = False
+        # {domain: {variable_id: [visit, …]}} — one scan of each measurement table, kept for the
+        # life of the panel because the covariate lists are rebuilt on every reload.
+        self._visit_catalog: dict[str, dict[str, list[str]]] = {}
         # Wide = one row per subject, one column per vessel. Applied *after* derived columns and
         # filters, so a vessel-wise QC filter still gets to act on the rows it was written for.
         self._wide_mode: bool = False
         self._wide_coverage: pd.DataFrame | None = None
         self._wide_complete: int = 0
-        # Measurement family melted back to long after the wide pivot, or "".
-        self._melt_family: str = ""
+        # Measurement families melted back to long after the wide pivot (may be several at once).
+        self._melt_families: list[str] = []
         # Columns hidden from the working frame. Held as names rather than by dropping them from
         # ``_analysis_df``, so a reload or a restore brings them back without re-querying.
         self._dropped_columns: set[str] = set()
@@ -477,6 +494,13 @@ class StatmodelsWindow(QMainWindow):
         )
         self._btn_focus.toggled.connect(self._on_focus_plot)
         status.addPermanentWidget(self._btn_focus)
+
+        # This window is often the only one on screen — maximized, or opened
+        # standalone from the CLI — so it carries its own theme switch rather than
+        # sending you back to the Napari dock for it. No viewer is passed: the
+        # switch finds one if this process has one, and does without if it does not.
+        self._btn_theme = theme_toggle_button(parent=self)
+        status.addPermanentWidget(self._btn_theme)
 
         # Snapshot the pristine arrangement for View → Reset panel layout.
         self._default_dock_state = self.saveState()
@@ -885,9 +909,25 @@ class StatmodelsWindow(QMainWindow):
         btn_row = QHBoxLayout()
         self._btn_fit = QPushButton("Fit model")
         self._btn_save = QPushButton("Save model")
+        self._btn_save.setToolTip(
+            "Write the configuration, the fitted model, the report and the exact rows it was "
+            "trained on into the model folder."
+        )
         self._btn_load = QPushButton("Load model…")
+        self._btn_load.setToolTip(
+            "Restore a saved model's settings, its report, and its training dataset when one was "
+            "saved alongside."
+        )
+        self._btn_load_data = QPushButton("Load dataset…")
+        self._btn_load_data.setToolTip(
+            "Load only the training rows of a saved model, without touching the current settings. "
+            "The frame is shown exactly as it was saved — combinations, derived columns and "
+            "filters are already in it, so they are not re-applied."
+        )
         self._btn_plot = QPushButton("Refresh plot")
-        for btn in (self._btn_fit, self._btn_save, self._btn_load, self._btn_plot):
+        for btn in (
+            self._btn_fit, self._btn_save, self._btn_load, self._btn_load_data, self._btn_plot
+        ):
             btn_row.addWidget(btn)
         box_lay.addLayout(btn_row)
 
@@ -1373,11 +1413,10 @@ class StatmodelsWindow(QMainWindow):
         row_flow.addWidget(self._btn_reshape)
         self._btn_melt = QPushButton("Melt by…")
         self._btn_melt.setToolTip(
-            "Melt one measurement's per-region columns of a wide frame back into a 'territory' "
-            "column, keeping every other column repeated down the rows.\n\n"
-            "This is what lets a region be a model *term* in a cross-modality frame: melt "
-            "flow_mean and you can write 'flow_mean ~ psqeduca * territory + t1_volume_mm3', with "
-            "the eTIV and the covariates still there as predictors."
+            "Melt one or more measurements' per-region columns of a wide frame back into a "
+            "'territory' column, keeping every other column repeated down the rows.\n\n"
+            "Select several families when they share regions (e.g. pi and flow_mean on the same "
+            "vessels). This is what lets a region be a model *term* in a cross-modality frame."
         )
         self._btn_melt.clicked.connect(self._on_melt_frame)
         self._btn_melt.setEnabled(False)
@@ -1406,6 +1445,7 @@ class StatmodelsWindow(QMainWindow):
         self._btn_fit.clicked.connect(self._on_fit)
         self._btn_save.clicked.connect(self._on_save)
         self._btn_load.clicked.connect(self._on_load)
+        self._btn_load_data.clicked.connect(self._on_load_dataset)
         self._btn_plot.clicked.connect(self._on_plot)
         self._plot.exportRequested.connect(self._on_export_plot)
         self._plot_display.currentIndexChanged.connect(lambda *_: self._sync_analysis_type())
@@ -1439,6 +1479,7 @@ class StatmodelsWindow(QMainWindow):
         self._frame_view.typeChangeRequested.connect(self._on_change_column_type)
         self._frame_view.referenceRequested.connect(self._on_set_reference_level)
         self._frame_view.plotXRequested.connect(self._on_set_plot_x)
+        self._frame_view.fileDropped.connect(self._on_import_frame_file)
         self._btn_derived.clicked.connect(lambda *_: self._on_edit_derived())
         self._btn_export.clicked.connect(self._on_export_frame)
 
@@ -1513,6 +1554,10 @@ class StatmodelsWindow(QMainWindow):
             log.debug("Catalog refresh failed: %s", exc)
         clinical_checked = checked_variable_ids(self._clinical_list)
         cognitive_checked = checked_variable_ids(self._cognitive_list)
+        # Rebuilding the rows destroys the combos, so the visit picks have to be carried across
+        # exactly as the check states are.
+        clinical_visits = checked_variable_visits(self._clinical_list)
+        cognitive_visits = checked_variable_visits(self._cognitive_list)
         populate_checklist(
             self._clinical_list,
             [
@@ -1522,12 +1567,36 @@ class StatmodelsWindow(QMainWindow):
                 *subject_image_annotation_entries(self._repo),
                 *self._repo.catalog.variable_entries(domain="clinical"),
             ],
+            visits=self._domain_visits("clinical"),
         )
         populate_checklist(
-            self._cognitive_list, self._repo.catalog.variable_entries(domain="cognitive")
+            self._cognitive_list,
+            self._repo.catalog.variable_entries(domain="cognitive"),
+            visits=self._domain_visits("cognitive"),
         )
         set_checked_variable_ids(self._clinical_list, clinical_checked)
         set_checked_variable_ids(self._cognitive_list, cognitive_checked)
+        set_variable_visits(self._clinical_list, clinical_visits)
+        set_variable_visits(self._cognitive_list, cognitive_visits)
+
+    def _domain_visits(self, domain: str) -> dict[str, list[str]]:
+        """
+        Visits available per variable in *domain*, cached for the life of the panel.
+
+        One scan of the measurement table answers it for every variable at once, and the answer only
+        changes when the dataset is re-imported — so it is read once rather than per covariate. The
+        cache is cleared by :meth:`_refresh_covariate_lists`' catalog refresh path below.
+        """
+        cached = self._visit_catalog.get(domain)
+        if cached is not None:
+            return cached
+        try:
+            visits = self._repo.variable_visits(domain=domain)
+        except Exception as exc:
+            log.debug("Could not read %s visits: %s", domain, exc)
+            visits = {}
+        self._visit_catalog[domain] = visits
+        return visits
 
     def _clinical_vars(self) -> list[str]:
         """Checked clinical covariate variable ids."""
@@ -1536,6 +1605,18 @@ class StatmodelsWindow(QMainWindow):
     def _cognitive_vars(self) -> list[str]:
         """Checked cognitive covariate variable ids."""
         return checked_variable_ids(self._cognitive_list)
+
+    def _visit_overrides(self) -> dict[str, str]:
+        """
+        ``{variable_id: visit_id}`` for every checked covariate pinned to a specific visit.
+
+        Only deliberate picks appear: a variable left on "latest", or recorded at a single visit,
+        contributes nothing and keeps the collapse policy's own behaviour.
+        """
+        return {
+            **checked_variable_visits(self._clinical_list),
+            **checked_variable_visits(self._cognitive_list),
+        }
 
     def _on_primary_measurement_changed(self) -> None:
         """Mirror the inline Data-selection form into measurement 0."""
@@ -1563,6 +1644,8 @@ class StatmodelsWindow(QMainWindow):
             notify("A reload is already running.", error=True)
             return
         self._refresh_covariate_lists()
+        # A query result is built from the recipe, so whatever a saved dataset pinned is over.
+        self._prebuilt_frame = False
         specs = self._measurements.specs()
         self._btn_reload.setEnabled(False)
         self._status.setText(f"Loading {len(specs)} measurement(s)…")
@@ -1575,6 +1658,7 @@ class StatmodelsWindow(QMainWindow):
             join=self._measurements.join(),
             grain=self._measurements.grain(),
             attach_qc=self._measurements.attach_qc(),
+            visit_overrides=self._visit_overrides(),
         )
         worker.finished_ok.connect(self._on_frame_loaded)
         worker.failed.connect(self._on_frame_load_failed)
@@ -1587,6 +1671,7 @@ class StatmodelsWindow(QMainWindow):
         """Adopt a freshly loaded frame and re-apply derived columns and filters to it."""
         frame, meta = payload
         self._analysis_df = frame
+        self._prebuilt_frame = False
         self._load_meta = meta
         self._btn_reload.setText("Reload data")
         self._btn_reload.setToolTip("")
@@ -1615,13 +1700,118 @@ class StatmodelsWindow(QMainWindow):
         self._status.setText(f"Reload failed: {message}")
         notify(f"Statmodels reload failed: {message}", error=True)
 
+    def _on_import_frame_file(self, path: str) -> None:
+        """
+        Adopt a dropped spreadsheet as the analysis frame.
+
+        The imported table replaces what the dataset query produced, so the panel stops being a view
+        of the repo and becomes a view of that file — which is the point: a collaborator's Excel can
+        be modelled, plotted and filtered with the same machinery without being imported into the
+        dataset first. Derived columns and filters are kept and re-applied, since they are the
+        user's working definitions rather than a property of the source; any that name a column the
+        file does not have report themselves in the chip bar as usual.
+
+        Pressing Reload data goes back to the dataset query.
+        """
+        source = Path(path)
+        try:
+            sheets = tabular_sheet_names(source)
+        except Exception as exc:
+            log.debug("Could not inspect %s: %s", source, exc, exc_info=True)
+            sheets = []
+
+        sheet: str | int = 0
+        if len(sheets) > 1:
+            choice, ok = QInputDialog.getItem(
+                self, "Choose a sheet", f"{source.name} has {len(sheets)} sheets:", sheets, 0, False
+            )
+            if not ok:
+                return
+            sheet = choice
+
+        try:
+            frame = read_tabular_source(source, sheet_name=sheet)
+        except Exception as exc:
+            log.debug("Import of %s failed", source, exc_info=True)
+            notify(f"Could not read {source.name}: {exc}", error=True)
+            QMessageBox.critical(self, "Import failed", f"{source}\n\n{exc}")
+            return
+
+        if frame is None or frame.empty:
+            notify(f"{source.name} has no rows.", error=True)
+            return
+
+        # Duplicate column names break patsy and the R engines alike, and an exported spreadsheet
+        # routinely has two columns called 'mean'. Same rule the dataset path applies.
+        frame = ensure_unique_columns(frame, context=source.name)
+
+        self._analysis_df = frame
+        # Unlike a saved training dataset, an imported spreadsheet is raw: derived columns and
+        # filters are meant to run on it, so it is not marked prebuilt.
+        self._prebuilt_frame = False
+        self._load_meta = {
+            "source": "imported-file",
+            "path": str(source),
+            "sheet": sheet if isinstance(sheet, str) else "",
+            "n_rows": int(len(frame)),
+            "covariates": [],
+            "warnings": [],
+        }
+        # A dropped file has no measurement specs behind it, so the diagnostics pane would keep
+        # describing the last dataset query. Reset it to the import instead.
+        self._measurements.set_diagnostics(self._load_meta)
+        self._btn_reload.setText("Reload data")
+        self._btn_reload.setToolTip("Discard the imported file and re-run the dataset query.")
+        self._recompute_frame(announce=False)
+
+        where = f" [{sheet}]" if isinstance(sheet, str) else ""
+        working = self._working_df
+        n_working = 0 if working is None else len(working)
+        notify(f"Imported {len(frame)} rows × {len(frame.columns)} columns from {source.name}{where}")
+        self._status.setText(
+            f"Imported {source.name}{where}: n={len(frame)} rows"
+            + (f" (filtered to {n_working})" if n_working != len(frame) else "")
+            + f"  |  {len(frame.columns)} columns  |  press Reload data to return to the dataset"
+        )
+
+    def _adopt_prebuilt_frame(self, frame: pd.DataFrame) -> None:
+        """
+        Show a saved training dataset exactly as it was written.
+
+        The recipe that produced it — combinations, derived columns, casts, filters, reshape — is
+        already in these rows, so it is displayed rather than rebuilt. Re-running it would at best
+        recompute identical values and at worst duplicate every synthetic row a ``mode="row"``
+        region combination added. The definitions stay visible in their panels so the frame can
+        still be read, and pressing Reload data returns to the dataset query.
+        """
+        self._working_df = frame
+        self._filter_report = []
+        self._chips.set_rules(self._chips.rules(), [])
+        self._chips.set_counts(len(frame), len(frame))
+        self._derived_label.setText(
+            f"{len(self._derived)} derived column(s) — already in the loaded dataset"
+            if self._derived else ""
+        )
+        self._sync_filter_toggle()
+        self._sync_reshape_buttons(frame)
+        self._frame_view.set_dropped(set())
+        self._frame_view.set_column_types(self._column_types)
+        self._frame_view.set_references(self._reference_levels)
+        self._frame_view.set_frame(
+            frame, derived_columns={d.name for d in self._derived}
+        )
+        self._sync_column_combos(frame)
+        self._sync_nonlinear_columns(frame)
+        self._mediation_form.set_columns(frame)
+
     def _recompute_frame(self, *, announce: bool = True) -> None:
         """
-        Rebuild the working frame: derived columns first, then the filter rules.
+        Rebuild the working frame from ``_analysis_df``, then filters, then optional melt/wide.
 
         Both stages always start from the untouched ``_analysis_df``, so removing a filter or editing
-        a derived column can never compound on a previously filtered frame. Derived columns come
-        first because filters must be able to target them (``log_pi > 0``).
+        a derived column can never compound on a previously filtered frame. When melt or wide reshape
+        is active, derived columns run after that reshape so their sources match the table (``pi``
+        rather than ``pi__LICA``); otherwise they run before filters so rules can target them.
         """
         base = self._analysis_df
         if base is None:
@@ -1629,12 +1819,22 @@ class StatmodelsWindow(QMainWindow):
             self._chips.set_rules(self._chips.rules(), [])
             return
 
+        if self._prebuilt_frame:
+            self._adopt_prebuilt_frame(base)
+            return
+
         # Region algebra first: a derived column may well be built from a combination
         # (``log(TCBF)``), and the reverse never happens — a combination reads one measurement
         # across rows, which a within-row transform cannot produce.
         combined, combo_errors, _reports = apply_region_combinations(base, self._combinations)
-        derived_frame, derived_errors = apply_derived_columns(combined, self._derived)
-        derived_errors = [*combo_errors, *derived_errors]
+        derived_errors = list(combo_errors)
+        post_derive = self._reshape_active()
+        if post_derive:
+            staged = combined
+        else:
+            staged, derr = apply_derived_columns(combined, self._derived)
+            derived_errors.extend(derr)
+            derived_frame = staged
         if derived_errors:
             self._derived_label.setText("⚠ " + "; ".join(derived_errors))
         else:
@@ -1642,15 +1842,15 @@ class StatmodelsWindow(QMainWindow):
                 f"{len(self._derived)} derived column(s)" if self._derived else ""
             )
 
-        derived_frame, type_notes = apply_column_types(derived_frame, self._column_types)
+        staged, type_notes = apply_column_types(staged, self._column_types)
         # References after casts: casting to Factor is what makes a column eligible for one, and a
         # cast rebuilds the categories, discarding any order set before it.
-        derived_frame, ref_notes = apply_reference_levels(derived_frame, self._reference_levels)
+        staged, ref_notes = apply_reference_levels(staged, self._reference_levels)
         if type_notes or ref_notes:
             log.info("Column types: %s", " ".join([*type_notes, *ref_notes]))
 
         rules = self._chips.rules()
-        working, report = apply_filter_rules(derived_frame, rules)
+        working, report = apply_filter_rules(staged, rules)
 
         # Reshape after the long-shape filters: derived columns and most rules are written against
         # long rows, so pivoting first would put their targets out of reach.
@@ -1662,9 +1862,14 @@ class StatmodelsWindow(QMainWindow):
         # Melt independently of the reshape button: the frame can already be wide because the
         # measurements were loaded on the subject grain, in which case the button was never pressed
         # and _wide_mode is False. The frame's own columns decide, not how it got that way.
-        if self._melt_family:
+        if self._melt_families:
             working = self._melt_working(working)
             reshaped = True
+
+        if post_derive:
+            working, derr = apply_derived_columns(working, self._derived)
+            derived_errors.extend(derr)
+            derived_frame, _ = apply_derived_columns(self._apply_reshape(combined), self._derived)
 
         if reshaped:
             # A rule can name a column that only exists *after* the reshape — an IQR fence on
@@ -1790,7 +1995,7 @@ class StatmodelsWindow(QMainWindow):
         # Offer the levels of the *unfiltered* frame, so a level filtered out earlier can be
         # re-included without clearing everything first.
         combined, _, _ = apply_region_combinations(base, self._combinations)
-        derived_frame, _ = apply_derived_columns(combined, self._derived)
+        derived_frame, _ = self._frame_with_derived_columns(combined)
         series = derived_frame[column] if column in derived_frame.columns else working[column]
 
         existing = [r for r in self._chips.rules() if r.column == column]
@@ -1881,8 +2086,12 @@ class StatmodelsWindow(QMainWindow):
         if self._analysis_df is None:
             notify("Reload data before adding derived columns.", error=True)
             return
+        editor_frame = self._editor_frame_for_derived()
+        if editor_frame is None:
+            notify("Reload data before adding derived columns.", error=True)
+            return
         dialog = DerivedColumnsDialog(
-            self, frame=self._analysis_df, columns=self._derived, bin_column=bin_column
+            self, frame=editor_frame, columns=self._derived, bin_column=bin_column
         )
         if dialog.exec():
             self._derived = dialog.columns()
@@ -1934,7 +2143,8 @@ class StatmodelsWindow(QMainWindow):
         base, working = self._analysis_df, self._working_df
         if base is None or working is None or len(working) >= len(base):
             return None
-        derived, _ = apply_derived_columns(base, self._derived)
+        combined, _, _ = apply_region_combinations(base, self._combinations)
+        derived, _ = self._frame_with_derived_columns(combined)
         wanted = [c for c in (x, y, group) if c]
         if any(c not in derived.columns for c in wanted):
             return None
@@ -2027,11 +2237,11 @@ class StatmodelsWindow(QMainWindow):
         families = subject_measurement_families(df) if df is not None and not df.empty else {}
         # A single-region measurement has no '__' columns and nothing to melt; a family needs at
         # least one region column to spread down the rows.
-        self._btn_melt.setEnabled(bool(families) or bool(self._melt_family))
-        self._btn_melt.setText(f"Melt: {self._melt_family}" if self._melt_family else "Melt by…")
+        self._btn_melt.setEnabled(bool(families) or bool(self._melt_families))
+        self._btn_melt.setText(self._melt_button_text())
 
         already_wide = bool(families) or (
-            df is not None and "territory" not in df.columns and not self._melt_family
+            df is not None and "territory" not in df.columns and not self._melt_families
         )
         if already_wide and not self._wide_mode:
             self._btn_reshape.setEnabled(False)
@@ -2048,37 +2258,74 @@ class StatmodelsWindow(QMainWindow):
                 "'lmca ~ lica' compares two columns of the same row. Every other engine wants long."
             )
 
-    def _melt_working(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Melt ``self._melt_family``'s per-region columns back to long, or return *df* unchanged."""
-        from nvitk.stats._statmodels_frames import melt_subject_frame
+    def _melt_button_text(self) -> str:
+        if not self._melt_families:
+            return "Melt by…"
+        if len(self._melt_families) == 1:
+            return f"Melt: {self._melt_families[0]}"
+        joined = ", ".join(self._melt_families)
+        if len(joined) > 36:
+            return f"Melt: {self._melt_families[0]} +{len(self._melt_families) - 1}"
+        return f"Melt: {joined}"
 
-        if df is None or df.empty or not self._melt_family:
+    def _reshape_active(self) -> bool:
+        """Whether the table's column layout differs from the joined analysis frame."""
+        return bool(self._wide_mode or self._melt_families)
+
+    def _apply_reshape(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Apply wide pivot and/or melt without derived columns or filter rules."""
+        working = df
+        if self._wide_mode:
+            working = self._to_wide(working)
+        if self._melt_families:
+            working = self._melt_working(working)
+        return working
+
+    def _editor_frame_for_derived(self) -> pd.DataFrame | None:
+        """Column layout shown in the derived-columns editor (matches the table after melt/wide)."""
+        base = self._analysis_df
+        if base is None:
+            return None
+        combined, _, _ = apply_region_combinations(base, self._combinations)
+        return self._apply_reshape(combined)
+
+    def _frame_with_derived_columns(self, combined: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+        """Evaluate derived columns against the frame shape the user sees in the table."""
+        if self._reshape_active():
+            return apply_derived_columns(self._apply_reshape(combined), self._derived)
+        return apply_derived_columns(combined, self._derived)
+
+    def _melt_working(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Melt ``self._melt_families``' per-region columns back to long, or return *df* unchanged."""
+        from nvitk.stats._statmodels_frames import melt_subject_families
+
+        if df is None or df.empty or not self._melt_families:
             return df
         try:
-            return melt_subject_frame(df, family=self._melt_family)
+            return melt_subject_families(df, self._melt_families)
         except ValueError as exc:
             notify(f"Cannot melt: {exc}", error=True)
-            self._melt_family = ""
+            self._melt_families = []
             return df
 
     def _on_melt_frame(self) -> None:
-        """Choose a measurement family to melt back into a territory column."""
+        """Choose one or more measurement families to melt back into a territory column."""
         from nvitk.stats._statmodels_frames import subject_measurement_families
 
         # Offer the families of the *un-melted* frame: once one is melted its columns are gone, so
         # asking the current frame would hide the option that is already active. This deliberately
         # does not consult _wide_mode — a frame loaded on the subject grain is already wide.
-        probe = self._melt_family
-        self._melt_family = ""
+        probe = list(self._melt_families)
+        self._melt_families = []
         self._recompute_frame(announce=False)
         # Explicit None test: a DataFrame in a boolean context raises rather than being falsy.
         probe_df = self._working_df
         families = (
             subject_measurement_families(probe_df) if probe_df is not None else {}
         )
-        self._melt_family = probe
 
         if not families:
+            self._melt_families = probe
             self._recompute_frame(announce=False)
             notify(
                 "Nothing to melt: no column is named '<measurement>__<region>'. That naming comes "
@@ -2088,37 +2335,30 @@ class StatmodelsWindow(QMainWindow):
             )
             return
 
-        options = ["(none — keep it wide)"] + [
-            f"{name}  ({len(regions)} regions: {', '.join(regions[:4])}"
-            f"{'…' if len(regions) > 4 else ''})"
-            for name, regions in families.items()
-        ]
-        keys = ["", *families]
-        current = keys.index(self._melt_family) if self._melt_family in keys else 0
-        choice, ok = QInputDialog.getItem(
-            self, "Melt by region", "Measurement to spread down the rows:", options, current, False
-        )
-        if not ok:
+        dialog = MeltFamiliesDialog(self, families=families, selected=probe)
+        if not dialog.exec():
+            self._melt_families = probe
             self._recompute_frame(announce=False)
             return
 
-        self._melt_family = keys[options.index(choice)]
+        self._melt_families = dialog.selected_families()
         self._recompute_frame(announce=False)
         frame = self._working_df
 
-        if not self._melt_family:
+        if not self._melt_families:
             self._btn_melt.setText("Melt by…")
             self._status.setText("Analysis dataframe: wide, not melted.")
             notify("Kept wide.")
             return
 
-        self._btn_melt.setText(f"Melt: {self._melt_family}")
+        self._btn_melt.setText(self._melt_button_text())
         levels = frame["territory"].nunique() if frame is not None and "territory" in frame else 0
+        melted_label = ", ".join(self._melt_families)
         self._status.setText(
-            f"Melted {self._melt_family} into {len(frame)} row(s) over {levels} territory level(s). "
+            f"Melted {melted_label} into {len(frame)} row(s) over {levels} territory level(s). "
             f"'territory' is a model term again; every other column repeats down the rows."
         )
-        notify(f"Melted {self._melt_family} — {levels} territory levels.")
+        notify(f"Melted {melted_label} — {levels} territory levels.")
 
     def _coverage_note(self) -> str:
         """One line naming the vessels that decide listwise deletion, or ``""``."""
@@ -2141,7 +2381,7 @@ class StatmodelsWindow(QMainWindow):
 
         if not self._wide_mode:
             self._wide_coverage = None
-            self._melt_family = ""
+            self._melt_families = []
             self._btn_melt.setText("Melt by…")
             self._btn_reshape.setText("Reshape → wide")
             self._status.setText("Analysis dataframe: long (one row per subject × region).")
@@ -2479,7 +2719,8 @@ class StatmodelsWindow(QMainWindow):
         The mask is built by comparing the filtered frame's index against the unfiltered one, so it
         follows whatever rules are active without this needing to re-implement them.
         """
-        derived, _ = apply_derived_columns(base, self._derived)
+        combined, _, _ = apply_region_combinations(base, self._combinations)
+        derived, _ = self._frame_with_derived_columns(combined)
         working = self._working_df
         if working is None or len(working) >= len(derived):
             return derived, None
@@ -3339,6 +3580,34 @@ class StatmodelsWindow(QMainWindow):
             log.debug("Plot failed: %s", exc)
             self._plot.show_error(f"Plot unavailable: {exc}")
 
+    def _mmrm_plot_mode(self, visit: str) -> str:
+        """
+        Resolve the plot-mode picker to ``"continuous"`` or ``"categorical"`` for an MMRM figure.
+
+        MMRM is the one engine whose default figure is a marginal-means table rather than a curve,
+        so ``auto`` has to look at the x column the way the other engines do: a numeric x that is
+        not the repeated factor itself is a curve, everything else is a set of levels. An explicit
+        pick wins, except that a non-numeric x cannot be drawn as a curve at all.
+        """
+        wanted = str(self._plot_mode.currentData() or "auto")
+        if wanted == "categorical":
+            return "categorical"
+
+        df = self._last_model_df
+        x = self._plot_x.currentText().strip()
+        if df is None or not x or x not in df.columns:
+            return "categorical"
+        # The repeated factor is the axis least-squares means are *for*; a curve along it would
+        # interpolate between visits that have no in-between.
+        if visit and x == visit:
+            return "categorical"
+        # Both "auto" and an explicit "continuous" land here: a curve needs a real number line, so
+        # a categorical or string x falls back to marginal means either way.
+        numeric = pd.api.types.is_numeric_dtype(df[x]) and not isinstance(
+            df[x].dtype, pd.CategoricalDtype
+        )
+        return "continuous" if numeric else "categorical"
+
     def _plot_mmrm(self) -> None:
         """
         Least-squares means by the repeated dimension, or the estimated correlation matrix.
@@ -3384,6 +3653,88 @@ class StatmodelsWindow(QMainWindow):
                         )
                     )
                     note = ""
+                elif self._mmrm_plot_mode(visit) == "continuous":
+                    # A continuous x has no least-squares means worth the name: emmeans holds every
+                    # other predictor at one point, so it answers with a single estimate at the
+                    # covariate's own mean — one dot per level stacked in a column, which is the
+                    # figure this branch exists to avoid. Predict the curve instead, exactly as the
+                    # lme4 and lmrob engines do.
+                    df = self._last_model_df
+                    x = self._plot_x.currentText().strip()
+                    if not x or df is None or x not in df.columns:
+                        raise ValueError("Choose a plot x column that is in the analysis frame.")
+                    y = self._last_outcome or self._primary_column()
+                    group_col = visit if visit and visit in df.columns else ""
+                    fixed_formula = meta.get("fixed_formula", "")
+                    title = f"MMRM: {y} ~ {x}" + (f" | {group_col}" if group_col else "")
+                    note = (
+                        f"Marginal fixed-effects curves, {meta.get('structure_label', '')} "
+                        "covariance. Switch the plot mode to categorical for least-squares means."
+                    )
+                    dropped = (
+                        self._excluded_points(x, y, group_col)
+                        if self._show_filtered.isChecked() and self._show_filtered.isEnabled()
+                        else None
+                    )
+
+                    if self._interactive_plot.isChecked():
+                        from nvitk.stats.r_mmrm import _mmrm_band, mmrm_predict
+
+                        geometry = r_model_geometry(
+                            self._last_result, df, x=x, y=y, group=group_col,
+                            mode="continuous", group_order=selected or None,
+                            predict_fn=mmrm_predict, band_fn=_mmrm_band,
+                            fixed_formula=fixed_formula,
+                            errorbar=self._show_ci.isChecked(),
+                        )
+                        if not self._include_points.isChecked():
+                            geometry.points = None
+                        elif dropped is not None:
+                            geometry.points = pd.concat(
+                                [geometry.points, dropped.loc[:, geometry.points.columns]],
+                                ignore_index=True,
+                            )
+                        excluded = (
+                            np.r_[np.zeros(len(df), bool), np.ones(len(dropped), bool)]
+                            if dropped is not None and self._include_points.isChecked() else None
+                        )
+                        render_kwargs = dict(
+                            x=x, y=y, group=group_col, hover_columns=self._hover_columns(df),
+                            excluded_mask=excluded, show_excluded=True,
+                            errorbar=self._show_ci.isChecked(),
+                            title=title, x_label=x, y_label=y,
+                        )
+                        draw = lambda mode: render(geometry, display=mode, **render_kwargs)
+                    else:
+                        plot_kwargs = dict(
+                            fit=self._last_result, df_fit=df, x=x, y=y, group=group_col,
+                            mode="continuous",
+                            include_points=self._include_points.isChecked(),
+                            errorbar=self._show_ci.isChecked(),
+                            fixed_formula=fixed_formula,
+                            group_order=selected or None, restrict_to_orders=subset,
+                            title=title,
+                        )
+                        geometry = None
+                        draw = lambda mode: plot_mmrm_params(display=mode, **plot_kwargs)
+
+                    try:
+                        fig = draw(display)
+                    except ValueError as exc:
+                        if display != "grouped":
+                            raise
+                        note = f"\u26a0 Grouped display unavailable \u2014 {exc}"
+                        fig = draw("overview")
+                    else:
+                        if display == "grouped":
+                            note += f"  {self._panel_note(fig)}"
+                    band_error = (
+                        geometry.error if geometry is not None else getattr(fig, "ci_error", "")
+                    )
+                    if band_error:
+                        note += f"  \u26a0 {band_error}"
+                    if dropped is not None:
+                        note += f"  {len(dropped)} filtered observation(s) shown in grey."
                 else:
                     x = self._plot_x.currentText().strip() or visit
                     hue = visit if x != visit else None
@@ -3536,6 +3887,11 @@ class StatmodelsWindow(QMainWindow):
                 notes.append(f"Showing {len(selected)} of {len(all_levels)} {group_col} levels.")
             if dropped is not None:
                 notes.append(f"{len(dropped)} filtered observation(s) shown in grey.")
+            # Coloured lines that coincide are not a drawing problem: this colour-by column has no
+            # term in the fit. Say so, or the legend reads as one curve per level regardless.
+            group_error = getattr(fig, "group_error", "")
+            if group_error:
+                notes.append(f"⚠ {group_error}")
             if self._show_ci.isChecked() and ci_error:
                 notes.append(f"⚠ {ci_error}")
             self._plot.set_status("  ".join(notes))
@@ -4680,6 +5036,9 @@ class StatmodelsWindow(QMainWindow):
             "attach_qc": self._measurements.attach_qc(),
             "clinical": self._clinical_vars(),
             "cognitive": self._cognitive_vars(),
+            # Which visit a covariate came from is part of the frame recipe, not a preference: the
+            # same formula fitted on plaque at visit 3 and at visit 4 is two different models.
+            "visit_overrides": self._visit_overrides(),
             "filters": [rule.to_dict() for rule in self._chips.rules()],
             "derived": [column.to_dict() for column in self._derived],
             "combinations": [c.to_dict() for c in self._combinations],
@@ -4689,7 +5048,7 @@ class StatmodelsWindow(QMainWindow):
             "column_types": dict(self._column_types),
             "reference_levels": dict(self._reference_levels),
             "wide": self._wide_mode,
-            "melt_family": self._melt_family,
+            "melt_families": list(self._melt_families),
             "analysis_type": self._analysis_kind(),
             "mm_formula": self._formula.toPlainText().strip(),
             "groups": self._groups.text().strip(),
@@ -4776,6 +5135,13 @@ class StatmodelsWindow(QMainWindow):
             set_checked_variable_ids(self._clinical_list, clinical)
         if isinstance(cfg.get("cognitive"), list):
             set_checked_variable_ids(self._cognitive_list, cfg["cognitive"])
+        overrides = {
+            str(k): str(v) for k, v in (cfg.get("visit_overrides") or {}).items() if str(v).strip()
+        }
+        # Applied to both lists: a variable id belongs to exactly one of them, and the setter
+        # ignores ids it does not hold.
+        set_variable_visits(self._clinical_list, overrides)
+        set_variable_visits(self._cognitive_list, overrides)
 
         self._chips.set_rules([FilterRule.from_dict(r) for r in cfg.get("filters") or []], [])
         self._combinations = [
@@ -4796,10 +5162,15 @@ class StatmodelsWindow(QMainWindow):
             str(k): str(v) for k, v in (cfg.get("reference_levels") or {}).items()
         }
         self._wide_mode = bool(cfg.get("wide", False))
-        self._melt_family = str(cfg.get("melt_family") or "")
+        raw_families = cfg.get("melt_families")
+        if raw_families is not None:
+            self._melt_families = [str(f).strip() for f in raw_families if str(f).strip()]
+        else:
+            legacy = str(cfg.get("melt_family") or "").strip()
+            self._melt_families = [legacy] if legacy else []
         self._btn_reshape.setText("Reshape → long" if self._wide_mode else "Reshape → wide")
         self._btn_melt.setEnabled(self._wide_mode)
-        self._btn_melt.setText(f"Melt: {self._melt_family}" if self._melt_family else "Melt by…")
+        self._btn_melt.setText(self._melt_button_text())
 
         for key, widget in (
             ("mm_formula", self._formula),
@@ -4978,6 +5349,16 @@ class StatmodelsWindow(QMainWindow):
         attempt("config.json", lambda: (out_dir / "config.json").write_text(
             json.dumps(self._config_dict(), indent=2), encoding="utf-8"))
 
+        # The rows the model actually saw, so the saved model reproduces without the dataset being
+        # reachable or unchanged. config.json describes how to rebuild the frame; this *is* the
+        # frame, combinations, derived columns and filters already applied.
+        if self._training_frame() is not None:
+            try:
+                written.append(self._save_training_dataset(out_dir))
+            except Exception as exc:
+                problems.append(f"training dataset: {exc}")
+                log.debug("Could not write the training dataset", exc_info=True)
+
         # The figure as it currently looks, so the saved model carries the picture that was being
         # looked at when it was saved. Skipped rather than reported when nothing is displayed —
         # a config-only save is a legitimate thing to do.
@@ -5079,6 +5460,122 @@ class StatmodelsWindow(QMainWindow):
         notify(f"Plot exported → {written}")
         self._status.setText(f"Plot exported → {written}")
 
+    def _training_frame(self) -> pd.DataFrame | None:
+        """
+        The rows a save should carry: what the model was fitted on, else what the table shows.
+
+        ``_last_model_df`` is the frame the engine received, after its own dropna — so it is the
+        literal training set. Before a fit there is none, and the working frame is the best
+        available answer to "the dataset this configuration produces".
+        """
+        for frame in (self._last_model_df, self._working_df):
+            if frame is not None and not frame.empty:
+                return frame
+        return None
+
+    def _save_training_dataset(self, out_dir: Path) -> str:
+        """
+        Write the training rows to ``dataset.parquet``, with a provenance sidecar.
+
+        Parquet rather than CSV: a model frame carries ordered categoricals, and their **order** is
+        what decides the reference level of every factor contrast. A CSV round-trip loses that, so
+        the reloaded frame would fit a different parameterization of the same model. CSV is written
+        instead only when no parquet engine is installed, with the loss logged.
+
+        Returns the file name written.
+        """
+        frame = self._training_frame()
+        if frame is None:
+            raise ValueError("there are no rows to save")
+
+        provenance = build_provenance_frame(
+            frame=frame,
+            source_rows=len(self._analysis_df) if self._analysis_df is not None else len(frame),
+            measurements=self._measurements.specs(),
+            join=self._measurements.join(),
+            covariates=(self._load_meta or {}).get("covariates", []),
+            visit_provenance=(self._load_meta or {}).get("visit_provenance", {}),
+            derived=self._derived,
+            filters=self._chips.rules(),
+            filter_report=self._filter_report,
+            dataset=str(self._repo.root),
+        )
+        try:
+            frame.to_parquet(out_dir / "dataset.parquet", index=False)
+            name = "dataset.parquet"
+        except Exception as exc:
+            log.warning(
+                "No parquet engine (%s) — writing dataset.csv instead. Factor level order, and "
+                "so each factor's reference level, is not preserved by CSV.", exc,
+            )
+            frame.to_csv(out_dir / "dataset.csv", index=False)
+            name = "dataset.csv"
+        provenance.to_csv(out_dir / "dataset.provenance.csv", index=False)
+        log.info("Saved training dataset: %d rows x %d columns", len(frame), len(frame.columns))
+        return name
+
+    def _load_training_dataset(self, model_dir: Path, *, announce: bool = True) -> bool:
+        """
+        Adopt ``dataset.parquet`` / ``dataset.csv`` from *model_dir* as the analysis frame.
+
+        Returns whether one was found. The frame is marked prebuilt (see
+        :meth:`_adopt_prebuilt_frame`), because everything the recipe would do to it has been done.
+        """
+        for name in ("dataset.parquet", "dataset.csv"):
+            path = model_dir / name
+            if path.is_file():
+                break
+        else:
+            return False
+
+        frame = pd.read_parquet(path) if path.suffix == ".parquet" else pd.read_csv(path)
+        if frame.empty:
+            raise ValueError(f"{path.name} has no rows.")
+
+        self._analysis_df = frame
+        self._prebuilt_frame = True
+        self._load_meta = {
+            "source": "saved-dataset",
+            "path": str(path),
+            "n_rows": int(len(frame)),
+            "covariates": [],
+            "warnings": [],
+        }
+        self._measurements.set_diagnostics(self._load_meta)
+        self._btn_reload.setToolTip("Discard the saved dataset and re-run the dataset query.")
+        self._recompute_frame(announce=False)
+        if announce:
+            notify(f"Loaded training dataset: {len(frame)} rows × {len(frame.columns)} columns")
+        return True
+
+    def _on_load_dataset(self) -> None:
+        """Prompt for a saved model folder (or a dataset file in one) and load its training rows."""
+        start = str(statmodels_root(self._repo))
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load a saved training dataset",
+            start,
+            "Saved dataset (dataset.parquet dataset.csv);;All (*)",
+        )
+        if not path:
+            return
+        chosen = Path(path)
+        model_dir = chosen.parent if chosen.is_file() else chosen
+        try:
+            if not self._load_training_dataset(model_dir):
+                notify(f"No dataset.parquet or dataset.csv in {model_dir}.", error=True)
+                return
+        except Exception as exc:
+            log.debug("Dataset load failed", exc_info=True)
+            notify(f"Load failed: {exc}", error=True)
+            QMessageBox.critical(self, "Load failed", str(exc))
+            return
+        frame = self._working_df
+        self._status.setText(
+            f"Loaded training dataset from {model_dir}: n={0 if frame is None else len(frame)} rows"
+            "  |  shown as saved; press Reload data to rebuild from the dataset."
+        )
+
     def _save_model_artifact(self, out_dir: Path) -> str:
         """
         Serialize the fitted model object itself, however this engine allows.
@@ -5138,6 +5635,14 @@ class StatmodelsWindow(QMainWindow):
                 self._apply_config(
                     cfg, allow_expressions=self._trusts_expressions(model_dir, cfg)
                 )
+            # The training rows come back with the settings that produced them. Without this the
+            # panel would show a saved model's report over whatever frame happened to be loaded.
+            dataset_loaded = False
+            try:
+                dataset_loaded = self._load_training_dataset(model_dir, announce=False)
+            except Exception as exc:
+                log.debug("Training dataset not restored", exc_info=True)
+                notify(f"Model loaded, but its dataset could not be read: {exc}", error=True)
             if pkl.is_file():
                 from statsmodels.regression.mixed_linear_model import MixedLMResults
 
@@ -5158,7 +5663,14 @@ class StatmodelsWindow(QMainWindow):
                     "have been loaded, so press Reload data and Fit to reproduce it."
                 )
             notify(f"Loaded model from {model_dir}")
-            self._status.setText(f"Loaded {model_dir} — press Reload data to rebuild the frame.")
+            self._status.setText(
+                f"Loaded {model_dir} — "
+                + (
+                    f"training dataset restored ({len(self._analysis_df)} rows), shown as saved."
+                    if dataset_loaded and self._analysis_df is not None
+                    else "press Reload data to rebuild the frame."
+                )
+            )
         except Exception as exc:
             notify(f"Load failed: {exc}", error=True)
             QMessageBox.critical(self, "Load failed", str(exc))
@@ -5193,6 +5705,59 @@ class StatmodelsWindow(QMainWindow):
             QMessageBox.No,
         )
         return answer == QMessageBox.Yes
+
+
+class MeltFamiliesDialog(QDialog):
+    """Pick one or more ``measurement__region`` families to spread down the rows."""
+
+    def __init__(
+        self,
+        parent: QWidget | None,
+        *,
+        families: dict[str, list[str]],
+        selected: Sequence[str],
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Melt by region")
+        self.resize(500, 380)
+
+        lay = QVBoxLayout(self)
+        hint = QLabel(
+            "Select one or more measurements to melt into long rows (subject × region). "
+            "When region labels match, values share a row; when they differ, rows are combined "
+            "and a family is left empty on regions it does not have."
+        )
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+
+        self._list = QListWidget()
+        self._list.setSelectionMode(QAbstractItemView.MultiSelection)
+        picked = set(selected)
+        for name, regions in sorted(families.items()):
+            preview = ", ".join(regions[:4])
+            if len(regions) > 4:
+                preview += "…"
+            item = QListWidgetItem(
+                f"{name}  ({len(regions)} regions: {preview})"
+            )
+            item.setData(Qt.UserRole, name)
+            self._list.addItem(item)
+            if name in picked:
+                item.setSelected(True)
+        lay.addWidget(self._list, stretch=1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+
+    def selected_families(self) -> list[str]:
+        out: list[str] = []
+        for row in range(self._list.count()):
+            item = self._list.item(row)
+            if item is not None and item.isSelected():
+                out.append(str(item.data(Qt.UserRole)))
+        return out
 
 
 # ──────────────────────────────────────────────────────────────────────────────
