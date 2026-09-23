@@ -40,6 +40,8 @@ import pandas as pd
 
 from nvitk.core.logger import Logger
 
+from .group_counts import displayed_counts
+
 log = Logger()
 
 #: Qualitative palette, matching the matplotlib ``tab10`` the static plots use so a figure looks
@@ -134,10 +136,16 @@ def column_panel_figure(
         subset = frame.loc[frame[facet_by].astype(str).isin({str(m) for m in members})]
         if subset.empty:
             continue
-        panels[name] = column_plot(
+        panel_mask = mask.loc[subset.index].to_numpy() if mask is not None else None
+        # Named with its own N: panels are autoscaled independently, so one drawn from eleven
+        # observations looks exactly as solid as one drawn from ninety unless it says otherwise.
+        size = displayed_counts(
+            subset, column, excluded=panel_mask, show_excluded=show_excluded
+        )
+        heading = f"{name}  ({size[0].suffix()})" if size else name
+        panels[heading] = column_plot(
             subset, column, kind=kind, group=group, hover_columns=hover_columns,
-            excluded_mask=(mask.loc[subset.index].to_numpy() if mask is not None else None),
-            show_excluded=show_excluded, title="",
+            excluded_mask=panel_mask, show_excluded=show_excluded, title="",
         )
     if not panels:
         raise ValueError(f"No rows in any {facet_by!r} panel.")
@@ -610,6 +618,14 @@ def column_plot(
     )
     colours = palette_for(levels)
     extra = [c for c in hover_columns if c in work.columns]
+    # A trace's name is both its legend entry and, for the categorical kinds, its x tick — so
+    # carrying the count there puts it on the figure whichever view is showing, and into the PNG
+    # with it. ``work`` is already coerced, dropped and filtered, so the counts are of what will
+    # actually be drawn.
+    counted = {
+        c.level: c
+        for c in displayed_counts(work, column, group=group, excluded=excluded, levels=levels)
+    }
     figure = go.Figure()
 
     for level in levels:
@@ -618,8 +634,10 @@ def column_plot(
             continue
         sub_excluded = excluded.reindex(sub.index).fillna(False)
         colour = colours.get(level, PALETTE[0])
+        count = counted.get(level)
         _add_distribution(
-            figure, sub, column, kind=kind, name=level or column, colour=colour,
+            figure, sub, column, kind=kind, colour=colour,
+            name=(count.label(separator="<br>") if count and level else level or column),
             hover_columns=extra, excluded=sub_excluded, show_excluded=show_excluded,
         )
 
@@ -748,20 +766,31 @@ def _kde(values: pd.Series, *, points: int = 200) -> tuple[Any, Any]:
 
 
 def _summary_text(values: pd.Series, excluded: pd.Series) -> str:
-    """The one-line descriptive summary shown above a distribution plot."""
+    """
+    The one-line descriptive summary shown above a distribution plot.
+
+    Reported over the rows a filter *kept*, so that ``n`` here is the sum of the per-level ``n``
+    on the axis below it, and so that the mean and SD are not the ones the filtering was there to
+    get rid of. Rows drawn greyed alongside are counted separately, in the same wording the level
+    labels use.
+    """
     numeric = pd.to_numeric(values, errors="coerce").dropna()
     if numeric.empty:
         return ""
+    dropped = (
+        excluded.reindex(numeric.index).fillna(False) if excluded is not None
+        else pd.Series(False, index=numeric.index)
+    )
+    kept = numeric.loc[~dropped]
+    if kept.empty:
+        kept = numeric
     parts = [
-        f"n = {len(numeric)}",
-        f"mean {numeric.mean():.4g}",
-        f"SD {numeric.std():.4g}",
-        f"median {numeric.median():.4g}",
-        f"IQR {numeric.quantile(0.25):.4g}–{numeric.quantile(0.75):.4g}",
+        f"n = {len(kept)}" + (f" +{int(dropped.sum())} excl" if bool(dropped.any()) else ""),
+        f"mean {kept.mean():.4g}",
+        f"SD {kept.std():.4g}",
+        f"median {kept.median():.4g}",
+        f"IQR {kept.quantile(0.25):.4g}–{kept.quantile(0.75):.4g}",
     ]
-    n_excluded = int(excluded.sum()) if excluded is not None else 0
-    if n_excluded:
-        parts.append(f"{n_excluded} excluded by filter")
     return "   ·   ".join(parts)
 
 
@@ -775,10 +804,15 @@ def _category_counts(
     if group and group in frame.columns:
         levels = [str(v) for v in pd.unique(frame[group].dropna().astype(str))]
         colours = palette_for(levels)
+        sizes = {
+            c.level: c for c in displayed_counts(frame, column, group=group, levels=levels)
+        }
         for level in levels:
             counts = frame.loc[frame[group].astype(str) == level, column].astype(str).value_counts()
+            size = sizes.get(level)
             figure.add_trace(go.Bar(
-                x=counts.index.tolist(), y=counts.to_numpy(), name=level,
+                x=counts.index.tolist(), y=counts.to_numpy(),
+                name=size.label(separator=" ") if size else level,
                 marker_color=colours[level], opacity=0.85,
                 hovertemplate=f"<b>{level}</b><br>{column}: %{{x}}<br>count: %{{y}}<extra></extra>",
             ))

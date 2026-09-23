@@ -24,6 +24,8 @@ import pandas as pd
 
 from nvitk.core.logger import Logger
 
+from .group_counts import displayed_counts
+
 log = Logger()
 
 #: Grey for observations a filter excluded — present but visibly set aside.
@@ -94,8 +96,8 @@ def column_plot_static(
     )
 
     if categorical:
-        _counts(ax, work, column, group=group)
-        ax.set_title(title or f"{column} — counts")
+        _counts(ax, work, column, group=group, excluded=excluded, show_excluded=show_excluded)
+        ax.set_title(title or f"{column} — counts", pad=22)
         _fit(figure)
         figure.linked_axes = [ax]
         return figure
@@ -112,6 +114,14 @@ def column_plot_static(
     )
     colours = _palette(order)
     hue = group if grouped else None
+    # Counted from ``work``, which is already coerced, dropped and filtered — so these are the
+    # observations the axes below will actually carry, not the rows the frame started with.
+    counted = {
+        c.level: c
+        for c in displayed_counts(
+            work, column, group=group if grouped else "", excluded=excluded, levels=order,
+        )
+    } if grouped else {}
 
     if kind in {"violin", "violin_points"}:
         sns.violinplot(
@@ -160,13 +170,32 @@ def column_plot_static(
             color=GREYED, alpha=0.75, size=4, jitter=0.25, ax=ax, legend=False,
         )
 
-    ax.set_title(title or column)
+    # Padded: the descriptive line below is annotated just above the axes, and a default-placed
+    # title lands on top of it.
+    ax.set_title(title or column, pad=22)
     if kind in {"histogram", "density", "ecdf"}:
         ax.set_xlabel(column)
     else:
         ax.set_xlabel(group if grouped else "")
         ax.set_ylabel(column)
     ax.grid(True, axis="y", alpha=0.25)
+
+    if grouped:
+        # On the categorical kinds the level *is* an x tick, so the count goes under it; on the
+        # overlaid ones the level is only a legend entry, so it goes there. Either way it is on
+        # the figure rather than in a tooltip, and exports with it.
+        if kind in {"histogram", "density", "ecdf"}:
+            legend = ax.get_legend()
+            for text in legend.get_texts() if legend is not None else []:
+                size = counted.get(text.get_text())
+                if size is not None:
+                    text.set_text(size.label(separator=" "))
+        else:
+            ax.set_xticks(list(range(len(order))))
+            ax.set_xticklabels(
+                [counted[level].label() if level in counted else level for level in order]
+            )
+
     if grouped and len(order) > 6:
         # Long vessel names overlap badly once there are more than a handful.
         ax.tick_params(axis="x", rotation=45)
@@ -230,17 +259,29 @@ def column_panels_static(
     )
     drawn: list[Any] = []
     for ax, (name, sub) in zip(axes, panels.items()):
+        panel_mask = mask.loc[sub.index].to_numpy() if mask is not None else None
+        # Each panel autoscales to its own range, so one drawn from eleven observations looks as
+        # solid as one drawn from ninety until its heading says which it is.
+        size = displayed_counts(sub, column, excluded=panel_mask, show_excluded=show_excluded)
         column_plot_static(
-            sub, column, kind=kind, group=group,
-            excluded_mask=(mask.loc[sub.index].to_numpy() if mask is not None else None),
-            show_excluded=show_excluded, title=name, ax=ax,
+            sub, column, kind=kind, group=group, excluded_mask=panel_mask,
+            show_excluded=show_excluded, ax=ax,
+            title=f"{name}  ({size[0].suffix()})" if size else name,
         )
         drawn.append(ax)
     figure.linked_axes = drawn
     return figure
 
 
-def _counts(ax: Any, frame: pd.DataFrame, column: str, *, group: str) -> None:
+def _counts(
+    ax: Any,
+    frame: pd.DataFrame,
+    column: str,
+    *,
+    group: str,
+    excluded: Any = None,
+    show_excluded: bool = True,
+) -> None:
     """Bar counts per level, for a column a distribution is not defined on."""
     import seaborn as sns
 
@@ -252,22 +293,47 @@ def _counts(ax: Any, frame: pd.DataFrame, column: str, *, group: str) -> None:
     )
     ax.set_ylabel("count")
     ax.grid(True, axis="y", alpha=0.25)
+    if hue:
+        # The bars are counts of *column*; the legend says how many rows each series has in total,
+        # which is the denominator those bars have to be read against.
+        sizes = {
+            c.level: c
+            for c in displayed_counts(
+                frame, column, group=hue, excluded=excluded, show_excluded=show_excluded
+            )
+        }
+        legend = ax.get_legend()
+        for text in legend.get_texts() if legend is not None else []:
+            size = sizes.get(text.get_text())
+            if size is not None:
+                text.set_text(size.label(separator=" "))
 
 
 def _summary_text(values: pd.Series, excluded: pd.Series | None) -> str:
-    """The one-line descriptive summary shown above a distribution plot."""
+    """
+    The one-line descriptive summary shown above a distribution plot.
+
+    Reported over the rows a filter *kept*, so that ``n`` here is the sum of the per-level ``n``
+    on the axis below it, and so that the mean and SD are not the ones the filtering was there to
+    get rid of. Rows drawn greyed alongside are counted separately, in the same wording the level
+    labels use.
+    """
     numeric = pd.to_numeric(values, errors="coerce").dropna()
     if numeric.empty:
         return ""
+    dropped = (
+        excluded.reindex(numeric.index).fillna(False) if excluded is not None
+        else pd.Series(False, index=numeric.index)
+    )
+    kept = numeric.loc[~dropped]
+    if kept.empty:
+        kept = numeric
     parts = [
-        f"n = {len(numeric)}",
-        f"mean {numeric.mean():.4g}",
-        f"SD {numeric.std():.4g}",
-        f"median {numeric.median():.4g}",
+        f"n = {len(kept)}" + (f" +{int(dropped.sum())} excl" if bool(dropped.any()) else ""),
+        f"mean {kept.mean():.4g}",
+        f"SD {kept.std():.4g}",
+        f"median {kept.median():.4g}",
     ]
-    n_excluded = int(excluded.sum()) if excluded is not None else 0
-    if n_excluded:
-        parts.append(f"{n_excluded} excluded")
     return "   ·   ".join(parts)
 
 

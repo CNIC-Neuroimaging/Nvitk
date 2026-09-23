@@ -14,7 +14,8 @@ Split into focused modules; import ``StatmodelsPanel`` / ``StatmodelsWindow`` fr
 ``report``           model info: stat chips over tabbed tables
 ``plot_view``        canvas, group include/exclude checklist, axis sliders
 ``mediation_panel``  mediation form and its worker
-``window``           the explorer window itself
+``window``           one session: the explorer window itself
+``sessions``         the tabbed shell that holds several sessions at once
 ``panel``            the right-tab launcher
 """
 
@@ -29,6 +30,7 @@ from .constants import (
     PIPELINE_KIND_TOF,
 )
 from .panel import StatmodelsPanel
+from .sessions import StatmodelsShell
 from .window import StatmodelsWindow
 
 __all__ = [
@@ -39,5 +41,6 @@ __all__ = [
     "PIPELINE_KIND_T1",
     "PIPELINE_KIND_TOF",
     "StatmodelsPanel",
+    "StatmodelsShell",
     "StatmodelsWindow",
 ]

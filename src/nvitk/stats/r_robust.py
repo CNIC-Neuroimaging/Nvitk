@@ -653,9 +653,13 @@ def lmrob_emmeans(
     Estimated marginal means and their confidence intervals, from ``emmeans`` in R.
 
     Same signature and return shape as :func:`~nvitk.stats.r_mixedlm.lme4_emmeans`, so the shared
-    plotting code can call either. It reuses that module's R helper, which takes any model
-    ``emmeans`` supports — and ``emmeans`` supports ``lmrob`` directly. The one difference is that
-    an ``lmrob`` fit *is* the R object, where a pymer4 model wraps one.
+    plotting code can call either. It reuses that module's R helper, and falls back to
+    :func:`~nvitk.stats.r_basis.linear_emmeans` when ``emmeans`` declines the model.
+
+    That fallback is not an edge case: ``emmeans`` registers no ``emm_basis`` method for
+    ``lmrob``, so it raises *Can't handle an object of class "lmrob"* and takes the confidence
+    band and the significance brackets down with it. An ``lmrob`` fit exposes ``coef`` and a
+    robust ``vcov`` like any other linear model, which is all a marginal mean needs.
 
     Parameters
     ----------
@@ -674,11 +678,20 @@ def lmrob_emmeans(
         r_mixedlm._EMMEANS_HELPER_LOADED = True
 
     values = FloatVector(list(at_values) if at_values is not None else [])
-    with _converter():
-        return pd.DataFrame(
-            globalenv[".nvitk_lme4_emmeans"](
-                fit, str(specs), str(at_name), values, float(ci_level)
+    try:
+        with _converter():
+            return pd.DataFrame(
+                globalenv[".nvitk_lme4_emmeans"](
+                    fit, str(specs), str(at_name), values, float(ci_level)
+                )
             )
+    except Exception as exc:
+        log.debug("emmeans declined this lmrob fit", exc_info=True)
+        log.info("emmeans cannot handle lmrob (%s); using its design matrix instead.", exc)
+        from .r_basis import linear_emmeans
+
+        return linear_emmeans(
+            fit, specs, at_name=at_name, at_values=at_values, ci_level=ci_level
         )
 
 

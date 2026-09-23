@@ -37,6 +37,7 @@ from qtpy.QtWidgets import (
 from nvitk.core.logger import Logger
 from nvitk.gui.core.geometry import fit_dialog
 from nvitk.stats.distribution_plots import column_panels_static, column_plot_static
+from nvitk.stats.group_counts import counts_note, displayed_counts
 from nvitk.stats.interactive import (
     COLUMN_FACET_MODES,
     COLUMN_PLOT_KINDS,
@@ -261,6 +262,47 @@ class ColumnPlotDialog(FigureHostMixin, QDialog):
         self._sub_split.setVisible(mode in {"panels", "anatomical"})
         self._redraw()
 
+    def _counts_line(self, column: str, split: str, sub: str) -> str:
+        """The N of everything on screen, as text.
+
+        The figure carries each level's count on its own tick or legend entry, which is where it
+        is wanted while reading a shape. This is the same set spelled out in one line: it survives
+        a figure too crowded to label, it says what the *whole* display is drawn from, and it can
+        be copied into a methods section. Faceting by one column and splitting inside the panels
+        by another are reported together, since both decide what a single violin contains.
+        """
+        if column not in self._frame.columns:
+            return ""
+        # The mask always goes in; ``show_excluded`` is what decides whether those rows are drawn
+        # greyed and counted apart, or not drawn and not counted. Withholding the mask instead
+        # would count rows the figure is not showing — the two have to be told the same thing.
+        shown = self._show_excluded.isChecked()
+        try:
+            overall = displayed_counts(
+                self._frame, column, excluded=self._excluded, show_excluded=shown
+            )
+            total = overall[0] if overall else None
+            lines = []
+            for by in dict.fromkeys(b for b in (split, sub) if b):
+                lines.append(
+                    counts_note(
+                        displayed_counts(
+                            self._frame, column, group=by,
+                            excluded=self._excluded, show_excluded=shown,
+                        ),
+                        # The whole is the same whichever way it is cut, so it leads the first
+                        # line only rather than being repeated under every grouping.
+                        total=total if not lines else None,
+                        group=by,
+                    )
+                )
+            if not lines:
+                lines = [counts_note([], total=total)]
+        except Exception as exc:
+            log.debug("Could not count %s: %s", column, exc, exc_info=True)
+            return ""
+        return "\n".join(line for line in lines if line)
+
     def _redraw(self, *_args: Any) -> None:
         """Rebuild the figure from the current control state."""
         column = self._column_box.currentText().strip()
@@ -290,8 +332,9 @@ class ColumnPlotDialog(FigureHostMixin, QDialog):
                 )
                 self._show_static(figure)
                 self.setWindowTitle(f"Distribution — {column}")
-                self._status.setText(
-                    "Matplotlib rendering. Tick Interactive for hover, zoom and per-point identity."
+                self._set_status(
+                    column, split, sub,
+                    "Matplotlib rendering. Tick Interactive for hover, zoom and per-point identity.",
                 )
                 return
             if panelled:
@@ -322,9 +365,15 @@ class ColumnPlotDialog(FigureHostMixin, QDialog):
             return
         self._show_interactive(figure)
         self.setWindowTitle(f"Distribution — {column}")
-        self._status.setText(
-            "Hover a point for its subject and territory. Drag to zoom, double-click to reset."
+        self._set_status(
+            column, split, sub,
+            "Hover a point for its subject and territory. Drag to zoom, double-click to reset.",
         )
+
+    def _set_status(self, column: str, split: str, sub: str, hint: str) -> None:
+        """Put the counts first and the backend hint after — the N is what gets read."""
+        counts = self._counts_line(column, split, sub)
+        self._status.setText(f"{counts}\n{hint}" if counts else hint)
 
     def _on_export(self) -> None:
         """Write the current figure to a PNG the user chooses."""

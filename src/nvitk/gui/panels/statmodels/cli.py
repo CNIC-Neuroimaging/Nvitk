@@ -127,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     # Qt platform plugin available.
     from qtpy.QtWidgets import QApplication
 
-    from .window import StatmodelsWindow
+    from .sessions import StatmodelsShell
 
     if args.dataset:
         root = Path(args.dataset).expanduser().resolve()
@@ -153,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
 
     set_theme(stored_theme())
     try:
-        window = StatmodelsWindow(initial_pipeline_kind=args.kind)
+        shell = StatmodelsShell(initial_pipeline_kind=args.kind)
     except Exception as exc:
         log.exception("Could not open the Statmodels window.")
         log.error(
@@ -162,16 +162,23 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    if args.load:
+    # The shell opens on one session; --load and --reload act on it. Further sessions are the
+    # user's to add with Ctrl+T once the window is up.
+    window = shell.current_session()
+
+    if args.load and window is not None:
         try:
             config_path = _resolve_config(args.load, Path(window._repo.root))
             window._apply_config(json.loads(config_path.read_text(encoding="utf-8")))
+            # The saved model names the session it was loaded into, so a second --load in another
+            # tab is told apart by what it holds rather than by the order it was opened in.
+            shell.rename_session(window, window.suggested_title())
             log.info("Loaded configuration from %s", config_path)
         except Exception as exc:
             log.error("Could not load %r: %s", args.load, exc)
 
-    window.show_maximized_floating()
-    if args.reload:
+    shell.show_maximized_floating()
+    if args.reload and window is not None:
         window._on_reload()
 
     return int(app.exec())

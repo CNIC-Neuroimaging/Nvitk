@@ -1,8 +1,15 @@
 """
-The Statmodels explorer window.
+The Statmodels explorer window — one session.
 
 Description
 -----------
+One of these is one workbench: one dataframe, one model, one plot. Several of them live side by
+side as the tabs of :mod:`nvitk.gui.panels.statmodels.sessions`'s shell, which is what ``embedded``
+builds for; a session hands its frame to a neighbouring tab through
+:meth:`StatmodelsWindow.import_session`. Nothing here is shared between sessions — every piece of
+state below is an instance attribute, which is what makes a second tab a second workbench rather
+than a second view.
+
 A floating, maximizable window laid out in three draggable rows:
 
 * **top** — what data to load (measurements) and what to do with it (MixedLM formula, or mediation)
@@ -27,7 +34,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
-from qtpy.QtCore import Qt
+from qtpy.QtCore import QEvent, QObject, Qt
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -80,6 +87,16 @@ from nvitk.stats.r_gam import (
     mrf_field_frame,
     plot_mrf_field,
     plot_mrf_graph,
+)
+from nvitk.stats.pairwise import (
+    MODE_ALL as PAIRWISE_ALL,
+    MODE_SIGNIFICANT as PAIRWISE_SIGNIFICANT,
+    annotate_axes as annotate_significance_axes,
+    annotate_corner as annotate_significance_corner,
+    annotate_plotly as annotate_significance_plotly,
+    contrast_note,
+    eligible as eligible_contrasts,
+    pairwise_contrasts,
 )
 from nvitk.stats.qc_filters import (
     KEEP_COLUMN,
@@ -339,6 +356,47 @@ _MEDIATION_PLOTS: tuple[tuple[str, str], ...] = (
 )
 
 
+class _SuspendedWindows(QObject):
+    """The separate windows a session took off screen, and which are still owed a comeback.
+
+    Hiding a window and closing one leave a widget in identical state — hidden, with an explicit
+    show/hide flag — so a session returning to the screen cannot tell "I took this down" from
+    "this was shut while I was away", and would put the second one back up. Watching for the close
+    event is the only thing that separates them, which is why this is an event filter and not a
+    list.
+    """
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        """Start empty; a session owns exactly one of these for its whole life."""
+        super().__init__(parent)
+        self._windows: list[QWidget] = []
+
+    def hide_all(self, windows: Sequence[QWidget]) -> None:
+        """Take *windows* off screen and note that each is owed a comeback."""
+        for window in windows:
+            if not any(window is held for held in self._windows):
+                window.installEventFilter(self)
+                self._windows.append(window)
+            window.hide()
+
+    def take(self) -> list[QWidget]:
+        """Hand back the windows still owed a comeback, and stop tracking them."""
+        windows, self._windows = self._windows, []
+        for window in windows:
+            try:
+                window.removeEventFilter(self)
+            except RuntimeError:
+                pass
+        return windows
+
+    def eventFilter(self, obj: Any, event: Any) -> bool:
+        """Drop a window from the set the moment anything closes it, and never eat the event."""
+        if event.type() == QEvent.Close:
+            self._windows = [held for held in self._windows if held is not obj]
+            obj.removeEventFilter(self)
+        return False
+
+
 def _style_splitter(split: QSplitter) -> None:
     """Make a splitter's handle wide enough to grab, and stop panes collapsing to nothing."""
     split.setHandleWidth(SPACE)
@@ -353,14 +411,28 @@ class StatmodelsWindow(QMainWindow):
         parent: QWidget | None = None,
         *,
         initial_pipeline_kind: str = PIPELINE_KIND_QVTPY,
+        embedded: bool = False,
     ) -> None:
-        """Build the three-row layout and wire every signal handler."""
+        """
+        Build the three-row layout and wire every signal handler.
+
+        ``embedded`` builds the same window as one page of
+        :class:`~nvitk.gui.panels.statmodels.sessions.StatmodelsShell`'s tab bar rather than as a
+        window of its own. Both the ``Qt.Window`` flag and the screen-fitted size belong to the
+        shell in that case: the flag would tear the page back out of its tab, and the size would
+        put a 1700×1000 floor under a widget that has to fit whatever the shell gives it.
+        """
         super().__init__(parent)
+        self._embedded = bool(embedded)
+        # The name the shell shows on this session's tab. Only used for provenance — the window
+        # is perfectly usable standalone, where nothing ever sets it.
+        self._session_name = ""
         self.setWindowTitle("nvitk Statmodels")
-        self.setWindowFlags(self.windowFlags() | Qt.Window)
-        # Preferred size, clamped to whatever screen this actually opens on — 1700×1000 runs
-        # off a laptop display, taking the plot pane's right edge with it.
-        fit_to_screen(self, 1700, 1000)
+        if not self._embedded:
+            self.setWindowFlags(self.windowFlags() | Qt.Window)
+            # Preferred size, clamped to whatever screen this actually opens on — 1700×1000 runs
+            # off a laptop display, taking the plot pane's right edge with it.
+            fit_to_screen(self, 1700, 1000)
         apply_dark_theme(self)
 
         self._repo = open_repo()
@@ -408,6 +480,10 @@ class StatmodelsWindow(QMainWindow):
         self._r_status = None
         self._mmrm_status = None
         self._robust_status = None
+
+        # Separate windows — floated docks, modeless plot dialogs — taken off screen while
+        # another session has the shell. See :meth:`suspend_detached_windows`.
+        self._detached_hidden = _SuspendedWindows(self)
 
         # ---- workers ----------------------------------------------------------
         self._load_worker: FrameLoadWorker | None = None
@@ -1324,6 +1400,32 @@ class StatmodelsWindow(QMainWindow):
             "standard error in the fit, so any interval drawn there would be too narrow."
         )
 
+        # Pairwise significance between the levels on the categorical axis, as brackets over the
+        # plot. A separate mode rather than two checkboxes: "all" and "significant only" are the
+        # same annotation at two thresholds, and thirteen vessels are seventy-eight comparisons —
+        # which of them get drawn is the whole decision.
+        self._show_signif = QCheckBox("Signif.")
+        self._show_signif.setToolTip(
+            "Draw significance brackets between the levels on the categorical axis.\n\n"
+            "Every level-versus-level comparison, not contrasts against the reference level: "
+            "“is LICA different from RICA” is the question a grouped plot is read for, and the "
+            "coefficient table does not answer it.\n"
+            "p-values are Holm-adjusted across the comparisons computed, so the correction "
+            "follows the levels actually shown.\n"
+            "Needs a categorical x axis — a continuous plot has no levels to span."
+        )
+        self._signif_mode = QComboBox()
+        self._signif_mode.addItem("all", PAIRWISE_ALL)
+        self._signif_mode.addItem("significant only", PAIRWISE_SIGNIFICANT)
+        self._signif_mode.setToolTip(
+            "all — every comparison, including 'NS' and the 'NA' of one that has no p-value.\n"
+            "significant only — just those with an adjusted p below 0.05.\n\n"
+            "Either way at most a dozen brackets are drawn, most significant first; the rest are "
+            "reported in the status line rather than stacked over the data."
+        )
+        self._signif_mode.setVisible(False)
+        self._show_signif.toggled.connect(self._signif_mode.setVisible)
+
         self._plot_display_label = QLabel("Display")
         lay.addWidget(self._plot_display_label)
         lay.addWidget(self._plot_display)
@@ -1335,6 +1437,8 @@ class StatmodelsWindow(QMainWindow):
         lay.addWidget(self._plot_group)
         lay.addWidget(self._include_points)
         lay.addWidget(self._show_ci)
+        lay.addWidget(self._show_signif)
+        lay.addWidget(self._signif_mode)
         return widget
 
     def _build_map_options(self) -> QWidget:
@@ -1491,6 +1595,8 @@ class StatmodelsWindow(QMainWindow):
         self._plot_group.currentIndexChanged.connect(self._on_plot_group_changed)
         self._include_points.stateChanged.connect(lambda *_: self._on_plot())
         self._show_ci.stateChanged.connect(lambda *_: self._on_plot())
+        self._show_signif.stateChanged.connect(lambda *_: self._on_plot())
+        self._signif_mode.currentIndexChanged.connect(lambda *_: self._on_plot())
         self._plot.optionsChanged.connect(self._on_plot)
         self._mediation_plot.currentIndexChanged.connect(lambda *_: self._sync_display_enabled())
         # Re-gate the option row too, not just the plot: the voxelwise controls differ per figure
@@ -1523,7 +1629,15 @@ class StatmodelsWindow(QMainWindow):
         self._mediation_form.cancelRequested.connect(self._on_cancel_mediation)
 
     def show_maximized_floating(self) -> None:
-        """Show, maximize, raise, and focus this window."""
+        """Show, maximize, raise, and focus this window — or its tab, when embedded."""
+        if self._embedded:
+            # There is no window here to maximize: the shell owns the frame, and maximizing a
+            # tab page would detach it. Raising the shell is the equivalent gesture.
+            shell = self.window()
+            self.show()
+            shell.raise_()
+            shell.activateWindow()
+            return
         self.show()
         self.showMaximized()
         self.raise_()
@@ -1574,6 +1688,273 @@ class StatmodelsWindow(QMainWindow):
         spec = self._data_form.spec()
         if spec.pipeline_kind != kind:
             self._data_form.apply_spec(MeasurementSpec(pipeline_kind=kind))
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Sessions
+    # ──────────────────────────────────────────────────────────────────────────
+    #: The half of :meth:`_config_dict` that describes the *frame* — the query behind it and every
+    #: transformation applied to it — rather than what gets fitted to it. Copying exactly these
+    #: keys into another session reproduces its table there without disturbing the destination's
+    #: formula, engine, plot settings or panel layout. Keep it in step with :meth:`_config_dict`:
+    #: a new frame-recipe key that is not listed here silently stops travelling between sessions.
+    DATA_CONFIG_KEYS: tuple[str, ...] = (
+        "version",
+        "measurements",
+        "join",
+        "grain",
+        "attach_qc",
+        "clinical",
+        "cognitive",
+        "visit_overrides",
+        "combinations",
+        "derived",
+        "filters",
+        "column_types",
+        "reference_levels",
+        "dropped_columns",
+        "wide",
+        "melt_families",
+    )
+
+    #: What :meth:`import_session` takes from the session it is pointed at.
+    IMPORT_RECIPE = "recipe"
+    IMPORT_RESULT = "result"
+    IMPORT_CLONE = "clone"
+
+    def set_session_name(self, name: str) -> None:
+        """Record the tab name the shell shows for this session, and title the window with it."""
+        self._session_name = str(name or "").strip()
+        self.setWindowTitle(
+            f"nvitk Statmodels — {self._session_name}" if self._session_name else "nvitk Statmodels"
+        )
+
+    def session_name(self) -> str:
+        """The tab name, or a placeholder when this window is not running inside a shell."""
+        return self._session_name or "this session"
+
+    def detached_windows(self) -> list[QWidget]:
+        """Every separate window this session currently has open on screen.
+
+        A floated dock and the modeless column / subject plot dialogs are *windows* parented to
+        this page, not widgets inside it — so Qt leaves them up when the shell switches to another
+        tab, where they sit over the new session looking like they belong to it.
+
+        Visible ones only: this page also parents some fifty never-shown popup frames belonging to
+        its combo boxes, and "is a window" alone does not tell those apart. The search is the whole
+        subtree rather than the direct children it would find today's two cases in — a dialog
+        parented one level deeper is an ordinary thing to write, and one that silently stopped
+        being hidden would be a strange bug to go looking for.
+        """
+        return [
+            child
+            for child in self.findChildren(QWidget)
+            if child.isWindow() and child.isVisible()
+        ]
+
+    def suspend_detached_windows(self) -> None:
+        """Take this session's separate windows off screen while another session has the shell."""
+        # Added to, not replaced: the shell suspends every session when it is itself hidden, and
+        # a session already off screen must not have its set of what to bring back cleared by a
+        # scan that correctly finds nothing left to hide.
+        self._detached_hidden.hide_all(self.detached_windows())
+
+    def restore_detached_windows(self) -> None:
+        """Put back exactly what :meth:`suspend_detached_windows` took down.
+
+        Works from what was recorded rather than re-scanning, so coming back costs the number of
+        windows involved — usually none — instead of another walk of the widget tree. Anything
+        closed in the meantime has already dropped out of that set, and a plot dialog deletes
+        itself when it closes, which is the ``RuntimeError``.
+        """
+        for window in self._detached_hidden.take():
+            try:
+                window.show()
+            except RuntimeError:
+                pass
+
+    def analysis_frame(self) -> pd.DataFrame | None:
+        """The frame as loaded, before derivation, filtering or reshape."""
+        return self._analysis_df
+
+    def working_frame(self) -> pd.DataFrame | None:
+        """The frame that actually gets fitted: derived, filtered and reshaped."""
+        return self._working_df
+
+    def has_frame(self) -> bool:
+        """Whether this session holds any data at all."""
+        return self._analysis_df is not None and not self._analysis_df.empty
+
+    def is_fitted(self) -> bool:
+        """Whether a model result or a mediation bundle is currently held."""
+        return self._last_result is not None or self._mediation_bundle is not None
+
+    def data_config(self) -> dict[str, Any]:
+        """The frame half of :meth:`_config_dict` — the keys named in :data:`DATA_CONFIG_KEYS`."""
+        cfg = self._config_dict()
+        return {key: cfg[key] for key in self.DATA_CONFIG_KEYS if key in cfg}
+
+    def suggested_title(self) -> str:
+        """A short name for this session: its model name, falling back to the pipeline kind."""
+        name = self._model_name.text().strip()
+        if name and name != DEFAULT_MODEL_NAME:
+            return name
+        try:
+            return str(self._data_form.spec().pipeline_kind)
+        except Exception:
+            return ""
+
+    def session_summary(self) -> str:
+        """A few lines describing what this session holds, for its tab's tooltip."""
+        base = self._analysis_df
+        lines: list[str] = []
+        if base is None:
+            lines.append("No data yet — press Reload data, or drop a spreadsheet on the table.")
+        else:
+            working = self._working_df
+            rows = 0 if working is None else len(working)
+            cols = 0 if working is None else len(working.columns)
+            loaded = f" of {len(base)} loaded" if rows != len(base) else ""
+            lines.append(f"{rows} rows{loaded} × {cols} columns")
+
+        recipe: list[str] = []
+        if self._combinations:
+            recipe.append(f"{len(self._combinations)} combination(s)")
+        if self._derived:
+            recipe.append(f"{len(self._derived)} derived")
+        rules = self._chips.rules()
+        if rules:
+            recipe.append(f"{len(rules)} filter(s)")
+        if self._wide_mode:
+            recipe.append("wide")
+        if self._melt_families:
+            recipe.append("melted: " + ", ".join(self._melt_families))
+        if self._dropped_columns:
+            recipe.append(f"{len(self._dropped_columns)} dropped")
+        if recipe:
+            lines.append(" · ".join(recipe))
+
+        lines.append(
+            f"{self._analysis_type.currentText()}"
+            + (" — fitted" if self.is_fitted() else " — not fitted")
+        )
+        return "\n".join(lines)
+
+    def import_session(self, source: "StatmodelsWindow", *, mode: str = IMPORT_RECIPE) -> str:
+        """
+        Take *source*'s dataframe into this session, returning a line describing what arrived.
+
+        Three readings of "the same data", because they are genuinely different things to want:
+
+        ``IMPORT_RECIPE``
+            The frame *and* the transformations that built it — region combinations, derived
+            columns, casts and reference levels, filters, the melt/wide reshape — plus the
+            measurement and covariate picks behind it, so pressing Reload data here re-runs the
+            same query. The table matches *source*'s exactly and every step stays editable, which
+            is what makes this the one to reach for when fitting a second model to one frame.
+        ``IMPORT_RESULT``
+            The finished table only, adopted as this session's *raw* data — the same rows and
+            columns, with the recipe spent rather than carried. That is the point: a row-producing
+            combination re-run over its own output appends a second copy of every synthetic row,
+            and a melt finds nothing left to melt. Take this when the other session's output is
+            the starting material for a new set of transformations.
+        ``IMPORT_CLONE``
+            The whole session — frame recipe, formula, engine settings, plot options and panel
+            layout — as a duplicate to diverge from.
+
+        The fit itself never crosses over, in any mode. A result belongs to the frame it was
+        fitted to, and one left sitting under a frame it did not come from reads as live when it
+        is not; press Fit to reproduce it.
+
+        Raises
+        ------
+        ValueError
+            When *source* has nothing this mode can take.
+        """
+        if source is self:
+            raise ValueError("a session cannot import from itself")
+
+        base = source.analysis_frame()
+        working = source.working_frame()
+        if mode == self.IMPORT_RESULT:
+            if working is None or working.empty:
+                raise ValueError(f"{source.session_name()} has no rows to take — load data there first")
+        elif mode == self.IMPORT_RECIPE and (base is None or base.empty):
+            raise ValueError(f"{source.session_name()} has no data loaded yet")
+
+        # Before the frame moves underneath it, for the same reason a load starts from nothing:
+        # a stale fit shown under new data is worse than no fit, because it does not say so.
+        self._reset_fit_state()
+        self._report.clear()
+
+        if mode == self.IMPORT_CLONE:
+            self._apply_config(source._config_dict())
+        elif mode == self.IMPORT_RECIPE:
+            self._apply_data_config(source.data_config())
+        else:
+            # Everything that would *re-run* is dropped, since it is already in these rows. Casts
+            # and reference levels are the exception: they describe the columns that arrived
+            # rather than a step still owed, and re-applying them is idempotent.
+            self._apply_data_config(
+                {
+                    **source.data_config(),
+                    "combinations": [],
+                    "derived": [],
+                    "filters": [],
+                    "dropped_columns": [],
+                    "wide": False,
+                    "melt_families": [],
+                }
+            )
+
+        frame = working if mode == self.IMPORT_RESULT else base
+        if frame is not None:
+            self._analysis_df = frame.copy()
+            # A finished table arrives raw, exactly like a dropped spreadsheet: its recipe is
+            # spent, so derived columns and filters added *here* are meant to run on it.
+            self._prebuilt_frame = (
+                False if mode == self.IMPORT_RESULT else source._prebuilt_frame
+            )
+            if mode == self.IMPORT_RESULT:
+                self._load_meta = {
+                    "source": "imported-session",
+                    "session": source.session_name(),
+                    "n_rows": int(len(frame)),
+                    "covariates": [],
+                    "warnings": [
+                        f"Adopted {source.session_name()}'s finished table as raw data — its "
+                        "combinations, derived columns, filters and reshape are not carried over."
+                    ],
+                }
+                self._btn_reload.setText("Reload data")
+                self._btn_reload.setToolTip(
+                    "Discard the imported table and re-run this session's dataset query."
+                )
+            else:
+                meta = dict(source._load_meta or {})
+                meta["source"] = "imported-session"
+                meta["session"] = source.session_name()
+                self._load_meta = meta
+                # Restoring the measurement picks above flagged the frame as stale, which it is
+                # not: the selection and the rows both came from *source*, so pressing Reload
+                # would rebuild the table that is already showing.
+                self._btn_reload.setText("Reload data")
+                self._btn_reload.setToolTip("")
+            self._measurements.set_diagnostics(self._load_meta)
+
+        self._recompute_frame(announce=False)
+
+        result = self._working_df
+        rows = 0 if result is None else len(result)
+        cols = 0 if result is None else len(result.columns)
+        what = {
+            self.IMPORT_RECIPE: "dataframe and transformations",
+            self.IMPORT_RESULT: "finished dataframe",
+            self.IMPORT_CLONE: "whole session",
+        }.get(mode, "dataframe")
+        line = f"Imported {source.session_name()}'s {what}: {rows} rows × {cols} columns."
+        self._status.setText(line)
+        notify(line)
+        return line
 
     # ──────────────────────────────────────────────────────────────────────────
     # Covariates and measurements
@@ -3732,6 +4113,15 @@ class StatmodelsWindow(QMainWindow):
                     geometry_error = getattr(fig, "emm_error", "") or getattr(fig, "ci_error", "")
             if fig is None:
                 fig = plt.gcf()
+            # Before the canvas is drawn: brackets change the y limit, and annotating a shown
+            # figure would need a second render to appear.
+            signif_note = self._annotate_significance(
+                fig,
+                covariate_refs=refs,
+                **self._significance_factor(
+                    df, x, group, str(self._plot_mode.currentData() or "auto")
+                ),
+            )
             self._plot.show_figure(fig)
 
             notes = []
@@ -3745,10 +4135,115 @@ class StatmodelsWindow(QMainWindow):
                 notes.append(f"{len(dropped)} filtered observation(s) shown in grey.")
             if geometry_error:
                 notes.append(f"\u26a0 {geometry_error}")
+            if signif_note:
+                notes.append(signif_note)
             self._plot.set_status("  ".join(notes))
         except Exception as exc:
             log.debug("Plot failed: %s", exc)
             self._plot.show_error(f"Plot unavailable: {exc}")
+
+    def _annotate_significance(
+        self,
+        fig: Any,
+        *,
+        factor: str,
+        levels: Sequence[str] | None = None,
+        covariate_refs: Mapping[str, Any] | None = None,
+        by: str = "",
+        by_levels: Sequence[str] | None = None,
+    ) -> str:
+        """
+        Put pairwise significance on every panel of *fig*, and describe what went on it.
+
+        Returns ``""`` when the toggle is off, so a caller can append this to its status note
+        unconditionally. A failure is reported rather than raised: a model whose contrasts cannot
+        be computed should still show its plot, with a line saying why the brackets are missing.
+
+        Brackets when the levels are on a categorical axis, a corner listing when they are not —
+        a continuous plot has ticks that mean x values, and a bracket across them would claim a
+        range of x it does not mean.
+
+        ``by`` compares *factor*'s levels within each level of the colouring column instead of
+        averaging over it, and paints each series' brackets in that series' colour. That is the
+        right question whenever the two interact: a plot of ``plaque * territory`` draws one
+        territory per line, and what a bracket over a line can claim is the plaque effect *in
+        that territory*, not one averaged across all of them.
+        """
+        if not self._show_signif.isChecked():
+            return ""
+        if self._last_result is None or self._last_model_df is None or not factor:
+            return ""
+
+        mode = str(self._signif_mode.currentData() or PAIRWISE_ALL)
+        try:
+            contrasts = pairwise_contrasts(
+                self._last_result,
+                self._last_model_df,
+                factor=factor,
+                levels=levels,
+                covariate_refs=covariate_refs,
+                by=by,
+                by_levels=by_levels,
+            )
+        except Exception as exc:
+            log.debug("Pairwise contrasts failed for %r", factor, exc_info=True)
+            return f"\u26a0 Significance unavailable \u2014 {exc}"
+
+        if hasattr(fig, "add_shape"):
+            # Plotly. Its categorical axis is positioned by category index, so the same layout
+            # serves it; the order has to be supplied because there are no tick labels to read.
+            order = [
+                str(v) for v in pd.unique(self._last_model_df[factor].dropna().astype(str))
+            ]
+            if levels:
+                order = [level for level in order if str(level) in {str(v) for v in levels}]
+            drawn, _ = annotate_significance_plotly(fig, contrasts, order, mode=mode)
+        else:
+            # ``linked_axes`` is every panel of a grouped display; a single-axes figure has one.
+            axes = list(getattr(fig, "linked_axes", None) or getattr(fig, "axes", []) or [])
+            drawn = 0
+            for ax in axes:
+                added, _ = annotate_significance_axes(ax, contrasts, mode=mode)
+                drawn += added
+            if not drawn and axes:
+                # No level pair sits on a categorical axis — list them rather than draw nothing.
+                drawn, _ = annotate_significance_corner(axes[0], contrasts, mode=mode)
+
+        # Counted against everything the mode asked for, not per panel: a comparison whose two
+        # levels landed in different panels of a grouped display has nowhere to be drawn, and
+        # saying so is the difference between a capped figure and a misleading one.
+        wanted = len(eligible_contrasts(contrasts, mode))
+        return contrast_note(drawn, max(0, wanted - drawn), mode)
+
+    def _significance_factor(
+        self, df: pd.DataFrame, x: str, group: str, mode: str
+    ) -> dict[str, Any]:
+        """
+        What the brackets should compare on this plot, as kwargs for :meth:`_annotate_significance`.
+
+        The categorical axis when there is one — that is what a bracket can span. The colouring
+        column then becomes ``by``, because each of its levels is a separate curve and a bracket
+        drawn over one of them is claiming the effect *within* it. Averaging over the series
+        instead would put one set of brackets over three curves that disagree.
+
+        With no categorical axis there is nothing to span, so the colouring column's own levels
+        are compared and listed in a corner instead.
+        """
+        categorical = mode == "categorical" or (
+            mode == "auto" and x in df.columns and not pd.api.types.is_numeric_dtype(df[x])
+        )
+        selected = self._plot.checked_levels() or None
+        if categorical and x in df.columns:
+            separate = bool(group) and group in df.columns and group != x
+            return {
+                "factor": x,
+                "levels": None,
+                "by": group if separate else "",
+                "by_levels": selected if separate else None,
+            }
+        if group and group in df.columns:
+            return {"factor": group, "levels": selected, "by": "", "by_levels": None}
+        return {"factor": "", "levels": None, "by": "", "by_levels": None}
 
     def _mmrm_plot_mode(self, visit: str) -> str:
         """
@@ -3802,6 +4297,9 @@ class StatmodelsWindow(QMainWindow):
                 raise ValueError("No groups selected — tick at least one in the Groups list.")
 
             display = str(self._plot_display.currentData() or "overview")
+            # What the significance brackets span, set by whichever branch draws. The correlation
+            # heatmap leaves it empty: a matrix has no categorical axis of levels to compare.
+            signif_x = ""
             with plt.style.context("default"):
                 if kind == "correlation":
                     # A correlation matrix is one object, not a family of curves; there is nothing
@@ -3912,6 +4410,7 @@ class StatmodelsWindow(QMainWindow):
                 else:
                     x = self._plot_x.currentText().strip() or visit
                     hue = visit if x != visit else None
+                    signif_x = x
                     specs = f"~ {x}" + (f" | {hue}" if hue else "")
                     frame = mmrm_emmeans(self._last_result, specs)
                     # Marginal means are estimated over every level; hiding one only removes it from
@@ -3951,11 +4450,27 @@ class StatmodelsWindow(QMainWindow):
                     else:
                         if display == "grouped":
                             note += f"  {self._panel_note(fig)}"
+            # Not the visit: the visit is what the *series* are, and the categorical axis is
+            # whatever was put on x — the plaque grouping in a `plaque * territory` fit. Brackets
+            # span the axis and are computed within each series, so each territory's line carries
+            # its own plaque comparisons. When x *is* the visit there is no second factor and
+            # this collapses to plain visit-versus-visit.
+            signif_kwargs = (
+                {"factor": visit, "levels": selected or None, "by": "", "by_levels": None}
+                if not signif_x or signif_x == visit
+                else {
+                    "factor": signif_x, "levels": None,
+                    "by": visit, "by_levels": selected or None,
+                }
+            )
+            signif_note = self._annotate_significance(fig, **signif_kwargs)
             self._plot.show_figure(fig)
             if subset:
                 note = (note + "  " if note else "") + (
                     f"Showing {len(selected)} of {len(all_levels)} {visit} levels."
                 )
+            if signif_note:
+                note = (note + "  " if note else "") + signif_note
             self._plot.set_status(note)
         except Exception as exc:
             log.debug("MMRM plot failed: %s", exc)
@@ -4047,6 +4562,12 @@ class StatmodelsWindow(QMainWindow):
                         display_note = f"\u26a0 Grouped display unavailable \u2014 {exc}"
                         fig = plot_lme4_params(display="overview", **kwargs)
                     ci_error = getattr(fig, "ci_error", "")
+            signif_note = self._annotate_significance(
+                fig,
+                **self._significance_factor(
+                    df, x, group_col, str(self._plot_mode.currentData() or "auto")
+                ),
+            )
             self._plot.show_figure(fig)
             notes = []
             if display_note:
@@ -4064,6 +4585,8 @@ class StatmodelsWindow(QMainWindow):
                 notes.append(f"⚠ {group_error}")
             if self._show_ci.isChecked() and ci_error:
                 notes.append(f"⚠ {ci_error}")
+            if signif_note:
+                notes.append(signif_note)
             self._plot.set_status("  ".join(notes))
         except Exception as exc:
             log.debug("lme4 plot failed: %s", exc)
@@ -4163,6 +4686,12 @@ class StatmodelsWindow(QMainWindow):
                         raise
                     display_note = f"\u26a0 Grouped display unavailable \u2014 {exc}"
                     fig = draw("overview")
+            signif_note = self._annotate_significance(
+                fig,
+                **self._significance_factor(
+                    df, x, group, str(self._plot_mode.currentData() or "auto")
+                ),
+            )
             self._plot.show_figure(fig)
 
             notes = []
@@ -4174,6 +4703,8 @@ class StatmodelsWindow(QMainWindow):
                 notes.append(f"Showing {len(selected)} of {len(all_levels)} {group} levels.")
             if self._show_ci.isChecked() and getattr(fig, "ci_error", ""):
                 notes.append(f"⚠ {fig.ci_error}")
+            if signif_note:
+                notes.append(signif_note)
             self._plot.set_status("  ".join(notes))
         except Exception as exc:
             log.debug("lmrob plot failed: %s", exc)
@@ -5277,21 +5808,26 @@ class StatmodelsWindow(QMainWindow):
             "plot_x": self._plot_x.currentText().strip(),
             "include_points": self._include_points.isChecked(),
             "show_ci": self._show_ci.isChecked(),
+            "show_significance": self._show_signif.isChecked(),
+            "significance_mode": str(self._signif_mode.currentData() or PAIRWISE_ALL),
             "show_legend": self._plot.show_legend(),
             "plot_groups": self._plot.checked_levels(),
             "layout_state": self._encoded_dock_state(),
         }
 
-    def _apply_config(self, cfg: dict[str, Any], *, allow_expressions: bool = True) -> None:
+    def _apply_data_config(self, cfg: dict[str, Any], *, allow_expressions: bool = True) -> None:
         """
-        Restore the panel from a saved config, migrating older schema versions first.
+        Restore the half of a config that describes *the frame*: the query behind it, and every
+        transformation applied to what that query returned.
 
-        Parameters
-        ----------
-        allow_expressions : bool
-            When ``False``, expression-kind derived columns are dropped instead of restored.
-            Expressions are evaluated code, and a config file can come from anywhere the user
-            browsed to — :meth:`_on_load` decides whether the source is trusted.
+        Split out of :meth:`_apply_config` because a session's dataframe is worth transplanting on
+        its own — see :meth:`import_session`. Everything the model, the plot and the panel layout
+        need stays in :meth:`_apply_config`, so taking a frame from a neighbouring tab cannot
+        quietly replace the formula being worked on here.
+
+        The key set this reads is :data:`DATA_CONFIG_KEYS`; a dict holding only those keys is a
+        valid argument, and :func:`_migrate_config` is idempotent, so calling this from
+        :meth:`_apply_config` does not migrate twice.
         """
         cfg = _migrate_config(cfg)
 
@@ -5348,6 +5884,20 @@ class StatmodelsWindow(QMainWindow):
         self._btn_reshape.setText("Reshape → long" if self._wide_mode else "Reshape → wide")
         self._btn_melt.setEnabled(self._wide_mode)
         self._btn_melt.setText(self._melt_button_text())
+
+    def _apply_config(self, cfg: dict[str, Any], *, allow_expressions: bool = True) -> None:
+        """
+        Restore the panel from a saved config, migrating older schema versions first.
+
+        Parameters
+        ----------
+        allow_expressions : bool
+            When ``False``, expression-kind derived columns are dropped instead of restored.
+            Expressions are evaluated code, and a config file can come from anywhere the user
+            browsed to — :meth:`_on_load` decides whether the source is trusted.
+        """
+        cfg = _migrate_config(cfg)
+        self._apply_data_config(cfg, allow_expressions=allow_expressions)
 
         for key, widget in (
             ("mm_formula", self._formula),
@@ -5484,6 +6034,11 @@ class StatmodelsWindow(QMainWindow):
             self._include_points.setChecked(bool(cfg["include_points"]))
         if "show_ci" in cfg:
             self._show_ci.setChecked(bool(cfg["show_ci"]))
+        if "show_significance" in cfg:
+            self._show_signif.setChecked(bool(cfg["show_significance"]))
+        signif_mode = self._signif_mode.findData(str(cfg.get("significance_mode") or ""))
+        if signif_mode >= 0:
+            self._signif_mode.setCurrentIndex(signif_mode)
         if "show_legend" in cfg:
             self._plot.set_show_legend(bool(cfg["show_legend"]))
         self._pending_plot_groups = cfg.get("plot_groups")
