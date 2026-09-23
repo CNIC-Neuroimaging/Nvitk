@@ -52,7 +52,7 @@ import numpy as np
 import pandas as pd
 
 from nvitk.core.logger import Logger
-from .frame_ops import _as_factor_preserving_order
+from .frame_ops import _as_factor_preserving_order, factors_for_r
 
 from .mixedlm import significance_stars
 
@@ -487,6 +487,10 @@ _R_HELPERS = """
 }
 
 .nvitk_mmrm_predict <- function(fit, newdata) {
+  # A fit read back from .rds does not attach its package, so mmrm's S3 methods are not registered
+  # and predict() dispatches to the default, which errors with "no applicable method". Loading the
+  # namespace registers them (and mmrm's emmeans extension with it); it is a no-op once loaded.
+  loadNamespace("mmrm")
   # ``conditional = FALSE`` is the marginal (fixed-effects) prediction, which is what a population
   # or per-level curve means. The conditional form borrows the subject's own observed residuals, so
   # every curve would be bent towards whichever subject the reference row happened to come from.
@@ -608,10 +612,10 @@ def fit_mmrm(
     # mmrm needs the repeated and subject columns as factors. pandas Categorical is what rpy2 maps
     # to an R factor — a plain string column arrives as a character vector, which mmrm rejects with
     # "Time point variable 'x' must be a factor". The R helper coerces again as a backstop, so this
-    # holds whatever rpy2 version is installed.
+    # holds whatever rpy2 version is installed. The same pass flattens any *ordered* categorical,
+    # which R would otherwise fit with polynomial rather than treatment contrasts.
     factor_columns = [c for c in (visit, subject, group) if c and c in df.columns]
-    for column in factor_columns:
-        df[column] = _as_factor_preserving_order(df[column])
+    df = factors_for_r(df, columns=factor_columns)
 
     problems = validate_mmrm_data(df, visit=visit, subject=subject, structure=structure)
     hard = [p for p in problems if "assumes" not in p and "will be unstable" not in p]
@@ -899,10 +903,10 @@ def mmrm_predict(fit: Any, newdata: pd.DataFrame, *, use_random_effects: bool = 
     _ensure_helpers()
     from rpy2.robjects import globalenv
 
-    frame = newdata.reset_index(drop=True).copy()
-    for column in frame.columns:
-        if not pd.api.types.is_numeric_dtype(frame[column]):
-            frame[column] = _as_factor_preserving_order(frame[column])
+    frame = factors_for_r(
+        newdata.reset_index(drop=True),
+        columns=[c for c in newdata.columns if not pd.api.types.is_numeric_dtype(newdata[c])],
+    )
     with _converter():
         from rpy2.robjects import conversion
 

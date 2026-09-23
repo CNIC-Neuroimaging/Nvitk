@@ -21,7 +21,7 @@ from typing import Sequence
 
 import numpy as np
 
-#: Every transform lands here.
+# Every transform lands here.
 TARGET_RANGE: tuple[float, float] = (0.0, 1.0)
 
 

@@ -57,10 +57,65 @@ IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # ──────────────────────────────────────────────────────────────────────────────
 # Row filters
 # ──────────────────────────────────────────────────────────────────────────────
+#: Relative tolerance for ``==`` / ``!=`` on a float column. Typing "3.8" must match a stored
+#: 3.7999999999999998, and no measurement in this toolkit is meaningful to nine significant digits.
+EQUALITY_RTOL = 1e-9
+
+
+def comparable_text(series: pd.Series) -> pd.Series:
+    """
+    *series* as text for a string comparison, without the spurious ``.0`` on whole numbers.
+
+    ``astype(str)`` renders a float column's ``0`` as ``"0.0"`` and a visit id read as a number as
+    ``"4.0"``, so ``contains 4`` and ``equals 0`` — typed the way anybody types them — matched
+    nothing. Integral values are rendered as integers here; everything else keeps its own repr.
+    """
+    text = series.astype(str)
+    num = pd.to_numeric(series, errors="coerce")
+    if not num.notna().any():
+        return text
+    integral = num.notna() & (num == num.round())
+    if not integral.any():
+        return text
+    return text.mask(integral, num.round().astype("Int64").astype(str))
+
+
+def _numeric_equality_mask(series: pd.Series, raw: str) -> pd.Series | None:
+    """
+    Boolean mask of ``series == raw`` compared as *numbers*, or ``None`` when that is not possible.
+
+    ``None`` means one of the two sides is not numeric, and the caller should fall back to a text
+    comparison. Within the numeric path the comparison is by closeness rather than by identity: a
+    column holding 0.1 + 0.2 is not equal to the 0.3 someone typed, and nobody means that.
+    """
+    num = pd.to_numeric(series, errors="coerce")
+    if not num.notna().any():
+        return None
+    try:
+        target = float(raw)
+    except (TypeError, ValueError):
+        return None
+    values = num.to_numpy(dtype=float, na_value=np.nan)
+    close = np.isclose(values, target, rtol=EQUALITY_RTOL, atol=0.0, equal_nan=False)
+    return pd.Series(close & ~np.isnan(values), index=series.index)
+
+
 def apply_row_filter(df: pd.DataFrame, column: str, op: str, value: str) -> pd.DataFrame:
-    """Filter *df* to rows where *column* satisfies *op* against *value* (numeric comparisons,
-    substring/exact string match, or equality/inequality); returns *df* unchanged if *column* is
-    missing or blank."""
+    """
+    Filter *df* to rows where *column* satisfies *op* against *value*.
+
+    ``>`` / ``>=`` / ``<`` / ``<=`` are always numeric. ``==`` / ``!=`` / ``equals`` compare as
+    numbers when the column and the typed value both are, and as text otherwise — comparing them as
+    text throughout is what made ``!= 0`` keep every zero, since ``str(0.0)`` is ``"0.0"`` and that
+    is not the string ``"0"``. ``contains`` is a substring test by nature and stays textual, over
+    the rendering :func:`comparable_text` produces.
+
+    A missing value fails every comparison except ``!=``, where it passes: a row with no value is
+    genuinely not equal to the thing being excluded, and dropping it would quietly discard rows the
+    filter was never about.
+
+    Returns *df* unchanged if *column* is missing or blank.
+    """
     if df.empty or not column or column not in df.columns:
         return df
     series = df[column]
@@ -81,16 +136,25 @@ def apply_row_filter(df: pd.DataFrame, column: str, op: str, value: str) -> pd.D
             mask = num < threshold
         else:
             mask = num <= threshold
-        return df.loc[mask]
+        return df.loc[mask.fillna(False)]
 
     if op == "contains":
-        return df.loc[series.astype(str).str.contains(raw, case=False, na=False)]
-    if op == "equals":
-        return df.loc[series.astype(str).str.lower() == raw.lower()]
+        return df.loc[comparable_text(series).str.contains(raw, case=False, na=False, regex=False)]
 
+    # ``equals`` is the case-insensitive spelling of ``==``; both take the numeric path when they
+    # can, so the level list and the typed value agree on what "0" means.
+    numeric = _numeric_equality_mask(series, raw)
     if op == "!=":
-        return df.loc[series.astype(str) != raw]
-    return df.loc[series.astype(str) == raw]
+        if numeric is not None:
+            # Missing values pass: they are not the value being excluded.
+            return df.loc[~numeric]
+        return df.loc[comparable_text(series) != raw]
+    if numeric is not None:
+        return df.loc[numeric]
+    text = comparable_text(series)
+    if op == "equals":
+        return df.loc[text.str.lower() == raw.lower()]
+    return df.loc[text == raw]
 
 
 def apply_iqr_filter(
@@ -147,23 +211,40 @@ def _apply_values_rule(df: pd.DataFrame, column: str, values: Sequence[str], exc
 
 def _apply_range_rule(
     df: pd.DataFrame, column: str, low: float | None, high: float | None,
-    *, keep_na: bool = False,
+    *, keep_na: bool = False, outside: bool = False,
 ) -> pd.DataFrame:
     """
     Keep rows whose numeric *column* value lies in ``[low, high]`` (either bound may be open).
+
+    With *outside*, the band is what gets dropped instead: rows below *low* **or** above *high*
+    survive. That is the tails-only question — "show me the subjects this measurement is extreme
+    in" — which is otherwise two mutually exclusive rules that no sequence of ANDed filters can
+    express, since each rule sees the previous one's output.
 
     ``keep_na`` decides what a missing value means. By default it fails, which is right for a
     measurement: a row with no value cannot be shown to be inside the range. It is wrong for a
     metric that is only *defined* on some rows — a junction residual exists on the parent vessel
     and nowhere else, so failing the NaNs would drop every vessel that was never checked. The IQR
-    rule already keeps NaN for the same reason.
+    rule already keeps NaN for the same reason. It applies to both directions: a missing value is
+    no more outside the band than it is inside it.
     """
     num = pd.to_numeric(df[column], errors="coerce")
-    mask = pd.Series(True, index=df.index)
-    if low is not None:
-        mask &= num >= float(low)
-    if high is not None:
-        mask &= num <= float(high)
+    if outside:
+        # Union, not the complement of the inside mask: the complement would sweep in the NaNs,
+        # which *keep_na* is there to decide about.
+        mask = pd.Series(False, index=df.index)
+        if low is not None:
+            mask |= num < float(low)
+        if high is not None:
+            mask |= num > float(high)
+        if low is None and high is None:
+            mask = pd.Series(True, index=df.index)
+    else:
+        mask = pd.Series(True, index=df.index)
+        if low is not None:
+            mask &= num >= float(low)
+        if high is not None:
+            mask &= num <= float(high)
     mask = mask.fillna(False)
     if keep_na:
         mask |= num.isna()
@@ -182,7 +263,7 @@ class FilterRule:
     kind : {"values", "compare", "range", "iqr"}
         ``values``  keep/exclude an explicit set of levels (the vessel-exclusion case);
         ``compare`` apply *op* / *value* through :func:`apply_row_filter`;
-        ``range``   keep rows inside ``[low, high]``;
+        ``range``   keep rows inside ``[low, high]``, or outside it with *outside*;
         ``iqr``     drop Tukey-fence outliers, optionally per level of *by*.
     enabled : bool
         Disabled rules are kept (so the UI can toggle them) but contribute no filtering.
@@ -199,6 +280,8 @@ class FilterRule:
     # ---- kind="range" ----------------------------------------------------------
     low: float | None = None
     high: float | None = None
+    #: Keep the tails instead of the band — rows below *low* or above *high*.
+    outside: bool = False
     #: Treat a missing value as passing rather than failing. For a metric defined on
     #: only some rows, failing the NaNs would drop everything that was never checked.
     keep_na: bool = False
@@ -220,6 +303,13 @@ class FilterRule:
         if self.kind == "range":
             lo = "−∞" if self.low is None else f"{float(self.low):.4g}"
             hi = "+∞" if self.high is None else f"{float(self.high):.4g}"
+            if self.outside:
+                parts = []
+                if self.low is not None:
+                    parts.append(f"{self.column} < {lo}")
+                if self.high is not None:
+                    parts.append(f"{self.column} > {hi}")
+                return " or ".join(parts) if parts else f"{self.column} (any)"
             return f"{lo} ≤ {self.column} ≤ {hi}"
         if self.kind == "iqr":
             scope = f"per {self.by}" if self.by else "global"
@@ -237,6 +327,8 @@ class FilterRule:
             "exclude": bool(self.exclude),
             "low": self.low,
             "high": self.high,
+            "outside": bool(self.outside),
+            "keep_na": bool(self.keep_na),
             "k": float(self.k),
             "by": self.by,
             "enabled": bool(self.enabled),
@@ -254,6 +346,8 @@ class FilterRule:
             exclude=bool(data.get("exclude", False)),
             low=None if data.get("low") is None else float(data["low"]),
             high=None if data.get("high") is None else float(data["high"]),
+            outside=bool(data.get("outside", False)),
+            keep_na=bool(data.get("keep_na", False)),
             k=float(data.get("k", DEFAULT_IQR_K)),
             by=(str(data["by"]) if data.get("by") else None),
             enabled=bool(data.get("enabled", True)),
@@ -309,7 +403,8 @@ def apply_filter_rules(
             out = apply_row_filter(out, rule.column, rule.op, rule.value)
         elif rule.kind == "range":
             out = _apply_range_rule(
-                out, rule.column, rule.low, rule.high, keep_na=bool(rule.keep_na)
+                out, rule.column, rule.low, rule.high,
+                keep_na=bool(rule.keep_na), outside=bool(rule.outside),
             )
         elif rule.kind == "iqr":
             by = rule.by if (rule.by and rule.by in out.columns) else None
@@ -411,6 +506,41 @@ def _as_factor_preserving_order(series: "pd.Series") -> "pd.Categorical":
                 ordered.append(text)
         return pd.Categorical(series.astype(str), categories=ordered)
     return pd.Categorical(series.astype(str))
+
+
+def factors_for_r(df: pd.DataFrame, *, columns: Sequence[str] = ()) -> pd.DataFrame:
+    """
+    A copy of *df* whose factors mean the same thing in R as in the rest of the toolkit.
+
+    Two corrections, both invisible in the frame itself and visible only in the coefficient table:
+
+    **Ordered categoricals are flattened.** R applies ``contr.poly`` to an ordered factor, so a
+    binned column crosses over and comes back as ``gr_plaque.L`` / ``.Q`` / ``.C`` — orthogonal
+    polynomial *trend* contrasts, named after nothing that appears in the data, instead of one
+    contrast per level against the reference. :func:`cut_into_bins` marks its result ordered so that
+    patsy takes the lowest bin as the baseline and plots keep the bins in sequence; neither of those
+    needs the ordering to survive into R, where its only effect is to change the contrast scheme out
+    from under the panel's reference-level control.
+
+    **Named *columns* are coerced to factors**, level order preserved — ``mmrm`` rejects a character
+    repeated or subject variable outright, and lme4 would read a numeric subject id as a covariate.
+
+    Level order is what carries the reference: both patsy and R contrast against a factor's *first*
+    level, which is what makes :func:`set_reference_level` a reordering rather than formula surgery.
+    """
+    out = df.copy()
+    for column in out.columns:
+        series = out[column]
+        if isinstance(series.dtype, pd.CategoricalDtype) and series.dtype.ordered:
+            # astype(str) renders missing values as "nan", which is not among the categories and so
+            # lands back as NaN — the levels are exactly the ones that were declared.
+            out[column] = pd.Categorical(
+                series.astype(str), categories=[str(c) for c in series.cat.categories]
+            )
+    for column in columns:
+        if column and column in out.columns:
+            out[column] = _as_factor_preserving_order(out[column])
+    return out
 
 
 def merge_levels(
@@ -1190,6 +1320,7 @@ def apply_derived_columns(
 
 __all__ = [
     "BINARIZE_OPS",
+    "EQUALITY_RTOL",
     "BINARIZE_SYMBOLS",
     "DEFAULT_IQR_K",
     "FILTER_OPS",
@@ -1208,6 +1339,7 @@ __all__ = [
     "bin_counts",
     "binarize_series",
     "cast_column",
+    "comparable_text",
     "merge_levels",
     "bin_interval_labels",
     "cut_into_bins",
@@ -1216,6 +1348,7 @@ __all__ = [
     "default_derived_name",
     "ensure_unique_columns",
     "evaluate_expression",
+    "factors_for_r",
     "filtered_columns",
     "parse_cut_points",
     "set_reference_level",

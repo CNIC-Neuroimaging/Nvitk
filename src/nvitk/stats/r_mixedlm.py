@@ -406,7 +406,12 @@ def fit_lme4(
         raise ValueError(f"No complete rows left after dropping missing values in {na_cols}.")
 
     # lme4 requires the grouping columns to be factors; a numeric subject id would be read as a
-    # covariate and silently fit something else entirely.
+    # covariate and silently fit something else entirely. The shared pass also flattens ordered
+    # categoricals, which R fits with polynomial contrasts (``.L`` / ``.Q`` / ``.C``) rather than
+    # one contrast per level against the reference.
+    from .frame_ops import factors_for_r
+
+    df = factors_for_r(df)
     for factor in lme4_grouping_factors(formula):
         if factor in df.columns:
             df[factor] = df[factor].astype(str)

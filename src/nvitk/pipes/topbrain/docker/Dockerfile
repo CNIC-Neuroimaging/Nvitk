@@ -1,5 +1,10 @@
 # ToPBrain / ToPAneu TA36 algorithm container for Grand Challenge.
-FROM pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+# CUDA 12.6: Grand Challenge minimum.
+# Overridable with --build-arg for a different torch.
+ARG BASE_IMAGE=pytorch/pytorch:2.6.0-cuda12.6-cudnn9-runtime
+
+# --platform pinned: Grand Challenge runs amd64. 
+FROM --platform=linux/amd64 ${BASE_IMAGE}
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -20,6 +25,7 @@ COPY --chown=algorithm:algorithm nnunetv2 /opt/algorithm/nnunetv2
 COPY --chown=algorithm:algorithm topbrain_algo /opt/algorithm/topbrain_algo
 # model/ holds one subdirectory per modality (model/ct, model/mr); models.json maps each
 # socket to one of them along with its channel count and the CT windows applied.
+
 COPY --chown=algorithm:algorithm model /opt/algorithm/model
 COPY --chown=algorithm:algorithm models.json /opt/algorithm/models.json
 COPY --chown=algorithm:algorithm postprocess.json /opt/algorithm/postprocess.json

@@ -23,7 +23,7 @@ from __future__ import annotations
 # ──────────────────────────────────────────────────────────────────────────────
 import json
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -652,6 +652,7 @@ class StatmodelsWindow(QMainWindow):
         self._mediation_form = MediationFormPanel()
         self._model_stack.addWidget(self._mediation_form)
         lay.addWidget(self._model_stack, stretch=1)
+        lay.addWidget(self._build_model_actions())
         return panel
 
     def _build_nonlinear_box(self) -> QWidget:
@@ -870,7 +871,6 @@ class StatmodelsWindow(QMainWindow):
         form.addRow(self._lmrob_psi_label, self._lmrob_psi)
         form.addRow(self._lmrob_setting_label, self._lmrob_setting)
         form.addRow(self._robust_label, self._robust)
-        form.addRow("Model name (save)", self._model_name)
         box_lay.addLayout(form)
 
         term_row = QHBoxLayout()
@@ -906,33 +906,67 @@ class StatmodelsWindow(QMainWindow):
         term_row.addStretch(1)
         box_lay.addLayout(term_row)
 
+        # Only the run action lives on this page. Save, load and redraw act on the panel rather
+        # than on a formula, and they sit below the stack so every analysis type has them — see
+        # :meth:`_build_model_actions`.
         btn_row = QHBoxLayout()
         self._btn_fit = QPushButton("Fit model")
-        self._btn_save = QPushButton("Save model")
-        self._btn_save.setToolTip(
-            "Write the configuration, the fitted model, the report and the exact rows it was "
-            "trained on into the model folder."
-        )
-        self._btn_load = QPushButton("Load model…")
-        self._btn_load.setToolTip(
-            "Restore a saved model's settings, its report, and its training dataset when one was "
-            "saved alongside."
-        )
-        self._btn_load_data = QPushButton("Load dataset…")
-        self._btn_load_data.setToolTip(
-            "Load only the training rows of a saved model, without touching the current settings. "
-            "The frame is shown exactly as it was saved — combinations, derived columns and "
-            "filters are already in it, so they are not re-applied."
-        )
-        self._btn_plot = QPushButton("Refresh plot")
-        for btn in (
-            self._btn_fit, self._btn_save, self._btn_load, self._btn_load_data, self._btn_plot
-        ):
-            btn_row.addWidget(btn)
+        btn_row.addWidget(self._btn_fit)
+        btn_row.addStretch(1)
         box_lay.addLayout(btn_row)
 
         box_lay.addStretch(1)
         return box
+
+    def _build_model_actions(self) -> QWidget:
+        """
+        Save / load / redraw, below the formulation stack so they belong to the panel.
+
+        These used to live inside the MixedLM formulation page, which meant selecting Mediation or
+        Non-linear — both of which are whole pages of their own, with their own run buttons —
+        switched the stack and took Save model and Load model away with it. A mediation result was
+        saveable only by switching the analysis type back first, and there was nothing to say so.
+        """
+        panel = QWidget()
+        lay = QVBoxLayout(panel)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(SPACE_TIGHT)
+
+        # The save name belongs here rather than on the formulation page for the same reason the
+        # buttons do: without it, every mediation went to <root>/model/ and overwrote the last one,
+        # because the field that names the folder was on a page the mediation user never sees.
+        name_row = QHBoxLayout()
+        name_row.addWidget(QLabel("Model name (save)"))
+        self._model_name.setToolTip(
+            "Folder under the configured model directory that Save model writes into."
+        )
+        name_row.addWidget(self._model_name, stretch=1)
+        lay.addLayout(name_row)
+
+        row = FlowRow()
+        flow = row.flow()
+        self._btn_save = QPushButton("Save model")
+        self._btn_save.setToolTip(
+            "Write the configuration, the result, the report and the exact rows it was trained on "
+            "into the model folder.\n\n"
+            "Works for a mediation run too: its path table, per-level table and bootstrap draws "
+            "are written, so reopening it does not mean re-running the bootstrap."
+        )
+        self._btn_load = QPushButton("Load model…")
+        self._btn_load.setToolTip(
+            "Restore a saved result's settings, its report and its frame — a fitted model or a "
+            "mediation bundle, whichever the folder was last saved with."
+        )
+        self._btn_load_data = QPushButton("Load dataset…")
+        self._btn_load_data.setToolTip(
+            "Load only the frame of a saved model, without touching the current settings."
+        )
+        self._btn_plot = QPushButton("Refresh plot")
+        self._btn_plot.setToolTip("Redraw the current figure with the options above it.")
+        for btn in (self._btn_save, self._btn_load, self._btn_load_data, self._btn_plot):
+            flow.addWidget(btn)
+        lay.addWidget(row)
+        return panel
 
     def _build_plot_options(self) -> QWidget:
         """Plot display / QC gate / mode / x / points, laid out for the plot pane's own top row."""
@@ -1007,10 +1041,12 @@ class StatmodelsWindow(QMainWindow):
         self._plot_group = QComboBox()
         self._plot_group.setMinimumWidth(120)
         self._plot_group.setToolTip(
-            "Factor the curves are drawn per level of.\n\n"
-            "Offers the model's random grouping factors and any categorical fixed effect. A "
-            "categorical fixed effect is preferred by default: a per-subject curve set is rarely "
-            "readable, and the fixed term is what the coefficient table is about."
+            "Categorical column the plot splits and colours by — one curve, or one set of marginal "
+            "means, per level.\n\n"
+            "Independent of the model: this only decides how the figure is drawn, not what was "
+            "fitted. Defaults to the model's own grouping factor. Point it at a different column "
+            "to colour by sex, by a binned covariate, or by a territory column that a region "
+            "combination has just added a level to."
         )
         self._plot_group_label = QLabel("colour by")
 
@@ -1452,7 +1488,7 @@ class StatmodelsWindow(QMainWindow):
         self._plot_display.currentIndexChanged.connect(lambda *_: self._on_plot())
         self._plot_mode.currentIndexChanged.connect(lambda *_: self._on_plot())
         self._plot_x.currentIndexChanged.connect(lambda *_: self._on_plot())
-        self._plot_group.currentIndexChanged.connect(lambda *_: self._on_plot())
+        self._plot_group.currentIndexChanged.connect(self._on_plot_group_changed)
         self._include_points.stateChanged.connect(lambda *_: self._on_plot())
         self._show_ci.stateChanged.connect(lambda *_: self._on_plot())
         self._plot.optionsChanged.connect(self._on_plot)
@@ -1774,35 +1810,81 @@ class StatmodelsWindow(QMainWindow):
             + f"  |  {len(frame.columns)} columns  |  press Reload data to return to the dataset"
         )
 
+    def _combinations_applicable(self, frame: pd.DataFrame | None) -> bool:
+        """
+        Whether *frame* carries the region and value columns every configured combination needs.
+
+        A combination sums one measurement across rows of a region column, so it can only be
+        evaluated in the shape that has both. A subject-grain frame has neither — the regions are
+        columns (``att_mean__LICA``) and there is no ``att_mean`` — and only gets them from the
+        melt. All-or-nothing on purpose: splitting the set across the two shapes would evaluate
+        some combinations before the filters and some after, so the same definition would mean
+        different things depending on where its columns happened to live.
+        """
+        if frame is None or frame.empty or not self._combinations:
+            return False
+        return all(
+            combo.region_column in frame.columns
+            and combo.value_column in frame.columns
+            and combo.subject_column in frame.columns
+            for combo in self._combinations
+        )
+
     def _adopt_prebuilt_frame(self, frame: pd.DataFrame) -> None:
         """
-        Show a saved training dataset exactly as it was written.
+        Show a saved *training* frame — one whose recipe has already been applied to it.
 
-        The recipe that produced it — combinations, derived columns, casts, filters, reshape — is
-        already in these rows, so it is displayed rather than rebuilt. Re-running it would at best
-        recompute identical values and at worst duplicate every synthetic row a ``mode="row"``
-        region combination added. The definitions stay visible in their panels so the frame can
-        still be read, and pressing Reload data returns to the dataset query.
+        Only reached for a model saved before the analysis frame was stored alongside it; a current
+        save restores the recipe's input instead and replays everything, which is what keeps a
+        loaded model's filters and reshape editable. Pressing Reload data returns to the dataset
+        query in either case.
         """
-        self._working_df = frame
-        self._filter_report = []
-        self._chips.set_rules(self._chips.rules(), [])
-        self._chips.set_counts(len(frame), len(frame))
+        # The structural half of the recipe — region combinations, derived columns, melt/wide — is
+        # already in these rows and is not re-run: a ``mode="row"`` combination would append a
+        # second copy of every synthetic row, and a melt finds no ``flow_mean__LICA`` columns left
+        # to melt. Row filters *are* re-run, so editing one still does something; an IQR rule is
+        # the exception, because its fences are recomputed from whatever survived last time and
+        # would creep tighter on every pass.
+        rules = self._chips.rules()
+        replayable = [r for r in rules if r.kind != "iqr"]
+        working, report = apply_filter_rules(frame, replayable)
+        by_rule = {id(entry["rule"]): entry for entry in report}
+        report = [
+            by_rule.get(
+                id(rule),
+                {
+                    "rule": rule,
+                    "n_before": len(frame),
+                    "n_after": len(frame),
+                    "removed": 0,
+                    "skipped": True,
+                    "reason": "already applied to the saved frame",
+                },
+            )
+            for rule in rules
+        ]
+
+        self._working_df = working
+        self._filter_report = report
+        self._chips.set_rules(rules, report)
+        self._chips.set_counts(len(working), len(frame))
         self._derived_label.setText(
             f"{len(self._derived)} derived column(s) — already in the loaded dataset"
             if self._derived else ""
         )
         self._sync_filter_toggle()
-        self._sync_reshape_buttons(frame)
+        self._sync_reshape_buttons(working)
         self._frame_view.set_dropped(set())
         self._frame_view.set_column_types(self._column_types)
         self._frame_view.set_references(self._reference_levels)
         self._frame_view.set_frame(
-            frame, derived_columns={d.name for d in self._derived}
+            working,
+            filtered_columns=filtered_columns(rules),
+            derived_columns={d.name for d in self._derived},
         )
-        self._sync_column_combos(frame)
-        self._sync_nonlinear_columns(frame)
-        self._mediation_form.set_columns(frame)
+        self._sync_column_combos(working)
+        self._sync_nonlinear_columns(working)
+        self._mediation_form.set_columns(working)
 
     def _recompute_frame(self, *, announce: bool = True) -> None:
         """
@@ -1823,24 +1905,32 @@ class StatmodelsWindow(QMainWindow):
             self._adopt_prebuilt_frame(base)
             return
 
-        # Region algebra first: a derived column may well be built from a combination
-        # (``log(TCBF)``), and the reverse never happens — a combination reads one measurement
-        # across rows, which a within-row transform cannot produce.
-        combined, combo_errors, _reports = apply_region_combinations(base, self._combinations)
-        derived_errors = list(combo_errors)
+        # Region algebra before derived columns: a derived column may well be built from a
+        # combination (``log(TCBF)``), and the reverse never happens — a combination reads one
+        # measurement across rows, which a within-row transform cannot produce.
+        #
+        # *Which shape* it runs in is not a free choice. A combination needs the long region
+        # column, and a subject-grain load has none — every region is already its own column, and
+        # the column only comes back from the melt. That is also the shape the combinations dialog
+        # read its regions from, so running here against the un-melted frame just failed with
+        # "column 'territory' is not in the frame" and produced neither a row nor a column while
+        # reporting success. When the base cannot carry them, the whole set is deferred until
+        # after the reshape.
         post_derive = self._reshape_active()
+        post_combine = bool(self._combinations) and not self._combinations_applicable(base)
+        derived_errors: list[str] = []
+        if post_combine:
+            combined = base
+        else:
+            combined, combo_errors, _reports = apply_region_combinations(base, self._combinations)
+            derived_errors.extend(combo_errors)
+
         if post_derive:
             staged = combined
         else:
             staged, derr = apply_derived_columns(combined, self._derived)
             derived_errors.extend(derr)
             derived_frame = staged
-        if derived_errors:
-            self._derived_label.setText("⚠ " + "; ".join(derived_errors))
-        else:
-            self._derived_label.setText(
-                f"{len(self._derived)} derived column(s)" if self._derived else ""
-            )
 
         staged, type_notes = apply_column_types(staged, self._column_types)
         # References after casts: casting to Factor is what makes a column eligible for one, and a
@@ -1866,10 +1956,31 @@ class StatmodelsWindow(QMainWindow):
             working = self._melt_working(working)
             reshaped = True
 
+        if post_combine:
+            # The reshape has just produced the region column, so the combinations can run at last.
+            # Before the derived columns below, for the same reason as above.
+            working, late_combo, _ = apply_region_combinations(working, self._combinations)
+            derived_errors.extend(late_combo)
+
         if post_derive:
             working, derr = apply_derived_columns(working, self._derived)
             derived_errors.extend(derr)
-            derived_frame, _ = apply_derived_columns(self._apply_reshape(combined), self._derived)
+            # The unfiltered frame in the shape the table shows — the chip bar's "n of N" needs the
+            # denominator, so this pass repeats the reshape and any deferred combinations without
+            # the filters rather than reusing ``working``.
+            reference = self._apply_reshape(combined)
+            if post_combine:
+                reference, _, _ = apply_region_combinations(reference, self._combinations)
+            derived_frame, _ = apply_derived_columns(reference, self._derived)
+
+        # Reported once, after every stage has had its say: a combination deferred past the reshape
+        # has no error to show until here.
+        if derived_errors:
+            self._derived_label.setText("⚠ " + "; ".join(derived_errors))
+        else:
+            self._derived_label.setText(
+                f"{len(self._derived)} derived column(s)" if self._derived else ""
+            )
 
         if reshaped:
             # A rule can name a column that only exists *after* the reshape — an IQR fence on
@@ -1994,8 +2105,7 @@ class StatmodelsWindow(QMainWindow):
             return
         # Offer the levels of the *unfiltered* frame, so a level filtered out earlier can be
         # re-included without clearing everything first.
-        combined, _, _ = apply_region_combinations(base, self._combinations)
-        derived_frame, _ = self._frame_with_derived_columns(combined)
+        derived_frame, _ = self._frame_with_derived_columns()
         series = derived_frame[column] if column in derived_frame.columns else working[column]
 
         existing = [r for r in self._chips.rules() if r.column == column]
@@ -2143,8 +2253,7 @@ class StatmodelsWindow(QMainWindow):
         base, working = self._analysis_df, self._working_df
         if base is None or working is None or len(working) >= len(base):
             return None
-        combined, _, _ = apply_region_combinations(base, self._combinations)
-        derived, _ = self._frame_with_derived_columns(combined)
+        derived, _ = self._frame_with_derived_columns()
         wanted = [c for c in (x, y, group) if c]
         if any(c not in derived.columns for c in wanted):
             return None
@@ -2159,6 +2268,28 @@ class StatmodelsWindow(QMainWindow):
         self._show_filtered.setText(
             f"Show filtered ({removed})" if removed > 0 else "Show filtered"
         )
+
+    def _plot_group_column(self, fallback: str = "") -> str:
+        """
+        The column the plot should split and colour by.
+
+        The "colour by" picker wins whenever it names a column the fitted frame actually has. It
+        used to be consulted by the lme4 path alone, so every other engine drew by the model's own
+        grouping field regardless of what the picker said — and after a region combination that
+        field is ``group_key``, which is precisely the question the picker exists to change.
+
+        Falls back to *fallback*, then to the model's grouping field, then to the frame's region
+        column, so an engine that has no grouping of its own still gets one.
+        """
+        frame = self._last_model_df if self._last_model_df is not None else self._working_df
+        columns = set(frame.columns) if frame is not None else set()
+        chosen = self._plot_group.currentText().strip()
+        if chosen and (not columns or chosen in columns):
+            return chosen
+        for candidate in (str(fallback or ""), self._groups.text().strip(), self._region_column_name()):
+            if candidate and (not columns or candidate in columns):
+                return candidate
+        return str(fallback or "")
 
     def _region_column_name(self) -> str:
         """Whichever column carries the vessel identity in this frame."""
@@ -2281,18 +2412,37 @@ class StatmodelsWindow(QMainWindow):
             working = self._melt_working(working)
         return working
 
-    def _editor_frame_for_derived(self) -> pd.DataFrame | None:
-        """Column layout shown in the derived-columns editor (matches the table after melt/wide)."""
+    def _combined_base_frame(self) -> pd.DataFrame | None:
+        """
+        The **unfiltered** frame in the shape the table shows, with region combinations applied.
+
+        The one place that knows *where* a combination belongs, mirroring :meth:`_recompute_frame`:
+        before the reshape when the base already carries the region column, after it when only the
+        melt produces one. Every editor and preview that needs "the frame without the filters" goes
+        through here — otherwise a subject-grain load hands them a frame missing exactly the rows
+        and columns the user just created, which is how the filter dialog came to offer a level
+        list without the synthetic territory in it.
+        """
         base = self._analysis_df
         if base is None:
             return None
-        combined, _, _ = apply_region_combinations(base, self._combinations)
-        return self._apply_reshape(combined)
+        if self._combinations_applicable(base):
+            combined, _, _ = apply_region_combinations(base, self._combinations)
+            return self._apply_reshape(combined)
+        reshaped = self._apply_reshape(base)
+        if self._combinations:
+            reshaped, _, _ = apply_region_combinations(reshaped, self._combinations)
+        return reshaped
 
-    def _frame_with_derived_columns(self, combined: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
-        """Evaluate derived columns against the frame shape the user sees in the table."""
-        if self._reshape_active():
-            return apply_derived_columns(self._apply_reshape(combined), self._derived)
+    def _editor_frame_for_derived(self) -> pd.DataFrame | None:
+        """Column layout shown in the derived-columns editor (matches the table after melt/wide)."""
+        return self._combined_base_frame()
+
+    def _frame_with_derived_columns(self) -> tuple[pd.DataFrame, list[str]]:
+        """The unfiltered table-shaped frame with the derived columns evaluated onto it."""
+        combined = self._combined_base_frame()
+        if combined is None:
+            return pd.DataFrame(), []
         return apply_derived_columns(combined, self._derived)
 
     def _melt_working(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -2676,7 +2826,7 @@ class StatmodelsWindow(QMainWindow):
             notify("Reload the data before plotting a column.", error=True)
             return
 
-        frame, excluded = self._frame_with_exclusions(base)
+        frame, excluded = self._frame_with_exclusions()
         if column not in frame.columns:
             notify(f"“{column}” is not in the analysis dataframe.", error=True)
             return
@@ -2712,15 +2862,14 @@ class StatmodelsWindow(QMainWindow):
         )
         dialog.show()
 
-    def _frame_with_exclusions(self, base: pd.DataFrame) -> tuple[pd.DataFrame, Any]:
+    def _frame_with_exclusions(self) -> tuple[pd.DataFrame, Any]:
         """
         The derived frame plus a boolean mask of the rows the active filters removed.
 
         The mask is built by comparing the filtered frame's index against the unfiltered one, so it
         follows whatever rules are active without this needing to re-implement them.
         """
-        combined, _, _ = apply_region_combinations(base, self._combinations)
-        derived, _ = self._frame_with_derived_columns(combined)
+        derived, _ = self._frame_with_derived_columns()
         working = self._working_df
         if working is None or len(working) >= len(derived):
             return derived, None
@@ -3379,6 +3528,24 @@ class StatmodelsWindow(QMainWindow):
         )
         return result, model_df, meta, result["y"], ""
 
+    def _on_plot_group_changed(self) -> None:
+        """
+        Rebuild the Groups checklist for the newly chosen colour-by column, then redraw.
+
+        Without the rebuild the checklist keeps the previous column's levels, and since the plot
+        paths filter by what is ticked there, switching to a column whose levels share no names
+        with the old one silently selects nothing — an empty figure, or "No groups selected".
+        """
+        frame = self._last_model_df if self._last_model_df is not None else self._working_df
+        column = self._plot_group_column()
+        if frame is not None and column:
+            # Every level of the new column starts ticked: a level list the user has never seen
+            # cannot carry their intent, and showing all of it is the honest default.
+            self._pending_plot_groups = None
+            self._sync_plot_levels(frame, column)
+            self._plot.set_checked_levels(None)
+        self._on_plot()
+
     def _sync_plot_levels(self, df: pd.DataFrame, column: str) -> None:
         """Rebuild the plot's group checklist from *column*'s levels in *df*."""
         if column in df.columns:
@@ -3386,10 +3553,13 @@ class StatmodelsWindow(QMainWindow):
         else:
             levels = []
         self._plot.set_levels(column, levels)
-        # A restored config named its groups before any fit told us what the levels are.
-        if self._pending_plot_groups is not None:
+        # A restored config named its groups before any fit told us what the levels are. An *empty*
+        # list is not a selection of nothing — it is a config saved before its checklist had been
+        # built, and honouring it literally leaves every level unticked, which the engines report
+        # as "No groups selected" on a model that was just loaded successfully.
+        if self._pending_plot_groups:
             self._plot.set_checked_levels(self._pending_plot_groups)
-            self._pending_plot_groups = None
+        self._pending_plot_groups = None
 
     def _covariate_reference_values(
         self, df: pd.DataFrame, formula: str, exclude: set[str]
@@ -3481,7 +3651,7 @@ class StatmodelsWindow(QMainWindow):
                     if candidate in df.columns:
                         x = candidate
                         break
-            group = self._groups.text().strip() or "group_key"
+            group = self._plot_group_column(self._groups.text().strip() or "group_key")
             if not x or y is None or y not in df.columns or group not in df.columns:
                 raise ValueError(
                     f"Cannot plot: need x/y/group columns (have {list(df.columns)})"
@@ -3664,7 +3834,11 @@ class StatmodelsWindow(QMainWindow):
                     if not x or df is None or x not in df.columns:
                         raise ValueError("Choose a plot x column that is in the analysis frame.")
                     y = self._last_outcome or self._primary_column()
-                    group_col = visit if visit and visit in df.columns else ""
+                    # The repeated factor is the natural default, but a synthetic territory added
+                    # by a region combination is exactly the case where it is not what you want.
+                    group_col = self._plot_group_column(visit)
+                    if group_col not in df.columns:
+                        group_col = ""
                     fixed_formula = meta.get("fixed_formula", "")
                     title = f"MMRM: {y} ~ {x}" + (f" | {group_col}" if group_col else "")
                     note = (
@@ -3794,11 +3968,7 @@ class StatmodelsWindow(QMainWindow):
 
             df = self._last_model_df
             factors = (self._last_fit_meta or {}).get("grouping_factors") or []
-            chosen = self._plot_group.currentText().strip()
-            group_col = (
-                chosen if chosen and chosen in (df.columns if df is not None else [])
-                else (factors[0] if factors else "")
-            )
+            group_col = self._plot_group_column(factors[0] if factors else "")
             y = self._last_outcome or self._primary_column()
             x = self._plot_x.currentText().strip()
             if not x or x not in df.columns:
@@ -3933,6 +4103,7 @@ class StatmodelsWindow(QMainWindow):
                 )
                 return
 
+            group = self._plot_group_column(group)
             y = self._last_outcome or self._primary_column()
             x = self._plot_x.currentText().strip()
             if not x or x not in df.columns:
@@ -4831,7 +5002,7 @@ class StatmodelsWindow(QMainWindow):
 
             result = self._last_result
             data = self._working_df
-            group = self._groups.text().strip()
+            group = self._plot_group_column(self._groups.text().strip())
             if data is None or group not in (data.columns if data is not None else []):
                 group = None
             display = str(self._plot_display.currentData() or "overview")
@@ -4919,7 +5090,13 @@ class StatmodelsWindow(QMainWindow):
     def _on_mediation_done(self, bundle: dict[str, Any]) -> None:
         """Show the mediation report and its default plot."""
         self._mediation_bundle = bundle
+        # A mediation run replaces whatever model was fitted before it: leaving the old metadata
+        # in place makes a save record the wrong engine, and the load that follows looks for a
+        # model object that this folder never had.
         self._last_result = None
+        self._last_model_df = self._working_df
+        self._last_fit_meta = {"engine": ANALYSIS_MEDIATION}
+        self._last_outcome = bundle["spec"].y or None
         self._report.set_mediation(bundle, raw_text=render_mediation_info(bundle))
         self._sync_mediation_plot_choices(bundle)
         self._plot_mediation()
@@ -5354,7 +5531,7 @@ class StatmodelsWindow(QMainWindow):
         # frame, combinations, derived columns and filters already applied.
         if self._training_frame() is not None:
             try:
-                written.append(self._save_training_dataset(out_dir))
+                written.extend(self._save_training_dataset(out_dir))
             except Exception as exc:
                 problems.append(f"training dataset: {exc}")
                 log.debug("Could not write the training dataset", exc_info=True)
@@ -5392,14 +5569,15 @@ class StatmodelsWindow(QMainWindow):
                 log.debug("Could not serialize the model object", exc_info=True)
 
         if self._mediation_bundle is not None:
-            attempt("mediation.txt", lambda: (out_dir / "mediation.txt").write_text(
-                render_mediation_info(self._mediation_bundle), encoding="utf-8"))
-            attempt("mediation_paths.csv", lambda: self._mediation_bundle["paths"].to_csv(
-                out_dir / "mediation_paths.csv", index=False))
-            summary = self._mediation_bundle.get("summary")
-            if isinstance(summary, pd.DataFrame) and not summary.empty:
-                attempt("mediation_by_level.csv", lambda: summary.to_csv(
-                    out_dir / "mediation_by_level.csv", index=False))
+            try:
+                written.extend(self._save_mediation_bundle(out_dir))
+            except Exception as exc:
+                problems.append(f"mediation result: {exc}")
+                log.debug("Could not write the mediation bundle", exc_info=True)
+
+        # Last, and for either kind of result: which engine produced this folder, and what it
+        # resolved the controls to. The loader reads it before deciding what to look for.
+        attempt("fit_meta.json", lambda: self._save_fit_state(out_dir))
 
         written = [w for w in written if w]
         if problems:
@@ -5473,20 +5651,54 @@ class StatmodelsWindow(QMainWindow):
                 return frame
         return None
 
-    def _save_training_dataset(self, out_dir: Path) -> str:
+    @staticmethod
+    def _write_frame(frame: pd.DataFrame, out_dir: Path, stem: str) -> str:
         """
-        Write the training rows to ``dataset.parquet``, with a provenance sidecar.
+        Write *frame* as ``<stem>.parquet``, falling back to CSV without a parquet engine.
 
-        Parquet rather than CSV: a model frame carries ordered categoricals, and their **order** is
-        what decides the reference level of every factor contrast. A CSV round-trip loses that, so
-        the reloaded frame would fit a different parameterization of the same model. CSV is written
-        instead only when no parquet engine is installed, with the loss logged.
+        Parquet rather than CSV by preference: an analysis frame carries ordered categoricals, and
+        their **order** is what decides the reference level of every factor contrast. A CSV round
+        trip loses that, so the reloaded frame would fit a different parameterization of the same
+        model. Returns the file name written.
+        """
+        try:
+            frame.to_parquet(out_dir / f"{stem}.parquet", index=False)
+            return f"{stem}.parquet"
+        except Exception as exc:
+            log.warning(
+                "No parquet engine (%s) — writing %s.csv instead. Factor level order, and so each "
+                "factor's reference level, is not preserved by CSV.", exc, stem,
+            )
+            frame.to_csv(out_dir / f"{stem}.csv", index=False)
+            return f"{stem}.csv"
 
-        Returns the file name written.
+    def _save_training_dataset(self, out_dir: Path) -> list[str]:
+        """
+        Write both frames a saved model needs, with a provenance sidecar.
+
+        Two of them, because they answer different questions:
+
+        ``analysis_frame``  the loaded frame *before* derived columns, region combinations, filters
+                            and reshape — the recipe's **input**. Reloading this and replaying
+                            ``config.json`` reproduces the model frame exactly, which is what makes
+                            a loaded model's filters, melts and combinations live rather than
+                            frozen: they have something to act on.
+        ``dataset``         the rows the fit actually saw, recipe already applied — the **record**,
+                            and what to hand a collaborator.
+
+        Saving only the second is what left a loaded model unable to re-filter or re-melt: every
+        transform had already happened to it, so re-running the recipe either did nothing or
+        double-applied.
+
+        Returns the file names written.
         """
         frame = self._training_frame()
         if frame is None:
             raise ValueError("there are no rows to save")
+
+        written = [self._write_frame(frame, out_dir, "dataset")]
+        if self._analysis_df is not None and not self._analysis_df.empty:
+            written.append(self._write_frame(self._analysis_df, out_dir, "analysis_frame"))
 
         provenance = build_provenance_frame(
             frame=frame,
@@ -5500,52 +5712,70 @@ class StatmodelsWindow(QMainWindow):
             filter_report=self._filter_report,
             dataset=str(self._repo.root),
         )
-        try:
-            frame.to_parquet(out_dir / "dataset.parquet", index=False)
-            name = "dataset.parquet"
-        except Exception as exc:
-            log.warning(
-                "No parquet engine (%s) — writing dataset.csv instead. Factor level order, and "
-                "so each factor's reference level, is not preserved by CSV.", exc,
-            )
-            frame.to_csv(out_dir / "dataset.csv", index=False)
-            name = "dataset.csv"
         provenance.to_csv(out_dir / "dataset.provenance.csv", index=False)
-        log.info("Saved training dataset: %d rows x %d columns", len(frame), len(frame.columns))
-        return name
+        log.info(
+            "Saved training dataset: %d rows x %d columns (source frame %d rows)",
+            len(frame), len(frame.columns),
+            0 if self._analysis_df is None else len(self._analysis_df),
+        )
+        return written
+
+    @staticmethod
+    def _read_saved_frame(model_dir: Path, stem: str) -> pd.DataFrame | None:
+        """Read ``<stem>.parquet`` or ``<stem>.csv`` from *model_dir*, or ``None`` if neither is there."""
+        for suffix in (".parquet", ".csv"):
+            path = model_dir / f"{stem}{suffix}"
+            if path.is_file():
+                frame = pd.read_parquet(path) if suffix == ".parquet" else pd.read_csv(path)
+                if frame.empty:
+                    raise ValueError(f"{path.name} has no rows.")
+                return frame
+        return None
 
     def _load_training_dataset(self, model_dir: Path, *, announce: bool = True) -> bool:
         """
-        Adopt ``dataset.parquet`` / ``dataset.csv`` from *model_dir* as the analysis frame.
+        Restore a saved model's frame, preferring the one the recipe can be replayed on.
 
-        Returns whether one was found. The frame is marked prebuilt (see
-        :meth:`_adopt_prebuilt_frame`), because everything the recipe would do to it has been done.
+        ``analysis_frame`` is the recipe's input, so adopting it lets the loaded filters, melt,
+        region combinations and derived columns run exactly as they did — which is what makes them
+        editable afterwards instead of frozen. ``dataset`` is the post-recipe training set; it is
+        used only when no analysis frame was saved (a model written before this was), and then the
+        frame has to be shown as-is, because re-running a melt on already-melted rows finds no
+        ``flow_mean__LICA`` columns to melt and a ``mode="row"`` combination would append a second
+        copy of every synthetic row.
+
+        Returns whether a frame was found.
         """
-        for name in ("dataset.parquet", "dataset.csv"):
-            path = model_dir / name
-            if path.is_file():
-                break
-        else:
+        source = self._read_saved_frame(model_dir, "analysis_frame")
+        prebuilt = source is None
+        if prebuilt:
+            source = self._read_saved_frame(model_dir, "dataset")
+        if source is None:
             return False
 
-        frame = pd.read_parquet(path) if path.suffix == ".parquet" else pd.read_csv(path)
-        if frame.empty:
-            raise ValueError(f"{path.name} has no rows.")
-
-        self._analysis_df = frame
-        self._prebuilt_frame = True
+        self._analysis_df = source
+        self._prebuilt_frame = prebuilt
         self._load_meta = {
-            "source": "saved-dataset",
-            "path": str(path),
-            "n_rows": int(len(frame)),
+            "source": "saved-dataset" if prebuilt else "saved-analysis-frame",
+            "path": str(model_dir),
+            "n_rows": int(len(source)),
             "covariates": [],
-            "warnings": [],
+            "warnings": (
+                ["Only the post-filter training rows were saved with this model, so the frame is "
+                 "shown as saved. Re-save it to make its filters and reshape live again."]
+                if prebuilt else []
+            ),
         }
         self._measurements.set_diagnostics(self._load_meta)
         self._btn_reload.setToolTip("Discard the saved dataset and re-run the dataset query.")
         self._recompute_frame(announce=False)
         if announce:
-            notify(f"Loaded training dataset: {len(frame)} rows × {len(frame.columns)} columns")
+            shown = self._working_df
+            notify(
+                f"Loaded saved frame: {len(source)} rows"
+                + (f" → {len(shown)} after the saved recipe" if shown is not None and not prebuilt
+                   else "")
+            )
         return True
 
     def _on_load_dataset(self) -> None:
@@ -5575,6 +5805,190 @@ class StatmodelsWindow(QMainWindow):
             f"Loaded training dataset from {model_dir}: n={0 if frame is None else len(frame)} rows"
             "  |  shown as saved; press Reload data to rebuild from the dataset."
         )
+
+    @staticmethod
+    def _json_safe(value: Any) -> Any:
+        """*value* reduced to something ``json.dump`` accepts, or ``None`` when it cannot be."""
+        if value is None or isinstance(value, (str, bool, int, float)):
+            return value
+        if isinstance(value, Mapping):
+            return {str(k): StatmodelsWindow._json_safe(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [StatmodelsWindow._json_safe(v) for v in value]
+        return None
+
+    def _save_fit_state(self, out_dir: Path) -> str:
+        """
+        Write the fit's own metadata to ``fit_meta.json``.
+
+        Not the same thing as ``config.json``: that records the controls the user set, this records
+        what the fit *resolved* them to — the engine, the fixed part with the covariance term
+        stripped, the repeated and subject columns, the grouping factors. Every engine's plot path
+        reads those, so without them a reloaded model can be drawn only after a refit.
+        """
+        engine = str((self._last_fit_meta or {}).get("engine") or "")
+        if not engine:
+            engine = (
+                ANALYSIS_MEDIATION if self._mediation_bundle is not None
+                else self._analysis_kind()
+            )
+        payload = {
+            "engine": engine,
+            "outcome": self._last_outcome or "",
+            "groups": self._groups.text().strip(),
+            "meta": self._json_safe(self._last_fit_meta or {}),
+        }
+        (out_dir / "fit_meta.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        return "fit_meta.json"
+
+    def _reset_fit_state(self) -> None:
+        """
+        Forget the current fit entirely.
+
+        Loading a model must start from nothing: leaving the previous result in place is how an
+        lmrob object survived into a freshly loaded MMRM and the plot asked emmeans to handle a
+        class it has never heard of. A stale model is worse than no model — no model says so.
+        """
+        self._last_result = None
+        self._last_model_df = None
+        self._last_fit_meta = None
+        self._last_outcome = None
+        self._mediation_bundle = None
+
+    #: Engines whose fitted object *is* the R object, so ``model.rds`` restores it directly. An
+    #: lme4 fit is a pymer4 wrapper around one and does not come back from the raw object, and a
+    #: statsmodels result has ``model.pkl`` instead.
+    _RDS_RESTORABLE = (ANALYSIS_MMRM, ANALYSIS_LMROB)
+
+    def _restore_fit(self, model_dir: Path, meta: dict[str, Any]) -> bool:
+        """
+        Put the saved model object back in place, if this engine's can be.
+
+        Returns whether ``_last_result`` now holds a usable fit.
+        """
+        engine = str(meta.get("engine") or "")
+        pkl = model_dir / "model.pkl"
+        rds = model_dir / "model.rds"
+
+        if pkl.is_file():
+            from statsmodels.regression.mixed_linear_model import MixedLMResults
+
+            self._last_result = MixedLMResults.load(str(pkl))
+            return True
+
+        if rds.is_file() and engine in self._RDS_RESTORABLE:
+            from rpy2.robjects import r as R_
+
+            # ``readRDS`` returns the object but attaches nothing, so every S3 method the fit needs
+            # — predict, summary, the emmeans extension — is unregistered until its package is
+            # loaded. Done once here rather than at each call site.
+            package = {ANALYSIS_MMRM: "mmrm", ANALYSIS_LMROB: "robustbase"}[engine]
+            try:
+                R_["loadNamespace"](package)
+            except Exception as exc:
+                log.debug("Could not load the R namespace %r: %s", package, exc)
+            self._last_result = R_["readRDS"](str(rds))
+            return True
+        return False
+
+    #: Bundle keys written to ``mediation.json``. ``dist`` and the frames go to their own files,
+    #: ``spec`` comes back from ``config.json``, and the rest is plain numbers.
+    _MEDIATION_JSON_SKIP = frozenset({"spec", "paths", "summary", "by_level"})
+
+    def _save_mediation_bundle(self, out_dir: Path) -> list[str]:
+        """
+        Write a mediation result so it can be reopened rather than re-bootstrapped.
+
+        Four files, because the bundle is four different kinds of thing: a tidy path table, an
+        optional per-level table, the bootstrap draw distribution, and a handful of scalars. A
+        5000-draw mixedlm bootstrap is minutes of compute, so the draws are worth keeping — the
+        distribution figure cannot be redrawn from the summary alone.
+
+        Returns the file names written.
+        """
+        bundle = self._mediation_bundle
+        if bundle is None:
+            return []
+        written: list[str] = []
+
+        (out_dir / "mediation.txt").write_text(render_mediation_info(bundle), encoding="utf-8")
+        written.append("mediation.txt")
+
+        # Through _write_frame, so the tables come back with their dtypes intact. A CSV round trip
+        # turns the ``level`` column of a pooled result from None into NaN and — worse — reads a
+        # per-level result's numeric-looking labels back as floats, so "3" becomes 3.0 and stops
+        # matching the frame it came from.
+        paths = bundle.get("paths")
+        if isinstance(paths, pd.DataFrame) and not paths.empty:
+            written.append(self._write_frame(paths, out_dir, "mediation_paths"))
+
+        summary = bundle.get("summary")
+        if isinstance(summary, pd.DataFrame) and not summary.empty:
+            written.append(self._write_frame(summary, out_dir, "mediation_by_level"))
+
+        raw = bundle.get("raw")
+        if isinstance(raw, dict) and isinstance(raw.get("dist"), Mapping):
+            draws = pd.DataFrame({k: np.asarray(v, dtype=float) for k, v in raw["dist"].items()})
+            if not draws.empty:
+                written.append(self._write_frame(draws, out_dir, "mediation_draws"))
+
+        payload = {
+            "engine": str(bundle.get("engine") or ""),
+            "note": str(bundle.get("note") or ""),
+            "spec": bundle["spec"].to_dict(),
+            # Everything the engine reported except the frames and the draws, which have their own
+            # files. ``point_estimate`` and ``bootstrap`` live here — the numbers the report reads.
+            "raw": {
+                k: self._json_safe(v)
+                for k, v in (raw or {}).items()
+                if k != "dist" and isinstance(raw, dict)
+            },
+        }
+        (out_dir / "mediation.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        written.append("mediation.json")
+        return written
+
+    def _load_mediation_bundle(self, model_dir: Path) -> bool:
+        """
+        Rebuild a saved mediation result and show it. Returns whether one was found.
+
+        Reassembled from the four saved files into the same shape
+        :func:`~nvitk.stats.mediation.run_mediation` returns, so the report and every figure read it
+        without knowing it came off disk.
+        """
+        meta_path = model_dir / "mediation.json"
+        if not meta_path.is_file():
+            return False
+        payload = json.loads(meta_path.read_text(encoding="utf-8"))
+
+        paths = self._read_saved_frame(model_dir, "mediation_paths")
+        if paths is None:
+            raise ValueError("mediation.json is present but its path table is missing.")
+        summary = self._read_saved_frame(model_dir, "mediation_by_level")
+        draws = self._read_saved_frame(model_dir, "mediation_draws")
+
+        raw = dict(payload.get("raw") or {})
+        if draws is not None and not draws.empty:
+            # Back to the arrays the distribution plot indexes by name.
+            raw["dist"] = {str(c): draws[c].to_numpy(dtype=float) for c in draws.columns}
+
+        bundle: dict[str, Any] = {
+            "spec": MediationSpec.from_dict(payload.get("spec") or {}),
+            "engine": str(payload.get("engine") or ""),
+            "paths": paths,
+            "summary": summary,
+            "by_level": summary,
+            "note": str(payload.get("note") or ""),
+            "raw": raw,
+        }
+        self._mediation_bundle = bundle
+        self._last_result = None
+        self._last_fit_meta = {"engine": ANALYSIS_MEDIATION, "loaded": True}
+        self._mediation_form.apply_spec(bundle["spec"])
+        self._report.set_mediation(bundle, raw_text=render_mediation_info(bundle))
+        self._sync_mediation_plot_choices(bundle)
+        self._plot_mediation()
+        return True
 
     def _save_model_artifact(self, out_dir: Path) -> str:
         """
@@ -5620,60 +6034,149 @@ class StatmodelsWindow(QMainWindow):
             self,
             "Load Statmodels config or pickle",
             start,
-            "Config/Model (config.json model.pkl);;All (*)",
+            "Config/Model (config.json model.pkl mediation.json);;All (*)",
         )
         if not path:
             return
         p = Path(path)
-        model_dir = p.parent if p.name in {"config.json", "model.pkl", "info.txt"} else p
+        model_dir = (
+            p.parent
+            if p.name in {"config.json", "model.pkl", "info.txt", "mediation.json"}
+            else p
+        )
         cfg_path = model_dir / "config.json"
-        pkl = model_dir / "model.pkl"
 
         try:
+            # Before anything else: a load starts from no fit at all, so a failure part-way through
+            # leaves the panel empty rather than showing the *previous* model's object under the
+            # new model's settings.
+            self._reset_fit_state()
             if cfg_path.is_file():
                 cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
                 self._apply_config(
                     cfg, allow_expressions=self._trusts_expressions(model_dir, cfg)
                 )
-            # The training rows come back with the settings that produced them. Without this the
-            # panel would show a saved model's report over whatever frame happened to be loaded.
+
+            fit_meta: dict[str, Any] = {}
+            meta_path = model_dir / "fit_meta.json"
+            if meta_path.is_file():
+                saved = json.loads(meta_path.read_text(encoding="utf-8"))
+                fit_meta = dict(saved.get("meta") or {})
+                # The top-level field is the authoritative record of what this folder describes —
+                # it is the one written with the mediation fallback applied — so it wins over the
+                # copy inside the engine's own metadata when the two disagree.
+                fit_meta["engine"] = (
+                    str(saved.get("engine") or "") or str(fit_meta.get("engine") or "")
+                )
+                self._last_outcome = str(saved.get("outcome") or "") or None
+            else:
+                # Written before fit_meta.json existed: the engine picker is the only record of
+                # which engine produced the files in this folder.
+                fit_meta = {"engine": self._analysis_kind()}
+            fit_meta["loaded"] = True
+            self._last_fit_meta = fit_meta
+
+            # The frame comes back with the settings that produced it. Without this the panel would
+            # show a saved model's report over whatever frame happened to be loaded.
             dataset_loaded = False
             try:
                 dataset_loaded = self._load_training_dataset(model_dir, announce=False)
             except Exception as exc:
                 log.debug("Training dataset not restored", exc_info=True)
                 notify(f"Model loaded, but its dataset could not be read: {exc}", error=True)
-            if pkl.is_file():
-                from statsmodels.regression.mixed_linear_model import MixedLMResults
+            if dataset_loaded:
+                # The plot paths read the frame the fit saw, not the one the table shows: a fit
+                # drops incomplete rows, and a curve drawn over the wider frame would not line up.
+                self._last_model_df = self._read_saved_frame(model_dir, "dataset")
 
-                self._last_result = MixedLMResults.load(str(pkl))
-                self._last_fit_meta = {"engine": ANALYSIS_MIXEDLM}
-                self._mediation_bundle = None
+            # A mediation result is a bundle of tables rather than a fitted object, so it restores
+            # from its own files — and completely, draws included, which is what makes reopening it
+            # cheaper than re-running a bootstrap that took minutes.
+            #
+            # Which of the two to restore is decided by the engine the *last* save recorded, not by
+            # which files happen to be present: saving a model and then a mediation under the same
+            # name leaves both sets behind, and the folder's own record is the only thing that says
+            # which one it currently describes.
+            engine = str(fit_meta.get("engine") or "")
+            has_mediation = (model_dir / "mediation.json").is_file()
+            mediation = False
+            if has_mediation and (engine == ANALYSIS_MEDIATION or not engine):
+                try:
+                    mediation = self._load_mediation_bundle(model_dir)
+                except Exception as exc:
+                    log.debug("Mediation bundle not restored", exc_info=True)
+                    notify(f"Mediation result could not be read: {exc}", error=True)
+
+            restored = mediation
+            if not mediation:
+                try:
+                    restored = self._restore_fit(model_dir, fit_meta)
+                except Exception as exc:
+                    log.debug("Model object not restored", exc_info=True)
+                    notify(
+                        f"Model settings loaded, but its object could not be read: {exc}",
+                        error=True,
+                    )
+                self._show_loaded_report(model_dir, fit_meta, restored=restored)
+                if restored and self._last_model_df is not None:
+                    self._sync_plot_levels(
+                        self._last_model_df, self._plot_group_column(fit_meta.get("groups"))
+                    )
+                    self._sync_map_contrasts(self._map_display())
+                    self._on_plot()
+
+            notify(f"Loaded model from {model_dir}")
+            rows = 0 if self._analysis_df is None else len(self._analysis_df)
+            self._status.setText(
+                f"Loaded {model_dir}"
+                + (f"  |  frame restored ({rows} rows)" if dataset_loaded else "")
+                + (
+                    "  |  mediation result restored — its figures are live."
+                    if mediation
+                    else "  |  model object restored — plots are live."
+                    if restored
+                    else "  |  this engine's object is not restorable; press Fit to reproduce it."
+                )
+            )
+        except Exception as exc:
+            self._reset_fit_state()
+            notify(f"Load failed: {exc}", error=True)
+            QMessageBox.critical(self, "Load failed", str(exc))
+
+    def _show_loaded_report(
+        self, model_dir: Path, meta: dict[str, Any], *, restored: bool
+    ) -> None:
+        """
+        Put the saved model's summary in the Results pane.
+
+        A restored statsmodels result can be re-summarized from the object itself, which keeps the
+        interactive report (sortable coefficients, the random-effects tables). Everything else falls
+        back to the ``info.txt`` written at save time — the same text, just not navigable.
+        """
+        engine = str(meta.get("engine") or "")
+        if restored and engine == ANALYSIS_MIXEDLM and self._last_result is not None:
+            try:
                 info = mixedlm_info_dict(
                     self._last_result, group_name=self._groups.text().strip() or "group_key"
                 )
                 self._report.set_mixedlm(info, raw_text=render_mixedlm_info(info))
-            elif (model_dir / "info.txt").is_file():
-                # An R or non-linear fit was saved as .rds / .csv rather than a Python object:
-                # its settings are restored and the report is shown, but reproducing the fitted
-                # object means re-running it.
-                self._report.set_message(
-                    (model_dir / "info.txt").read_text(encoding="utf-8")
-                    + "\n\nThis engine's model object is not restorable in Python — the settings "
-                    "have been loaded, so press Reload data and Fit to reproduce it."
-                )
-            notify(f"Loaded model from {model_dir}")
-            self._status.setText(
-                f"Loaded {model_dir} — "
-                + (
-                    f"training dataset restored ({len(self._analysis_df)} rows), shown as saved."
-                    if dataset_loaded and self._analysis_df is not None
-                    else "press Reload data to rebuild the frame."
-                )
+                return
+            except Exception as exc:
+                log.debug("Could not re-summarize the loaded model: %s", exc, exc_info=True)
+
+        info_txt = model_dir / "info.txt"
+        if not info_txt.is_file():
+            self._report.set_message(
+                f"Loaded {model_dir.name}. No saved report was found in this folder."
             )
-        except Exception as exc:
-            notify(f"Load failed: {exc}", error=True)
-            QMessageBox.critical(self, "Load failed", str(exc))
+            return
+        text = info_txt.read_text(encoding="utf-8")
+        if not restored:
+            text += (
+                "\n\nThis engine's model object could not be restored — the settings and the "
+                "frame have been loaded, so press Fit to reproduce it."
+            )
+        self._report.set_message(text)
 
     def _trusts_expressions(self, model_dir: Path, cfg: dict[str, Any]) -> bool:
         """

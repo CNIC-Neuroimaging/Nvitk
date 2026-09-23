@@ -331,14 +331,22 @@ def apply_region_combinations(
             )
         else:
             frame = values.reset_index()
-            frame[combo.region_column] = combo.name
             frame = frame.rename(columns={combo.name: combo.value_column})
+            # The region label goes into every column that carries it, not just the one the
+            # combination names. The analysis frame holds the region twice — ``territory`` and
+            # ``group_key`` hold identical labels — and a plot or a model grouped by the other one
+            # sees the synthetic row as missing, so it is silently dropped from exactly the figure
+            # it was created for.
+            mirrors = mirrored_region_columns(out, combo.region_column)
+            for column in mirrors:
+                frame[column] = combo.name
+
             # Carry the subject-level covariates over so the synthetic rows are usable in a model;
             # anything that varies within a subject has no defined value here and is left out.
             constant = _subject_constant_columns(out, combo.subject_column)
             extras = [
                 c for c in constant
-                if c not in {combo.subject_column, combo.region_column, combo.value_column}
+                if c not in {combo.subject_column, combo.value_column, *mirrors}
             ]
             if extras:
                 lookup = out.groupby(combo.subject_column)[extras].first().reset_index()
@@ -348,6 +356,38 @@ def apply_region_combinations(
     if new_rows:
         out = pd.concat([out, *new_rows], ignore_index=True)
     return out, errors, reports
+
+
+def mirrored_region_columns(df: pd.DataFrame, region_column: str) -> list[str]:
+    """
+    *region_column*, plus every column of *df* holding the same set of labels.
+
+    The analysis frame carries the region twice: ``territory`` and ``group_key`` are built from one
+    another (see :func:`~nvitk.stats._statmodels_frames.finalize_analysis_frame`), and a model or a
+    plot may group by either. A synthetic row that names only one of them is missing in the other,
+    and a ``groupby`` drops it — so the new region disappears from the figure it was made for.
+
+    Matched on the labels rather than on a list of known aliases, so a renamed or melted column
+    keeps working. ``region_id`` is left alone: it holds the published ids a region was collapsed
+    from, which are not the same labels.
+    """
+    if not region_column or region_column not in df.columns:
+        return []
+    labels = set(df[region_column].dropna().astype(str))
+    if not labels:
+        return [region_column]
+    out = [str(region_column)]
+    for column in df.columns:
+        name = str(column)
+        if name == str(region_column):
+            continue
+        # Cheap gate first: comparing the full label set of every column of a large frame costs
+        # more than the combination it is preparing.
+        if df[column].nunique(dropna=True) != len(labels):
+            continue
+        if set(df[column].dropna().astype(str)) == labels:
+            out.append(name)
+    return out
 
 
 def _subject_constant_columns(df: pd.DataFrame, subject_column: str) -> list[str]:
@@ -459,4 +499,5 @@ __all__ = [
     "composite_combinations",
     "conservation_combinations",
     "evaluate_region_combination",
+    "mirrored_region_columns",
 ]

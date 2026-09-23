@@ -177,8 +177,9 @@ class ColumnFilterDialog(QDialog):
     Build the filter rules for one column.
 
     Three tabs, each producing at most one rule: **Levels** (checkable list, keep or exclude — the
-    vessel-exclusion case), **Numeric** (range and/or an operator comparison), and **IQR** (Tukey
-    fences, optionally computed within each level of a scope column).
+    vessel-exclusion case), **Numeric** (a range kept from the inside or the outside, and/or an
+    operator comparison), and **IQR** (Tukey fences, optionally computed within each level of a
+    scope column).
 
     The dialog is seeded from the rules already active on the column, so reopening it edits rather
     than stacking duplicates.
@@ -294,9 +295,17 @@ class ColumnFilterDialog(QDialog):
         lay = QVBoxLayout(page)
 
         # ---- range ------------------------------------------------------------
-        self._range_enabled = QCheckBox("Keep values in a range")
+        self._range_enabled = QCheckBox("Filter by range")
         lay.addWidget(self._range_enabled)
         range_form = QFormLayout()
+        self._range_mode = QComboBox()
+        self._range_mode.addItem("Keep values inside the range  (min ≤ x ≤ max)", False)
+        self._range_mode.addItem("Keep values outside the range  (x < min or x > max)", True)
+        self._range_mode.setToolTip(
+            "Outside keeps the two tails and drops the band between them. It cannot be written as "
+            "two separate rules: each rule filters what the previous one left, so 'x < min' "
+            "followed by 'x > max' keeps nothing."
+        )
         self._range_low = QLineEdit()
         self._range_high = QLineEdit()
         if self._is_numeric:
@@ -304,9 +313,17 @@ class ColumnFilterDialog(QDialog):
             self._range_high.setPlaceholderText(f"{self._numeric.max():.6g}")
         self._range_low.setToolTip("Leave blank for no lower bound.")
         self._range_high.setToolTip("Leave blank for no upper bound.")
+        range_form.addRow("mode", self._range_mode)
         range_form.addRow("min", self._range_low)
         range_form.addRow("max", self._range_high)
         lay.addLayout(range_form)
+        self._range_keep_na = QCheckBox("Keep rows with no value")
+        self._range_keep_na.setToolTip(
+            "A missing value is neither inside the range nor outside it. Off, those rows are "
+            "dropped; on, they are kept — which is what you want for a metric that is only "
+            "defined on some rows."
+        )
+        lay.addWidget(self._range_keep_na)
 
         # ---- comparison -------------------------------------------------------
         self._compare_enabled = QCheckBox("Compare against a value")
@@ -315,6 +332,14 @@ class ColumnFilterDialog(QDialog):
         self._compare_op = QComboBox()
         for op in FILTER_OPS:
             self._compare_op.addItem(op)
+        self._compare_op.setToolTip(
+            "< > <= >= compare as numbers.\n"
+            "== != equals compare as numbers when this column and the value both are, and as text "
+            "otherwise — so '!= 0' drops the zeros of a float column.\n"
+            "contains is a case-insensitive substring test; whole numbers are matched without a "
+            "trailing '.0', so 'contains 4' finds a visit id stored as 4.0.\n"
+            "A missing value fails every comparison except !=, which keeps it."
+        )
         self._compare_value = QLineEdit()
         compare_row.addWidget(self._compare_op)
         compare_row.addWidget(self._compare_value, stretch=1)
@@ -392,8 +417,10 @@ class ColumnFilterDialog(QDialog):
                 self._tabs.setCurrentIndex(0)
             elif rule.kind == "range":
                 self._range_enabled.setChecked(True)
+                self._range_mode.setCurrentIndex(1 if rule.outside else 0)
                 self._range_low.setText("" if rule.low is None else f"{rule.low:g}")
                 self._range_high.setText("" if rule.high is None else f"{rule.high:g}")
+                self._range_keep_na.setChecked(bool(rule.keep_na))
                 self._tabs.setCurrentIndex(1)
             elif rule.kind == "compare":
                 self._compare_enabled.setChecked(True)
@@ -435,7 +462,16 @@ class ColumnFilterDialog(QDialog):
             low = _parse_float(self._range_low.text())
             high = _parse_float(self._range_high.text())
             if low is not None or high is not None:
-                out.append(FilterRule(column=self._column, kind="range", low=low, high=high))
+                out.append(
+                    FilterRule(
+                        column=self._column,
+                        kind="range",
+                        low=low,
+                        high=high,
+                        outside=bool(self._range_mode.currentData()),
+                        keep_na=self._range_keep_na.isChecked(),
+                    )
+                )
 
         if self._compare_enabled.isChecked() and self._compare_value.text().strip():
             out.append(

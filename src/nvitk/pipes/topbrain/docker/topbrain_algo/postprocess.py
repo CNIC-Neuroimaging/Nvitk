@@ -1,19 +1,7 @@
 """Connected-component clean-up, applied to the predicted label map.
 
-Scope, and why it is narrower than the pipeline's
+Scope
 -------------------------------------------------
-``nvitk.pipes.topbrain.util.postproc`` offers more: gap bridging, adjacency and laterality
-repair, intensity-guided region growing. Those rest on ``nvitk.segmentation.vessel_topology``
-and ``nvitk.morphology``, which in turn pull in the array-backend layer and the ``Image`` type —
-several thousand lines whose only purpose in an inference image would be steps that are **off by
-default** and have to be measured on a validation fold before they are worth enabling.
-
-So the container implements the steps the pipeline actually ships with, and stage 5 **refuses to
-build** an image whose ``--postprocess`` selection asks for more (see :data:`SUPPORTED_STEPS`).
-Refusing is the point: a container that silently skipped a step would apply something other than
-what stage 3 measured, which is exactly the drift the whole config-as-data arrangement exists to
-prevent.
-
 ``islands`` removes speckle: components below ``min_volume_mm3`` in physical volume, judged per
 class so a small artery is never compared against a large one. ``largest`` is stricter — one
 component per class — and is off by default because several TA36 classes legitimately appear as
@@ -30,11 +18,11 @@ from typing import Any, Sequence
 import numpy as np
 from scipy import ndimage as ndi
 
-#: Steps this slim runtime can apply, in the order they are applied.
+# Steps this slim runtime can apply, in the order they are applied.
 SUPPORTED_STEPS: tuple[str, ...] = ("islands", "largest")
 
-#: Full 26-neighbourhood. Vessels run diagonally through the voxel grid far more often than they
-#: run along an axis, so face-only connectivity fragments a perfectly continuous artery.
+# Full 26-neighbourhood. Vessels run diagonally through the voxel grid far more often than they
+# run along an axis, so face-only connectivity fragments a perfectly continuous artery.
 _STRUCTURE = np.ones((3, 3, 3), dtype=bool)
 
 

@@ -17,9 +17,10 @@ daemon are frequently not the same one.
 
 One image, both tracks
 ----------------------
-Grand Challenge exposes a CT socket and an MR socket, and a submission may be sent to either
-portal. This packs whichever models it is given into a single image and lets the entry point
-pick at run time, so one build covers both tracks:
+Grand Challenge exposes a CT **input** socket and an MR one, and a submission may be sent to
+either portal. (Both write to the *same* output socket in the 2026 TA36 edition -- see
+``docker/inference.py``.) This packs whichever models it is given into a single image and lets
+the entry point pick at run time, so one build covers both tracks:
 
 * two modality-specific models (``ta36_ct`` + ``ta36_mr``) — each socket gets its own;
 * one modality-agnostic model (``ta36``) — registered for both sockets;
@@ -34,9 +35,16 @@ is recoverable from the weights, and a container that guesses a window produces 
 wrong segmentation rather than an error — so the channel count is read back from each model's
 own ``dataset.json`` and cross-checked against the windows given here.
 
-Submission constraints (from the challenge's template): container ≤10 GB, ≤31 GiB DRAM, one
-``.mha`` in and one ``.mha`` out with identical shape, no network at run time. The entry point
-also reads NIfTI and NRRD, which the platform never sends but local testing often has.
+Submission constraints, from the 2026 template (``CoWBenchmark/TopBrain_Algo_Submission``):
+container ≤10 GB, ≤31 GiB DRAM, one ``.mha`` in and one ``.mha`` out with identical shape, no
+network at run time. The entry point also reads NIfTI and NRRD, which the platform never sends
+but local testing often has.
+
+The template also allows the weights to be uploaded **separately** as a ``.tar.gz`` that the
+platform extracts to ``/opt/ml/model/`` at run time. This stage bakes them in instead, which is
+the template's other documented option and keeps the image self-contained -- with ``--layout
+split`` a full five-fold ensemble lands around 9 GiB, inside the ceiling. The separate tarball
+is what to reach for if a future model no longer fits.
 """
 
 from __future__ import annotations
@@ -45,6 +53,7 @@ import json
 import re
 import shutil
 import subprocess
+import tarfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -97,6 +106,17 @@ CHECKPOINT_KEEP_KEYS: tuple[str, ...] = (
 #: Name of the per-modality model map written into the build context.
 MODELS_CONFIG_NAME: str = "models.json"
 
+#: Where the weights ride.
+#:
+#: ``baked``    inside the image, under ``/opt/algorithm/model``. Self-contained, and what keeps
+#:              a submission reproducible from one artefact -- but it counts against the 10 GiB
+#:              image ceiling.
+#: ``tarball``  a separate ``.tar.gz`` uploaded alongside, which Grand Challenge extracts to
+#:              ``/opt/ml/model/`` at run time. The image then stays around 7 GiB whatever the
+#:              ensemble weighs, which is what makes ``--layout mixed`` viable with two full
+#:              five-fold ensembles.
+WEIGHT_MODES: tuple[str, ...] = ("baked", "tarball")
+
 
 @dataclass
 class ModelSpec:
@@ -123,8 +143,13 @@ class ModelSpec:
 
     @property
     def directory(self) -> str:
-        """Path inside the image, relative to the build context."""
-        return f"model/{self.modality}"
+        """Path of this model **relative to whichever weight root holds it**.
+
+        Just the modality, so the same ``models.json`` works whether the weights were baked in
+        (``/opt/algorithm/model/ct``) or arrived as a tarball (``/opt/ml/model/ct``). The entry
+        point probes both roots.
+        """
+        return self.modality
 
 
 def _docker_assets_dir() -> Path:
@@ -472,6 +497,8 @@ def _assemble_context(
     *,
     results_root: Path,
     slim: bool = True,
+    weights: str = "baked",
+    base_image: str | None = None,
     ct_window: Sequence[float] | None = None,
     ct_context_window: Sequence[float] | None = None,
     mr_percentiles: Sequence[float] | None = None,
@@ -560,11 +587,28 @@ def _assemble_context(
     postproc.write_container_config(context, spec)
 
     # ---- 4. Trained weights, one folder per model ----------------------------
+    # Baked: straight into the context's model/, which the Dockerfile COPYs. Tarball: into a
+    # sibling staging tree that becomes the .tar.gz, leaving model/ empty in the image so the
+    # weights do not count against the 10 GiB ceiling.
+    weights_root = (
+        context / "model" if weights == "baked"
+        else Path(results_root) / STAGE5_PACKAGE_DIR / f"{name}_model"
+    )
+    if weights == "tarball":
+        shutil.rmtree(weights_root, ignore_errors=True)
+        # Still created, and still COPYed: one Dockerfile has to serve both modes, and COPY of a
+        # missing directory is a build error.
+        (context / "model").mkdir(parents=True, exist_ok=True)
+        (context / "model" / ".keep").write_text(
+            "Weights ship as a separate tarball; see topbrain_stage5.json.\n", encoding="utf-8"
+        )
+    weights_root.mkdir(parents=True, exist_ok=True)
+
     registry: dict[str, dict[str, Any]] = {}
     for model in specs:
         model.channels = read_channels(model.run_dir)
         model.copied_folds = collect_model(
-            model.run_dir, context / model.directory,
+            model.run_dir, weights_root / model.directory,
             folds=model.folds, checkpoint=model.checkpoint, slim=slim,
         )
         for socket_modality in (model.serves or (model.modality,)):
@@ -594,6 +638,21 @@ def _assemble_context(
 
     _check_requirements_cover_imports(context)
 
+    tarball: Path | None = None
+    if weights == "tarball":
+        tarball = weights_root.with_suffix(".tar.gz")
+        log.info("Packing the weights into %s ...", tarball.name)
+        # Members are stored relative to weights_root, so the archive expands to ct/ and mr/ at
+        # the root of /opt/ml/model -- which is where the entry point looks.
+        with tarfile.open(tarball, "w:gz") as archive:
+            for entry in sorted(weights_root.iterdir()):
+                archive.add(entry, arcname=entry.name)
+        # The staging tree is a full second copy of the weights; the archive is the deliverable.
+        shutil.rmtree(weights_root, ignore_errors=True)
+        log.ok(f"weights tarball: {tarball} ({tarball.stat().st_size / 2**30:.2f} GiB) — "
+               f"upload it under the algorithm's Models section; Grand Challenge extracts it "
+               f"to /opt/ml/model/")
+
     context_size = sum(p.stat().st_size for p in context.rglob("*") if p.is_file())
     estimate = BASE_IMAGE_GIB + context_size / 2**30
     log.info("Build context: %.2f GiB (image ~%.2f GiB with the %.0f GiB base)",
@@ -610,7 +669,10 @@ def _assemble_context(
     if build or save:
         _require_docker()
         log.info("Building %s ...", image)
-        subprocess.run(["docker", "build", "-t", image, str(context)], check=True)
+        command = ["docker", "build", "-t", image]
+        if base_image:
+            command += ["--build-arg", f"BASE_IMAGE={base_image}"]
+        subprocess.run([*command, str(context)], check=True)
         if save:
             archive = context.parent / f"{name}_{tag}.tar.gz"
             log.info("Saving %s ...", archive)
@@ -630,6 +692,9 @@ def _assemble_context(
                 "models": list(identities),
                 "registry": registry,
                 "checkpoints_stripped": slim,
+                "weights": weights,
+                "weights_tarball": str(tarball) if tarball else None,
+                "base_image": base_image,
                 "postprocess": spec.as_dict(),
                 "bundled_nnunet": "in-tree build (released nnunetv2 not installed)",
                 "image": image, "context": str(context),
@@ -663,6 +728,8 @@ def run_package(
     checkpoint: str | None = None,
     layout: str = "split",
     slim: bool = True,
+    weights: str = "baked",
+    base_image: str | None = None,
     ct_window: Sequence[float] | None = None,
     ct_context_window: Sequence[float] | None = None,
     mr_percentiles: Sequence[float] | None = None,
@@ -688,6 +755,10 @@ def run_package(
     """
     if layout not in LAYOUTS:
         raise ValueError(f"Unknown --layout {layout!r}; expected one of {', '.join(LAYOUTS)}.")
+    if weights not in WEIGHT_MODES:
+        raise ValueError(
+            f"Unknown --weights {weights!r}; expected one of {', '.join(WEIGHT_MODES)}."
+        )
     loss = loss or cfg.DEFAULT_LOSS
     specs, identities = resolve_models(
         nnunet_results=nnunet_results, results_root=results_root,
@@ -707,7 +778,8 @@ def run_package(
         groups = [(list(specs), list(identities))]
 
     shared = dict(
-        results_root=results_root, slim=slim, ct_window=ct_window,
+        results_root=results_root, slim=slim, weights=weights, base_image=base_image,
+        ct_window=ct_window,
         ct_context_window=ct_context_window, mr_percentiles=mr_percentiles,
         mr_context_percentiles=mr_context_percentiles, tag=tag, build=build, save=save,
         postprocess=postprocess, min_volume_mm3=min_volume_mm3,
@@ -885,6 +957,7 @@ def _worker_argv(
     *, label_set: str, loss: str, plans_identifier: str | None, configuration_name: str | None,
     folds: Sequence[int | str] | None, checkpoint: str | None, name: str, tag: str,
     build: bool, save: bool, backend: str, layout: str = "split",
+    weights: str = "baked", base_image: str | None = None,
     ct_model: Path | None = None, mr_model: Path | None = None,
     ct_window: Sequence[float] | None = None,
     ct_context_window: Sequence[float] | None = None,
@@ -903,6 +976,7 @@ def _worker_argv(
         "--label-set", label_set,
         "--loss", quote_path(loss),
         "--layout", layout,
+        "--weights", weights,
         "--name", quote_path(name),
         "--tag", quote_path(tag),
     ]
@@ -978,6 +1052,14 @@ def submit_sge(
 @click.option("--checkpoint", type=str, default=None,
               help="Checkpoint name inside each fold. Default: resolved per model — "
                    "checkpoint_final.pth when every fold has one, else checkpoint_best.pth.")
+@click.option("--weights", type=click.Choice(list(WEIGHT_MODES)), default="baked",
+              show_default=True,
+              help="'baked' puts the weights in the image; 'tarball' writes them as a separate "
+                   ".tar.gz that Grand Challenge extracts to /opt/ml/model/, keeping the image "
+                   "small enough that the ensemble size stops mattering.")
+@click.option("--base-image", type=str, default=None,
+              help="Override the Dockerfile's BASE_IMAGE. Only used when this command builds; "
+                   "a manual 'docker build' takes the Dockerfile default.")
 @click.option("--no-slim", is_flag=True, default=False,
               help="Ship the training checkpoints whole. They are about twice the size and "
                    "predict identically; the extra is optimizer state.")
@@ -1010,6 +1092,7 @@ def main(
     postprocess: str | None, min_volume_mm3: float,
     repair_gaps_mm: float | None, repair_close_radius: int, configuration_name: str | None,
     folds: str | None, layout: str, checkpoint: str | None, no_slim: bool,
+    weights: str, base_image: str | None,
     ct_window: tuple[float, float] | None, ct_context_window: tuple[float, float] | None,
     mr_percentiles: tuple[float, float] | None,
     mr_context_percentiles: tuple[float, float] | None,
@@ -1026,7 +1109,7 @@ def main(
         loss=loss, architecture=architecture, plans_identifier=plans_identifier,
         configuration_name=configuration_name,
         folds=parse_folds(folds) if folds else None, checkpoint=checkpoint,
-        layout=layout, slim=not no_slim,
+        layout=layout, slim=not no_slim, weights=weights, base_image=base_image,
         ct_window=ct_window or None, ct_context_window=ct_context_window or None,
         mr_percentiles=mr_percentiles or None,
         mr_context_percentiles=mr_context_percentiles or None,
@@ -1038,7 +1121,7 @@ def main(
 
 __all__ = [
     "CHECKPOINT_KEEP_KEYS", "CHECKPOINT_NAME", "CHECKPOINT_ORDER", "MODELS_CONFIG_NAME",
-    "LAYOUTS", "ModelSpec", "discover_folds", "resolve_checkpoint",
+    "LAYOUTS", "WEIGHT_MODES", "ModelSpec", "discover_folds", "resolve_checkpoint",
     "build_sge_command", "collect_model", "harmonisation_for", "main", "read_channels",
     "resolve_models", "resolve_run_dir", "run_package", "strip_checkpoint", "submit_sge",
 ]

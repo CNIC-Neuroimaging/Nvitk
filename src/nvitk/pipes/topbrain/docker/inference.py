@@ -1,16 +1,21 @@
-"""Grand Challenge entry point for the ToPBrain algorithm container.
+"""Grand Challenge entry point for the TopBrain algorithm container.
 
 Reads the single volume supplied on the input socket, runs nnU-Net inference plus the
 pipeline's post-processing, and writes a mask of **identical shape** to the output socket.
 Sockets follow the challenge's published interface::
 
-    /input/images/head-{ct,mr}-angio/<uuid>.mha
-    /output/images/head-{ct,mr}-angio-segmentation/<uuid>.mha
+    /input/images/head-ct-angio/<uuid>.mha   ->  /output/images/extended-head-angio-segmentation/output.mha
+    /input/images/head-mr-angio/<uuid>.mha   ->  /output/images/extended-head-angio-segmentation/output.mha
 
-The ``<uuid>`` is assigned by the platform and cannot be predicted, so the volume is found by
-scanning the socket directory, and the output keeps the input's filename -- extension included.
-NIfTI and NRRD are accepted alongside ``.mha`` (see :data:`INPUT_SUFFIXES`) so the same image can
-be run over local data during development; the platform itself only ever supplies ``.mha``.
+Both tracks share **one** output socket and a **fixed** output filename. That changed between the
+2025 and 2026 editions -- 2025 had per-modality ``head-{ct,mr}-angio-segmentation`` sockets and
+echoed the input's name -- and writing to the old location leaves the expected one empty, which
+the platform reports as a failed job with nothing in the log to explain it.
+
+Which socket was populated is read from ``/input/inputs.json``, the manifest Grand Challenge
+generates; the ``<uuid>`` input name is never predictable, so the volume itself is found by
+scanning. NIfTI and NRRD are accepted alongside ``.mha`` (see :data:`INPUT_SUFFIXES`) so the same
+image can be run over local data during development; the platform only ever supplies ``.mha``.
 
 One image, both tracks
 ----------------------
@@ -53,28 +58,59 @@ INPUT_ROOT = Path(os.environ.get("TOPBRAIN_INPUT_ROOT", "/input"))
 OUTPUT_ROOT = Path(os.environ.get("TOPBRAIN_OUTPUT_ROOT", "/output"))
 MODELS_CONFIG = Path(os.environ.get("TOPBRAIN_MODELS_CONFIG", ALGORITHM_ROOT / "models.json"))
 
-#: Input socket → (output socket, modality), in the order they are probed.
+# The challenge's input sockets: ``(slug, relative path under /input, modality)``.
+#
+# The slug is what ``inputs.json`` names; the relative path is where the volume lands. Both come
+# from the 2026 submission template (``CoWBenchmark/TopBrain_Algo_Submission``), whose
+# ``inputs.json`` fixtures pair ``head-ct-angiography`` with ``images/head-ct-angio``.
 SOCKETS: tuple[tuple[str, str, str], ...] = (
-    ("head-ct-angio", "head-ct-angio-segmentation", "ct"),
-    ("head-mr-angio", "head-mr-angio-segmentation", "mr"),
+    ("head-ct-angiography", "images/head-ct-angio", "ct"),
+    ("head-mr-angiography", "images/head-mr-angio", "mr"),
 )
 
-#: Volume extensions accepted on the input socket, longest suffix first so ``.mha.gz`` is not
-#: mistaken for ``.gz``. Grand Challenge always supplies ``.mha``; the NIfTI forms are here so
-#: the same image can be run over local data during development without converting it first.
-#: SimpleITK reads all of them, and the output keeps whatever the input used -- which on the
-#: platform is always ``.mha``.
+# Where the mask goes. **One socket for both tracks** in the 2026 TA36 edition -- the 2025
+# per-modality ``head-{ct,mr}-angio-segmentation`` sockets are gone. Writing to the old ones
+# leaves the expected location empty and the job is marked failed, with nothing in the log to
+# say why, so this is the single most important constant in the file.
+OUTPUT_SOCKET: str = "images/extended-head-angio-segmentation"
+
+# The mask's filename, fixed by the template -- *not* the input's name. ``main.py`` in the
+# template writes ``location / f"output{suffix}"`` with ``suffix = ".mha"``.
+OUTPUT_NAME: str = "output.mha"
+
+# Written by Grand Challenge beside the images, naming the sockets that were populated.
+INPUTS_MANIFEST: str = "inputs.json"
+
+# Where the weights may live, most specific first.
+#
+# The challenge allows them either baked into the image or uploaded separately as a ``.tar.gz``
+# that the platform extracts to ``/opt/ml/model/``. Probing both means a single image works in
+# either mode: if a tarball is attached it wins, and otherwise the baked copy is used. That also
+# makes it possible to attach an updated tarball to an already-uploaded image without rebuilding.
+# ``$TOPBRAIN_WEIGHT_ROOTS`` (colon-separated) overrides them, which is how the tarball path is
+# exercised off-platform -- ``/opt/ml`` is not writable on a development machine.
+WEIGHT_ROOTS: tuple[str, ...] = tuple(
+    os.environ["TOPBRAIN_WEIGHT_ROOTS"].split(":")
+) if os.environ.get("TOPBRAIN_WEIGHT_ROOTS") else (
+    "/opt/ml/model", str(ALGORITHM_ROOT / "model")
+)
+
+# Volume extensions accepted on the input socket, longest suffix first so ``.mha.gz`` is not
+# mistaken for ``.gz``. Grand Challenge always supplies ``.mha``; the NIfTI forms are here so
+# the same image can be run over local data during development without converting it first.
+# SimpleITK reads all of them, and the output keeps whatever the input used -- which on the
+# platform is always ``.mha``.
 INPUT_SUFFIXES: tuple[str, ...] = (".mha.gz", ".mha", ".nii.gz", ".nii", ".nrrd")
 
-#: Below this many HU is air, for the purposes of recognising a CT.
+# Below this many HU is air, for the purposes of recognising a CT.
 CT_AIR_HU: float = -500.0
 
-#: A head CT has at least this fraction of its voxels in air.
+# A head CT has at least this fraction of its voxels in air.
 CT_AIR_FRACTION: float = 0.05
 
-#: Scratch directories to try, in order. On Grand Challenge ``/tmp`` is writable and starts empty
-#: on every run, whatever the Dockerfile put there. The fallbacks matter for local testing, where
-#: a container run with ``--read-only`` but no ``--tmpfs /tmp`` has nowhere to work.
+# Scratch directories to try, in order. On Grand Challenge ``/tmp`` is writable and starts empty
+# on every run, whatever the Dockerfile put there. The fallbacks matter for local testing, where
+# a container run with ``--read-only`` but no ``--tmpfs /tmp`` has nowhere to work.
 WORK_CANDIDATES: tuple[str, ...] = ("/tmp", "/var/tmp")
 
 
@@ -83,10 +119,35 @@ def log(message: str) -> None:
     print(f"[topbrain] {message}", flush=True)
 
 
-def find_input() -> tuple[Path, str, str]:
-    """Locate the single supplied image; returns ``(path, output_socket, socket_modality)``.
+def declared_modality() -> str | None:
+    """The modality Grand Challenge says it populated, from ``inputs.json``.
 
-    Grand Challenge feeds one image at a time, so exactly one socket is populated.
+    The platform generates this file listing the sockets it filled. Reading it is the documented
+    contract, and it is unambiguous where scanning directories is merely usually right. Returns
+    ``None`` when the file is absent (local testing) or names nothing recognised, so the caller
+    falls back to looking at what is actually on disk.
+    """
+    manifest = INPUT_ROOT / INPUTS_MANIFEST
+    if not manifest.is_file():
+        return None
+    try:
+        entries = json.loads(manifest.read_text(encoding="utf-8"))
+        slugs = {entry["socket"]["slug"] for entry in entries}
+    except (OSError, ValueError, KeyError, TypeError):
+        log(f"WARNING: {manifest} is unreadable; falling back to scanning the sockets.")
+        return None
+    for slug, _relative, modality in SOCKETS:
+        if slug in slugs:
+            return modality
+    log(f"WARNING: {manifest} names {sorted(slugs)}, none of which is a ToPBrain image socket.")
+    return None
+
+
+def find_input() -> tuple[Path, str]:
+    """Locate the single supplied volume; returns ``(path, socket_modality)``.
+
+    Grand Challenge feeds one image at a time, so exactly one socket is populated. When
+    ``inputs.json`` says which, only that one is searched; otherwise every socket is.
 
     Raises
     ------
@@ -97,8 +158,10 @@ def find_input() -> tuple[Path, str, str]:
         a hand-assembled test directory -- and silently taking the alphabetically first would
         segment a different case than the tester meant.
     """
-    for input_socket, output_socket, modality in SOCKETS:
-        directory = INPUT_ROOT / "images" / input_socket
+    announced = declared_modality()
+    candidates = [s for s in SOCKETS if announced is None or s[2] == announced]
+    for _slug, relative, modality in candidates:
+        directory = INPUT_ROOT / relative
         if not directory.is_dir():
             continue
         images = sorted(
@@ -111,10 +174,12 @@ def find_input() -> tuple[Path, str, str]:
                 f"({', '.join(p.name for p in images)}); Grand Challenge supplies exactly one."
             )
         if images:
-            return images[0], output_socket, modality
+            if announced is not None:
+                log(f"inputs.json announced the {modality.upper()} socket")
+            return images[0], modality
+    searched = ", ".join(str(INPUT_ROOT / s[1]) for s in candidates)
     raise FileNotFoundError(
-        f"No volume ({', '.join(INPUT_SUFFIXES)}) found under {INPUT_ROOT}/images/"
-        f"{{{', '.join(s for s, _, _ in SOCKETS)}}}."
+        f"No volume ({', '.join(INPUT_SUFFIXES)}) found under {searched}."
     )
 
 
@@ -274,6 +339,33 @@ def select_model(payload: dict[str, Any], modality: str) -> dict[str, Any]:
     return entry
 
 
+def resolve_model_dir(relative: str) -> Path:
+    """Find the model directory named by ``models.json`` under one of :data:`WEIGHT_ROOTS`.
+
+    Raises
+    ------
+    FileNotFoundError
+        Listing what was tried. The two failure modes look identical from inside -- a tarball
+        that was never attached, and one whose contents are nested a level deeper than expected
+        -- so the message names both.
+    """
+    for root in WEIGHT_ROOTS:
+        candidate = Path(root) / relative
+        if (candidate / "plans.json").is_file():
+            # Judged by location, not by a path prefix: the roots are overridable for testing,
+            # and a label that lies about where the weights came from is worse than none.
+            inside_image = candidate.is_relative_to(ALGORITHM_ROOT)
+            log(f"weights: {candidate} "
+                f"({'baked into the image' if inside_image else 'mounted from outside it'})")
+            return candidate
+    tried = ", ".join(str(Path(r) / relative) for r in WEIGHT_ROOTS)
+    raise FileNotFoundError(
+        f"No model directory with a plans.json at any of: {tried}. If the weights were uploaded "
+        f"as a separate tarball, check it is attached to this algorithm and that it expands to "
+        f"{relative}/ at the root of /opt/ml/model rather than inside another directory."
+    )
+
+
 def harmonise_channels(data: np.ndarray, entry: dict[str, Any]) -> list[np.ndarray]:
     """Build every input channel the model expects, in order.
 
@@ -311,7 +403,7 @@ def harmonise_channels(data: np.ndarray, entry: dict[str, Any]) -> list[np.ndarr
 def main() -> int:
     """Predict for the supplied case and write the mask to the matching output socket."""
     silence_nnunet_path_warnings()
-    image_path, output_socket, socket_modality = find_input()
+    image_path, socket_modality = find_input()
     log(f"input={image_path.name} socket={socket_modality}")
 
     image = sitk.ReadImage(str(image_path))
@@ -320,7 +412,7 @@ def main() -> int:
 
     modality = resolve_modality(array, socket_modality)
     entry = select_model(load_registry(), modality)
-    model_dir = ALGORITHM_ROOT / entry["dir"]
+    model_dir = resolve_model_dir(entry["dir"])
     log(f"model={entry['dir']} folds={entry.get('folds')} "
         f"channels={entry['channels']} labels={entry.get('label_set')}")
 
@@ -418,9 +510,11 @@ def main() -> int:
             f"requires an identical grid."
         )
 
-    destination = OUTPUT_ROOT / "images" / output_socket
+    # One socket and one fixed filename for both tracks: see OUTPUT_SOCKET / OUTPUT_NAME. The
+    # input's own name is deliberately not reused -- the template writes "output.mha" regardless.
+    destination = OUTPUT_ROOT / OUTPUT_SOCKET
     destination.mkdir(parents=True, exist_ok=True)
-    out_path = destination / image_path.name
+    out_path = destination / OUTPUT_NAME
     sitk.WriteImage(output, str(out_path), useCompression=True)
     log(f"wrote {out_path} labels={sorted(np.unique(cleaned).tolist())[:8]}...")
     return 0

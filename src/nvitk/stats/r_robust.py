@@ -46,7 +46,7 @@ import numpy as np
 import pandas as pd
 
 from nvitk.core.logger import Logger
-from .frame_ops import _as_factor_preserving_order
+from .frame_ops import _as_factor_preserving_order, factors_for_r
 
 log = Logger()
 
@@ -262,6 +262,9 @@ _R_HELPERS = """
 }
 
 .nvitk_lmrob_predict <- function(fit, newdata) {
+  # See the mmrm helper: a fit restored from .rds carries no attached package, so its S3 methods
+  # are unregistered until the namespace is loaded.
+  loadNamespace("robustbase")
   as.numeric(stats::predict(fit, newdata = newdata))
 }
 """
@@ -390,9 +393,13 @@ def fit_lmrob(
     from .frame_ops import ensure_unique_columns
 
     df = ensure_unique_columns(df, context="analysis dataframe")
-    for column in needed:
-        if column in df.columns and not pd.api.types.is_numeric_dtype(df[column]):
-            df[column] = _as_factor_preserving_order(df[column])
+    # The same pass flattens any ordered categorical: R fits an ordered factor with polynomial
+    # contrasts, which names its coefficients .L/.Q/.C instead of one per level.
+    df = factors_for_r(
+        df,
+        columns=[c for c in needed
+                 if c in df.columns and not pd.api.types.is_numeric_dtype(df[c])],
+    )
 
     with _converter():
         from rpy2.robjects import conversion
@@ -620,10 +627,10 @@ def lmrob_predict(fit: Any, newdata: pd.DataFrame, *, use_random_effects: bool =
     _ensure_helpers()
     from rpy2.robjects import globalenv
 
-    frame = newdata.reset_index(drop=True).copy()
-    for column in frame.columns:
-        if not pd.api.types.is_numeric_dtype(frame[column]):
-            frame[column] = _as_factor_preserving_order(frame[column])
+    frame = factors_for_r(
+        newdata.reset_index(drop=True),
+        columns=[c for c in newdata.columns if not pd.api.types.is_numeric_dtype(newdata[c])],
+    )
     with _converter():
         from rpy2.robjects import conversion
 

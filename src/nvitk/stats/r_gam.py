@@ -42,7 +42,7 @@ import numpy as np
 import pandas as pd
 
 from nvitk.core.logger import Logger
-from .frame_ops import _as_factor_preserving_order
+from .frame_ops import _as_factor_preserving_order, factors_for_r
 
 log = Logger()
 
@@ -366,9 +366,11 @@ def fit_mrf(
     from .frame_ops import ensure_unique_columns
 
     df = ensure_unique_columns(df, context="analysis dataframe")
-    for column in needed:
-        if column != "vessel_node" and not pd.api.types.is_numeric_dtype(df[column]):
-            df[column] = _as_factor_preserving_order(df[column])
+    df = factors_for_r(
+        df,
+        columns=[c for c in needed
+                 if c != "vessel_node" and not pd.api.types.is_numeric_dtype(df[c])],
+    )
     df["vessel_node"] = pd.Categorical(df["vessel_node"].astype(str), categories=list(graph))
 
     with _converter():
