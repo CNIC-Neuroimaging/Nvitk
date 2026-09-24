@@ -69,6 +69,91 @@ def statmodels_root(repo: DataRepo | None = None) -> Path:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Grouping columns
+# ──────────────────────────────────────────────────────────────────────────────
+#: How few distinct values a *float* column needs before it counts as a factor. Dtype alone
+#: cannot tell a numeric-coded factor from a measurement: one missing value upcasts an integer
+#: ``sex`` to float64, and excluding floats outright is what kept ``sex`` out of every hue and
+#: split picker. A factor coded numerically — sex, a binarized flag, a visit number, a bin index —
+#: never has more levels than this; a continuous measurement essentially always does, even in a
+#: small frame, where a bare level cap would let it through.
+MAX_FLOAT_GROUP_LEVELS: int = 12
+
+
+def groupable_levels(series: pd.Series, *, cap: int) -> list[str]:
+    """
+    The levels of *series* if it can be grouped by, in natural order; ``[]`` if it cannot.
+
+    "Can be grouped by" is about how many distinct values there are, not about dtype — at least
+    two to compare, and few enough to draw or lay out.
+    """
+    from nvitk.stats.region_groups import natural_level_key
+
+    values = series.dropna()
+    if values.empty:
+        return []
+    levels = [str(v) for v in pd.unique(values)]
+    limit = int(cap)
+    if pd.api.types.is_float_dtype(series) and not isinstance(
+        series.dtype, pd.CategoricalDtype
+    ):
+        # Two ways a float says it is a measurement rather than a factor: too many distinct
+        # values, or values that never repeat. The second matters on a frame filtered down to a
+        # handful of rows, where a measurement has few enough levels to clear the cap on count
+        # alone — and a factor's levels repeat at any size.
+        limit = min(limit, MAX_FLOAT_GROUP_LEVELS)
+        if len(levels) >= len(values):
+            return []
+    if not 2 <= len(levels) <= limit:
+        return []
+    return sorted(levels, key=natural_level_key)
+
+
+def is_groupable(series: pd.Series, *, cap: int) -> bool:
+    """Whether *series* can be used as a grouping — see :func:`groupable_levels`."""
+    return bool(groupable_levels(series, cap=cap))
+
+
+def grouping_columns(
+    frame: pd.DataFrame | None,
+    *,
+    cap: int,
+    exclude: Sequence[str] = (),
+    extra: Sequence[str] = (),
+) -> list[str]:
+    """
+    Every column of *frame* worth offering as a grouping, in the frame's own order.
+
+    Parameters
+    ----------
+    cap : int
+        Most levels a column may have and still be offered. Readability differs by use — overlaid
+        violins turn to slivers well before panels do — so the caller sets it.
+    exclude : sequence of str
+        Columns to leave out regardless, e.g. the one being summarized.
+    extra : sequence of str
+        Columns to offer even when they blow the cap — a model's own grouping factor belongs in
+        the picker whether or not it has 510 levels.
+    """
+    if frame is None or frame.empty:
+        return [name for name in extra if name not in set(exclude)]
+
+    skip = {str(c) for c in exclude}
+    forced = {str(c) for c in extra}
+    out: list[str] = []
+    for column in frame.columns:
+        name = str(column)
+        if name in skip or name in out:
+            continue
+        if name in forced or is_groupable(frame[column], cap=cap):
+            out.append(name)
+    # A forced column the frame does not have is still worth listing: the picker is what tells the
+    # user the fit grouped on something the plotting frame no longer carries.
+    out += [name for name in forced if name not in set(out) and name not in skip]
+    return out
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Formula helpers
 # ──────────────────────────────────────────────────────────────────────────────
 def parse_vc_formula(text: str) -> dict[str, str] | None:

@@ -17,6 +17,13 @@ generates; the ``<uuid>`` input name is never predictable, so the volume itself 
 scanning. NIfTI and NRRD are accepted alongside ``.mha`` (see :data:`INPUT_SUFFIXES`) so the same
 image can be run over local data during development; the platform only ever supplies ``.mha``.
 
+Local batch mode
+----------------
+The platform sends exactly one case per run. A hand-assembled local directory often holds
+several -- both sockets filled, or several files in one -- and those are all segmented, each
+routed to the model for its own modality and written under its own name. Only the single-case
+path uses the fixed ``output.mha``, because only that path can ever be a real submission.
+
 One image, both tracks
 ----------------------
 Grand Challenge populates exactly one socket per run. Which one it is already names the
@@ -143,44 +150,46 @@ def declared_modality() -> str | None:
     return None
 
 
-def find_input() -> tuple[Path, str]:
-    """Locate the single supplied volume; returns ``(path, socket_modality)``.
+def find_inputs() -> list[tuple[Path, str]]:
+    """Every supplied volume, as ``(path, socket_modality)`` pairs.
 
-    Grand Challenge feeds one image at a time, so exactly one socket is populated. When
-    ``inputs.json`` says which, only that one is searched; otherwise every socket is.
+    Grand Challenge populates exactly one socket with exactly one image, so in a real run this
+    returns a single pair and :func:`main` takes the single-case path. It returns more only when
+    a hand-assembled local directory holds several -- several files in one socket, or both
+    sockets filled at once, which is a natural way to keep a couple of test cases side by side.
+
+    Returning them all rather than the first is the point. The earlier version stopped at the
+    first socket that had anything, so a directory holding a CT *and* an MR silently segmented
+    the CT and discarded the MR without a word.
+
+    When ``inputs.json`` names a socket only that one is searched, because on the platform it is
+    authoritative and a stray file in the other socket is not something to act on.
 
     Raises
     ------
     FileNotFoundError
         When no socket holds a readable volume.
-    RuntimeError
-        When one socket holds several. The platform supplies exactly one, so more than one means
-        a hand-assembled test directory -- and silently taking the alphabetically first would
-        segment a different case than the tester meant.
     """
     announced = declared_modality()
     candidates = [s for s in SOCKETS if announced is None or s[2] == announced]
+    found: list[tuple[Path, str]] = []
     for _slug, relative, modality in candidates:
         directory = INPUT_ROOT / relative
         if not directory.is_dir():
             continue
-        images = sorted(
-            path for path in directory.iterdir()
-            if path.is_file() and path.name.endswith(INPUT_SUFFIXES)
+        for path in sorted(
+            p for p in directory.iterdir()
+            if p.is_file() and p.name.endswith(INPUT_SUFFIXES)
+        ):
+            found.append((path, modality))
+    if not found:
+        searched = ", ".join(str(INPUT_ROOT / s[1]) for s in candidates)
+        raise FileNotFoundError(
+            f"No volume ({', '.join(INPUT_SUFFIXES)}) found under {searched}."
         )
-        if len(images) > 1:
-            raise RuntimeError(
-                f"{directory} holds {len(images)} volumes "
-                f"({', '.join(p.name for p in images)}); Grand Challenge supplies exactly one."
-            )
-        if images:
-            if announced is not None:
-                log(f"inputs.json announced the {modality.upper()} socket")
-            return images[0], modality
-    searched = ", ".join(str(INPUT_ROOT / s[1]) for s in candidates)
-    raise FileNotFoundError(
-        f"No volume ({', '.join(INPUT_SUFFIXES)}) found under {searched}."
-    )
+    if announced is not None:
+        log(f"inputs.json announced the {announced.upper()} socket")
+    return found
 
 
 def detect_modality(data: np.ndarray) -> str | None:
@@ -289,6 +298,44 @@ def resolve_work_root() -> Path:
         "makes /tmp writable; locally, a container run with --read-only needs "
         "--tmpfs /tmp:rw,exec,size=30g alongside it, or set $TOPBRAIN_WORK_ROOT."
     )
+
+
+def check_output_writable() -> Path:
+    """Verify the output socket can be written to, before spending minutes on a prediction.
+
+    Same probe as :func:`resolve_work_root`, applied to the socket the mask must land in. Not a
+    safety net -- ``OUTPUT_ROOT`` is fixed at ``/output`` on Grand Challenge and the platform
+    guarantees it is writable there -- but the commonest local-testing mistake is bind-mounting a
+    host directory owned by the host user onto this path: the image runs as the non-root
+    ``algorithm`` user (the challenge requires that), whose uid does not match, and the mount
+    itself succeeds so nothing surfaces until after prediction, deep inside SimpleITK. Failing
+    here instead turns a wasted GPU run into an immediate, actionable message.
+
+    Returns
+    -------
+    Path
+        The directory the mask will be written to, already confirmed writable.
+
+    Raises
+    ------
+    RuntimeError
+        Naming the directory and, for the local-mount case specifically, the fix.
+    """
+    destination = OUTPUT_ROOT / OUTPUT_SOCKET
+    try:
+        destination.mkdir(parents=True, exist_ok=True)
+        probe = destination / ".topbrain_write_probe"
+        probe.touch()
+        probe.unlink()
+    except OSError as error:
+        raise RuntimeError(
+            f"Cannot write to {destination} ({error.strerror or error}). On Grand Challenge this "
+            f"path is always writable; locally it usually means the host directory bind-mounted "
+            f"onto it is not writable by this image's non-root user. Fix the host directory's "
+            f"permissions (e.g. 'chmod 777' it for a quick local test) or its ownership, then "
+            f"re-run -- nothing has been computed yet."
+        ) from error
+    return destination
 
 
 def load_registry() -> dict[str, Any]:
@@ -400,49 +447,12 @@ def harmonise_channels(data: np.ndarray, entry: dict[str, Any]) -> list[np.ndarr
     return channels
 
 
-def main() -> int:
-    """Predict for the supplied case and write the mask to the matching output socket."""
-    silence_nnunet_path_warnings()
-    image_path, socket_modality = find_input()
-    log(f"input={image_path.name} socket={socket_modality}")
+def build_predictor(model_dir: Path, entry: dict[str, Any]):
+    """Load one modality's ensemble. Built once per modality, reused for every case of it.
 
-    image = sitk.ReadImage(str(image_path))
-    original_size = image.GetSize()
-    array = sitk.GetArrayFromImage(image).astype(np.float32)
-
-    modality = resolve_modality(array, socket_modality)
-    entry = select_model(load_registry(), modality)
-    model_dir = resolve_model_dir(entry["dir"])
-    log(f"model={entry['dir']} folds={entry.get('folds')} "
-        f"channels={entry['channels']} labels={entry.get('label_set')}")
-
-    work_root = resolve_work_root()
-    work_in = work_root / "topbrain_in"
-    work_out = work_root / "topbrain_out"
-    for directory in (work_in, work_out):
-        # Cleared, not merely created. Grand Challenge hands each run an empty /tmp, but a
-        # locally reused one is not: a CT case leaves case_0001 behind, the next MR case writes
-        # only case_0000, and nnU-Net then sees a two-channel case for a one-channel model. It
-        # reports that as "Background workers died", which points nowhere near the cause.
-        shutil.rmtree(directory, ignore_errors=True)
-        directory.mkdir(parents=True, exist_ok=True)
-
-    ending = model_file_ending(model_dir)
-    for index, channel in enumerate(harmonise_channels(array, entry)):
-        prepared = sitk.GetImageFromArray(channel)
-        prepared.CopyInformation(image)
-        # nnU-Net identifies channels by the _000N suffix, and finds cases at all only if the
-        # extension matches the model's declared file_ending.
-        sitk.WriteImage(prepared, str(work_in / f"case_{index:04d}{ending}"))
-
-    staged = sorted(p.name for p in work_in.iterdir() if p.is_file())
-    if len(staged) != int(entry["channels"]):
-        raise RuntimeError(
-            f"Staged {len(staged)} file(s) ({', '.join(staged)}) for a "
-            f"{entry['channels']}-channel model. nnU-Net would report this as "
-            f"'Background workers died', which says nothing about the cause."
-        )
-
+    Loading a five-fold ResEnc-L ensemble is by far the most expensive setup step, so a batch of
+    several CT cases must not pay it once per case.
+    """
     import torch
     from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
 
@@ -476,10 +486,51 @@ def main() -> int:
         use_folds=None,  # every fold present in the image
         checkpoint_name=entry.get("checkpoint", "checkpoint_final.pth"),
     )
-    predictor.predict_from_files(
-        str(work_in), str(work_out),
-        save_probabilities=False, overwrite=True,
-        num_processes_preprocessing=1, num_processes_segmentation_export=1,
+    return predictor
+
+
+def segment(image, array: np.ndarray, *, predictor, entry: dict[str, Any], model_dir: Path,
+            work_root: Path) -> np.ndarray:
+    """Harmonise, predict and post-process one volume; returns the ``uint8`` mask."""
+    work_in = work_root / "topbrain_in"
+    work_out = work_root / "topbrain_out"
+    for directory in (work_in, work_out):
+        # Cleared, not merely created. Grand Challenge hands each run an empty /tmp, but a
+        # locally reused one is not: a CT case leaves case_0001 behind, the next MR case writes
+        # only case_0000, and nnU-Net then sees a two-channel case for a one-channel model. It
+        # reports that as "Background workers died", which points nowhere near the cause. The
+        # same applies between cases of one batch, which is why this is per case, not per run.
+        shutil.rmtree(directory, ignore_errors=True)
+        directory.mkdir(parents=True, exist_ok=True)
+
+    ending = model_file_ending(model_dir)
+    for index, channel in enumerate(harmonise_channels(array, entry)):
+        prepared = sitk.GetImageFromArray(channel)
+        prepared.CopyInformation(image)
+        # nnU-Net identifies channels by the _000N suffix, and finds cases at all only if the
+        # extension matches the model's declared file_ending.
+        sitk.WriteImage(prepared, str(work_in / f"case_{index:04d}{ending}"))
+
+    staged = sorted(p.name for p in work_in.iterdir() if p.is_file())
+    if len(staged) != int(entry["channels"]):
+        raise RuntimeError(
+            f"Staged {len(staged)} file(s) ({', '.join(staged)}) for a "
+            f"{entry['channels']}-channel model. nnU-Net would report this as "
+            f"'Background workers died', which says nothing about the cause."
+        )
+
+    # Sequential, not predict_from_files: that one hands the preprocessed volume to a worker
+    # process through a torch.multiprocessing Queue, which moves it into /dev/shm. Docker gives a
+    # container 64 MB of /dev/shm by default, while a head angiogram resampled to the plan's
+    # spacing is several hundred MB of float32 -- so the worker dies instantly and nnU-Net
+    # reports "Background workers died", blaming RAM. Nothing here can set --shm-size: on Grand
+    # Challenge we do not control the run flags at all.
+    #
+    # The worker costs nothing to give up. It exists to overlap preprocessing of case N+1 with
+    # prediction of case N, and the platform sends exactly one case per run, so there is nothing
+    # to overlap. This trades a failure mode for no measurable time.
+    predictor.predict_from_files_sequential(
+        str(work_in), str(work_out), save_probabilities=False, overwrite=True,
     )
 
     produced = sorted(work_out.glob("case.*"))
@@ -500,23 +551,107 @@ def main() -> int:
         min_volume_mm3=min_volume_mm3,
     )
     log(report.describe())
-    cleaned = np.asarray(cleaned, dtype=np.uint8)
+    return np.asarray(cleaned, dtype=np.uint8)
 
-    output = sitk.GetImageFromArray(cleaned)
-    output.CopyInformation(image)
-    if output.GetSize() != original_size:
+
+def output_name(path: Path, batch: bool) -> str:
+    """The filename for one case's mask.
+
+    A real Grand Challenge run has exactly one case and the socket expects exactly
+    ``output.mha``, so the single-case path keeps that name unchanged. A local batch has no
+    single output slot to reuse, so each mask is named after its input instead -- which can only
+    happen off-platform, since the platform never sends more than one case per run.
+    """
+    if not batch:
+        return OUTPUT_NAME
+    name = path.name
+    for suffix in INPUT_SUFFIXES:
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    return f"{name}.mha"
+
+
+def main() -> int:
+    """Predict for every supplied case and write the masks to the output socket."""
+    silence_nnunet_path_warnings()
+    # Checked first, before any preprocessing or prediction: a permission problem here is the
+    # same after ten minutes of GPU work as it is right now, so there is nothing to gain by
+    # discovering it late.
+    output_dir = check_output_writable()
+    cases = find_inputs()
+    batch = len(cases) > 1
+    if batch:
+        # Never reachable on the platform, so say plainly that this is the local path and that
+        # the filenames differ because of it.
+        log(f"{len(cases)} volumes supplied — batch mode (Grand Challenge sends one per run); "
+            f"each mask is named after its input rather than {OUTPUT_NAME}")
+
+    registry = load_registry()
+    work_root = resolve_work_root()
+
+    # Resolved up front so the run stops on a modality this image cannot serve before predicting
+    # anything, and so the cases can be grouped.
+    resolved: list[tuple[Path, str]] = []
+    for path, socket_modality in cases:
+        array = sitk.GetArrayFromImage(sitk.ReadImage(str(path))).astype(np.float32)
+        resolved.append((path, resolve_modality(array, socket_modality)))
+        del array
+    for _path, modality in resolved:
+        select_model(registry, modality)
+
+    names = [output_name(path, batch) for path, _ in resolved]
+    clashing = {n for n in names if names.count(n) > 1}
+    if clashing:
         raise RuntimeError(
-            f"Output size {output.GetSize()} != input size {original_size}; the challenge "
-            f"requires an identical grid."
+            f"Two or more inputs would be written to the same mask: "
+            f"{', '.join(sorted(clashing))}. Rename them so each case has its own output."
         )
 
-    # One socket and one fixed filename for both tracks: see OUTPUT_SOCKET / OUTPUT_NAME. The
-    # input's own name is deliberately not reused -- the template writes "output.mha" regardless.
-    destination = OUTPUT_ROOT / OUTPUT_SOCKET
-    destination.mkdir(parents=True, exist_ok=True)
-    out_path = destination / OUTPUT_NAME
-    sitk.WriteImage(output, str(out_path), useCompression=True)
-    log(f"wrote {out_path} labels={sorted(np.unique(cleaned).tolist())[:8]}...")
+    written = 0
+    # Grouped by modality, and the predictor built once per group: loading a five-fold ResEnc-L
+    # ensemble dwarfs the per-case work, so alternating CT/MR case by case would reload it every
+    # time. Processing a group at a time also keeps only one ensemble resident.
+    for modality in ("ct", "mr"):
+        group = [(p, m) for p, m in resolved if m == modality]
+        if not group:
+            continue
+        entry = select_model(registry, modality)
+        model_dir = resolve_model_dir(entry["dir"])
+        log(f"model={entry['dir']} folds={entry.get('folds')} "
+            f"channels={entry['channels']} labels={entry.get('label_set')} "
+            f"cases={len(group)}")
+        predictor = build_predictor(model_dir, entry)
+
+        for path, _ in group:
+            log(f"case {path.name} ({modality.upper()})")
+            image = sitk.ReadImage(str(path))
+            original_size = image.GetSize()
+            array = sitk.GetArrayFromImage(image).astype(np.float32)
+            cleaned = segment(
+                image, array, predictor=predictor, entry=entry, model_dir=model_dir,
+                work_root=work_root,
+            )
+
+            output = sitk.GetImageFromArray(cleaned)
+            output.CopyInformation(image)
+            if output.GetSize() != original_size:
+                raise RuntimeError(
+                    f"Output size {output.GetSize()} != input size {original_size}; the "
+                    f"challenge requires an identical grid."
+                )
+
+            # One socket for both tracks: see OUTPUT_SOCKET. output_dir was confirmed writable
+            # at the very start of main(), so this is the only place that computes the path.
+            out_path = output_dir / output_name(path, batch)
+            sitk.WriteImage(output, str(out_path), useCompression=True)
+            log(f"wrote {out_path} labels={sorted(np.unique(cleaned).tolist())[:8]}...")
+            written += 1
+
+        del predictor
+
+    if written != len(resolved):
+        raise RuntimeError(f"Wrote {written} mask(s) for {len(resolved)} case(s).")
     return 0
 
 

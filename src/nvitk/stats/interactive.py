@@ -40,7 +40,7 @@ import pandas as pd
 
 from nvitk.core.logger import Logger
 
-from .group_counts import displayed_counts
+from .group_counts import displayed_counts, level_strings
 
 log = Logger()
 
@@ -612,8 +612,12 @@ def column_plot(
     if work.empty:
         raise ValueError(f"{column!r} has no numeric values to plot.")
 
+    if group and group in work.columns:
+        # Once, at the top: the levels, the per-level subsets and the counts below all key on the
+        # string form, and a numerically coded factor has to spell it the same way in each.
+        work[group] = level_strings(work[group])
     levels = (
-        [str(v) for v in pd.unique(work[group].dropna().astype(str))]
+        [str(v) for v in pd.unique(work[group].dropna())]
         if group and group in work.columns else [""]
     )
     colours = palette_for(levels)

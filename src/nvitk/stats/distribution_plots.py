@@ -24,7 +24,7 @@ import pandas as pd
 
 from nvitk.core.logger import Logger
 
-from .group_counts import displayed_counts
+from .group_counts import displayed_counts, level_strings
 
 log = Logger()
 
@@ -109,6 +109,12 @@ def column_plot_static(
         raise ValueError(f"{column!r} has no numeric values to plot.")
 
     grouped = bool(group) and group in work.columns
+    if grouped:
+        # The level order, the palette keys and the counts are all built as strings, but seaborn
+        # keys its palette on the column's own values — so a numerically coded factor raised
+        # "The palette dictionary is missing keys: {0.0, 1.0}". Casting once here is what keeps
+        # every one of them talking about the same levels.
+        work[group] = level_strings(work[group])
     order = (
         [str(v) for v in pd.unique(work[group].dropna().astype(str))] if grouped else [column]
     )

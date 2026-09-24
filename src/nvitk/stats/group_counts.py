@@ -32,6 +32,36 @@ import numpy as np
 import pandas as pd
 
 
+def level_strings(series: pd.Series) -> pd.Series:
+    """
+    *series* as the labels a plot groups by, with missing values left missing.
+
+    Two things a bare ``astype(str)`` gets wrong on a numerically coded factor:
+
+    * ``NaN`` becomes the string ``"nan"``, which then draws as a level of its own — a violin of
+      the rows that have no value for the column;
+    * a whole float prints as ``1.0``, so ``sex`` reads as ``0.0`` / ``1.0``. That spelling is
+      the *common* case rather than an odd one: a single missing value upcasts an integer-coded
+      factor to float64.
+
+    Categoricals and strings are returned unchanged apart from the cast, so the levels a factor
+    already has keep their spelling.
+    """
+    values = series.dropna()
+    if (
+        pd.api.types.is_float_dtype(series)
+        and not isinstance(series.dtype, pd.CategoricalDtype)
+        and not values.empty
+        and bool(np.isfinite(values.to_numpy(dtype=float)).all())
+        and bool((values.to_numpy(dtype=float) % 1 == 0).all())
+    ):
+        text = series.astype("Int64").astype(str)
+    else:
+        text = series.astype(str)
+    # ``where`` keeps the label where there was a value and restores NA everywhere else.
+    return text.where(series.notna())
+
+
 @dataclass(frozen=True)
 class GroupCount:
     """What one level of a grouping contributes to the figure."""
@@ -110,10 +140,12 @@ def displayed_counts(
     if not group or group not in frame.columns:
         return [_at("", pd.Series(True, index=frame.index))]
 
-    keys = frame[group].astype(str)
+    # Through :func:`level_strings`, not a bare cast: the figure labels its levels that way, and
+    # a status line reading "1.0" beside a tick reading "1" is two answers to one question.
+    keys = level_strings(frame[group])
     order = (
         [str(level) for level in levels] if levels is not None
-        else [str(v) for v in pd.unique(frame[group].dropna().astype(str))]
+        else [str(v) for v in pd.unique(keys.dropna())]
     )
     return [_at(level, keys == level) for level in order]
 
@@ -144,4 +176,4 @@ def counts_note(
     return f"{head}   |   {body}" if head else body
 
 
-__all__ = ["GroupCount", "counts_note", "displayed_counts"]
+__all__ = ["GroupCount", "counts_note", "displayed_counts", "level_strings"]

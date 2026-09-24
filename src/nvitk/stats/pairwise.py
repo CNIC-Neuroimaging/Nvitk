@@ -268,8 +268,13 @@ def _r_contrasts(
         # emmeans has no ``emm_basis`` for every model this toolkit fits — ``lmrob`` is the one
         # that matters here — and says so by raising. The contrasts are still computable from the
         # fit's own coefficients and covariance, which is what this falls back to.
-        log.debug("emmeans declined %s; using the design-matrix basis.", type(model), exc_info=True)
-        log.info("emmeans could not contrast this model (%s); using its design matrix instead.", exc)
+        # Debug, not info: for an lmrob fit this fires on every plot, the fallback reproduces
+        # emmeans to 1e-9, and an R traceback in the log on each redraw reads like a failure.
+        log.debug(
+            "emmeans declined %s (%s); using the design-matrix basis.",
+            type(model).__name__, str(exc).strip().splitlines()[0] if str(exc).strip() else exc,
+            exc_info=True,
+        )
         from .r_basis import linear_pairs
 
         table = linear_pairs(model, factor, by=by)
@@ -307,6 +312,59 @@ def _first(row: Any, names: Sequence[str]) -> float:
             except (TypeError, ValueError):
                 continue
     return float("nan")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# What the model can actually be asked
+# ──────────────────────────────────────────────────────────────────────────────
+def fixed_effect_terms(result: Any) -> list[str]:
+    """Names of the model's fixed-effect parameters, whichever engine produced it.
+
+    Empty when no normalizer recognizes the object, which callers read as "unknown" rather than
+    as "none": refusing a comparison on the strength of a check that did not run is worse than
+    letting the engine answer for itself.
+    """
+    from ._model_values import coefficient_series
+
+    try:
+        params, _pvalues = coefficient_series(result)
+        return [str(term) for term in params.index]
+    except Exception as exc:
+        log.debug("Could not read the fixed effects: %s", exc)
+        return []
+
+
+def has_fixed_effect(result: Any, df: pd.DataFrame, column: str) -> bool:
+    """
+    Whether *column* has a fixed-effect term — the only kind a contrast can be formed from.
+
+    A factor that appears only as a random-effects *grouping* — ``(1 + plaque | territory)`` —
+    has no fixed-effect parameters, so there is nothing to contrast between its levels. What it
+    has instead are shrunk per-level predictions, which are not tested parameters: a BLUP carries
+    no null hypothesis. Asking ``emmeans`` anyway gets *No variable named territory in the
+    reference grid*, three frames below where the mistake was made.
+
+    Matching is by coefficient name, which each engine spells differently — patsy's
+    ``territory[T.LICA]``, R's ``territoryLICA`` — and the R form is only accepted when what
+    follows the column's name is one of its actual levels, so ``age`` does not match ``age_c``.
+    """
+    terms = fixed_effect_terms(result)
+    if not terms:
+        return True
+
+    levels = (
+        {str(v) for v in df[column].dropna().astype(str)} if column in df.columns else set()
+    )
+    from ._model_values import term_parts
+
+    for term in terms:
+        for part in term_parts(term):
+            name = str(part)
+            if name == column or name.startswith(f"{column}["):
+                return True
+            if name.startswith(column) and name[len(column):] in levels:
+                return True
+    return False
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -358,16 +416,28 @@ def pairwise_contrasts(
     """
     if factor not in df.columns:
         raise ValueError(f"{factor!r} is not in the fitted frame.")
+    if not has_fixed_effect(result, df, factor):
+        raise ValueError(
+            f"{factor!r} has no fixed-effect term in this model — it appears only in the random "
+            "structure, or not at all — so there is nothing to contrast between its levels. "
+            "Add it as a fixed effect to compare them."
+        )
     present = [str(v) for v in pd.unique(df[factor].dropna().astype(str))]
     order = [str(level) for level in levels] if levels is not None else sorted(present)
     order = [level for level in order if level in set(present)]
     if len(order) < 2:
         raise ValueError(f"{factor!r} has fewer than two levels to compare.")
 
+    # A ``by`` the model has no fixed effect for is dropped rather than raised on: the comparison
+    # it was qualifying is still perfectly answerable, just not split per series. Refusing the
+    # whole annotation because the colouring column happens not to be in the model would take
+    # away brackets that are correct.
+    dropped_by = ""
+    if by and (by not in df.columns or not has_fixed_effect(result, df, by)):
+        dropped_by, by, by_levels = by, "", None
+
     groups: list[str] = []
     if by:
-        if by not in df.columns:
-            raise ValueError(f"{by!r} is not in the fitted frame.")
         seen = [str(v) for v in pd.unique(df[by].dropna().astype(str))]
         groups = (
             [str(level) for level in by_levels if str(level) in set(seen)]
@@ -377,13 +447,17 @@ def pairwise_contrasts(
             raise ValueError(f"{by!r} has no levels to compare within.")
 
     if hasattr(result, "cov_params") and hasattr(getattr(result, "model", None), "data"):
-        return _statsmodels_contrasts(
+        out = _statsmodels_contrasts(
             result, df, factor=factor, levels=order,
             covariate_refs=covariate_refs or {}, by=by, by_levels=groups,
         )
-    out = _r_contrasts(_r_object(result), factor=factor, levels=order, by=by)
-    if by and groups:
-        out = out.loc[out["by"].isin(set(groups))].reset_index(drop=True)
+    else:
+        out = _r_contrasts(_r_object(result), factor=factor, levels=order, by=by)
+        if by and groups:
+            out = out.loc[out["by"].isin(set(groups))].reset_index(drop=True)
+    # Carried on the frame so the caller can say why the brackets are not per-series without
+    # having to re-derive the reason.
+    out.attrs["dropped_by"] = dropped_by
     return out
 
 
@@ -779,7 +853,9 @@ __all__ = [
     "contrast_note",
     "draw_brackets",
     "eligible",
+    "fixed_effect_terms",
     "format_p",
+    "has_fixed_effect",
     "holm",
     "level_positions",
     "pairwise_contrasts",

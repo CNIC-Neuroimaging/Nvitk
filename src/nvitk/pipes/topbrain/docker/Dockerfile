@@ -1,7 +1,10 @@
 # ToPBrain / ToPAneu TA36 algorithm container for Grand Challenge.
 # CUDA 12.6: Grand Challenge minimum.
 # Overridable with --build-arg for a different torch.
-ARG BASE_IMAGE=pytorch/pytorch:2.6.0-cuda12.6-cudnn9-runtime
+# -----Base Image requested by Grand Challenge-----
+# ARG BASE_IMAGE=pytorch/pytorch:2.6.0-cuda12.6-cudnn9-runtime
+# -----Base Image to test GUP locally-----
+ARG BASE_IMAGE=pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime     
 
 # --platform pinned: Grand Challenge runs amd64. 
 FROM --platform=linux/amd64 ${BASE_IMAGE}

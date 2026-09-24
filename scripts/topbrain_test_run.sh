@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+
+# Stop at first error
+set -e
+
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+DOCKER_TAG="topbrain_algo_docker_ta36_seg"
+DOCKER_NOOP_VOLUME="${DOCKER_TAG}-volume"
+
+INPUT_DIR="${SCRIPT_DIR}/test/input"
+OUTPUT_DIR="${SCRIPT_DIR}/test/output"
+
+# Maximum is currently 31g, configurable in your algorithm image settings on grand challenge
+MEM_LIMIT="31g"
+
+
+echo "=+= Cleaning up any earlier output"
+if [ -d "$OUTPUT_DIR" ]; then
+  # Ensure permissions are setup correctly
+  # This allows for the Docker user to write to this location
+  rm -rf "${OUTPUT_DIR}"/*
+  chmod -f o+rwx "$OUTPUT_DIR"
+else
+  mkdir -m o+rwx "$OUTPUT_DIR"
+fi
+
+
+echo "=+= (Re)build the container"
+docker build "$SCRIPT_DIR" \
+  --progress=plain \
+  --no-cache \
+  --platform=linux/amd64 \
+  --tag $DOCKER_TAG 2>&1
+
+
+cleanup() {
+    echo "=+= Cleaning permissions ..."
+    # Ensure permissions are set correctly on the output
+    # This allows the host user (e.g. you) to access and handle these files
+    docker run --rm \
+      --platform=linux/amd64 \
+      --quiet \
+      --volume "$OUTPUT_DIR":/output \
+      --entrypoint /bin/sh \
+      $DOCKER_TAG \
+      -c "chmod -R -f o+rwX /output/* || true"
+
+    # Ensure volume is removed
+    docker volume rm "$DOCKER_NOOP_VOLUME" > /dev/null
+}
+
+# This allows for the Docker user to read
+chmod -R -f o+rX "$INPUT_DIR" "${SCRIPT_DIR}/model"
+
+
+if [ -d "${OUTPUT_DIR}/interf0" ]; then
+  # This allows for the Docker user to write
+  chmod -f o+rwX "${OUTPUT_DIR}/interf0"
+
+  echo "=+= Cleaning up any earlier output"
+  # Use the container itself to circumvent ownership problems
+  docker run --rm \
+      --platform=linux/amd64 \
+      --quiet \
+      --volume "${OUTPUT_DIR}/interf0":/output \
+      --entrypoint /bin/sh \
+      $DOCKER_TAG \
+      -c "rm -rf /output/* || true"
+else
+  mkdir -p -m o+rwX "${OUTPUT_DIR}/interf0"
+fi
+
+if [ -d "${OUTPUT_DIR}/interf1" ]; then
+  # This allows for the Docker user to write
+  chmod -f o+rwX "${OUTPUT_DIR}/interf1"
+
+  echo "=+= Cleaning up any earlier output"
+  # Use the container itself to circumvent ownership problems
+  docker run --rm \
+      --platform=linux/amd64 \
+      --quiet \
+      --volume "${OUTPUT_DIR}/interf1":/output \
+      --entrypoint /bin/sh \
+      $DOCKER_TAG \
+      -c "rm -rf /output/* || true"
+else
+  mkdir -p -m o+rwX "${OUTPUT_DIR}/interf1"
+fi
+
+
+docker volume create "$DOCKER_NOOP_VOLUME" > /dev/null
+
+trap cleanup EXIT
+
+run_docker_forward_pass() {
+  local interface_dir="$1"
+
+  echo "=+= Doing a forward pass on ${interface_dir}"
+  ## Note the extra arguments that are passed here:
+  # '--network none'
+  #    entails there is no internet connection
+  # '--gpus all'
+  #    enables access to any GPUs present
+  # '--volume <NAME>:/tmp'
+  #   is added because on Grand Challenge this directory cannot be used to store permanent files
+  # '--memory <MEM_LIMIT>'
+  #   is added to restrict the maximum amount of memory the container can use. The GC limit is 32-1=31g
+  # shared memory available to your container at GC /dev/shm is 50% of the System Memory
+  #   default docker shm-size is 64mb, need to increase to 2g+
+  # '--volume ../model:/opt/ml/model/":ro'
+  #   is added to provide access to the (optional) tarball-upload locally
+
+  docker run --rm \
+      --platform=linux/amd64 \
+      --network none \
+      --memory="${MEM_LIMIT}" \
+      --shm-size=8g \
+      --gpus all \
+      --volume "${INPUT_DIR}/${interface_dir}":/input:ro \
+      --volume "${OUTPUT_DIR}/${interface_dir}":/output \
+      --volume "$DOCKER_NOOP_VOLUME":/tmp \
+      --volume "${SCRIPT_DIR}/model":/opt/ml/model:ro \
+      $DOCKER_TAG
+
+  # Ensure permissions are set correctly on the output
+  # This allows the host user (e.g. you) to access and handle these files
+  docker run --rm \
+      --quiet \
+      --env HOST_UID=`id --user` \
+      --env HOST_GID=`id --group` \
+      --volume "$OUTPUT_DIR":/output \
+      alpine:latest \
+      /bin/sh -c 'chown -R ${HOST_UID}:${HOST_GID} /output'
+
+  echo "=+= Wrote results to ${OUTPUT_DIR}/${interface_dir}"
+}
+
+run_docker_forward_pass "interf0"
+
+run_docker_forward_pass "interf1"
+
+echo "#################################################"
+echo "##### Test 1 >>> /output/ folder check"
+echo -e '\n$ ls -alR /output/ \n'
+
+docker run --rm \
+        --volume "$OUTPUT_DIR":/output:ro \
+        alpine ls -alR /output/
+
+echo "#################################################"
+echo
+
+###################################################################################
+# Test if the docker outputs match the expected outputs in ./test/expected_output/
+###################################################################################
+
+run_output_compare_with_expected() {
+  local interface_dir="$1"
+
+  echo "=+= Comparing outputs on ${interface_dir}"
+
+  echo "#################################################"
+  echo "##### Test 2 >>> segmentation mask check"
+  # Compare the segmentation output from Docker with the expected segmentation mask
+  # TODO: Provide the expected output segmentation mask of your algorithm in ./test/expected_output/
+  # TODO: In the python code snippet below change the following if necessary:
+
+  if [[ "$interface_dir" == "interf0" ]]; then
+      EXPECTED_SEG_MASK="expected_output_dummy_mra.mha"
+  elif [[ "$interface_dir" == "interf1" ]]; then
+      EXPECTED_SEG_MASK="expected_output_dummy_cta.mha"
+  else
+      echo "Unknown interface: $interface_dir" >&2
+      return 1
+  fi
+
+  docker run --rm \
+          --volume "$OUTPUT_DIR":/output \
+          --volume $SCRIPT_DIR/test/expected_output/:/expected_output/ \
+          biocontainers/simpleitk:v1.0.1-3-deb-py3_cv1 python3 -c """
+import os
+import SimpleITK as sitk
+
+output_path = '/output/${interface_dir}/images/extended-head-angio-segmentation/output.mha'
+print(f'{output_path} isfile? ', os.path.isfile(output_path))
+expected_output_path = '/expected_output/${EXPECTED_SEG_MASK}'
+print(f'{expected_output_path} isfile? ', os.path.isfile(expected_output_path))
+
+output = sitk.ReadImage(output_path)
+expected_output = sitk.ReadImage(expected_output_path) 
+
+label_filter = sitk.LabelOverlapMeasuresImageFilter()
+label_filter.Execute(output, expected_output)
+dice_score = label_filter.GetDiceCoefficient()
+
+print(f'dice_score = {dice_score}')
+
+if dice_score == 1.0:
+    print('[Success] Dice score=1, Test 2 passed!')
+else:
+    print('Dice score != 1, Test 2 failed!')
+    print('[FAIL] Test 2 has FAILED!')
+"""
+  echo "#################################################"
+  echo
+}
+
+run_output_compare_with_expected "interf0"
+
+run_output_compare_with_expected "interf1"
+
+
+
+echo "Please make sure you pass the above 2 tests before submitting your docker"
+
+echo -e "\n=+= Save this image for uploading via save.sh \"${DOCKER_TAG}\""

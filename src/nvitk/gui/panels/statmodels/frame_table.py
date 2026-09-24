@@ -75,6 +75,7 @@ from nvitk.stats.interactive import COLUMN_PLOT_KINDS
 from nvitk.stats.qc_filters import available_presets
 
 from .constants import MAX_CATEGORICAL_LEVELS, TABLE_ROW_CAP
+from .helpers import groupable_levels, grouping_columns
 from .theme import (
     COLOR_ACCENT,
     COLOR_FAINT,
@@ -800,18 +801,9 @@ class AnalysisFrameView(QWidget):
         A continuous measurement has as many levels as rows, and ``subject_uid`` nearly so — a
         summary keyed on either is the raw data with extra columns.
         """
-        frame = self._model.frame()
-        out: list[str] = []
-        for name in frame.columns:
-            if str(name) == str(exclude):
-                continue
-            series = frame[name]
-            if pd.api.types.is_numeric_dtype(series) and not isinstance(
-                series.dtype, pd.CategoricalDtype
-            ):
-                continue
-            if 2 <= int(series.nunique(dropna=True)) <= int(max_levels):
-                out.append(str(name))
+        out = grouping_columns(
+            self._model.frame(), cap=max_levels, exclude=[exclude] if exclude else []
+        )
 
         # Frame order puts identifier columns first, which is the wrong end of the menu: a summary
         # by territory is the common case, one per subject is the rare one.
@@ -1025,11 +1017,7 @@ class AnalysisFrameView(QWidget):
         frame = self._model.frame()
         if column not in frame.columns:
             return []
-        series = frame[column]
-        if pd.api.types.is_float_dtype(series):
-            return []
-        levels = [str(v) for v in pd.unique(series.dropna())]
-        return sorted(levels) if 1 < len(levels) <= cap else []
+        return groupable_levels(frame[column], cap=cap)
 
     def set_references(self, references: Mapping[str, str]) -> None:
         """Record the active reference levels, so the menu can tick the current one."""

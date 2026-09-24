@@ -71,6 +71,23 @@ and to the shell itself: hiding or closing the window takes every session's deta
 screen with it rather than stranding them on the desktop. A panel you closed yourself stays
 closed — a round trip through another tab does not bring it back.
 
+### What can be a hue or a split
+
+Every picker that asks "group by which column" — the distribution window's *by* and sub-split, the
+model plot's *colour by*, the summary grouping, the reference-level menu, the SEM grouping — offers
+a column on how many **distinct values** it has, not on its dtype. A factor is a factor whether it
+is spelled `"M"`/`"F"` or `0`/`1`, and deciding by dtype is what kept every numerically coded one
+out: a single missing value upcasts an integer `sex` to float64.
+
+A continuous measurement is excluded by the level cap rather than by being numeric. Floats get a
+tighter test, since dtype cannot separate a coded factor from a measurement: at most
+`MAX_FLOAT_GROUP_LEVELS` (12) distinct values, **and** values that repeat — a measurement's do not,
+which is what keeps it out of a frame filtered down to a handful of rows.
+
+Levels are labelled through `nvitk.stats.group_counts.level_strings`, so a whole float reads as
+`0` / `1` rather than `0.0` / `1.0`, and rows with no value stay missing instead of drawing as a
+`nan` level of their own.
+
 ### Taking another session's dataframe
 
 Right-clicking a session *other* than the current one offers to pull its dataframe across. The
@@ -166,6 +183,27 @@ the number to cite.
 The **grouped** display needs no special handling: a panel holding three of thirteen territories
 has three legend entries, so only those three series' brackets land on it, in that panel's own
 colours.
+
+### Factors the model has no fixed effect for
+
+A contrast is a linear combination of *fixed-effect* coefficients, so a factor the model has none
+for cannot be compared. The common case is a random-effects grouping:
+
+```{code-block} text
+log1p_pi ~ plaque + age_c + (1 + plaque | territory) + (1 | subject_uid)
+```
+
+Nothing about `territory` is in the fixed effects here. What the model has instead is one shrunk
+prediction per territory, and a BLUP carries no null hypothesis — there is no p-value to put on a
+bracket. Asking `emmeans` anyway answers *No variable named territory in the reference grid*, from
+three frames below where the mistake was made, so the check happens up front instead.
+
+* Asked to **compare** such a factor's levels, the plot says so and names the fix: add it as a
+  fixed effect.
+* Asked to **split by** one — the usual case, since it is the colouring column — the split is
+  dropped and the comparison is pooled instead. The brackets that get drawn are correct; the
+  status line says they are pooled and why. Refusing the whole annotation because the colouring
+  column is not in the formula would take away brackets that were fine.
 
 ### What gets drawn
 

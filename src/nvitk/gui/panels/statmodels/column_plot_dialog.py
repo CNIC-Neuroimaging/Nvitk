@@ -46,6 +46,7 @@ from nvitk.stats.interactive import (
 )
 
 from .figure_host import FigureHostMixin
+from .helpers import grouping_columns
 from .theme import muted_label_style
 
 log = Logger()
@@ -197,20 +198,12 @@ class ColumnPlotDialog(FigureHostMixin, QDialog):
         """
         Columns usable as a grouping: discrete, and few enough levels to stay readable.
 
-        A numeric column is only offered when it is a Categorical — a continuous measurement has as
-        many "levels" as rows and grouping by it is meaningless. ``subject_uid`` is excluded the same
-        way, by the level cap.
+        How many distinct values there are, not what dtype holds them — a factor is a factor
+        whether it is spelled ``"M"``/``"F"`` or ``0``/``1``, and requiring a Categorical kept
+        every numerically coded one out of this picker. ``subject_uid`` is excluded by the level
+        cap, which is what excludes a continuous measurement too.
         """
-        out: list[str] = []
-        for column in self._frame.columns:
-            series = self._frame[column]
-            if pd.api.types.is_numeric_dtype(series) and not isinstance(
-                series.dtype, pd.CategoricalDtype
-            ):
-                continue
-            if 2 <= int(series.nunique(dropna=True)) <= int(max_levels):
-                out.append(str(column))
-        return out
+        return grouping_columns(self._frame, cap=max_levels)
 
     def _sync_split_choices(self) -> None:
         """

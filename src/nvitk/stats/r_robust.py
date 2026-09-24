@@ -686,8 +686,10 @@ def lmrob_emmeans(
                 )
             )
     except Exception as exc:
-        log.debug("emmeans declined this lmrob fit", exc_info=True)
-        log.info("emmeans cannot handle lmrob (%s); using its design matrix instead.", exc)
+        # Debug, not info: emmeans has never supported lmrob, so this fires on every fit and
+        # every redraw. The fallback reproduces it to 1e-9, and a stack of R tracebacks in the
+        # log reads like a broken fit rather than the documented path it is.
+        log.debug("emmeans declined this lmrob fit; using the design-matrix basis.", exc_info=True)
         from .r_basis import linear_emmeans
 
         return linear_emmeans(

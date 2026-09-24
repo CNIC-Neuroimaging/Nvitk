@@ -234,6 +234,7 @@ from .export import build_provenance_frame, export_analysis_frame, export_group_
 from .frame_table import AnalysisFrameView, ColumnFilterDialog, FilterChipBar
 from .helpers import (
     checked_variable_ids,
+    grouping_columns,
     checked_variable_visits,
     dropped_rows_note,
     filter_list_widget,
@@ -2451,18 +2452,9 @@ class StatmodelsWindow(QMainWindow):
         if groups_field and groups_field not in factors:
             factors.append(groups_field)
 
-        candidates: list[str] = []
-        if df is not None and not df.empty:
-            for column in df.columns:
-                name = str(column)
-                if name in candidates:
-                    continue
-                series = df[name]
-                if pd.api.types.is_float_dtype(series):
-                    continue
-                levels = series.dropna().nunique()
-                if 1 < levels <= MAX_CATEGORICAL_LEVELS or name in factors:
-                    candidates.append(name)
+        # Not "skip every float": one missing value upcasts an integer-coded ``sex`` to float64,
+        # and skipping it there is what left the colour-by unable to offer it.
+        candidates = grouping_columns(df, cap=MAX_CATEGORICAL_LEVELS, extra=factors)
 
         ordered = [c for c in candidates if c not in factors] + [c for c in factors if c in candidates]
         self._plot_group.blockSignals(True)
@@ -4213,7 +4205,17 @@ class StatmodelsWindow(QMainWindow):
         # levels landed in different panels of a grouped display has nowhere to be drawn, and
         # saying so is the difference between a capped figure and a misleading one.
         wanted = len(eligible_contrasts(contrasts, mode))
-        return contrast_note(drawn, max(0, wanted - drawn), mode)
+        note = contrast_note(drawn, max(0, wanted - drawn), mode)
+        # The colouring column had no fixed effect to split the comparison by — a random-effects
+        # grouping factor, or simply not in the formula. The brackets that did get drawn are
+        # correct; what they are not is per-series, and the reader has to be told which.
+        skipped = str(contrasts.attrs.get("dropped_by") or "")
+        if skipped and drawn:
+            note += (
+                f"  Pooled across {skipped}: it has no fixed-effect term in this model, so there "
+                "is no per-series comparison to make."
+            )
+        return note
 
     def _significance_factor(
         self, df: pd.DataFrame, x: str, group: str, mode: str
@@ -4750,18 +4752,11 @@ class StatmodelsWindow(QMainWindow):
         self._sem_group.addItem("(none — one model for everyone)", "")
 
         df = self._working_df
-        if df is not None and not df.empty:
-            for name in df.columns:
-                series = df[name]
-                if pd.api.types.is_numeric_dtype(series) and not isinstance(
-                    series.dtype, pd.CategoricalDtype
-                ):
-                    continue
-                levels = int(series.nunique(dropna=True))
-                # Two is the minimum for a comparison; the cap keeps a per-subject split out of a
-                # menu it would otherwise dominate.
-                if 2 <= levels <= 6:
-                    self._sem_group.addItem(f"{name} ({levels} groups)", str(name))
+        # Two levels is the minimum for a comparison; the cap keeps a per-subject split out of a
+        # menu it would otherwise dominate.
+        for name in grouping_columns(df, cap=6):
+            levels = int(df[name].nunique(dropna=True))
+            self._sem_group.addItem(f"{name} ({levels} groups)", str(name))
 
         index = self._sem_group.findData(previous)
         self._sem_group.setCurrentIndex(index if index >= 0 else 0)

@@ -62,6 +62,7 @@ from qtpy.QtWidgets import (
 )
 
 from nvitk.gui.core.design import SPACE_TIGHT
+from nvitk.gui.core.geometry import fit_dialog
 from nvitk.stats.r_mmrm import COVARIANCE_STRUCTURES, covariance_term
 from nvitk.stats.regression import SPLINE_TERMS, spline_term
 
@@ -117,7 +118,11 @@ class DerivedColumnsDialog(QDialog):
         """
         super().__init__(parent)
         self.setWindowTitle("Derived columns")
-        self.resize(680, 520)
+        # Not a bare resize: the editor side's forms add up to an 850x499 minimum, which silently
+        # overrode the 680x520 asked for here and left the dialog unable to be made smaller. The
+        # same helper the other exploration dialogs use caps the floor to something the screen
+        # can actually give, and leaves the window resizable.
+        fit_dialog(self, 680, 520)
         self._frame = frame
         self._columns: list[DerivedColumn] = list(columns)
         # Columns that exist before any derived one — what a new name must not collide with.
@@ -152,6 +157,9 @@ class DerivedColumnsDialog(QDialog):
         lay.addWidget(QLabel("Derived columns (applied in order)"))
         self._list = QListWidget()
         self._list.currentRowChanged.connect(self._on_select)
+        # A floor of its own, so the summary below cannot squeeze the list down to the three
+        # rows that made a ten-column set unnavigable.
+        self._list.setMinimumHeight(150)
         lay.addWidget(self._list, stretch=1)
 
         row = QHBoxLayout()
@@ -166,10 +174,24 @@ class DerivedColumnsDialog(QDialog):
         row.addStretch(1)
         lay.addLayout(row)
 
+        # One line per derived column, and a word-wrapped QLabel's *minimum* height is its whole
+        # text — so ten of them demanded more height than the dialog has, took it from the list
+        # above, and still ran off the bottom. Scrolled, it asks for a fixed share and keeps the
+        # rest of the column intact however many columns are defined.
         self._preview = QLabel("")
         self._preview.setWordWrap(True)
+        self._preview.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self._preview.setStyleSheet(muted_label_style())
-        lay.addWidget(self._preview)
+        self._preview_scroll = QScrollArea()
+        self._preview_scroll.setWidget(self._preview)
+        self._preview_scroll.setWidgetResizable(True)
+        self._preview_scroll.setFrameShape(QScrollArea.NoFrame)
+        # Wrapping is to the viewport width, so a horizontal bar would only ever appear for an
+        # unbreakable column name — and a second scrollbar is worse than an elided one.
+        self._preview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._preview_scroll.setMinimumHeight(70)
+        self._preview_scroll.setMaximumHeight(190)
+        lay.addWidget(self._preview_scroll)
         return panel
 
     def _build_editor_side(self) -> QWidget:

@@ -53,7 +53,12 @@ def preprocess_fromfiles_save_to_queue(list_of_lists: List[List[str]],
                     pass
         done_event.set()
     except Exception as e:
-        # print(Exception, e)
+        # Printed, not swallowed. The parent only sees "Background workers died. Look for the
+        # error message further up!" -- and with this commented out there never was one, which
+        # sends every diagnosis down the RAM path regardless of the real cause.
+        import traceback
+
+        traceback.print_exc()
         abort_event.set()
         raise e
 
