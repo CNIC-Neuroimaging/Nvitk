@@ -32,6 +32,25 @@ import numpy as np
 import pandas as pd
 
 
+def ordered_levels(
+    present: Sequence[str], order: Sequence[str] | None = None
+) -> list[str]:
+    """
+    *present* arranged by *order*, with anything *order* does not name kept after it.
+
+    A saved order outlives the frame it was chosen on — a filter can remove a level, a reload can
+    add one — so it selects and ranks rather than dictating: levels it names appear first in its
+    sequence, and a level that arrived since is appended rather than silently dropped.
+    """
+    if not order:
+        return [str(level) for level in present]
+    seen = [str(level) for level in present]
+    known = set(seen)
+    named = [str(level) for level in order if str(level) in known]
+    taken = set(named)
+    return named + [level for level in seen if level not in taken]
+
+
 def level_strings(series: pd.Series) -> pd.Series:
     """
     *series* as the labels a plot groups by, with missing values left missing.
@@ -176,4 +195,10 @@ def counts_note(
     return f"{head}   |   {body}" if head else body
 
 
-__all__ = ["GroupCount", "counts_note", "displayed_counts", "level_strings"]
+__all__ = [
+    "GroupCount",
+    "counts_note",
+    "displayed_counts",
+    "level_strings",
+    "ordered_levels",
+]

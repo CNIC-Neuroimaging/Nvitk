@@ -24,7 +24,7 @@ import pandas as pd
 
 from nvitk.core.logger import Logger
 
-from .group_counts import displayed_counts, level_strings
+from .group_counts import displayed_counts, level_strings, ordered_levels
 
 log = Logger()
 
@@ -59,6 +59,7 @@ def column_plot_static(
     group: str = "",
     excluded_mask: Any = None,
     show_excluded: bool = True,
+    level_order: Sequence[str] | None = None,
     title: str = "",
     ax: Any = None,
     figsize: tuple[float, float] = (10.0, 6.0),
@@ -96,7 +97,10 @@ def column_plot_static(
     )
 
     if categorical:
-        _counts(ax, work, column, group=group, excluded=excluded, show_excluded=show_excluded)
+        _counts(
+            ax, work, column, group=group, excluded=excluded,
+            show_excluded=show_excluded, level_order=level_order,
+        )
         ax.set_title(title or f"{column} — counts", pad=22)
         _fit(figure)
         figure.linked_axes = [ax]
@@ -116,7 +120,8 @@ def column_plot_static(
         # every one of them talking about the same levels.
         work[group] = level_strings(work[group])
     order = (
-        [str(v) for v in pd.unique(work[group].dropna().astype(str))] if grouped else [column]
+        ordered_levels([str(v) for v in pd.unique(work[group].dropna())], level_order)
+        if grouped else [column]
     )
     colours = _palette(order)
     hue = group if grouped else None
@@ -227,6 +232,8 @@ def column_panels_static(
     group: str = "",
     excluded_mask: Any = None,
     show_excluded: bool = True,
+    panel_order: Sequence[str] | None = None,
+    level_order: Sequence[str] | None = None,
     anatomical: bool = False,
     title: str = "",
     n_cols: int = 2,
@@ -243,8 +250,13 @@ def column_panels_static(
 
     levels = [str(v) for v in pd.unique(frame[facet_by].dropna().astype(str))]
     groups = (
+        # The anatomical grouping pools levels into named panels of its own, so a per-level order
+        # has nothing to arrange there.
         resolve_panels(levels, column=facet_by) if anatomical
-        else {level: [level] for level in sorted(levels, key=natural_level_key)}
+        else {
+            level: [level]
+            for level in ordered_levels(sorted(levels, key=natural_level_key), panel_order)
+        }
     )
     mask = (
         pd.Series(np.asarray(excluded_mask, dtype=bool), index=frame.index)
@@ -271,12 +283,26 @@ def column_panels_static(
         size = displayed_counts(sub, column, excluded=panel_mask, show_excluded=show_excluded)
         column_plot_static(
             sub, column, kind=kind, group=group, excluded_mask=panel_mask,
-            show_excluded=show_excluded, ax=ax,
+            show_excluded=show_excluded, level_order=level_order, ax=ax,
             title=f"{name}  ({size[0].suffix()})" if size else name,
         )
         drawn.append(ax)
     figure.linked_axes = drawn
     return figure
+
+
+def base_levels(series: pd.Series) -> list[str]:
+    """
+    A column's levels in their own order — its categories when it has them, else as they appear.
+
+    The base a chosen order is applied on top of. A binned column carries the order it was cut in,
+    which is the one to fall back to; anything else has only the order the rows arrived in.
+    """
+    labels = level_strings(series).dropna()
+    if isinstance(series.dtype, pd.CategoricalDtype):
+        present = set(labels)
+        return [str(c) for c in series.dtype.categories if str(c) in present]
+    return [str(v) for v in pd.unique(labels)]
 
 
 def _counts(
@@ -287,14 +313,28 @@ def _counts(
     group: str,
     excluded: Any = None,
     show_excluded: bool = True,
+    level_order: Sequence[str] | None = None,
 ) -> None:
     """Bar counts per level, for a column a distribution is not defined on."""
     import seaborn as sns
 
-    hue = group if group and group in frame.columns else None
+    work = frame.copy()
+    hue = group if group and group in work.columns else None
+    # One order applied to both axes: ``ordered_levels`` keeps whatever it does not name, so
+    # ordering the split column is a no-op on an x axis of different levels — and orders both
+    # when, as on a counts plot of the split column itself, they are the same levels.
+    # Both base orders read before either cast: on a counts plot of the split column itself the
+    # hue *is* the x column, and reading its order after the cast loses the categories — which
+    # is how the bars came out in the binned order and the legend in first-appearance order.
+    x_levels = ordered_levels(base_levels(work[column]), level_order)
+    hue_levels = ordered_levels(base_levels(work[hue]), level_order) if hue else None
+    work[column] = level_strings(work[column])
+    if hue:
+        work[hue] = level_strings(work[hue])
+
     sns.countplot(
-        data=frame, x=column, hue=hue, ax=ax,
-        palette=_palette(sorted({str(v) for v in frame[hue].dropna()})) if hue else None,
+        data=work, x=column, hue=hue, ax=ax, order=x_levels, hue_order=hue_levels,
+        palette=_palette(hue_levels) if hue else None,
         legend=bool(hue),
     )
     ax.set_ylabel("count")
@@ -305,7 +345,8 @@ def _counts(
         sizes = {
             c.level: c
             for c in displayed_counts(
-                frame, column, group=hue, excluded=excluded, show_excluded=show_excluded
+                work, column, group=hue, excluded=excluded, show_excluded=show_excluded,
+                levels=hue_levels,
             )
         }
         legend = ax.get_legend()

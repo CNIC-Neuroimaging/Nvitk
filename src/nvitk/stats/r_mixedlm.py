@@ -980,6 +980,7 @@ def _emmeans_band(
     fixed_formula: str,
     ci_level: float,
     emmeans_fn: Any = None,
+    hold: Mapping[str, Any] | None = None,
 ) -> dict[str | None, pd.DataFrame] | None:
     """
     Marginal means with intervals, one frame per group level (``None`` keyed for the population).
@@ -991,9 +992,28 @@ def _emmeans_band(
     ``emmeans_fn`` selects which engine's emmeans call to make; it defaults to lme4's. Everything
     else here is engine-independent, which is why the robust engine reuses this function rather than
     repeating the grouped/population logic.
+
+    ``hold`` is the reference row the *curves* were predicted at, and it is what keeps the band
+    around the line rather than parallel to it. ``emmeans`` averages over every factor outside its
+    specification with equal weights; the plotted curve instead holds each one at its modal level.
+    On a model with a categorical covariate those are different numbers, and the band came out
+    displaced from the line by a constant — the modal level's effect minus the mean of them. Naming
+    those factors in the specification and then selecting the held combination asks ``emmeans`` for
+    the interval of the curve actually drawn.
     """
     grouped = bool(group) and group != x and bool(re.search(rf"\b{re.escape(group)}\b", fixed_formula))
-    specs = f"~ {x}" + (f" | {group}" if grouped else "")
+
+    # Only what the model actually uses: pinning a column the formula never mentions would ask
+    # emmeans for a variable its reference grid does not have.
+    pinned = {
+        str(name): value
+        for name, value in dict(hold or {}).items()
+        if str(name) not in {x, group}
+        and not isinstance(value, (int, float, np.integer, np.floating))
+        and re.search(rf"\b{re.escape(str(name))}\b", fixed_formula)
+    }
+    by_terms = ([group] if grouped else []) + list(pinned)
+    specs = f"~ {x}" + (" | " + " * ".join(by_terms) if by_terms else "")
     try:
         frame = (emmeans_fn or lme4_emmeans)(
             model,
@@ -1005,6 +1025,15 @@ def _emmeans_band(
     except Exception as exc:
         log.warning("Could not obtain marginal means from emmeans: %s", exc)
         log.debug("emmeans failure", exc_info=True)
+        return None
+
+    for name, value in pinned.items():
+        if name in frame.columns:
+            frame = frame.loc[frame[name].astype(str) == str(value)]
+    if frame.empty:
+        log.warning(
+            "No marginal means at the reference levels %s; falling back to no band.", pinned
+        )
         return None
 
     if not grouped or group not in frame.columns:
@@ -1335,6 +1364,7 @@ def plot_lme4_params(
             continuous=mode == "continuous",
             fixed_formula=fixed_formula or "",
             ci_level=ci_level,
+            hold=base,
         )
         if bands is None:
             errors["ci_error"] = (

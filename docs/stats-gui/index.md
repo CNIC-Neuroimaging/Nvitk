@@ -71,6 +71,35 @@ and to the shell itself: hiding or closing the window takes every session's deta
 screen with it rather than stranding them on the desktop. A panel you closed yourself stays
 closed — a round trip through another tab does not bring it back.
 
+### Ordering the levels
+
+The axis order defaults to a natural sort — `g2` before `g10` — which is right for bin groups and
+wrong for anything whose meaning is not alphabetical: a severity scale, a vessel sequence
+following the circulation, a control group that belongs first. **Order…** on the distribution
+window opens a reorder editor for whichever column the *by* picker is on: the x-axis groups when
+split, the panels when panelled.
+
+Drag or use the arrows, or take one of the computed orders — *Natural*, *A–Z*, *By median*
+(ascending median of the plotted column), *By count* (most observations first), *Reverse*. The
+button reads **Order ✓** while an order is in force, and each column keeps its own, so switching
+the split and coming back does not lose it.
+
+This applies to the counts view too. A categorical column is not drawn as a distribution but as
+bar counts of its own levels, and those bars, their legend and the status line all follow the
+chosen order. Without one they follow the order the column was **cut** in — a binned column
+carries its own categories — rather than the order its rows happen to arrive in.
+
+An order outlives the frame it was chosen on, so it selects and ranks rather than dictating: a
+level a filter has since removed is skipped, and one that has since appeared is drawn after the
+ordered set rather than silently dropped.
+
+### Legend
+
+Both the distribution window and the model plots carry a **Legend** toggle. It acts on the figure
+in place — no refit, no redraw of the data — and survives the redraws that every other control
+triggers. The violin, box and strip views name their levels on the axis instead, so there is no
+legend to hide there.
+
 ### What can be a hue or a split
 
 Every picker that asks "group by which column" — the distribution window's *by* and sub-split, the
@@ -167,6 +196,69 @@ Python for both backends rather than by each engine's own default, so a bracket 
 thing whichever engine drew it. The correction is over the comparisons actually computed — untick
 half the levels in the *Groups* list and the rest stop carrying their penalty.
 
+### Correcting, or not
+
+A regression table corrects nothing — it prints seventy raw p-values — so a corrected figure and
+a coefficient table can never agree. The **adjust** selector settles which you are looking at:
+
+| Setting | Shows |
+|---|---|
+| `Holm` (default) | corrected within each series — the responsible default |
+| `raw p` | the uncorrected p of each comparison, exactly what the table prints |
+
+The gap is not small. Six comparisons per territory turn a table's `p = 0.0145 *` into
+`p = 0.087` — no longer significant, and invisible under *significant only*. Pick `raw p` to read
+a model's interactions off the figure as the table reports them; the status line then says
+**uncorrected (raw p, as the coefficient table)** rather than *Holm-adjusted*, because the two
+figures look identical otherwise.
+
+An uncorrected bracket is a real result about one comparison. It misleads only if read as though
+every comparison on the figure had been tested at that level — which is what the correction
+exists to prevent, and why it stays the default.
+
+**What counts as one family** (when correcting) is the series, not the figure. When the plot splits by a second
+factor, each of its levels is corrected on its own — `emmeans`' convention for a `by`
+specification, and how a per-curve bracket is read. Pooling instead makes seventeen territories a
+single family of 102 tests, where a real effect at raw p = 0.003 adjusts to 0.30: every bracket
+reads `NS` and *significant only* draws nothing, which says more about the denominator than about
+the data.
+
+### What a bracket is testing
+
+A bracket and an interaction coefficient answer different questions, so the **basis** selector
+next to the mode says which one is drawn:
+
+| Basis | A bracket between two plaque levels on RICA asks | Drawn |
+|---|---|---|
+| `within series` | does g1 differ from g0 **in RICA** — the simple effect | every pair |
+| `interaction (table rows)` | does the g0→g1 change in RICA differ **from the reference territory's** | pairs against the factor's reference — one per table row |
+| `interaction (all pairs)` | the same, for any two levels | every pair; the extras are differences of two interaction coefficients |
+
+The second is exactly what the coefficient table's `plaque[g1]:territory[RICA]` row reports, and
+it is checked against it: estimate, standard error and p agree to 1e-9 on the statsmodels engines
+and to the table's own precision on lmrob and MMRM. Pick it to read a model's interactions
+straight off the figure.
+
+`interaction (table rows)` gives **exactly one bracket per interaction row** and no more. An
+interaction *term* contrasts a level against the factor's own reference, so only pairs touching
+that reference are drawn: with four plaque groups and seventeen territories that is 3 × 16 = 48
+brackets against the table's 48 interaction rows.
+
+`interaction (all pairs)` lifts that restriction. A g1-versus-g2 bracket is then the *difference
+of two* interaction coefficients — a real contrast, but one the table never prints, so there is
+nothing to check it against. The two bases carry identical numbers for the pairs they share; the
+restriction removes comparisons rather than changing them, and shrinks the correction family with
+them (three per series rather than six).
+
+The reference series carries no brackets in that basis — it is the baseline the others are
+measured from, so its own contrasts are zero by construction. Which level that is comes from the
+fit rather than from a sort order: it is the one the coefficient table is silent about, so the
+figure and the table always name the same baseline. The status line says which.
+
+The `within series` basis cannot be read off the table at all: a simple effect's standard error
+needs the covariance between the main and interaction terms, which the table does not carry.
+Either basis can be significant while the other is not.
+
 ### One set of brackets per curve
 
 When the plot colours by a second factor, the comparisons are made **within** each of its levels,
@@ -216,6 +308,19 @@ levels are listed in a corner box instead.
 Available on the MixedLM/OLS/GLM, lme4, lmrob and MMRM plots, on both the Matplotlib and the
 Plotly backend. Not on the non-linear fit (one curve over all rows, so there are no levels), the
 anatomical maps (which already colour by significance) or SEM.
+
+### Where the confidence band sits
+
+The band has to describe the curve it is drawn around, and two different conventions made it
+describe something else. The plotted curve holds each **categorical** covariate at its modal
+level; `emmeans` averages over every factor outside its specification with equal weights. On a
+model with a categorical covariate those are different numbers, so the band came out displaced
+from the line by a constant — the modal level's effect minus the mean of them.
+
+The held factors are now named in the specification and the held combination selected, so the
+band's centre *is* the predicted curve, exactly. Continuous covariates need no pin: `emmeans`
+already holds those at their mean, which is what the reference row does. Per-level bands are
+unaffected — each still surrounds its own curve.
 
 ### Engines `emmeans` will not take
 

@@ -447,6 +447,41 @@ def harmonise_channels(data: np.ndarray, entry: dict[str, Any]) -> list[np.ndarr
     return channels
 
 
+#: Assumed when ``models.json`` predates the orientation key, and what every released model was
+#: in fact trained on.
+FALLBACK_ORIENTATION: str = "LPS"
+
+
+def orientation_of(image) -> str:
+    """The image's anatomical orientation as a DICOM code, e.g. ``LPS``."""
+    return sitk.DICOMOrientImageFilter_GetOrientationFromDirectionCosines(image.GetDirection())
+
+
+def to_model_orientation(image, target: str):
+    """Reorient *image* into the orientation the model was trained in.
+
+    nnU-Net does not do this. Its reader records the direction cosines, hands the array to the
+    network in whatever voxel order the file happens to use, and restores the direction on
+    write -- so a volume that is RAS where the training data was LPS reaches the network
+    transposed and mirrored, and comes back a confident, wrong segmentation rather than an error.
+
+    ``DICOMOrient`` only permutes and flips axes. There is no interpolation, so this is exact
+    both ways and safe for the label map on the return trip.
+
+    Returns
+    -------
+    tuple
+        ``(reoriented_image, original_code)``. When the image is already in *target* the original
+        is returned untouched, which is the case for every volume the release ships.
+    """
+    source = orientation_of(image)
+    if source == target:
+        return image, source
+    log(f"reorienting {source} -> {target} for the model "
+        f"(restored to {source} before writing)")
+    return sitk.DICOMOrient(image, target), source
+
+
 def build_predictor(model_dir: Path, entry: dict[str, Any]):
     """Load one modality's ensemble. Built once per modality, reused for every case of it.
 
@@ -623,10 +658,14 @@ def main() -> int:
             f"cases={len(group)}")
         predictor = build_predictor(model_dir, entry)
 
+        target = entry.get("orientation") or FALLBACK_ORIENTATION
         for path, _ in group:
             log(f"case {path.name} ({modality.upper()})")
-            image = sitk.ReadImage(str(path))
-            original_size = image.GetSize()
+            original = sitk.ReadImage(str(path))
+            original_size = original.GetSize()
+            # Into the model's orientation, and back again after post-processing. A no-op for the
+            # LPS volumes the release ships, so nothing changes for a case already in it.
+            image, source_code = to_model_orientation(original, target)
             array = sitk.GetArrayFromImage(image).astype(np.float32)
             cleaned = segment(
                 image, array, predictor=predictor, entry=entry, model_dir=model_dir,
@@ -635,6 +674,8 @@ def main() -> int:
 
             output = sitk.GetImageFromArray(cleaned)
             output.CopyInformation(image)
+            if source_code != target:
+                output = sitk.DICOMOrient(output, source_code)
             if output.GetSize() != original_size:
                 raise RuntimeError(
                     f"Output size {output.GetSize()} != input size {original_size}; the "

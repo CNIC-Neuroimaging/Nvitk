@@ -30,6 +30,13 @@ comparison computed — not only the ones that fit on the figure — and both ba
 the same way in Python rather than each engine's own default, so a bracket means the same thing
 whichever engine drew it. Holm rather than Tukey because it needs no distributional assumption
 about the set, and it is valid for the unbalanced, covariate-adjusted comparisons these are.
+
+What counts as "the set" is the family the figure is read in. With a ``by`` — one series or one
+panel per level of a second factor — each level is corrected on its own, which is also
+``emmeans``' convention for a ``by`` specification. Pooling them instead makes seventeen
+territories a single family of 102 tests, and a real effect at raw p = 0.003 comes out at 0.30:
+every bracket reads NS and nothing is drawn, which says far more about the denominator than about
+the data.
 """
 
 from __future__ import annotations
@@ -46,6 +53,23 @@ import pandas as pd
 from nvitk.core.logger import Logger
 
 log = Logger()
+
+#: Whether the p-values a bracket shows are corrected for multiplicity.
+ADJUST_HOLM = "holm"
+ADJUST_NONE = "none"
+
+#: What a bracket between two levels is testing — the simple effect inside a series, or the
+#: difference-in-differences against the reference series, which is what an interaction term is.
+BASIS_WITHIN = "within"
+#: One bracket per interaction row of the coefficient table — pairs against the factor's own
+#: reference, which is what an interaction *term* contrasts.
+BASIS_INTERACTION = "interaction"
+#: The same difference-in-differences over *every* pair of levels. A g1-versus-g2 bracket is then
+#: the difference of two interaction coefficients: a real contrast, and one no table row carries.
+BASIS_INTERACTION_ALL = "interaction_all"
+
+#: Both bases that measure against the reference series.
+INTERACTION_BASES = frozenset({BASIS_INTERACTION, BASIS_INTERACTION_ALL})
 
 #: Columns every backend returns, in order.
 CONTRAST_COLUMNS: tuple[str, ...] = (
@@ -114,7 +138,16 @@ def _frame(rows: list[dict[str, Any]]) -> pd.DataFrame:
     if "by" not in out.columns:
         out["by"] = ""
     out["by"] = out["by"].astype(str)
-    out["p_adj"] = holm(out["p_value"])
+    # Corrected within each ``by`` level, not across the whole set. That is what ``emmeans`` does
+    # with a ``by`` specification, and it is how the figure is read: a series' brackets are a
+    # family of their own, drawn over its own curve. Across the set instead, seventeen
+    # territories make one family of 102 tests — where a real effect at raw p = 0.003 adjusts to
+    # 0.30, every bracket reads NS, and "significant only" draws nothing at all.
+    grouped = out["by"].astype(bool).any()
+    out["p_adj"] = (
+        out.groupby("by", sort=False)["p_value"].transform(lambda s: holm(s.to_numpy()))
+        if grouped else holm(out["p_value"])
+    )
     out["stars"] = _stars(out["p_adj"])
     for column in CONTRAST_COLUMNS:
         if column not in out.columns:
@@ -136,6 +169,9 @@ def _statsmodels_contrasts(
     covariate_refs: Mapping[str, Any],
     by: str = "",
     by_levels: Sequence[str] = (),
+    basis: str = BASIS_WITHIN,
+    reference: str = "",
+    factor_reference: str = "",
 ) -> pd.DataFrame:
     """
     Every pair of *levels*, as differences of design-matrix rows at *covariate_refs*.
@@ -189,11 +225,27 @@ def _statsmodels_contrasts(
     rows: list[dict[str, Any]] = []
     groups = [str(g) for g in by_levels] if by else [""]
     width = len(levels)
+    # The reference block's rows, for the difference-in-differences: an interaction contrast is
+    # this series' (a − b) minus the reference series' (a − b), which is exactly what the
+    # coefficient table's interaction row reports.
+    baseline = (
+        groups.index(reference) * width
+        if basis in INTERACTION_BASES and reference in groups else None
+    )
     for block, group in enumerate(groups):
         offset = block * width
         for i in range(width):
             for j in range(i + 1, width):
+                if factor_reference and factor_reference not in {
+                    str(levels[i]), str(levels[j])
+                }:
+                    # An interaction *term* contrasts a level against the factor's reference.
+                    # Any other pair is the difference of two of them — a real contrast, but not
+                    # one the coefficient table prints, so not one this basis claims to show.
+                    continue
                 contrast = rows_design[offset + i] - rows_design[offset + j]
+                if baseline is not None:
+                    contrast = contrast - (rows_design[baseline + i] - rows_design[baseline + j])
                 estimate = float(contrast @ beta)
                 variance = float(contrast @ vcov @ contrast)
                 se = float(np.sqrt(variance)) if variance > 0 else np.nan
@@ -242,11 +294,35 @@ _R_PAIRS_HELPER = """
 }
 """
 
+#: The difference-in-differences form. ``interaction = "pairwise"`` gives every pair of *factor*
+#: crossed with every pair of *by*; the rows wanted are the ones whose ``by`` pair involves the
+#: reference level, which is what the coefficient table's interaction rows report.
+_R_PAIRS_INTERACTION_HELPER = """
+.nvitk_pairs_interaction <- function(model, factor_name, by_name) {
+  suppressMessages(try(emmeans::emm_options(lmer.df = "satterthwaite"), silent = TRUE))
+  spec <- stats::as.formula(paste("~", factor_name, "*", by_name))
+  em <- emmeans::emmeans(model, specs = spec)
+  out <- as.data.frame(summary(
+    emmeans::contrast(em, interaction = c("pairwise", "pairwise"), adjust = "none")))
+  nm <- names(out)
+  names(out)[nm == paste0(factor_name, "_pairwise")] <- ".contrast"
+  names(out)[nm == paste0(by_name, "_pairwise")] <- ".by_contrast"
+  out
+}
+"""
+
 _PAIRS_HELPER_LOADED = False
 
 
 def _r_contrasts(
-    model: Any, *, factor: str, levels: Sequence[str], by: str = ""
+    model: Any,
+    *,
+    factor: str,
+    levels: Sequence[str],
+    by: str = "",
+    basis: str = BASIS_WITHIN,
+    reference: str = "",
+    factor_reference: str = "",
 ) -> pd.DataFrame:
     """Every pair of *levels* from ``emmeans``, restricted to the levels being drawn.
 
@@ -259,7 +335,14 @@ def _r_contrasts(
 
     if not _PAIRS_HELPER_LOADED:
         R_(_R_PAIRS_HELPER)
+        R_(_R_PAIRS_INTERACTION_HELPER)
         _PAIRS_HELPER_LOADED = True
+
+    if basis in INTERACTION_BASES:
+        return _r_interaction_contrasts(
+            model, factor=factor, levels=levels, by=by, reference=reference,
+            factor_reference=factor_reference,
+        )
 
     try:
         with localconverter(default_converter + pandas2ri.converter):
@@ -277,7 +360,7 @@ def _r_contrasts(
         )
         from .r_basis import linear_pairs
 
-        table = linear_pairs(model, factor, by=by)
+        table = linear_pairs(model, factor, by=by, reference="", factor_reference="")
 
     # emmeans names the comparison column "contrast" and spells a pair "LICA - RICA"; levels
     # holding a "-" are re-split on the separator emmeans actually uses, " - ".
@@ -303,6 +386,72 @@ def _r_contrasts(
     return _frame(rows)
 
 
+def _r_interaction_contrasts(
+    model: Any,
+    *,
+    factor: str,
+    levels: Sequence[str],
+    by: str,
+    reference: str,
+    factor_reference: str = "",
+) -> pd.DataFrame:
+    """
+    Difference-in-differences against *reference*, from ``emmeans``' interaction contrasts.
+
+    ``emmeans`` returns every pair of *factor* crossed with every pair of *by*; only the rows
+    whose ``by`` pair involves the reference level are an interaction *coefficient*. Which side
+    of that pair the reference falls on decides the sign — ``BASILAR - RICA`` is the negative of
+    the row the table prints for RICA.
+    """
+    from rpy2.robjects import default_converter, globalenv, pandas2ri
+    from rpy2.robjects.conversion import localconverter
+
+    try:
+        with localconverter(default_converter + pandas2ri.converter):
+            table = pd.DataFrame(
+                globalenv[".nvitk_pairs_interaction"](model, str(factor), str(by))
+            )
+    except Exception as exc:
+        log.debug(
+            "emmeans declined the interaction contrast (%s); using the design-matrix basis.",
+            str(exc).strip().splitlines()[0] if str(exc).strip() else exc,
+            exc_info=True,
+        )
+        from .r_basis import linear_pairs
+
+        table = linear_pairs(
+            model, factor, by=by, reference=reference, factor_reference=factor_reference
+        )
+
+    wanted = {str(level) for level in levels}
+    rows: list[dict[str, Any]] = []
+    for _index, row in table.iterrows():
+        pair = str(row.get(".contrast", "")).split(" - ")
+        groups = str(row.get(".by_contrast", "")).split(" - ")
+        if len(pair) != 2 or len(groups) != 2:
+            continue
+        a, b = pair[0].strip(), pair[1].strip()
+        left, right = groups[0].strip(), groups[1].strip()
+        if a not in wanted or b not in wanted or reference not in {left, right}:
+            continue
+        if factor_reference and factor_reference not in {a, b}:
+            continue
+        group = right if left == reference else left
+        # Oriented so the estimate is this series minus the reference series, matching the sign
+        # the coefficient table prints.
+        sign = -1.0 if left == reference else 1.0
+        statistic = _first(row, ("t.ratio", "z.ratio", "statistic"))
+        rows.append({
+            "by": group, "a": a, "b": b,
+            "estimate": sign * _first(row, ("estimate",)),
+            "se": _first(row, ("SE", "std.error")),
+            "statistic": sign * statistic,
+            "df": _first(row, ("df",)),
+            "p_value": _first(row, ("p.value", "p_value")),
+        })
+    return _frame(rows)
+
+
 def _first(row: Any, names: Sequence[str]) -> float:
     """The first of *names* present in *row*, as a float, or NaN."""
     for name in names:
@@ -312,6 +461,33 @@ def _first(row: Any, names: Sequence[str]) -> float:
             except (TypeError, ValueError):
                 continue
     return float("nan")
+
+
+def reference_level(result: Any, df: pd.DataFrame, column: str) -> str:
+    """
+    The level of *column* the model contrasts everything else against.
+
+    Found by elimination rather than by guessing at the sort order: every level with a
+    coefficient of its own is not the reference, so the one left over is. That is exactly the
+    level the coefficient table is silent about, which is what makes an interaction contrast
+    computed here line up with the interaction row the table shows.
+    """
+    from ._model_values import term_parts
+
+    if column not in df.columns:
+        return ""
+    levels = [str(v) for v in pd.unique(df[column].dropna().astype(str))]
+    named: set[str] = set()
+    for term in fixed_effect_terms(result):
+        for part in term_parts(term):
+            name = str(part)
+            if name.startswith(f"{column}[") :
+                inner = name[name.index("[") + 1: -1]
+                named.add(inner[2:] if inner.startswith("T.") else inner)
+            elif name.startswith(column) and name[len(column):] in set(levels):
+                named.add(name[len(column):])
+    missing = [level for level in levels if level not in named]
+    return missing[0] if len(missing) == 1 else ""
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -379,6 +555,8 @@ def pairwise_contrasts(
     covariate_refs: Mapping[str, Any] | None = None,
     by: str = "",
     by_levels: Sequence[str] | None = None,
+    basis: str = BASIS_WITHIN,
+    adjust: str = ADJUST_HOLM,
 ) -> pd.DataFrame:
     """
     Every level-versus-level comparison of *factor*, Holm-adjusted and starred.
@@ -401,6 +579,31 @@ def pairwise_contrasts(
         have to be the comparison inside that series.
     by_levels : sequence of str, optional
         Restrict *by* to these levels. Defaults to every level present in *df*.
+    adjust : {"holm", "none"}
+        Whether to correct for multiplicity. ``holm`` is the default and the responsible one.
+        ``none`` reports the raw p of each comparison, which is what a coefficient *table* shows
+        — a regression table corrects nothing — so it is the setting that makes a figure and a
+        table agree. An uncorrected bracket is a real result about one comparison; it is only
+        misleading if read as though the whole figure had been tested at that level.
+    basis : {"within", "interaction", "interaction_all"}
+        What a comparison between two levels is testing.
+
+        ``within``
+            The simple effect inside each ``by`` level — "does g1 differ from g0 *in RICA*",
+            over every pair of levels.
+        ``interaction``
+            The difference-in-differences against the reference ``by`` level — "does the g0→g1
+            effect differ *between RICA and the reference territory*", which is the quantity the
+            coefficient table's ``plaque[g1]:territory[RICA]`` row reports. Restricted to pairs
+            against the *factor's* own reference, so there is one comparison per interaction row
+            of the table and no more.
+        ``interaction_all``
+            The same quantity over every pair. A g1-versus-g2 comparison is then the difference
+            of two interaction coefficients — a real contrast, but one no table row carries, so
+            it cannot be checked against the table.
+
+        The last two need a ``by``, and the reference level itself gets no comparisons: it is the
+        baseline they are measured from.
 
     Returns
     -------
@@ -446,18 +649,67 @@ def pairwise_contrasts(
         if not groups:
             raise ValueError(f"{by!r} has no levels to compare within.")
 
+    basis = str(basis or BASIS_WITHIN)
+    reference = ""
+    factor_reference = ""
+    if basis in INTERACTION_BASES:
+        if not by:
+            raise ValueError(
+                "An interaction contrast needs a second factor to compare against — this plot "
+                "has only one grouping, so there is no interaction to test."
+            )
+        reference = reference_level(result, df, by)
+        # The factor's own reference too: an interaction term is a level against *that*, so this
+        # is what makes the brackets one-for-one with the table's interaction rows. Left empty
+        # for the all-pairs basis, which deliberately goes beyond them.
+        factor_reference = (
+            reference_level(result, df, factor) if basis == BASIS_INTERACTION else ""
+        )
+        if not reference:
+            raise ValueError(
+                f"Could not identify {by!r}'s reference level, so there is nothing to measure an "
+                "interaction contrast against."
+            )
+        # Every level is contrasted against the reference, so the reference's own comparisons are
+        # identically zero. Dropped rather than drawn as a row of NS brackets that mean nothing.
+        groups = [g for g in groups if g != reference]
+        if not groups:
+            raise ValueError(
+                f"{by!r} has only its reference level {reference!r} selected — an interaction "
+                "contrast needs at least one level to compare against it."
+            )
+
     if hasattr(result, "cov_params") and hasattr(getattr(result, "model", None), "data"):
         out = _statsmodels_contrasts(
             result, df, factor=factor, levels=order,
-            covariate_refs=covariate_refs or {}, by=by, by_levels=groups,
+            covariate_refs=covariate_refs or {},
+            by=by, by_levels=([reference] + groups if reference else groups),
+            basis=basis, reference=reference, factor_reference=factor_reference,
         )
+        if reference:
+            out = out.loc[out["by"] != reference].reset_index(drop=True)
+            out = _frame(out.to_dict("records"))
     else:
-        out = _r_contrasts(_r_object(result), factor=factor, levels=order, by=by)
+        out = _r_contrasts(
+            _r_object(result), factor=factor, levels=order, by=by,
+            basis=basis, reference=reference, factor_reference=factor_reference,
+        )
         if by and groups:
             out = out.loc[out["by"].isin(set(groups))].reset_index(drop=True)
     # Carried on the frame so the caller can say why the brackets are not per-series without
     # having to re-derive the reason.
+    if str(adjust) == ADJUST_NONE:
+        # Re-stated rather than re-derived: the backends always Holm-adjust on the way out, so
+        # this puts the raw p back in the column everything downstream reads — the brackets, the
+        # cap's ordering and the "significant only" filter all key on ``p_adj``.
+        out["p_adj"] = out["p_value"]
+        out["stars"] = _stars(out["p_adj"])
+        out = out.sort_values("p_adj", na_position="last", kind="stable").reset_index(drop=True)
+
     out.attrs["dropped_by"] = dropped_by
+    # The baseline the interaction contrasts were measured from, for the figure to name.
+    out.attrs["reference"] = reference
+    out.attrs["adjust"] = str(adjust)
     return out
 
 
@@ -839,7 +1091,13 @@ def contrast_note(drawn: int, omitted: int, mode: str) -> str:
 
 
 __all__ = [
+    "ADJUST_HOLM",
+    "ADJUST_NONE",
     "ALPHA",
+    "BASIS_INTERACTION",
+    "BASIS_INTERACTION_ALL",
+    "BASIS_WITHIN",
+    "INTERACTION_BASES",
     "CONTRAST_COLUMNS",
     "MAX_BRACKETS",
     "MODE_ALL",
@@ -859,5 +1117,6 @@ __all__ = [
     "holm",
     "level_positions",
     "pairwise_contrasts",
+    "reference_level",
     "series_colours",
 ]

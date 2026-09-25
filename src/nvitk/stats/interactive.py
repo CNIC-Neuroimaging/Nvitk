@@ -40,7 +40,7 @@ import pandas as pd
 
 from nvitk.core.logger import Logger
 
-from .group_counts import displayed_counts, level_strings
+from .group_counts import displayed_counts, level_strings, ordered_levels
 
 log = Logger()
 
@@ -89,6 +89,8 @@ def column_panel_figure(
     hover_columns: Sequence[str] = (),
     excluded_mask: Any = None,
     show_excluded: bool = True,
+    panel_order: Sequence[str] | None = None,
+    level_order: Sequence[str] | None = None,
     anatomical: bool = False,
     title: str = "",
     n_cols: int = 2,
@@ -120,11 +122,16 @@ def column_panel_figure(
 
     levels = [str(v) for v in pd.unique(frame[facet_by].dropna().astype(str))]
     if anatomical:
+        # The anatomical grouping pools levels into named panels of its own, so a per-level order
+        # has nothing to arrange there.
         groups = resolve_panels(levels, column=facet_by)
     else:
         from .region_groups import natural_level_key
 
-        groups = {level: [level] for level in sorted(levels, key=natural_level_key)}
+        groups = {
+            level: [level]
+            for level in ordered_levels(sorted(levels, key=natural_level_key), panel_order)
+        }
 
     mask = (
         pd.Series(np.asarray(excluded_mask, dtype=bool), index=frame.index)
@@ -145,7 +152,8 @@ def column_panel_figure(
         heading = f"{name}  ({size[0].suffix()})" if size else name
         panels[heading] = column_plot(
             subset, column, kind=kind, group=group, hover_columns=hover_columns,
-            excluded_mask=panel_mask, show_excluded=show_excluded, title="",
+            excluded_mask=panel_mask, show_excluded=show_excluded,
+            level_order=level_order, title="",
         )
     if not panels:
         raise ValueError(f"No rows in any {facet_by!r} panel.")
@@ -566,6 +574,7 @@ def column_plot(
     hover_columns: Sequence[str] = (),
     excluded_mask: Any = None,
     show_excluded: bool = True,
+    level_order: Sequence[str] | None = None,
     title: str = "",
     height: int = 560,
 ) -> Any:
@@ -604,7 +613,9 @@ def column_plot(
         pd.api.types.is_numeric_dtype(work[column])
     )
     if categorical:
-        return _category_counts(work, column, group=group, title=title, height=height)
+        return _category_counts(
+            work, column, group=group, title=title, height=height, level_order=level_order
+        )
 
     values = pd.to_numeric(work[column], errors="coerce")
     work = work.assign(**{column: values}).dropna(subset=[column])
@@ -617,7 +628,7 @@ def column_plot(
         # string form, and a numerically coded factor has to spell it the same way in each.
         work[group] = level_strings(work[group])
     levels = (
-        [str(v) for v in pd.unique(work[group].dropna())]
+        ordered_levels([str(v) for v in pd.unique(work[group].dropna())], level_order)
         if group and group in work.columns else [""]
     )
     colours = palette_for(levels)
@@ -799,37 +810,62 @@ def _summary_text(values: pd.Series, excluded: pd.Series) -> str:
 
 
 def _category_counts(
-    frame: pd.DataFrame, column: str, *, group: str, title: str, height: int
+    frame: pd.DataFrame,
+    column: str,
+    *,
+    group: str,
+    title: str,
+    height: int,
+    level_order: Sequence[str] | None = None,
 ) -> Any:
     """Counts per level, for a column a distribution plot is not defined on."""
     import plotly.graph_objects as go
 
+    from .distribution_plots import base_levels
+
+    work = frame.copy()
+    # Same rule as the static counts, and the same ordering trap: both base orders are read
+    # before either cast, because on a counts plot of the split column itself they are the same
+    # column and a cast would take its categories away.
+    grouped = bool(group) and group in work.columns
+    x_levels = ordered_levels(base_levels(work[column]), level_order)
+    levels = ordered_levels(base_levels(work[group]), level_order) if grouped else []
+    work[column] = level_strings(work[column])
+
     figure = go.Figure()
-    if group and group in frame.columns:
-        levels = [str(v) for v in pd.unique(frame[group].dropna().astype(str))]
+    if grouped:
+        work[group] = level_strings(work[group])
         colours = palette_for(levels)
         sizes = {
-            c.level: c for c in displayed_counts(frame, column, group=group, levels=levels)
+            c.level: c for c in displayed_counts(work, column, group=group, levels=levels)
         }
         for level in levels:
-            counts = frame.loc[frame[group].astype(str) == level, column].astype(str).value_counts()
+            counts = work.loc[work[group] == level, column].value_counts()
+            # Reindexed rather than taken as value_counts orders it, so every series lines up on
+            # the same categories and a level absent from one of them still holds its slot.
+            counts = counts.reindex(x_levels, fill_value=0)
             size = sizes.get(level)
             figure.add_trace(go.Bar(
-                x=counts.index.tolist(), y=counts.to_numpy(),
+                x=list(counts.index), y=counts.to_numpy(),
                 name=size.label(separator=" ") if size else level,
                 marker_color=colours[level], opacity=0.85,
                 hovertemplate=f"<b>{level}</b><br>{column}: %{{x}}<br>count: %{{y}}<extra></extra>",
             ))
     else:
-        counts = frame[column].astype(str).value_counts()
+        counts = work[column].value_counts().reindex(x_levels, fill_value=0)
         figure.add_trace(go.Bar(
-            x=counts.index.tolist(), y=counts.to_numpy(), name=column,
+            x=list(counts.index), y=counts.to_numpy(), name=column,
             marker_color=PALETTE[0], opacity=0.85,
             hovertemplate=f"{column}: %{{x}}<br>count: %{{y}}<extra></extra>",
         ))
     figure.update_layout(
         title={"text": title or f"{column} — counts", "x": 0.5, "xanchor": "center"},
-        xaxis={"title": column, "gridcolor": "#E6E6E6"},
+        # Plotly sorts a categorical axis by first appearance otherwise, which would undo the
+        # order the bars were just built in.
+        xaxis={
+            "title": column, "gridcolor": "#E6E6E6",
+            "categoryorder": "array", "categoryarray": x_levels,
+        },
         yaxis={"title": "count", "gridcolor": "#E6E6E6"},
         barmode="group", plot_bgcolor="white", paper_bgcolor="white", height=height,
         margin={"l": 70, "r": 30, "t": 70, "b": 60},

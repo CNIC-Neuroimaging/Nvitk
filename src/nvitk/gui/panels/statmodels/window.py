@@ -89,6 +89,12 @@ from nvitk.stats.r_gam import (
     plot_mrf_graph,
 )
 from nvitk.stats.pairwise import (
+    ADJUST_HOLM as PAIRWISE_HOLM,
+    ADJUST_NONE as PAIRWISE_RAW,
+    BASIS_INTERACTION as PAIRWISE_INTERACTION,
+    BASIS_INTERACTION_ALL as PAIRWISE_INTERACTION_ALL,
+    INTERACTION_BASES as PAIRWISE_INTERACTION_BASES,
+    BASIS_WITHIN as PAIRWISE_WITHIN,
     MODE_ALL as PAIRWISE_ALL,
     MODE_SIGNIFICANT as PAIRWISE_SIGNIFICANT,
     annotate_axes as annotate_significance_axes,
@@ -1412,7 +1418,9 @@ class StatmodelsWindow(QMainWindow):
             "“is LICA different from RICA” is the question a grouped plot is read for, and the "
             "coefficient table does not answer it.\n"
             "p-values are Holm-adjusted across the comparisons computed, so the correction "
-            "follows the levels actually shown.\n"
+            "follows the levels actually shown — and within each series rather than across "
+            "them, since a curve's brackets are a family of their own. Pooling seventeen "
+            "territories into one family of 102 tests is what turns a real effect into NS.\n"
             "Needs a categorical x axis — a continuous plot has no levels to span."
         )
         self._signif_mode = QComboBox()
@@ -1425,7 +1433,45 @@ class StatmodelsWindow(QMainWindow):
             "reported in the status line rather than stacked over the data."
         )
         self._signif_mode.setVisible(False)
-        self._show_signif.toggled.connect(self._signif_mode.setVisible)
+
+        # What a bracket is testing, which is a different axis from how many are drawn. The two
+        # are genuinely different questions and a model with an interaction answers them
+        # differently — which is the whole reason the choice exists.
+        self._signif_basis = QComboBox()
+        self._signif_basis.addItem("within series", PAIRWISE_WITHIN)
+        self._signif_basis.addItem("interaction (table rows)", PAIRWISE_INTERACTION)
+        self._signif_basis.addItem("interaction (all pairs)", PAIRWISE_INTERACTION_ALL)
+        self._signif_basis.setToolTip(
+            "within series — the simple effect inside each curve: “does g1 differ from g0 in "
+            "RICA”, over every pair.\n\n"
+            "interaction (table rows) — the difference-in-differences against the reference "
+            "series: “does the g0→g1 change in RICA differ from the reference territory's”. "
+            "That is what the coefficient table's plaque[g1]:territory[RICA] row reports, and "
+            "this draws one bracket per such row and no more.\n\n"
+            "interaction (all pairs) — the same quantity over every pair. A g1–g2 bracket is "
+            "then the difference of two interaction coefficients: a real contrast, but one no "
+            "table row carries, so it cannot be checked against the table.\n\n"
+            "Both interaction bases leave the reference series blank — it is the baseline the "
+            "others are measured from."
+        )
+        self._signif_basis.setVisible(False)
+
+        self._signif_adjust = QComboBox()
+        self._signif_adjust.addItem("Holm", PAIRWISE_HOLM)
+        self._signif_adjust.addItem("raw p", PAIRWISE_RAW)
+        self._signif_adjust.setToolTip(
+            "Holm — corrected for multiplicity within each series. The responsible default: six "
+            "comparisons per territory means a raw p of 0.0145 becomes 0.087.\n\n"
+            "raw p — no correction, which is what a coefficient *table* reports: a regression "
+            "table corrects nothing. Pick this to make the figure and the table agree.\n"
+            "An uncorrected bracket is a real result about one comparison. It only misleads if "
+            "read as though every comparison on the figure had been tested at that level."
+        )
+        self._signif_adjust.setVisible(False)
+        # Not ``widget``: that name holds this row's FlowRow, and rebinding it here returned the
+        # combo instead, letting the row be garbage-collected out from under its own layout.
+        for dependent in (self._signif_mode, self._signif_basis, self._signif_adjust):
+            self._show_signif.toggled.connect(dependent.setVisible)
 
         self._plot_display_label = QLabel("Display")
         lay.addWidget(self._plot_display_label)
@@ -1440,6 +1486,8 @@ class StatmodelsWindow(QMainWindow):
         lay.addWidget(self._show_ci)
         lay.addWidget(self._show_signif)
         lay.addWidget(self._signif_mode)
+        lay.addWidget(self._signif_basis)
+        lay.addWidget(self._signif_adjust)
         return widget
 
     def _build_map_options(self) -> QWidget:
@@ -1598,6 +1646,8 @@ class StatmodelsWindow(QMainWindow):
         self._show_ci.stateChanged.connect(lambda *_: self._on_plot())
         self._show_signif.stateChanged.connect(lambda *_: self._on_plot())
         self._signif_mode.currentIndexChanged.connect(lambda *_: self._on_plot())
+        self._signif_basis.currentIndexChanged.connect(lambda *_: self._on_plot())
+        self._signif_adjust.currentIndexChanged.connect(lambda *_: self._on_plot())
         self._plot.optionsChanged.connect(self._on_plot)
         self._mediation_plot.currentIndexChanged.connect(lambda *_: self._sync_display_enabled())
         # Re-gate the option row too, not just the plot: the voxelwise controls differ per figure
@@ -4167,6 +4217,8 @@ class StatmodelsWindow(QMainWindow):
             return ""
 
         mode = str(self._signif_mode.currentData() or PAIRWISE_ALL)
+        basis = str(self._signif_basis.currentData() or PAIRWISE_WITHIN)
+        adjust = str(self._signif_adjust.currentData() or PAIRWISE_HOLM)
         try:
             contrasts = pairwise_contrasts(
                 self._last_result,
@@ -4176,6 +4228,8 @@ class StatmodelsWindow(QMainWindow):
                 covariate_refs=covariate_refs,
                 by=by,
                 by_levels=by_levels,
+                basis=basis,
+                adjust=adjust,
             )
         except Exception as exc:
             log.debug("Pairwise contrasts failed for %r", factor, exc_info=True)
@@ -4206,9 +4260,22 @@ class StatmodelsWindow(QMainWindow):
         # saying so is the difference between a capped figure and a misleading one.
         wanted = len(eligible_contrasts(contrasts, mode))
         note = contrast_note(drawn, max(0, wanted - drawn), mode)
+        if drawn and adjust == PAIRWISE_RAW:
+            # Said plainly, because an uncorrected figure and a corrected one look identical.
+            note = note.replace("Holm-adjusted", "uncorrected (raw p, as the coefficient table)")
         # The colouring column had no fixed effect to split the comparison by — a random-effects
         # grouping factor, or simply not in the formula. The brackets that did get drawn are
         # correct; what they are not is per-series, and the reader has to be told which.
+        if basis in PAIRWISE_INTERACTION_BASES and drawn:
+            baseline = str(contrasts.attrs.get("reference") or "")
+            scope = (
+                "one per coefficient-table row"
+                if basis == PAIRWISE_INTERACTION else "every level pair, beyond the table's rows"
+            )
+            note += (
+                f"  Interaction contrasts against {baseline or 'the reference series'} "
+                f"({scope}), which therefore carries none of its own."
+            )
         skipped = str(contrasts.attrs.get("dropped_by") or "")
         if skipped and drawn:
             note += (
@@ -5805,6 +5872,8 @@ class StatmodelsWindow(QMainWindow):
             "show_ci": self._show_ci.isChecked(),
             "show_significance": self._show_signif.isChecked(),
             "significance_mode": str(self._signif_mode.currentData() or PAIRWISE_ALL),
+            "significance_basis": str(self._signif_basis.currentData() or PAIRWISE_WITHIN),
+            "significance_adjust": str(self._signif_adjust.currentData() or PAIRWISE_HOLM),
             "show_legend": self._plot.show_legend(),
             "plot_groups": self._plot.checked_levels(),
             "layout_state": self._encoded_dock_state(),
@@ -6034,6 +6103,12 @@ class StatmodelsWindow(QMainWindow):
         signif_mode = self._signif_mode.findData(str(cfg.get("significance_mode") or ""))
         if signif_mode >= 0:
             self._signif_mode.setCurrentIndex(signif_mode)
+        signif_basis = self._signif_basis.findData(str(cfg.get("significance_basis") or ""))
+        if signif_basis >= 0:
+            self._signif_basis.setCurrentIndex(signif_basis)
+        signif_adjust = self._signif_adjust.findData(str(cfg.get("significance_adjust") or ""))
+        if signif_adjust >= 0:
+            self._signif_adjust.setCurrentIndex(signif_adjust)
         if "show_legend" in cfg:
             self._plot.set_show_legend(bool(cfg["show_legend"]))
         self._pending_plot_groups = cfg.get("plot_groups")

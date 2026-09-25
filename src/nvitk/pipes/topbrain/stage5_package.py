@@ -106,6 +106,19 @@ CHECKPOINT_KEEP_KEYS: tuple[str, ...] = (
 #: Name of the per-modality model map written into the build context.
 MODELS_CONFIG_NAME: str = "models.json"
 
+#: Anatomical orientation the models were trained in, as a DICOM orientation code.
+#:
+#: nnU-Net does **not** reorient: its SimpleITK reader records the direction cosines, hands the
+#: array to the network in the file's own voxel order, and restores the direction on write. So
+#: the orientation the training data happened to be in is part of the model's contract, and an
+#: inference volume in any other one is fed to the network transposed or mirrored -- which
+#: produces a plausible-looking wrong segmentation, not an error.
+#:
+#: Measured, not assumed: all 50 volumes of the ToPBrain release and every image in
+#: ``Dataset507``/``Dataset508`` are LPS. Override with ``--orientation`` if a future model is
+#: trained on something else.
+DEFAULT_ORIENTATION: str = "LPS"
+
 #: Where the weights ride.
 #:
 #: ``baked``    inside the image, under ``/opt/algorithm/model``. Self-contained, and what keeps
@@ -499,6 +512,7 @@ def _assemble_context(
     slim: bool = True,
     weights: str = "baked",
     base_image: str | None = None,
+    orientation: str = DEFAULT_ORIENTATION,
     ct_window: Sequence[float] | None = None,
     ct_context_window: Sequence[float] | None = None,
     mr_percentiles: Sequence[float] | None = None,
@@ -618,6 +632,7 @@ def _assemble_context(
                 "channels": model.channels,
                 "label_set": model.label_set,
                 "folds": model.copied_folds,
+                "orientation": orientation,
                 **harmonisation_for(
                     socket_modality, model.channels,
                     ct_window=ct_window, ct_context_window=ct_context_window,
@@ -730,6 +745,7 @@ def run_package(
     slim: bool = True,
     weights: str = "baked",
     base_image: str | None = None,
+    orientation: str = DEFAULT_ORIENTATION,
     ct_window: Sequence[float] | None = None,
     ct_context_window: Sequence[float] | None = None,
     mr_percentiles: Sequence[float] | None = None,
@@ -779,7 +795,7 @@ def run_package(
 
     shared = dict(
         results_root=results_root, slim=slim, weights=weights, base_image=base_image,
-        ct_window=ct_window,
+        orientation=orientation, ct_window=ct_window,
         ct_context_window=ct_context_window, mr_percentiles=mr_percentiles,
         mr_context_percentiles=mr_context_percentiles, tag=tag, build=build, save=save,
         postprocess=postprocess, min_volume_mm3=min_volume_mm3,
@@ -958,6 +974,7 @@ def _worker_argv(
     folds: Sequence[int | str] | None, checkpoint: str | None, name: str, tag: str,
     build: bool, save: bool, backend: str, layout: str = "split",
     weights: str = "baked", base_image: str | None = None,
+    orientation: str = DEFAULT_ORIENTATION,
     ct_model: Path | None = None, mr_model: Path | None = None,
     ct_window: Sequence[float] | None = None,
     ct_context_window: Sequence[float] | None = None,
@@ -977,6 +994,7 @@ def _worker_argv(
         "--loss", quote_path(loss),
         "--layout", layout,
         "--weights", weights,
+        "--orientation", orientation,
         "--name", quote_path(name),
         "--tag", quote_path(tag),
     ]
@@ -1057,6 +1075,11 @@ def submit_sge(
               help="'baked' puts the weights in the image; 'tarball' writes them as a separate "
                    ".tar.gz that Grand Challenge extracts to /opt/ml/model/, keeping the image "
                    "small enough that the ensemble size stops mattering.")
+@click.option("--orientation", type=str, default=DEFAULT_ORIENTATION, show_default=True,
+              help="DICOM orientation code the models were trained in. The container reorients "
+                   "each input to it before predicting and restores the original for the output; "
+                   "nnU-Net itself never reorients, so a mismatch segments the wrong voxel order "
+                   "without erroring.")
 @click.option("--base-image", type=str, default=None,
               help="Override the Dockerfile's BASE_IMAGE. Only used when this command builds; "
                    "a manual 'docker build' takes the Dockerfile default.")
@@ -1092,7 +1115,7 @@ def main(
     postprocess: str | None, min_volume_mm3: float,
     repair_gaps_mm: float | None, repair_close_radius: int, configuration_name: str | None,
     folds: str | None, layout: str, checkpoint: str | None, no_slim: bool,
-    weights: str, base_image: str | None,
+    weights: str, base_image: str | None, orientation: str,
     ct_window: tuple[float, float] | None, ct_context_window: tuple[float, float] | None,
     mr_percentiles: tuple[float, float] | None,
     mr_context_percentiles: tuple[float, float] | None,
@@ -1110,6 +1133,7 @@ def main(
         configuration_name=configuration_name,
         folds=parse_folds(folds) if folds else None, checkpoint=checkpoint,
         layout=layout, slim=not no_slim, weights=weights, base_image=base_image,
+        orientation=orientation,
         ct_window=ct_window or None, ct_context_window=ct_context_window or None,
         mr_percentiles=mr_percentiles or None,
         mr_context_percentiles=mr_context_percentiles or None,
@@ -1121,7 +1145,7 @@ def main(
 
 __all__ = [
     "CHECKPOINT_KEEP_KEYS", "CHECKPOINT_NAME", "CHECKPOINT_ORDER", "MODELS_CONFIG_NAME",
-    "LAYOUTS", "WEIGHT_MODES", "ModelSpec", "discover_folds", "resolve_checkpoint",
+    "DEFAULT_ORIENTATION", "LAYOUTS", "WEIGHT_MODES", "ModelSpec", "discover_folds", "resolve_checkpoint",
     "build_sge_command", "collect_model", "harmonisation_for", "main", "read_channels",
     "resolve_models", "resolve_run_dir", "run_package", "strip_checkpoint", "submit_sge",
 ]

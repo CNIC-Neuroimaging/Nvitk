@@ -40,7 +40,7 @@ from __future__ import annotations
 # ──────────────────────────────────────────────────────────────────────────────
 import shutil
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -707,6 +707,7 @@ def _lmrob_band(
     continuous: bool,
     fixed_formula: str,
     ci_level: float,
+    hold: Mapping[str, Any] | None = None,
 ) -> dict[str | None, pd.DataFrame] | None:
     """Confidence bands from ``emmeans``, in the shape the shared plotter consumes."""
     from .r_mixedlm import _emmeans_band
@@ -722,6 +723,9 @@ def _lmrob_band(
         continuous=continuous,
         fixed_formula=fixed_formula,
         ci_level=ci_level,
+        # Forwarded, not dropped: this is what keeps the band around the curve rather than
+        # parallel to it. See :func:`~nvitk.stats.r_mixedlm._emmeans_band`.
+        hold=hold,
         emmeans_fn=lmrob_emmeans,
     )
 

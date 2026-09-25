@@ -109,22 +109,33 @@ _R_BASIS_HELPER = """
   out
 }
 
-.nvitk_lm_pairs <- function(model, factor_name, by_name) {
+.nvitk_lm_pairs <- function(model, factor_name, by_name, reference, factor_reference) {
   sv <- if (nzchar(by_name)) c(factor_name, by_name) else factor_name
   bs <- .nvitk_lm_basis(model, sv, "", numeric(0))
   lab <- as.character(bs$labels[[factor_name]])
   grp <- if (nzchar(by_name)) as.character(bs$labels[[by_name]]) else rep("", length(lab))
+  # Difference-in-differences when a reference level is named: this series' (a - b) less the
+  # reference series' (a - b), which is what an interaction coefficient is.
+  ref_idx <- if (nzchar(reference)) which(grp == reference) else integer(0)
 
   rows <- list()
   # Within each by level, not across it: the comparison a per-series bracket claims is the
   # simple effect inside that series, which on an interaction model is not the averaged one.
   for (g in unique(grp)) {
+    if (length(ref_idx) && identical(g, reference)) next
     idx <- which(grp == g)
     k <- length(idx)
     if (k < 2) next
     for (ii in seq_len(k - 1)) for (jj in (ii + 1):k) {
       i <- idx[ii]; j <- idx[jj]
+      # An interaction term contrasts a level against the factor's own reference; any other
+      # pair is the difference of two of them, which the coefficient table does not print.
+      if (nzchar(factor_reference) &&
+          !(lab[i] == factor_reference || lab[j] == factor_reference)) next
       cv <- bs$X[i, ] - bs$X[j, ]
+      if (length(ref_idx)) {
+        cv <- cv - (bs$X[ref_idx[ii], ] - bs$X[ref_idx[jj], ])
+      }
       est <- sum(cv * bs$b)
       se <- sqrt(max(0, drop(t(cv) %*% bs$V %*% cv)))
       stat <- if (se > 0) est / se else NA_real_
@@ -133,8 +144,13 @@ _R_BASIS_HELPER = """
            else if (is.finite(dof) && dof > 0) 2 * stats::pt(abs(stat), dof, lower.tail = FALSE)
            else 2 * stats::pnorm(abs(stat), lower.tail = FALSE)
       rows[[length(rows) + 1]] <- data.frame(
-        .by = g, contrast = paste(lab[i], "-", lab[j]), estimate = est,
-        SE = se, df = dof, t.ratio = stat, p.value = p, stringsAsFactors = FALSE)
+        .by = g, contrast = paste(lab[i], "-", lab[j]),
+        # Named for both parsers: the plain path reads ``.by`` and ``contrast``, the interaction
+        # path reads ``.contrast`` and ``.by_contrast``.
+        .contrast = paste(lab[i], "-", lab[j]),
+        .by_contrast = if (nzchar(reference)) paste(g, "-", reference) else "",
+        estimate = est, SE = se, df = dof, t.ratio = stat, p.value = p,
+        stringsAsFactors = FALSE)
     }
   }
   if (!length(rows)) stop("fewer than two levels to compare")
@@ -195,17 +211,29 @@ def linear_emmeans(
     )
 
 
-def linear_pairs(model: Any, factor: str, *, by: str = "") -> pd.DataFrame:
+def linear_pairs(
+    model: Any,
+    factor: str,
+    *,
+    by: str = "",
+    reference: str = "",
+    factor_reference: str = "",
+) -> pd.DataFrame:
     """
     Every level-versus-level contrast of *factor*, shaped like ``emmeans::contrast``'.
 
     With *by*, the comparisons are formed within each of its levels and the level is returned in
-    a ``.by`` column, matching what the ``emmeans`` path renames its own by-column to.
+    a ``.by`` column, matching what the ``emmeans`` path renames its own by-column to. With
+    *reference* as well, each comparison becomes the difference-in-differences against that
+    level — an interaction contrast — and the reference's own rows are dropped, being zero by
+    construction.
 
     Unadjusted: the correction is applied in Python across the comparisons actually kept, so
     that every engine's brackets mean the same thing.
     """
-    return _call(".nvitk_lm_pairs", model, str(factor), str(by))
+    return _call(
+        ".nvitk_lm_pairs", model, str(factor), str(by), str(reference), str(factor_reference)
+    )
 
 
 __all__ = ["linear_emmeans", "linear_pairs"]
