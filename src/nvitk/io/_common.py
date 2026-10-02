@@ -165,6 +165,61 @@ def default_nifti_axes(ndim: int) -> str:
     return "".join(f"D{i}" for i in range(ndim))
 
 
+#: nibabel/NIfTI affines are RAS+; ITK (SimpleITK, MetaImage, NRRD) is LPS. The two differ by a
+#: sign flip on the first two world axes, and the matrix is its own inverse, so one constant
+#: serves both directions. Getting this wrong mirrors left against right without changing a
+#: single voxel -- which for a segmentation whose classes are lateralised is the worst kind of
+#: silent error, since the result still looks like an anatomically plausible mask.
+RAS_LPS_FLIP: Any = np.diag([-1.0, -1.0, 1.0, 1.0])
+
+
+def itk_geometry_from_affine(
+    affine: Any, axes: str, *, world: str = "ras"
+) -> tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]]:
+    """Decompose a voxel-to-world *affine* into ITK ``(spacing, origin, direction)``.
+
+    *affine* maps voxel indices **in the order named by** *axes* (so ``"XYZ"`` for an image read
+    from NIfTI) onto world millimetres in the *world* convention. ITK indexes ``(x, y, z)`` and
+    works in LPS, so the columns are permuted into that order and the world axes flipped when
+    *world* is RAS.
+
+    Returns
+    -------
+    tuple
+        ``(spacing, origin, direction)`` ready for ``SetSpacing`` / ``SetOrigin`` /
+        ``SetDirection``; *direction* is the row-major 3x3 as ITK wants it.
+
+    Raises
+    ------
+    ValidationError
+        On a degenerate affine -- a zero-length column has no direction to recover, and silently
+        substituting one would put the volume somewhere arbitrary.
+    """
+    matrix = np.asarray(affine, dtype=float)
+    if matrix.shape != (4, 4):
+        raise ValidationError(f"Expected a 4x4 affine, got {matrix.shape}.")
+    if str(world).lower() == "ras":
+        matrix = RAS_LPS_FLIP @ matrix
+
+    spatial = [a for a in axes.upper() if a in "XYZ"]
+    if len(spatial) != 3:
+        raise ValidationError(f"Need three spatial axes to build an ITK geometry, got {axes!r}.")
+    # ITK's index order is x, y, z; the affine's columns follow *axes*.
+    order = [spatial.index(a) for a in "XYZ"]
+    linear = matrix[:3, :3][:, order]
+
+    spacing = np.linalg.norm(linear, axis=0)
+    if not np.all(spacing > 0):
+        raise ValidationError(f"Affine has a zero-length axis; spacing would be {spacing}.")
+    direction = linear / spacing
+
+    return (
+        tuple(float(v) for v in spacing),
+        tuple(float(v) for v in matrix[:3, 3]),
+        tuple(float(v) for v in direction.reshape(-1)),
+    )
+
+
 def orientation_codes_from_affine(affine: Any) -> str | None:
     """Return axis codes like ``\"RAS\"`` / ``\"LPS\"`` from a 4x4 voxel-to-world affine (nibabel)."""
     try:
