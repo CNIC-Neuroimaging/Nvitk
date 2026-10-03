@@ -15,6 +15,7 @@ types-transform
 morphology-filters-restoration
 registration
 segmentation
+nn
 measure
 stats
 viz
@@ -103,6 +104,13 @@ SGE submission helpers and the Singularity container/model registry.
 :link: cli-catalog
 :link-type: doc
 How `pyhelp` and `nvitk-gui`'s tool dock discover and describe every command.
+:::
+
+:::{grid-item-card} {octicon}`cpu` Deep-learning blocks
+:link: nn
+:link-type: doc
+`nvitk.nn` — torch-only network components: the CViT convolutional vision transformer,
+weight transfer, attention-usage probes, LR schedules.
 :::
 
 :::{grid-item-card} {octicon}`tools` Utilities

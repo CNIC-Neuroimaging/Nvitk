@@ -17,8 +17,26 @@ from nvitk.gui.tools.runner import notify
 
 
 def layer_to_image(layer: Any, *, use_file_affine: bool = True) -> Image:
-    """Build an :class:`~nvitk.types.Image` from a Napari layer (Image / Labels)."""
+    """Build an :class:`~nvitk.types.Image` from a Napari layer (Image / Labels).
+
+    A time-first 3D+t layer is written in the file's own axis order (``XYZT``)
+    with its 4x4 spatial affine, so the saved NIfTI is the standard layout and
+    reopens identically.
+    """
+    from nvitk.gui.core.orientation import layer_is_time_leading
+    from nvitk.gui.core.spatial import layer_source_axes, layer_source_order
+
     img = spatial_layer_to_image(layer)
+    if layer_is_time_leading(layer):
+        meta = dict(img.metadata or {})
+        src_axes = layer_source_axes(layer) or img.axes
+        meta["axes"] = src_axes
+        aff = layer_affine(layer)
+        if aff is not None:
+            meta["affine"] = aff
+        data = layer_source_order(layer, img.data)
+        meta["shape"] = tuple(int(v) for v in data.shape)
+        return Image(data=data, metadata=meta, axes=src_axes, name=img.name)
     if use_file_affine:
         meta = dict(img.metadata or {})
         src = meta.get("affine_source")

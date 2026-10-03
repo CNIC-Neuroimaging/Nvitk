@@ -491,6 +491,23 @@ def run_gui_tool(
         _run_viz_ortho_views(viewer, layer)
         return None
 
+    # 3D+t and k-space tools manage their own output layers (a 3D result of a
+    # 3D+t layer, a k-space view with its complex data kept beside it).
+    _time_freq = {
+        "time_extract_frame": "run_extract_frame",
+        "time_projection": "run_temporal_projection",
+        "time_curve": "run_time_curve",
+        "time_stack_layers": "run_stack_layers",
+        "kspace_fft": "run_kspace",
+        "kspace_ifft": "run_inverse_kspace",
+        "kspace_filter": "run_kspace_filter",
+    }
+    if tool_id in _time_freq:
+        from nvitk.gui.viz import time_frequency
+
+        getattr(time_frequency, _time_freq[tool_id])(viewer, layer, params)
+        return None
+
     if tool_id == "viz_vessel_cpr":
         _run_viz_vessel_cpr(viewer, layer, label_ids, params)
         return None
@@ -1925,9 +1942,15 @@ def _phase_arrays_from_layers_or_disk(
     rl_name = str(params.get("rl_layer") or "").strip()
     fh_name = str(params.get("fh_layer") or "").strip()
     if ap_name and rl_name and fh_name:
-        ap = as_backend_array(_resolve_layer(viewer, ap_name).data).astype(np.float64)
-        rl = as_backend_array(_resolve_layer(viewer, rl_name).data).astype(np.float64)
-        fh = as_backend_array(_resolve_layer(viewer, fh_name).data).astype(np.float64)
+        from nvitk.gui.core.spatial import layer_source_order
+
+        # In the file's axis order (time last), which velocity_mm_s_from_phases
+        # expects — a 3D+t layer is shown time-first, its .data is TXYZ.
+        def _phase(name: str):
+            layer_ = _resolve_layer(viewer, name)
+            return as_backend_array(layer_source_order(layer_)).astype(np.float64)
+
+        ap, rl, fh = _phase(ap_name), _phase(rl_name), _phase(fh_name)
         return ap, rl, fh, _layer_spacing(_resolve_layer(viewer, ap_name))
 
     subject = str(params.get("subject") or "").strip()
@@ -2605,7 +2628,9 @@ def _prepare_vessel_hemo_for_viz(
     _, ref_on_ap, _ = align_mask_to_reference_layer(reference_layer, ap_layer, order=1)
     mag = cd = vel_mag = as_backend_array(ref_on_ap.data).astype(np.float64)
 
-    ap_data = to_numpy(ap_layer.data)
+    from nvitk.gui.core.spatial import layer_source_order
+
+    ap_data = layer_source_order(ap_layer)  # file order: time is the last axis
     n_t = int(ap_data.shape[3]) if getattr(ap_data, "ndim", 0) >= 4 else None
     temporal_resolution = None
     tr_source = "none"

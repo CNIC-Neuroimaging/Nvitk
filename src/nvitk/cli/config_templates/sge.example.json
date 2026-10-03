@@ -159,6 +159,40 @@
       "cluster_results_root": "<cluster_results_root>",
       "cluster_model_root": "<cluster_model_root>",
       "cluster_corpus_root": "<cluster_corpus_root>"
+    },
+    "cvit": {
+      "log_subdir": "CViT",
+      "err_subdir": "CViT",
+      "sge_job_prefix": "CVIT",
+      "sge_project": "GPU",
+      "sge_account": "Prod",
+      "sge_ngpu": 1,
+      "sge_h_vmem": "60G",
+      "sge_queue": null,
+      "default_sge_scripts_dir": "<DIR_FOR_GENERATED_JOB_SCRIPTS>",
+      "default_sge_container_root": "<PATH_TO_NVITK_SIF>"
+    },
+    "cvit_paths": {
+      "local_data_root": "<local_data_root>",
+      "local_nnunet_raw": "<local_nnunet_raw>",
+      "local_nnunet_preprocessed": "<local_nnunet_preprocessed>",
+      "local_nnunet_results": "<local_nnunet_results>",
+      "local_nnssl_raw": "<local_nnssl_raw>",
+      "local_nnssl_preprocessed": "<local_nnssl_preprocessed>",
+      "local_nnssl_results": "<local_nnssl_results>",
+      "local_corpus_root": "<local_corpus_root>",
+      "local_results_root": "<local_results_root>",
+      "local_model_root": "<local_model_root>",
+      "cluster_data_root": "<cluster_data_root>",
+      "cluster_nnunet_raw": "<cluster_nnunet_raw>",
+      "cluster_nnunet_preprocessed": "<cluster_nnunet_preprocessed>",
+      "cluster_nnunet_results": "<cluster_nnunet_results>",
+      "cluster_nnssl_raw": "<cluster_nnssl_raw>",
+      "cluster_nnssl_preprocessed": "<cluster_nnssl_preprocessed>",
+      "cluster_nnssl_results": "<cluster_nnssl_results>",
+      "cluster_corpus_root": "<cluster_corpus_root>",
+      "cluster_results_root": "<cluster_results_root>",
+      "cluster_model_root": "<cluster_model_root>"
     }
   }
 }

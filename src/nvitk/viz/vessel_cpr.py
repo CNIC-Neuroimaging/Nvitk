@@ -27,6 +27,8 @@ from nvitk.transform.cpr import (
     resample_centerline,
 )
 
+from nvitk.transform.threaded import map_coordinates as threaded_map_coordinates
+
 setup(globals())
 
 #: Centerlines shorter than this are noise rather than vessels.
@@ -467,7 +469,8 @@ def station_area_diameter_mm(
     """
     binary = (as_backend_array(binary_mask) > 0).astype(float)
     coords = polar_coords(samples, ray_mm=ray_mm, n_angle=n_angle, n_radius=n_radius)
-    occ = ndi.map_coordinates(binary, coords, order=1, mode="constant", cval=0.0)
+    # (stations x angles x radii) samples: slab-parallel on the host, bit-identical.
+    occ = threaded_map_coordinates(binary, coords, order=1, mode="constant", cval=0.0)
 
     dr = float(ray_mm) / int(n_radius)
     inside = (occ >= 0.5).astype(np.int8)

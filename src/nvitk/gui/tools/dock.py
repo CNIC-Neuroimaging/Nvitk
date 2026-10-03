@@ -532,6 +532,9 @@ def build_tools_dock(
     top_row_layout.setContentsMargins(0, 0, 0, 0)
     top_row_layout.setSpacing(6)
     top_row_layout.addWidget(build_gpu_toggle_button(), 1)
+    from nvitk.gui.core.performance import build_performance_button
+
+    top_row_layout.addWidget(build_performance_button(), 1)
     top_row_layout.addWidget(build_orientation_quick_button(viewer), 1)
     top_row.setLayout(top_row_layout)
     layout.addWidget(top_row, 0)

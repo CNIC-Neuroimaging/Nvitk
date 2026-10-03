@@ -40,6 +40,19 @@ Every GUI and CLI `--backend cpu|gpu` flag across the toolkit (see {doc}`../gui/
 the {doc}`Main GUI's GPU toggle <../gui/index>`) is a thin wrapper over this same mechanism,
 via `nvitk.core.click_backend`.
 
+## CPU worker budget
+
+`nvitk.core.parallel` holds one process-wide answer to "how many CPU threads may nvitk use"
+and the thread pool that spends them. Threads rather than processes: the host kernels that
+matter (`scipy.ndimage` interpolation, large NumPy ufuncs, `scipy.fft`) release the GIL, so they
+scale without pickling volumes into child processes.
+
+| Variable / call | Effect |
+|---|---|
+| `NVITK_WORKERS` | `24`, `75%`, `-4` (all but four), `all` or `auto` (default: 75 % of usable cores). |
+| `get_worker_count()` / `set_worker_count(spec)` | Read / change the budget (also points BLAS/OpenMP, numba, torch and SimpleITK at it). |
+| `parallel_map(func, items)` | Ordered map on the shared pool; serial when nested inside a pool task. |
+
 ## Other `nvitk.core` primitives
 
 | Module | Purpose |

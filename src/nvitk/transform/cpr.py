@@ -27,6 +27,8 @@ from nvitk.core.array import to_numpy
 from nvitk.core.backend import setup, using
 from nvitk.core import as_backend_array
 
+from nvitk.transform.threaded import map_coordinates as threaded_map_coordinates
+
 setup(globals())
 
 #: Below this the two ends of a segment are treated as the same point.
@@ -451,7 +453,9 @@ def cpr_sample(
     ids produces values that were never in the segmentation.
     """
     coords = cpr_coords(samples, angle_deg=angle_deg, ray_mm=ray_mm, n_ray=n_ray)
-    image = ndi.map_coordinates(
+    # Slab-parallel on the host (bit-identical to ndi.map_coordinates); a CuPy
+    # volume goes straight to the GPU kernel.
+    image = threaded_map_coordinates(
         as_backend_array(volume),
         as_backend_array(coords),
         order=int(order),

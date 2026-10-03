@@ -22,7 +22,26 @@ from nvitk.core.logger import Logger
 from .._common import default_nifti_axes, orientation_codes_from_affine, reorder_axes
 from ..writers.tiff import write_tiff
 
+from ._dicom_dynamic import (
+    build_temporal_image,
+    detect_temporal_layout,
+    dicom2nifti_affine,
+    rescaled_slice,
+    series_label,
+    split_by_geometry,
+    storage_dtype,
+)
+from ._dicom_philips import (
+    apply_heart_rate_alias,
+    copy_sbi_series,
+    is_spectral_base_series,
+    sbi_series_summary,
+    sbi_slice_positions,
+    write_sbi_manifest,
+)
+from ._dicom_spectral import annotate_spectral
 from ._dicom_rtstructs import integrate_rtstruct_processing
+from ._dicom_waveform import export_waveforms, is_waveform
 from ._dicom_tissue import extract_tissue_segmentation_data, is_tissue_segmentation
 from ._dicom_zeiss import (
     ZeissOctAligner,
@@ -696,7 +715,28 @@ def _filter_metadata_for_nifti(metadata: dict[str, Any], additional_tags: list[s
         tags_to_save.update(additional_tags)
     filtered_metadata: dict[str, Any] = {}
     _collect_tags_from_nested(metadata, tags_to_save, filtered_metadata)
+    # Keys nvitk derives (timing, spectral result, geometry split) and the identifiers
+    # stack grouping needs. Copied from the top level only: the recursive collection
+    # above would let a value from a nested sequence overwrite the series' own.
+    for key in NIFTI_TOP_LEVEL_KEYS:
+        if key in metadata and metadata[key] is not None:
+            filtered_metadata[key] = metadata[key]
     return filtered_metadata
+
+
+#: Top-level metadata always embedded in the NIfTI extension — so a file converted
+#: without ``--save-metadata`` still knows its frame times, cardiac phases, spectral
+#: result, and the study / frame / recon identifiers that phase and energy stacking
+#: group by.
+NIFTI_TOP_LEVEL_KEYS: tuple[str, ...] = (
+    "StudyInstanceUID", "FrameOfReferenceUID", "ConvolutionKernel", "FilterType",
+    "ImageComments", "AcquisitionDateTime", "HeartRateSource",
+    "axes", "rgb", "dynamic", "n_timepoints", "n_slices_per_timepoint", "t_res",
+    "temporal_resolution", "frame_times_s", "temporal_order_source", "temporal_time_source",
+    "temporal_dropped_instances", "cardiac_phases_percent", "geometry_subseries",
+    "spectral_result", "spectral_result_label", "spectral_units", "spectral_energy_kev",
+    "spectral_source", "spectral_file_label",
+)
 
 
 def _venc_scalar_from_philips_list(raw: Any) -> float | None:
@@ -913,6 +953,9 @@ def _is_custom_imaging_dicom(ds: Any) -> bool:
             pass
     if is_tissue_segmentation(ds):
         return True
+    if is_waveform(ds):
+        # Not an image, but kept: run_dicom2nifti exports it as a signal (CSV + JSON).
+        return True
     try:
         _ = ds.pixel_array
         return True
@@ -1038,6 +1081,11 @@ def _pixel_arrays_to_basic_volume(pixel_arrays: list[np.ndarray]) -> np.ndarray:
     """Stack raw per-slice pixel arrays into a volume with axes transposed to NIfTI (x,y,z,...) order."""
     if not pixel_arrays:
         raise ValidationError("Series has no readable pixel arrays.")
+    shapes = {tuple(np.shape(a)) for a in pixel_arrays}
+    if len(shapes) > 1:
+        raise ValidationError(
+            f"Slices of different sizes cannot share a volume: {sorted(shapes)}."
+        )
     array = np.array(pixel_arrays)
     if len(pixel_arrays) > 1:
         if array.ndim == 3:
@@ -1417,9 +1465,18 @@ def _read_dicom_conversion(
         ds_lists.append(dsl)
         base_md = _pydicom_dataset_to_dict(meta[uid], include_private_tags=include_private_tags)
         base_md.update(_collect_rescale_metadata(dsl))
+        # Philips leaves HeartRate empty (private tag instead); spectral results get named.
+        _annotate_vendor(base_md, meta[uid])
         _ensure_output_metadata_fields(base_md, rescale_type="DV")
         mds.append(base_md)
     return ds_lists, mds
+
+
+def _annotate_vendor(md: dict[str, Any], ds: Any) -> dict[str, Any]:
+    """Vendor/derived metadata for one series: heart-rate alias and spectral result type."""
+    apply_heart_rate_alias(md, ds)
+    annotate_spectral(md, ds)
+    return md
 
 
 def _force_ras_nifti(image: Any) -> Any:
@@ -1461,100 +1518,109 @@ def _apply_nifti_reorient_flags(
 
 
 def _spatial_sort_ds_list(ds_list: list[Any]) -> list[Any]:
-    """Order slices along the slice normal when IOP/IPP are available."""
-    if not ds_list:
-        return ds_list
-    first = ds_list[0]
-    iop = getattr(first, "ImageOrientationPatient", None)
-    if iop is None or len(iop) < 6:
-        return ds_list
-    row_dir = np.array([float(x) for x in iop[:3]], dtype=float)
-    col_dir = np.array([float(x) for x in iop[3:6]], dtype=float)
-    slice_dir = np.cross(row_dir, col_dir)
-    nrm = np.linalg.norm(slice_dir)
-    if nrm < 1e-8:
-        return ds_list
-    slice_dir = slice_dir / nrm
+    """Order slices like ``dicom2nifti.common.sort_dicoms`` (most-varying IPP axis, ascending).
 
-    scored: list[tuple[float, int, Any]] = []
-    for idx, ds in enumerate(ds_list):
+    Matching dicom2nifti's order — not merely *an* order along the normal — is
+    what makes :func:`_affine_from_dicom_series` reproduce its affine exactly.
+    Datasets without ``ImagePositionPatient`` keep their incoming order.
+    """
+    if len(ds_list) <= 1:
+        return list(ds_list)
+    positions = []
+    for ds in ds_list:
         ipp = getattr(ds, "ImagePositionPatient", None)
-        if ipp is None:
-            return ds_list
-        ipp_arr = np.array([float(x) for x in ipp], dtype=float)
-        scored.append((float(np.dot(ipp_arr, slice_dir)), idx, ds))
-    scored.sort(key=lambda t: t[0])
-    return [t[2] for t in scored]
+        if ipp is None or len(ipp) < 3:
+            return list(ds_list)
+        try:
+            positions.append([float(v) for v in ipp[:3]])
+        except (TypeError, ValueError):
+            return list(ds_list)
+    arr = np.asarray(positions, dtype=float)
+    axis = int(np.argmax(arr.max(axis=0) - arr.min(axis=0)))
+    order = np.argsort(arr[:, axis], kind="stable")
+    return [ds_list[int(i)] for i in order]
 
 
 def _affine_from_dicom_series(ds_list: list[Any]) -> np.ndarray | None:
     """
-    Build a 4x4 LPS voxel-to-world affine from ImageOrientationPatient,
-    ImagePositionPatient, PixelSpacing, and slice spacing.
+    RAS voxel-to-world affine for a ``(columns, rows, slices)`` stack of *ds_list*.
 
-    Volume layout must match :func:`_pixel_arrays_to_basic_volume` (first axis = column,
-    second = row, third = slice when multiple 2D slices).
+    Same formula as ``dicom2nifti`` (:func:`._dicom_dynamic.dicom2nifti_affine`),
+    so a series rescued by the fallback lands in the same world frame as its
+    neighbours. *ds_list* must already be in stacking order. ``None`` when the
+    orientation/position attributes are missing.
     """
     if not ds_list or nib is None:
         return None
-    ds0 = ds_list[0]
-    iop = getattr(ds0, "ImageOrientationPatient", None)
-    ipp0 = getattr(ds0, "ImagePositionPatient", None)
-    ps = getattr(ds0, "PixelSpacing", None)
-    if iop is None or ipp0 is None or ps is None or len(iop) < 6:
-        return None
     try:
-        row_dir = np.array([float(x) for x in iop[:3]], dtype=float)
-        col_dir = np.array([float(x) for x in iop[3:6]], dtype=float)
-        slice_dir = np.cross(row_dir, col_dir)
-        nrm = np.linalg.norm(slice_dir)
-        if nrm < 1e-8:
-            return None
-        slice_dir = slice_dir / nrm
-        row_spacing = float(ps[0])
-        col_spacing = float(ps[1])
-        ipp_first = np.array([float(x) for x in ipp0], dtype=float)
-
-        if len(ds_list) > 1:
-            ipp1 = np.array([float(x) for x in ds_list[1].ImagePositionPatient], dtype=float)
-            d_slice = float(np.linalg.norm(ipp1 - ipp_first))
-            if d_slice < 1e-8:
-                st = getattr(ds0, "SpacingBetweenSlices", None)
-                if st is None:
-                    st = getattr(ds0, "SliceThickness", None)
-                d_slice = float(st) if st is not None else 1.0
-        else:
-            st = getattr(ds0, "SpacingBetweenSlices", None)
-            if st is None:
-                st = getattr(ds0, "SliceThickness", None)
-            d_slice = float(st) if st is not None else 1.0
-
-        affine = np.eye(4)
-        # Match _pixel_arrays_to_basic_volume: volume axes are (col, row, slice).
-        affine[:3, 0] = col_dir * col_spacing
-        affine[:3, 1] = row_dir * row_spacing
-        affine[:3, 2] = slice_dir * d_slice
-        affine[:3, 3] = ipp_first
-        return affine
+        return dicom2nifti_affine(ds_list)
     except Exception:
         return None
 
 
-def _basic_fallback_image(ds_list: list[Any]) -> Any | None:
-    """Build a NIfTI image from raw pixel arrays with a best-effort affine (identity if geometry can't be derived)."""
+def _basic_fallback_image(
+    ds_list: list[Any], *, label: str = "series", rescale: bool = True
+) -> Any | None:
+    """Build a NIfTI image from pixel arrays with a best-effort affine (identity if geometry can't be derived).
+
+    Grey-level slices get their ``RescaleSlope``/``RescaleIntercept`` applied (*rescale*),
+    so a localizer or a locator comes out in HU like the volumes beside it — integer
+    slope/intercept keep an integer dtype. Only one geometry can share a volume: when
+    the slices still disagree on size (no geometry split was possible upstream), the
+    largest consistent group is kept and the rest are reported rather than crashing the stack.
+    """
     ordered = _spatial_sort_ds_list(ds_list)
-    pixel_arrays = []
+    pairs = []
     for ds in ordered:
         try:
             if hasattr(ds, "pixel_array"):
-                pixel_arrays.append(ds.pixel_array)
+                grey = int(ds.get("SamplesPerPixel", 1) or 1) == 1
+                pairs.append((ds, rescaled_slice(ds) if (rescale and grey) else ds.pixel_array))
         except Exception:
             continue
-    if not pixel_arrays:
+    if not pairs:
         return None
-    volume = _pixel_arrays_to_basic_volume(pixel_arrays)
-    affine = _affine_from_dicom_series(ordered)
+    by_shape: dict[tuple[int, ...], list[tuple[Any, Any]]] = {}
+    for ds, arr in pairs:
+        by_shape.setdefault(tuple(arr.shape), []).append((ds, arr))
+    if len(by_shape) > 1:
+        keep = max(by_shape.values(), key=len)
+        _warn(
+            f"{label}: slices have {len(by_shape)} different sizes "
+            f"({', '.join('x'.join(map(str, k)) for k in by_shape)}); keeping the "
+            f"{len(keep)} of size {'x'.join(map(str, keep[0][1].shape))}."
+        )
+        pairs = keep
+    arrays = [arr for _, arr in pairs]
+    try:
+        samples = int(pairs[0][0].get("SamplesPerPixel", 1) or 1)
+    except (TypeError, ValueError):
+        samples = 1
+    if samples in (3, 4) and arrays[0].ndim == 3 and arrays[0].shape[-1] == samples:
+        # Colour (screen captures, dose reports): keep the samples as the *last*
+        # axis — (columns, rows[, slices], RGB) — which is how nvitk's reader and
+        # the GUI recognise a colour image. The grey-volume transpose would put
+        # them first and open a screenshot as a three-slice volume.
+        if len(arrays) == 1:
+            volume = np.ascontiguousarray(arrays[0].transpose(1, 0, 2))
+        else:
+            volume = np.ascontiguousarray(np.stack(arrays).transpose(2, 1, 0, 3))
+    else:
+        if rescale:
+            # One dtype for the stack: the smallest that holds every rescaled value.
+            dtype = storage_dtype(arrays)
+            arrays = [a.astype(dtype, copy=False) for a in arrays]
+        volume = _pixel_arrays_to_basic_volume(arrays)
+    affine = _affine_from_dicom_series([ds for ds, _ in pairs])
     if affine is None:
+        # A screen capture has no patient geometry by nature; anything else
+        # without it is worth a warning.
+        capture = str(getattr(pairs[0][0], "SOPClassUID", "")).startswith("1.2.840.10008.5.1.4.1.1.7")
+        (_info if capture else _warn)(
+            f"{label}: no orientation/position tags"
+            + (" (screen capture)" if capture else "")
+            + "; written with an identity affine."
+        )
         affine = np.eye(4)
     return nib.Nifti1Image(volume, affine)
 
@@ -1632,25 +1698,97 @@ def _convert_ds_list_to_nifti_image(
 ) -> tuple[Any, str] | None:
     """Convert one DICOM series (list of datasets) to a NIfTI image, with a cascade of fallbacks.
 
-    Prefers ``dicom2nifti`` (proper geometry from ImageOrientation/Position);
-    on known failure modes (too few slices/localizer, inconsistent orientation,
-    non-cubical/gantry-tilt, NaN geometry, non-imaging files) it retries with
-    orientation fixing, NaN cleaning, forced reorientation, or finally falls
-    back to :func:`_basic_fallback_image`. Applies the requested rescale policy
-    and reorientation flags before returning ``(image, actual_rescale_type)``.
+    Strategy
+    --------
+    1. A **dynamic** series (slice positions repeated over time — bolus tracking,
+       perfusion, cine) is recognised up front (:func:`detect_temporal_layout`).
+       For non-MR modalities it is built directly as ``X x Y x Z x T``: the generic
+       ``dicom2nifti`` path cannot stack repeated positions at all. MR keeps
+       ``dicom2nifti`` first, whose vendor converters handle Philips/GE/Siemens 4D.
+    2. Otherwise ``dicom2nifti`` (proper geometry from orientation/position). Its
+       known failure modes (too few slices/localizer, inconsistent orientation,
+       non-cubical/gantry-tilt, NaN geometry, non-imaging files) get the targeted
+       retries they always had.
+    3. Any failure then falls back to the temporal builder (when the layout is
+       dynamic) and finally to :func:`_basic_fallback_image`.
+
+    Applies the requested rescale policy and reorientation flags before returning
+    ``(image, actual_rescale_type)``. Every message names the series.
     """
-    temp_nifti_path = None
-    used_basic_fallback = False
+    if not ds_list:
+        _warn("Skipping a series with no images left to convert.")
+        return None
+    label = series_label(md if md else ds_list[0])
+    modality = str((md or {}).get("Modality") or ds_list[0].get("Modality", "") or "").upper()
+
     try:
-        if _dicom2nifti is None:
-            image = _basic_fallback_image(ds_list)
-            used_basic_fallback = True
-            if image is None:
-                return None
-        else:
+        layout = detect_temporal_layout(ds_list)
+    except Exception as exc:  # noqa: BLE001 — detection is a hint, never a blocker
+        _debug(f"{label}: temporal layout detection failed: {exc}")
+        layout = None
+
+    temp_nifti_path = None
+    # Set when the image did not come from dicom2nifti: the builders below apply
+    # the DICOM rescale themselves, so the DV/FP/revert step must not run again.
+    custom_image = False
+
+    def _temporal_image() -> Any | None:
+        """The 3D+t volume for a dynamic layout, or ``None``."""
+        nonlocal custom_image
+        if layout is None:
+            return None
+        try:
+            image, extra = build_temporal_image(layout)
+        except Exception as exc:  # noqa: BLE001
+            _warn(f"{label}: could not build the dynamic (3D+t) volume: {exc}")
+            return None
+        if md is not None:
+            md.update(extra)
+        unit = "s" if layout.time_source != "index" else "frame"
+        dropped = (
+            f"; {layout.dropped} surplus instance(s) left out" if layout.dropped else ""
+        )
+        _info(
+            f"{label}: dynamic series → {layout.n_t} time points x {layout.n_z} slice(s), "
+            f"ordered by {layout.order_source}, dt={layout.t_res:.4g} {unit}{dropped}"
+        )
+        if revert_scaling or str(rescale_type).upper() == "FP":
+            _warn(f"{label}: revert-scaling / FP rescale are not applied to dynamic series (DV kept).")
+        custom_image = True
+        return image
+
+    def _fallback_image() -> Any | None:
+        """Temporal builder first (when dynamic), then the basic geometry fallback."""
+        nonlocal custom_image
+        image = _temporal_image()
+        if image is None:
+            image = _basic_fallback_image(ds_list, label=label, rescale=not revert_scaling)
+            custom_image = image is not None
+        return image
+
+    # One or two single-frame images — localizers, a locator, screen captures —
+    # are never a dicom2nifti volume (it needs >= 3 slices and filters captures
+    # out), so they go straight to the geometry-aware basic path instead of
+    # through two failed attempts and their warnings. Multi-frame objects
+    # (enhanced CT/MR) still go to dicom2nifti, which understands them.
+    single_images = len(ds_list) <= 2 and all(
+        int(ds.get("NumberOfFrames", 1) or 1) <= 1 for ds in ds_list
+    )
+
+    try:
+        image = None
+        if layout is not None and modality != "MR":
+            image = _temporal_image()
+        if image is None and layout is None and single_images:
+            image = _basic_fallback_image(ds_list, label=label, rescale=not revert_scaling)
+            custom_image = image is not None
+        if image is None and _dicom2nifti is None:
+            image = _fallback_image()
+        elif image is None:
             with tempfile.NamedTemporaryFile(suffix=".nii", delete=False, dir=tmp_dir) as tf:
                 temp_nifti_path = tf.name
 
+            res = None
             try:
                 res = _dicom2nifti.convert_dicom.dicom_array_to_nifti(
                     ds_list,
@@ -1660,20 +1798,16 @@ def _convert_ds_list_to_nifti_image(
             except Exception as exc:
                 error_str = str(exc)
                 if any(err_type in error_str for err_type in ["TOO_FEW_SLICES", "LOCALIZER"]):
-                    _warn(f"Detected {error_str} error, attempting to process as single-slice or localizer...")
-                    image = _basic_fallback_image(ds_list)
-                    used_basic_fallback = True
+                    _info(f"{label}: {error_str} — converting as single-slice / localizer images.")
+                    image = _fallback_image()
                 elif "IMAGE_ORIENTATION_INCONSISTENT" in error_str:
-                    _warn(
-                        f"IMAGE_ORIENTATION_INCONSISTENT detected, attempting to fix orientation "
-                        f"inconsistencies: {exc}"
-                    )
+                    _warn(f"{label}: IMAGE_ORIENTATION_INCONSISTENT, fixing orientation inconsistencies: {exc}")
                     try:
                         fixed_ds_list, corrections_count = _fix_orientation_inconsistencies(ds_list)
                         if corrections_count > 0:
                             _warn(
-                                f"Orientation fixing applied ({corrections_count} slices corrected), "
-                                "retrying conversion..."
+                                f"{label}: orientation fixing applied ({corrections_count} slices "
+                                "corrected), retrying conversion..."
                             )
                             try:
                                 res = _dicom2nifti.convert_dicom.dicom_array_to_nifti(
@@ -1688,8 +1822,8 @@ def _convert_ds_list_to_nifti_image(
                                     for token in ["invalid value encountered", "nan", "orthogonality check failed"]
                                 ) or any(token in fix_error_str for token in ["NON_CUBICAL_IMAGE", "GANTRY_TILT"]):
                                     _warn(
-                                        f"Detected {fix_error_str} after orientation fixing, "
-                                        "attempting to clean and retry..."
+                                        f"{label}: {fix_error_str} after orientation fixing, "
+                                        "cleaning NaN geometry and retrying..."
                                     )
                                     cleaned_fixed_ds_list = _clean_nan_values(fixed_ds_list)
                                     try:
@@ -1699,21 +1833,18 @@ def _convert_ds_list_to_nifti_image(
                                             reorient_nifti=False,
                                         )
                                     except Exception:
-                                        image = _basic_fallback_image(ds_list)
-                                        used_basic_fallback = True
+                                        image = _fallback_image()
                                 else:
-                                    raise
+                                    image = _fallback_image()
                         else:
-                            image = _basic_fallback_image(ds_list)
-                            used_basic_fallback = True
+                            image = _fallback_image()
                     except Exception:
-                        image = _basic_fallback_image(ds_list)
-                        used_basic_fallback = True
+                        image = _fallback_image()
                 elif any(
                     err_type in error_str
                     for err_type in ["NON_CUBICAL_IMAGE", "GANTRY_TILT", "ConversionValidationError"]
                 ):
-                    _warn(f"Detected {error_str} error, trying reorientation first...")
+                    _warn(f"{label}: {error_str}, retrying with reorientation...")
                     try:
                         res = _dicom2nifti.convert_dicom.dicom_array_to_nifti(
                             ds_list,
@@ -1721,22 +1852,34 @@ def _convert_ds_list_to_nifti_image(
                             reorient_nifti=True,
                         )
                     except Exception:
-                        image = _basic_fallback_image(ds_list)
-                        used_basic_fallback = True
-                elif "NON_IMAGING_DICOM_FILES" in error_str:
-                    image = _basic_fallback_image(ds_list)
-                    used_basic_fallback = True
+                        image = _fallback_image()
                 else:
-                    raise
+                    # NON_IMAGING_DICOM_FILES, a stack of mismatched slice sizes,
+                    # an empty list after dicom2nifti's own filtering (IndexError)
+                    # — none of these is worth a traceback: the fallbacks below
+                    # either convert the series or say why they cannot.
+                    _warn(f"{label}: dicom2nifti could not convert it ({type(exc).__name__}: {exc}); using fallbacks.")
+                    image = _fallback_image()
 
-            if not used_basic_fallback:
+            if res is not None and image is None:
                 image = res["NII"]
 
         if image is None:
+            _warn(f"{label}: no conversion succeeded; series skipped.")
             return None
 
+        # Colour captures keep their samples last; say so, so readers (and the
+        # GUI) show an RGB image rather than a three-slice volume.
+        try:
+            samples = int(ds_list[0].get("SamplesPerPixel", 1) or 1)
+        except (TypeError, ValueError):
+            samples = 1
+        if md is not None and samples in (3, 4) and image.ndim in (3, 4) and image.shape[-1] == samples:
+            md["axes"] = "XYC" if image.ndim == 3 else "XYZC"
+            md["rgb"] = True
+
         actual_rescale_type = "DV"
-        if not used_basic_fallback:
+        if not custom_image:
             image, actual_rescale_type = _apply_requested_rescale(
                 image,
                 md=md,
@@ -1752,8 +1895,9 @@ def _convert_ds_list_to_nifti_image(
         return image, actual_rescale_type
     except Exception as exc:
         import traceback
-        _warn(traceback.format_exc())
-        _warn(f"Standard conversion with fallbacks failed: {exc}")
+
+        _debug(traceback.format_exc())
+        _warn(f"{label}: conversion with fallbacks failed: {type(exc).__name__}: {exc}")
         return None
     finally:
         try:
@@ -1904,7 +2048,28 @@ def _load_standard_series_arrays(
     tmp_dir: Path | None = None,
     mouse_reorient: bool = False,
 ) -> list[tuple[np.ndarray, dict[str, Any]]]:
-    """Load a standard cross-sectional series via :func:`_convert_ds_list_to_nifti_image` and prepare its output array."""
+    """Load a standard cross-sectional series via :func:`_convert_ds_list_to_nifti_image` and prepare its output array.
+
+    A series mixing image geometries returns one array per geometry (see
+    :func:`._dicom_dynamic.split_by_geometry`), each tagged ``geometry_subseries``.
+    """
+    groups = split_by_geometry(ds_list)
+    if len(groups) > 1:
+        _info(f"{series_label(md)}: splitting into {len(groups)} sub-series by image geometry")
+        outputs: list[tuple[np.ndarray, dict[str, Any]]] = []
+        for suffix, sub in groups:
+            md_sub = _pydicom_dataset_to_dict(sub[0], include_private_tags=True)
+            _annotate_vendor(md_sub, sub[0])
+            md_sub.update(_collect_rescale_metadata(sub))
+            _ensure_output_metadata_fields(md_sub, rescale_type="DV")
+            md_sub["geometry_subseries"] = suffix
+            outputs.extend(
+                _load_standard_series_arrays(
+                    sub, md_sub, force_ras=force_ras, revert_scaling=revert_scaling,
+                    rescale_type=rescale_type, tmp_dir=tmp_dir, mouse_reorient=mouse_reorient,
+                )
+            )
+        return outputs
     converted = _convert_ds_list_to_nifti_image(
         ds_list,
         force_ras=force_ras,
@@ -1918,7 +2083,9 @@ def _load_standard_series_arrays(
         return []
     image, actual_rescale_type = converted
     data = np.asanyarray(image.dataobj)
-    return [_prepare_array_output(data, md, affine=image.affine, rescale_type=actual_rescale_type)]
+    # Axes the converter recorded (XYZT for a dynamic series, XYC for a colour capture).
+    axes = md.get("axes") if isinstance(md.get("axes"), str) and len(md["axes"]) == data.ndim else None
+    return [_prepare_array_output(data, md, axes=axes, affine=image.affine, rescale_type=actual_rescale_type)]
 
 
 def _load_one_series_arrays(
@@ -1932,6 +2099,7 @@ def _load_one_series_arrays(
     revert_scaling: bool = False,
     rescale_type: str = "DV",
     tmp_dir: Path | None = None,
+    j2k_decode: bool = False,
 ) -> list[tuple[np.ndarray, dict[str, Any]]]:
     """Dispatch one series to the right loader by modality/format: OP photo, Zeiss raw-OCT, or standard cross-sectional."""
     if mod in ["OP", "OT"]:
@@ -2020,6 +2188,12 @@ def load_dicom_series(
         if not ds_list:
             _warn(f"Skipping empty series (UID: {md.get('SeriesInstanceUID', 'N/A')}).")
             continue
+        if is_spectral_base_series(ds_list):
+            _info(f"{series_label(md)}: Philips spectral base images (not pixels) — skipped.")
+            continue
+        if all(is_waveform(ds) for ds in ds_list):
+            _info(f"{series_label(md)}: waveform (ECG), not an image — skipped (dcm2nii exports it as CSV).")
+            continue
 
         readable_ds_list = []
         for ds in ds_list:
@@ -2046,6 +2220,7 @@ def load_dicom_series(
                 _info(f"Splitting series into {len(buckets)} subseries by ImageType")
                 for _, sub in buckets.items():
                     md_sub = _pydicom_dataset_to_dict(sub[0], include_private_tags=include_private_tags)
+                    _annotate_vendor(md_sub, sub[0])
                     md_sub.update(_collect_rescale_metadata(sub))
                     _ensure_output_metadata_fields(md_sub, rescale_type="DV")
                     if rescale_type.upper() == "FP":
@@ -2151,8 +2326,12 @@ def _build_output_filename(
     compress: bool = False,
     skip_existing: bool = False,
     explicit_output_path: str | None = None,
+    name_suffix: str = "",
 ) -> tuple[str, bool]:
     """Resolve the output NIfTI path for a series (custom naming, else PID/desc/accession-based), de-duplicating on collision.
+
+    *name_suffix* (a geometry sub-series label such as ``SAG`` or ``158x512``) is
+    appended after the image-type label, so sub-series of one series sort together.
 
     Returns ``(path, should_write)`` — *should_write* is ``False`` when
     *skip_existing* is set and the target already exists.
@@ -2194,6 +2373,17 @@ def _build_output_filename(
             base = fname.replace(".nii.gz", "").replace(".nii", "")
             if not base.endswith(f"_{label}"):
                 fname = f"{base}_{label}{ext}"
+    spectral = str(md.get("spectral_file_label") or "")
+    if spectral and not custom_naming and md.get("spectral_source") not in ("description", None):
+        # Only when the result came from DICOM attributes: a description that matched
+        # ("MonoE 70keV[HU]", "Virtual Non-Contrast") already names it; "Spectral 3" does not.
+        base = fname.replace(".nii.gz", "").replace(".nii", "")
+        squash = lambda text: re.sub(r"[^a-z0-9]", "", text.lower())  # noqa: E731
+        if squash(spectral) not in squash(base):
+            fname = f"{base}_{_sanitize_filename(spectral)}{ext}"
+    if name_suffix:
+        base = fname.replace(".nii.gz", "").replace(".nii", "")
+        fname = f"{base}_{_sanitize_filename(name_suffix)}{ext}"
 
     final_output_path = os.path.join(output_folder, fname)
     if skip_existing and os.path.exists(final_output_path):
@@ -2679,6 +2869,74 @@ def _process_one_series(
         if out is not None:
             return out
 
+    # ---- Standard cross-sectional path ------------------------------------------
+    # One volume needs one geometry. A series mixing image sizes or orientations
+    # (two surview projections, reformats of different heights, captures) is cut
+    # into sub-series first; each converts — and is named — on its own.
+    groups = split_by_geometry(ds_list)
+    if len(groups) > 1:
+        if explicit_output_path:
+            raise ValidationError(
+                f"{series_label(md)} mixes {len(groups)} image geometries; "
+                "write to an output directory instead of one file."
+            )
+        _info(
+            f"{series_label(md)}: splitting into {len(groups)} sub-series by image geometry "
+            f"({', '.join(f'{suffix}: {len(sub)}' for suffix, sub in groups)})"
+        )
+        outputs: list[str] = []
+        for suffix, sub in groups:
+            md_sub = _pydicom_dataset_to_dict(sub[0], include_private_tags=True)
+            _annotate_vendor(md_sub, sub[0])
+            md_sub.update(_collect_rescale_metadata(sub))
+            if rescale_type.upper() == "FP":
+                md_sub.update(_collect_scale_slope_metadata(sub))
+            _ensure_output_metadata_fields(md_sub, rescale_type="DV")
+            md_sub["geometry_subseries"] = suffix
+            outputs.extend(
+                _process_standard_series(
+                    sub, output_folder, md_sub, mod, sub[0],
+                    custom_naming=custom_naming, force_ras=force_ras,
+                    mouse_reorient=mouse_reorient, revert_scaling=revert_scaling,
+                    append_label=append_label, save_metadata=save_metadata,
+                    additional_tags=additional_tags, compress=compress,
+                    rescale_type=rescale_type, skip_existing=skip_existing,
+                    tmp_dir=tmp_dir, explicit_output_path=None, name_suffix=suffix,
+                )
+            )
+        return outputs
+    return _process_standard_series(
+        ds_list, output_folder, md, mod, first_ds,
+        custom_naming=custom_naming, force_ras=force_ras, mouse_reorient=mouse_reorient,
+        revert_scaling=revert_scaling, append_label=append_label,
+        save_metadata=save_metadata, additional_tags=additional_tags, compress=compress,
+        rescale_type=rescale_type, skip_existing=skip_existing, tmp_dir=tmp_dir,
+        explicit_output_path=explicit_output_path,
+    )
+
+
+def _process_standard_series(
+    ds_list: list[Any],
+    output_folder: str,
+    md: dict[str, Any],
+    mod: str,
+    first_ds: Any,
+    *,
+    custom_naming: str | None,
+    force_ras: bool,
+    mouse_reorient: bool = False,
+    revert_scaling: bool = False,
+    append_label: bool = True,
+    save_metadata: bool = False,
+    additional_tags: list[str] | None = None,
+    compress: bool = False,
+    rescale_type: str = "DV",
+    skip_existing: bool = False,
+    tmp_dir: Path | None = None,
+    explicit_output_path: str | None = None,
+    name_suffix: str = "",
+) -> list[str]:
+    """Name, convert and save one single-geometry series (see :func:`_process_one_series`)."""
     final_output_path, should_write = _build_output_filename(
         md,
         first_ds,
@@ -2688,6 +2946,7 @@ def _process_one_series(
         compress=compress,
         skip_existing=skip_existing,
         explicit_output_path=explicit_output_path,
+        name_suffix=name_suffix,
     )
     if not should_write:
         _info(f"Skipping existing output: {final_output_path}")
@@ -2715,6 +2974,93 @@ def _process_one_series(
     return [out] if out else []
 
 
+def _keep_spectral_base_images(
+    sbi_found: list[tuple[list[Any], dict[str, Any]]],
+    series_all: list[list[Any]],
+    metas: list[dict[str, Any]],
+    produced: dict[str, list[str]],
+    output_folder: str,
+    *,
+    copy: bool,
+    skip_existing: bool,
+) -> str:
+    """Write the SBI manifest (and copy the SBI DICOM with *copy*); returns the manifest path.
+
+    Each SBI series is matched to the conventional reconstruction it was produced with:
+    same frame of reference and the very same slice positions, preferring the series whose
+    description is the one named in the SBI comment (``…|IMR, 78%``).
+    """
+    sbi_uids = {
+        _normalize_series_uid(md.get("SeriesInstanceUID", md.get("series_uid"))) for _, md in sbi_found
+    }
+    candidates = []
+    for ds_list, md in zip(series_all, metas):
+        uid = _normalize_series_uid(md.get("SeriesInstanceUID", md.get("series_uid")))
+        if not ds_list or uid in sbi_uids:
+            continue
+        candidates.append((uid, md, sbi_slice_positions(ds_list)))
+
+    entries = []
+    for ds_list, md in sbi_found:
+        entry = sbi_series_summary(ds_list)
+        positions = sbi_slice_positions(ds_list)
+        matches = [
+            (uid, cmd) for uid, cmd, cpos in candidates
+            if cpos == positions
+            and str(cmd.get("FrameOfReferenceUID", "")) == entry["frame_of_reference_uid"]
+        ]
+        ref = entry["reference_description"].strip().lower()
+        # The SBI comment may shorten the name ("Miocardio, 78%" for
+        # "Miocardio, 78%, iDose (6)"), so a prefix counts as a match.
+        named = [m for m in matches if ref and str(m[1].get("SeriesDescription", "")).strip().lower().startswith(ref)]
+        best = (named or matches or [None])[0]
+        if best is not None:
+            uid, cmd = best
+            entry["reference_series"] = {
+                "series_number": str(cmd.get("SeriesNumber", "")),
+                "series_description": str(cmd.get("SeriesDescription", "")),
+                "series_instance_uid": uid,
+                "nifti": [os.path.basename(p) for p in produced.get(uid, [])],
+                "match": "description + slice positions" if named else "slice positions",
+            }
+        else:
+            entry["reference_series"] = None
+        if copy:
+            folder = _sanitize_filename(f"{entry['series_number']}_{entry['series_description']}")
+            dest = os.path.join(output_folder, "sbi", folder)
+            n = copy_sbi_series(ds_list, dest, skip_existing=skip_existing)
+            entry["copied_to"] = os.path.relpath(dest, output_folder)
+            _info(f"{series_label(md)}: copied {n} SBI file(s) to {entry['copied_to']}")
+        entries.append(entry)
+    path = write_sbi_manifest(entries, output_folder)
+    _info(f"Spectral base images: {len(entries)} series listed in {os.path.basename(path)}")
+    return path
+
+
+def _export_waveform_series(
+    ds_list: list[Any],
+    md: dict[str, Any],
+    output_folder: str,
+    *,
+    custom_naming: str | None,
+    skip_existing: bool,
+) -> list[str]:
+    """Write a waveform series (ECG) as CSV + JSON, named like the image outputs."""
+    path, should_write = _build_output_filename(
+        md, ds_list[0], custom_naming, output_folder, append_label=False, compress=False,
+        skip_existing=skip_existing,
+    )
+    base = path[: -len(".nii")] if path.endswith(".nii") else path
+    if not should_write or (skip_existing and os.path.exists(f"{base}.csv")):
+        _info(f"Skipping existing output: {base}.csv")
+        return [f"{base}.csv"]
+    try:
+        return export_waveforms(ds_list, base)
+    except Exception as exc:  # noqa: BLE001 — a malformed waveform must not stop the study
+        _warn(f"{series_label(md)}: could not export the waveform: {exc}")
+        return []
+
+
 def run_dicom2nifti(
     input_path: str,
     output_folder: str,
@@ -2737,8 +3083,23 @@ def run_dicom2nifti(
     align_oct: bool = False,
     map_zeiss_laterality: bool = False,
     j2k_decode: bool = False,
+    stack_phases: bool = False,
+    stack_energies: bool = False,
+    sbi: str = "manifest",
 ) -> list[str]:
     """Convert every DICOM series found at *input_path* to NIfTI files under *output_folder*.
+
+    Philips Spectral Base Images are never converted (they hold compressed spectral data,
+    not pixels); *sbi* decides what is kept of them: ``"skip"`` nothing, ``"manifest"``
+    (default) a ``spectral_base_images.json`` listing each SBI series, its source files and
+    the reconstruction (and NIfTI) it belongs to, ``"copy"`` that plus a copy of the SBI
+    DICOM files under ``sbi/``. With *stack_energies*, monoenergetic spectral results of one
+    reconstruction are stacked into ``X x Y x Z x E`` volumes.
+
+    Dynamic series (repeated slice positions) are written as 3D+t / 2D+t volumes,
+    and series mixing image geometries are split into one file per geometry. With
+    *stack_phases*, cardiac phase reconstructions of one acquisition are also
+    stacked into one 3D+t file each (:func:`._dicom_phases.stack_cardiac_phases`).
 
     The top-level library entry point behind the ``dcm2nii`` CLI: reads and
     groups series (:func:`_read_dicom_conversion`), narrows by series number/
@@ -2750,6 +3111,9 @@ def run_dicom2nifti(
     origin. Depth is untouched. Without it every cube keeps a zero origin.
     """
     _require_deps()
+    sbi_mode = str(sbi or "manifest").strip().lower()
+    if sbi_mode not in ("skip", "manifest", "copy"):
+        raise ValidationError(f"sbi={sbi!r}: use 'skip', 'manifest' or 'copy'.")
     os.makedirs(output_folder, exist_ok=True)
 
     series_all, metas = _read_dicom_conversion(
@@ -2793,10 +3157,37 @@ def run_dicom2nifti(
                 _debug(f"Zeiss alignment reference scan failed: {exc}")
 
     outputs: list[str] = []
+    # What each series produced (by SeriesInstanceUID), so the SBI manifest can point
+    # at the NIfTI of the reconstruction a spectral base series belongs to.
+    produced: dict[str, list[str]] = {}
+    sbi_found: list[tuple[list[Any], dict[str, Any]]] = []
     for ds_list, md in zip(series_all, metas):
+        start = len(outputs)
+        uid = _normalize_series_uid(md.get("SeriesInstanceUID", md.get("series_uid"))) or str(id(ds_list))
         try:
             if not ds_list:
                 _warn(f"Skipping empty series (UID: {md.get('SeriesInstanceUID', 'N/A')}).")
+                continue
+            if is_spectral_base_series(ds_list):
+                sbi_found.append((ds_list, md))
+                kept = {
+                    "skip": "nothing kept",
+                    "manifest": "listed in spectral_base_images.json",
+                    "copy": "DICOM copied to sbi/ and listed in spectral_base_images.json",
+                }[sbi_mode]
+                _info(
+                    f"{series_label(md)}: Philips spectral base images (compressed spectral "
+                    f"data, not pixels) — not converted; {kept}. Generate monoE / iodine / "
+                    "Z-effective series on a Philips spectral workstation to convert them."
+                )
+                continue
+            if all(is_waveform(ds) for ds in ds_list):
+                outputs.extend(
+                    _export_waveform_series(
+                        ds_list, md, output_folder, custom_naming=custom_naming,
+                        skip_existing=skip_existing,
+                    )
+                )
                 continue
             readable_ds_list = []
             for ds in ds_list:
@@ -2822,6 +3213,7 @@ def run_dicom2nifti(
                     _info(f"Splitting series into {len(buckets)} subseries by ImageType")
                     for sig, sub in buckets.items():
                         md_sub = _pydicom_dataset_to_dict(sub[0], include_private_tags=True)
+                        _annotate_vendor(md_sub, sub[0])
                         md_sub.update(_collect_rescale_metadata(sub))
                         _ensure_output_metadata_fields(md_sub, rescale_type="DV")
                         if rescale_type.upper() == "FP":
@@ -2884,6 +3276,53 @@ def run_dicom2nifti(
                 )
             )
         except Exception as exc:
-            _err(f"Error during conversion for series: {exc}")
+            _err(f"Error during conversion for {series_label(md)}: {exc}")
             continue
+        finally:
+            produced[uid] = outputs[start:]
+
+    if sbi_found and sbi_mode != "skip":
+        try:
+            outputs.append(
+                _keep_spectral_base_images(
+                    sbi_found, series_all, metas, produced, output_folder,
+                    copy=sbi_mode == "copy", skip_existing=skip_existing,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — the image outputs are already written
+            _warn(f"Could not write the spectral base image manifest: {exc}")
+
+    if stack_phases and outputs:
+        try:
+            from ._dicom_phases import stack_cardiac_phases
+
+            stacks = stack_cardiac_phases(
+                outputs,
+                output_folder,
+                compress=compress,
+                save_metadata=save_metadata,
+                skip_existing=skip_existing,
+            )
+            if not stacks:
+                _info("No cardiac phase siblings to stack (need >= 2 phases of one reconstruction).")
+            outputs.extend(stacks)
+        except Exception as exc:  # noqa: BLE001 — the per-series outputs are already written
+            _warn(f"Cardiac phase stacking failed: {exc}")
+
+    if stack_energies and outputs:
+        try:
+            from ._dicom_spectral import stack_monoenergetic
+
+            stacks = stack_monoenergetic(
+                [p for p in outputs if p.endswith((".nii", ".nii.gz"))],
+                output_folder,
+                compress=compress,
+                save_metadata=save_metadata,
+                skip_existing=skip_existing,
+            )
+            if not stacks:
+                _info("No monoenergetic levels to stack (need >= 2 keV levels of one reconstruction).")
+            outputs.extend(stacks)
+        except Exception as exc:  # noqa: BLE001
+            _warn(f"Monoenergetic stacking failed: {exc}")
     return outputs

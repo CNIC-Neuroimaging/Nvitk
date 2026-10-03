@@ -45,6 +45,45 @@ def _intensity_range(data: np.ndarray) -> tuple[float, float]:
     return (lo, hi) if hi > lo else (lo, lo + 1.0)
 
 
+def _decimals_for(lo: float, hi: float) -> int:
+    """Readout precision that resolves about a thousandth of the span."""
+    span = abs(float(hi) - float(lo))
+    if span >= 1000:
+        return 0
+    if span >= 100:
+        return 1
+    if span >= 10:
+        return 2
+    return 4
+
+
+def _absolute_window_params(
+    layer: Any,
+    data: np.ndarray,
+    *,
+    low_label: str,
+    high_label: str,
+    default: tuple[float, float],
+    hint: str,
+) -> tuple[OpParam, OpParam]:
+    """A low/high pair of sliders in the layer's own intensity units.
+
+    Both span the data's full range, so any window — including one tighter than
+    the robust default, or reaching the extremes — is a drag away, and a CT
+    reads in Hounsfield units rather than in percentiles of whatever the volume
+    happens to contain.
+    """
+    lo, hi = _intensity_range(data)
+    dec = _decimals_for(lo, hi)
+    d_lo = float(np.clip(min(default), lo, hi))
+    d_hi = float(np.clip(max(default), lo, hi))
+    return (
+        OpParam("low", low_label, "float", d_lo, minimum=lo, maximum=hi, decimals=dec),
+        OpParam("high", high_label, "float", d_hi, minimum=lo, maximum=hi, decimals=dec,
+                hint=f"{hint}  Data range {lo:.6g} … {hi:.6g}."),
+    )
+
+
 def threshold_params(viewer: Any) -> tuple[OpParam, ...]:
     """A threshold slider spanning the active layer's intensity range."""
     layer, data = _require_array_layer(viewer)
@@ -120,11 +159,25 @@ def crop_params(_viewer: Any) -> tuple[OpParam, ...]:
     )
 
 
-def contrast_params(_viewer: Any) -> tuple[OpParam, ...]:
-    """Percentile window for the auto-contrast."""
-    return (
-        OpParam("low", "Low percentile", "float", 1.0, minimum=0.0, maximum=49.0, decimals=2),
-        OpParam("high", "High percentile", "float", 99.0, minimum=51.0, maximum=100.0, decimals=2),
+def contrast_params(viewer: Any) -> tuple[OpParam, ...]:
+    """Absolute display window (minimum / maximum shown) for brightness/contrast.
+
+    Starts on the robust 1–99 % window — what *auto* means — in intensity units,
+    with the layer's current window quoted in the hint for reference.
+    """
+    layer, data = _require_array_layer(viewer)
+    try:
+        auto = contrast_window(layer, 1.0, 99.0)
+    except ValueError:
+        auto = _intensity_range(data)
+    current = getattr(layer, "contrast_limits", None)
+    cur = f"Current window {float(current[0]):.6g} … {float(current[1]):.6g}." if current else ""
+    return _absolute_window_params(
+        layer, data,
+        low_label="Minimum (black)",
+        high_label="Maximum (white)",
+        default=auto,
+        hint=f"Display window in the layer's own units (HU for CT). {cur}",
     )
 
 
@@ -153,16 +206,31 @@ def _add(viewer: Any, layer: Any, data: np.ndarray, suffix: str, *, labels: bool
 
 
 # ── contrast ──────────────────────────────────────────────────────────────────
-def auto_contrast(viewer: Any, *, low: float = 1.0, high: float = 99.0) -> str:
-    """Set the active layer's contrast limits to a robust percentile window.
+def auto_contrast(viewer: Any, *, low: float | None = None, high: float | None = None) -> str:
+    """Set the active layer's display window to ``[low, high]`` (intensity units).
 
-    The equivalent of ImageJ's *Auto* in Brightness/Contrast: it moves the display
-    window only, never the data, so it is always safe and always reversible.
+    The equivalent of ImageJ's Brightness/Contrast: it moves the display window
+    only, never the data, so it is always safe and always reversible. With no
+    limits given it applies the robust 1–99 % window (ImageJ's *Auto*).
     """
     layer, _data = _require_array_layer(viewer)
-    lo, hi = contrast_window(layer, low, high)
+    if low is None or high is None:
+        lo, hi = contrast_window(layer, 1.0, 99.0)
+    else:
+        lo, hi = sorted((float(low), float(high)))
+        if hi <= lo:
+            raise ValueError("The maximum must be above the minimum.")
+    set_display_window(layer, lo, hi)
+    return f"Contrast set to [{lo:.6g}, {hi:.6g}] on “{layer.name}”."
+
+
+def set_display_window(layer: Any, low: float, high: float) -> None:
+    """Set *layer*'s contrast limits, widening its slider range first if needed."""
+    lo, hi = float(low), float(high)
+    rng = getattr(layer, "contrast_limits_range", None)
+    if rng is not None and (lo < float(rng[0]) or hi > float(rng[1])):
+        layer.contrast_limits_range = (min(lo, float(rng[0])), max(hi, float(rng[1])))
     layer.contrast_limits = (lo, hi)
-    return f"Contrast set to [{lo:.4g}, {hi:.4g}] on “{layer.name}”."
 
 
 def contrast_window(layer: Any, low: float = 1.0, high: float = 99.0) -> tuple[float, float]:
@@ -243,8 +311,8 @@ def ct_window(viewer: Any, *, preset: str = "brain", apply_all: str = "no") -> s
     )
     for target in targets:
         try:
-            target.contrast_limits = (lo, hi)
-        except Exception:  # noqa: BLE001 — a layer whose range excludes the window
+            set_display_window(target, lo, hi)
+        except Exception:  # noqa: BLE001 — a layer that will not take a window
             continue
     where = f"{len(targets)} image layer(s)" if len(targets) > 1 else f"“{layer.name}”"
     return f"{get_window(preset).label} applied to {where}."
@@ -538,30 +606,45 @@ def equalize_histogram(viewer: Any, *, method: str = "clahe", clip_limit: float 
     return f"Histogram equalised ({method}) on “{layer.name}”."
 
 
-def rescale_params(_viewer: Any) -> tuple[OpParam, ...]:
-    """Options for :func:`rescale_intensity`."""
+def rescale_params(viewer: Any) -> tuple[OpParam, ...]:
+    """Options for :func:`rescale_intensity`: an absolute input window and the output top."""
+    layer, data = _require_array_layer(viewer)
+    try:
+        auto = contrast_window(layer, 1.0, 99.0)
+    except ValueError:
+        auto = _intensity_range(data)
+    low, high = _absolute_window_params(
+        layer, data,
+        low_label="Input minimum → 0",
+        high_label="Input maximum → output max",
+        default=auto,
+        hint="Values outside the window are clipped.",
+    )
     return (
-        OpParam("low", "Low percentile", "float", 1.0, minimum=0.0, maximum=49.0, decimals=2),
-        OpParam("high", "High percentile", "float", 99.0, minimum=51.0, maximum=100.0,
-                decimals=2),
+        low,
+        high,
         OpParam("out_max", "Output maximum", "float", 1.0, minimum=1.0, maximum=65535.0,
                 decimals=0, hint="The rescaled data spans 0 to this."),
     )
 
 
 def rescaled_intensity(
-    layer: Any, low: float = 1.0, high: float = 99.0, out_max: float = 1.0
+    layer: Any, low: float | None = None, high: float | None = None, out_max: float = 1.0
 ) -> np.ndarray:
-    """The rescaled image :func:`rescale_intensity` would produce."""
+    """The rescaled image :func:`rescale_intensity` would produce.
+
+    *low* / *high* are intensities in the layer's own units; omitted, they
+    default to the robust 1–99 % window.
+    """
     from skimage import exposure
 
     data = np.asarray(layer_data(layer), dtype=np.float32)
-    finite = data[np.isfinite(data)]
-    if finite.size == 0:
-        raise ValueError("Layer has no finite voxels.")
-    lo, hi = (float(v) for v in np.percentile(finite, (float(low), float(high))))
+    if low is None or high is None:
+        lo, hi = contrast_window(layer, 1.0, 99.0)
+    else:
+        lo, hi = sorted((float(low), float(high)))
     if hi <= lo:
-        raise ValueError("That percentile window is empty.")
+        raise ValueError("The input window is empty: maximum must be above minimum.")
     return np.asarray(
         exposure.rescale_intensity(data, in_range=(lo, hi), out_range=(0.0, float(out_max))),
         dtype=np.float32,
@@ -569,9 +652,9 @@ def rescaled_intensity(
 
 
 def rescale_intensity(
-    viewer: Any, *, low: float = 1.0, high: float = 99.0, out_max: float = 1.0
+    viewer: Any, *, low: float | None = None, high: float | None = None, out_max: float = 1.0
 ) -> str:
-    """Stretch a percentile window of the data onto a fixed output range."""
+    """Stretch an intensity window of the data onto ``[0, out_max]``."""
     from nvitk.core.backend import using
 
     layer, _data = _require_array_layer(viewer)
@@ -613,16 +696,19 @@ def histogram_params(_viewer: Any) -> tuple[OpParam, ...]:
 
 
 # ── segmentation helpers ──────────────────────────────────────────────────────
-def contour_params(_viewer: Any) -> tuple[OpParam, ...]:
-    """Options for :func:`find_contours`."""
+def contour_params(viewer: Any) -> tuple[OpParam, ...]:
+    """Options for :func:`find_contours`: an iso-level slider over the data range."""
+    _layer, data = _require_array_layer(viewer)
+    lo, hi = _intensity_range(data)
     return (
-        OpParam("level", "Level (0 = midpoint)", "float", 0.0, minimum=-1e6, maximum=1e6,
-                decimals=4, hint="Intensity the contour follows. 0 uses the data's midpoint."),
+        OpParam("level", "Level", "float", (lo + hi) / 2.0, minimum=lo, maximum=hi,
+                decimals=_decimals_for(lo, hi),
+                hint=f"Intensity the contour follows, in the layer's units. Range {lo:.6g} … {hi:.6g}."),
         OpParam("axis", "Slice axis", "int", 0, minimum=0, maximum=2),
     )
 
 
-def find_contours(viewer: Any, *, level: float = 0.0, axis: int = 0) -> str:
+def find_contours(viewer: Any, *, level: float | None = None, axis: int = 0) -> str:
     """Trace iso-intensity contours slice by slice into a Shapes layer.
 
     skimage's marching squares is 2D, so a volume is traced one slice at a time
@@ -635,10 +721,13 @@ def find_contours(viewer: Any, *, level: float = 0.0, axis: int = 0) -> str:
     arr = np.asarray(data, dtype=np.float32)
     if arr.ndim not in (2, 3):
         raise ValueError("Contours need a 2D or 3D layer.")
-    value = float(level)
-    if value == 0.0:
+    if level is None:
+        # No level asked for: the data's midpoint. 0 is a level like any other
+        # (water in HU), so it no longer stands for "pick one for me".
         finite = arr[np.isfinite(arr)]
         value = float((finite.min() + finite.max()) / 2.0) if finite.size else 0.0
+    else:
+        value = float(level)
 
     paths: list[np.ndarray] = []
     with using("numpy"):
@@ -647,7 +736,9 @@ def find_contours(viewer: Any, *, level: float = 0.0, axis: int = 0) -> str:
         else:
             ax = int(np.clip(axis, 0, 2))
             for index in range(arr.shape[ax]):
-                plane = np.take(arr, index, axis=ax)
+                key = [slice(None)] * arr.ndim
+                key[ax] = index
+                plane = arr[tuple(key)]  # a view; np.take copies the whole volume per slice
                 for contour in measure.find_contours(plane, value):
                     # Marching squares returns 2D rows/cols; put the slice back.
                     full = np.insert(contour, ax, float(index), axis=1)

@@ -633,7 +633,16 @@ def integrate_rtstruct_processing(
                 filepath = os.path.join(root, file)
                 if os.path.isfile(filepath):
                     try:
-                        ds = pydicom.dcmread(filepath, force=True)
+                        # Header only: deciding "is this an RT-Struct?" needs the
+                        # SOP class, not the pixels. Reading every file in full
+                        # here cost minutes per study over a network share
+                        # (4.7k CT instances: ~5.5 min → seconds).
+                        ds = pydicom.dcmread(
+                            filepath,
+                            force=True,
+                            stop_before_pixels=True,
+                            specific_tags=["SOPClassUID", "Modality"],
+                        )
                         if is_rtstruct_file(ds):
                             rtstruct_files.append(filepath)
                     except Exception:

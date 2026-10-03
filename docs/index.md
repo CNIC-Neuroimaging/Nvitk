@@ -79,8 +79,9 @@ brain/vascular plotting.
 :::{grid-item-card} {octicon}`workflow` Pipelines
 :link: pipelines/index
 :link-type: doc
-End-to-end batch pipelines: PESA-Fat (CT/PET, DIXON) and QVTPy (4D-flow hemodynamics),
-local or SGE-cluster execution.
+End-to-end batch pipelines: PESA-Fat (CT/PET, DIXON), QVTPy (4D-flow hemodynamics),
+TopBrain (vessel segmentation) and CViT (convolutional vision transformers), local or
+SGE-cluster execution.
 :::
 ::::
 
@@ -97,6 +98,9 @@ local or SGE-cluster execution.
   and cluster-bootstrap mediation analysis over cohort measurement tables.
 - **Cluster-aware pipelines** — PESA-Fat and QVTPy run identically `--submit local` or
   `--submit sge`, with per-subject array-job dispatch and dependency chaining.
+- **Deep-learning segmentation on nnU-Net** — TopBrain and CViT train, pre-train and infer on
+  vendored nnU-Net / nnssl engines; CViT adds convolutional-token vision transformers with an
+  attention-usage probe that measures whether the transformer is actually used.
 
 ## Where to next
 

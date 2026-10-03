@@ -254,6 +254,8 @@ def run_driver_script(
     remote_host: str | None = None,
     remote_user: str | None = None,
     credentials: tuple[str, str, str] | None = None,
+    config=None,
+    host_aliases=None,
 ) -> list[str]:
     """Write one bash driver containing every ``qsub`` block, then run it where ``qsub`` exists.
 
@@ -263,6 +265,13 @@ def run_driver_script(
 
     *emit_blocks* is called with the open script handle and writes the stage blocks -- the only
     part that differs between a multi-stage chain and a single inference job.
+
+    Parameters
+    ----------
+    config, host_aliases
+        Another pipeline's config module (``SGE_SCRIPTS_DIR``, ``SGE_LOG_DIR``, ``SGE_ERR_DIR``)
+        and cluster host aliases, so pipelines other than topbrain (e.g. CViT) reuse this
+        driver. Default: topbrain's.
 
     Returns
     -------
@@ -277,8 +286,10 @@ def run_driver_script(
     from nvitk.cluster.sge import write_script_header
     from nvitk.cluster.sge_chunk import parse_sge_submission_job_ids
     from nvitk.cluster.sge_remote import publish_sge_driver_script, resolve_sge_script_paths
-    from nvitk.pipes.topbrain import config as cfg
+    from nvitk.pipes.topbrain import config as _topbrain_cfg
 
+    cfg = config if config is not None else _topbrain_cfg
+    aliases = host_aliases if host_aliases is not None else pth.CLUSTER_HOST_ALIASES
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     local_script, remote_script = resolve_sge_script_paths(
         Path(emit_script) if emit_script is not None else None,
@@ -309,7 +320,7 @@ def run_driver_script(
     else:
         host, user, password = credentials or prompt_ssh_credentials(
             remote_host=remote_host, remote_user=remote_user,
-            host_aliases=pth.CLUSTER_HOST_ALIASES,
+            host_aliases=aliases,
         )
         cluster_path = publish_sge_driver_script(
             local_script, remote_script, host=host, user=user, password=password,

@@ -351,6 +351,12 @@ draggable rows, per its own module docstring:
 2. **Middle** — the plot pane and a model-info report, given most of the window's height.
 3. **Bottom** — clinical/cognitive covariate pickers and the analysis dataframe table.
 
+The arrangement is remembered like the main window's: closing the Statmodels window (or quitting
+the GUI) saves the current session's dock layout and the window geometry to `gui.json`
+(`statmodels_dock_state`, `statmodels_geometry`), and every new session opens on that layout.
+*View → Reset panel layout* still returns to the factory arrangement, and a loaded session config
+that carries its own layout replaces the remembered one.
+
 Data flows one way and is recomputed from scratch on every reload, so toggling one stage
 never compounds on another's output:
 

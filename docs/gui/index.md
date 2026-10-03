@@ -69,29 +69,103 @@ itself, and says why. "Apply to all" skips non-CT layers rather than blanking th
 The registry is display-only and never modifies voxels. For intensity rescaling that feeds a
 model, see {mod}`nvitk.normalization.intensity`.
 
+## 3D+t volumes
+
+A 4D image — a dynamic CT, a perfusion or cine series, a cardiac phase stack from
+`dcm2nii --stack-phases` — opens as a **time-first** layer: napari sees a `T x X x Y x Z`
+view of the `X x Y x Z x T` file (no copy) with a block-diagonal 5x5 affine, the time step on
+the first axis and the file's full spatial affine on the other three.
+
+Why it matters: napari aligns layers by their *trailing* dimensions. Time last put a 3D mask of
+the same patient on world axes (Y, Z, T), so overlays never lined up and inflated the time
+slider; and 4D layers had to drop their (oblique) affine to keep the slider sane. Time-first,
+the spatial axes are the trailing three — exactly where every 3D layer sits — so a 3D
+segmentation, a 3D tool output or a CT of another phase overlays the 4D volume voxel for voxel,
+and nothing couples time and space.
+
+- It opens like a 3D volume (axial, 2D) on its first frame; the time slider's play button is a
+  cine. The slider runs in seconds when the frame interval is known.
+- Tools get the array as shown (`TXYZ`, axes labelled accordingly); 3D results of a 3D+t layer
+  land on its spatial grid. Export writes the file's own `XYZT` order and 4x4 affine back.
+- 4D-flow phase arithmetic reads the file order through
+  `nvitk.gui.core.spatial.layer_source_order`, so the flow tools work unchanged.
+
+## Orthogonal views
+
+The **Orthogonal views** dock shows axial / coronal / sagittal through one crosshair, drawing
+every visible layer on the bound layer's grid (off-grid layers are resampled once and cached).
+
+- **3D+t**: a 4D layer binds like a 3D one; a *Time* slider appears above the views and stays in
+  step with napari's time slider both ways, so playing the cine drives the views and the 3D
+  planes too. The label shows the frame time, the cardiac phase, or — for a monoenergetic stack —
+  the energy in keV.
+- **3D slices**: *Show the three slices in 3D* puts the cuts on the canvas; *…and the slice
+  image* draws them with the **same window, colormap and gamma** as the layer (labels keep
+  their colours) and follows later edits — they used to appear in napari's default grey range.
+- **Per-layer control**: a table lists every drawn layer with two checkboxes — *3D slice*
+  (which layers get a slice image on the planes; default the bound one) and *Cut* (which layers
+  the *See inside* cut opens; default all). Keep a mask whole while the CT around it is cut away,
+  or the other way round.
+
+## Performance (CPU threads)
+
+The views' host work — slicing and compositing every layer, resampling off-grid layers, oblique
+and CPR reformats, FFTs — runs on nvitk's shared worker pool ({mod}`nvitk.core.parallel`).
+The **CPU: N / M threads** button in the Tools dock sets the budget: default **75 % of the cores**,
+presets 25/50/75 %/all, stored in `gui.json` (`"performance"`) and overridden per session by
+`$NVITK_WORKERS`. The same dialog toggles napari's experimental *asynchronous slicing*.
+
+Measured on a 512x512x416 float64 CT with a mask and an off-grid layer: a three-view redraw
+dropped from 8.2 s to 18 ms. Most of that was not threading but a slicing fix — `np.take`
+copied the whole Fortran-ordered NIfTI array for every slice; the views now index views of it.
+Resampling the off-grid layer: 13.8 s on one thread, 0.67 s on 24.
+
+## Time & frequency tools
+
+| Tool | What it does |
+|---|---|
+| **3D+t: extract time frame** | One frame (or the one on screen) as a 3D layer. |
+| **3D+t: temporal projection** | max / mean / min / std / sum / median, plus **ttp** (time to peak, s) and **auc** maps. |
+| **3D+t: time–intensity curve** | The curve at the cursor voxel or over a mask label, in a window that collects curves and saves CSV — bolus tracking, enhancement. On a monoenergetic stack (`dcm2nii --stack-energies`) it is the spectral curve, HU vs keV. |
+| **3D+t: stack layers** | Same-grid 3D layers → one 3D+t layer, ordered by energy for monoenergetic results or by cardiac phase when known. |
+| **K-space (FFT)** | Spatial FFT (3D, or 2D slice by slice; per time point for 3D+t) shown as log-magnitude (or phase/real/imag) on the same grid. The complex data stays attached to the layer. |
+| **Inverse FFT** | Back to image space from the active k-space layer, optionally keeping or removing the region painted in a mask over k-space. |
+| **K-space filter** | Radial low/high/band-pass/band-stop with a Hann, Gaussian, Butterworth or ideal edge. |
+
+All run on the GPU when GPU computing is on; the FFTs use the worker pool on the CPU.
+
+## Quick tools: brightness / contrast
+
+The search-bar quick operations that set a window — *Brightness / contrast*, *Rescale
+intensity*, *Find contours* — take **absolute intensities** (HU for CT) on sliders spanning the
+layer's data range, each with a box to type an exact value. They start on the robust 1–99 %
+window expressed in intensity units, and the live preview is reverted if the dialog is cancelled.
+
 ## Tool catalog
 
 `nvitk.gui.tools.registry` defines every tool as a `GuiToolSpec` (id, category, parameter
 spec, whether it needs a reference layer or 3D data, and its run mode), merged with the
-pipeline shortcuts from `nvitk.gui.pipeline.catalog`. **91 tools across 11 categories**,
+pipeline shortcuts from `nvitk.gui.pipeline.catalog`. **117 tools across 12 categories**,
 each backed by the same functions documented in the {doc}`Main API Reference <../api/index>`:
 
 | Category | Count | Examples |
 |---|---|---|
 | Restoration | 3 | Bilateral filter, N4 bias correction, MRI super-resolution |
-| Filters | 6 | Sliding threshold, Hessian, Jerman vesselness, snakes, mask keep-inside/outside |
+| Filters | 19 | Sliding threshold, Hessian, Jerman vesselness, snakes, mask keep-inside/outside |
 | Morphology | 11 | Dilate/erode/open/close, fill holes, connected components, ICA siphon correction, mask genus |
 | Centerline | 3 | Detect/cut junctions, convert to polyline |
-| Segmentation | 24 | Label ops, mask boolean algebra, region growing, blood flood, ANTsPyNet brain/vessel/DKT, TotalSegmentator, eICAB |
-| Visualization | 8 | PET/SUV hotspots, 4D-flow vectors/streamlines, vessel cross-sections, hemodynamics, TOF morphometrics |
-| Transform | 8 | Volume projection, reorient, rotate, swap axes, isotropy, resample, oblique slice |
+| Segmentation | 25 | Label ops, mask boolean algebra, region growing, blood flood, ANTsPyNet brain/vessel/DKT, TotalSegmentator, eICAB |
 | Registration | 6 | FLIRT rigid/apply, ANTsPy register/apply, FireANTs register/apply |
-| Measure | 16 | QVTPy LOCs, LOC/mask hemodynamics, volume, morphometrics, Dice/Jaccard, SUV stats |
+| Visualization | 12 | PET/SUV hotspots, 4D-flow vectors/streamlines, vessel cross-sections, hemodynamics, TOF morphometrics |
+| Transform | 8 | Volume projection, reorient, rotate, swap axes, isotropy, resample, oblique slice |
+| Time & frequency | 7 | 3D+t frame / projection / time curve / stacking, k-space FFT, inverse FFT, k-space filter |
+| Measure | 19 | QVTPy LOCs, LOC/mask hemodynamics, volume, morphometrics, Dice/Jaccard, SUV stats |
 | Lab | 1 | Mouse TOF Circle-of-Willis interactive session |
+| Pipelines | 3 | Pipeline CLI shortcuts |
 
 The dock (`nvitk.gui.tools.dock`) wires the category/operation form to a label picker (shown
 for label-like layers), a TotalSegmentator ROI checklist (shown only for that tool), a
-pipeline-CLI form (for the Pipelines category), the GPU toggle, and a "Run SGE" button
+pipeline-CLI form (for the Pipelines category), the GPU toggle, the CPU-threads button, and a "Run SGE" button
 (enabled per-tool via `is_sge_capable`).
 
 ## GPU toggle

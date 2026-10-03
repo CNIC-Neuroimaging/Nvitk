@@ -14,7 +14,7 @@
 Why the in-tree nnU-Net build
 -----------------------------
 Released ``nnunetv2`` cannot consume an nnssl checkpoint. The in-tree build at
-``pipes/topbrain/nnunet`` adds the two pieces that make it possible:
+``pipes/_engines/nnunet`` adds the two pieces that make it possible:
 
 ``nnUNetv2_preprocess_like_nnssl``
     Reads the checkpoint's adaptation plan, derives target spacing and normalisation from it,

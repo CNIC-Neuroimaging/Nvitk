@@ -16,6 +16,7 @@ instead of only at its surface.
 from __future__ import annotations
 
 import functools
+import threading
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -23,19 +24,24 @@ import numpy as np
 from qtpy.QtCore import Qt, QTimer, Signal
 from qtpy.QtGui import QImage, QPixmap
 from qtpy.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QGridLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QPushButton,
     QSizePolicy,
     QSlider,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from nvitk.core.array import to_numpy
+from nvitk.core.parallel import parallel_map
 from nvitk.gui.core.design import (
     COLOR_ACCENT,
     COLOR_BORDER,
@@ -299,7 +305,8 @@ def oblique_slice(
     axis-aligned slice exactly, and keeps the crosshair still on screen while the
     plane turns under it.
     """
-    from scipy.ndimage import map_coordinates
+    # Slab-parallel on the shared worker pool, bit-identical to SciPy's.
+    from nvitk.transform.threaded import map_coordinates
 
     height, width = int(shape[0]), int(shape[1])
     sp = np.asarray(spacing, dtype=float)[:3]
@@ -338,9 +345,19 @@ def line_direction_px(
     return (d_row / norm, d_col / norm)
 
 
-#: Ceiling on cached resampled volumes, mirroring the slice-cache budget. One
-#: off-grid layer costs a full copy on the active grid.
-_RESAMPLE_BUDGET_BYTES = 512 * 1024 * 1024
+def _resample_budget() -> int:
+    """Ceiling on cached resampled volumes: 15 % of RAM, never under 512 MB.
+
+    One off-grid layer costs a full copy on the active grid. The old fixed
+    512 MB refused to draw any off-grid layer at all next to a 512x512x416
+    float64 CT (870 MB on its own) — on a workstation with tens of GB free.
+    """
+    from nvitk.core.parallel import physical_memory_bytes
+
+    return max(512 * 1024 * 1024, int(0.15 * physical_memory_bytes()))
+
+
+_RESAMPLE_BUDGET_BYTES = _resample_budget()
 
 
 @dataclass
@@ -364,6 +381,8 @@ class RenderSource:
     gamma: float = 1.0
     order: int = 1
     resampled: bool = False
+    #: Time point ``data`` was taken at, for a 3D+t layer (``None`` for a 3D one).
+    time: int | None = None
     #: Distinct label ids in ``data``, computed once. Finding them is a full
     #: ``np.unique`` over the volume (~24 ms on a 50 MB mask) and they cannot
     #: change without ``data`` changing, which rebuilds the source anyway — so
@@ -390,17 +409,45 @@ def _grid_key(layer: Any) -> tuple:
     """
     from nvitk.gui.core.spatial import layer_affine
 
-    shape = _layer_shape(layer)
+    shape = _spatial_shape(layer)
     affine = layer_affine(layer)
     raw_scale = getattr(layer, "scale", None)
     # Explicitly against None: a layer's scale is a NumPy array, and ``or`` on
     # one raises rather than falling back.
     scale = () if raw_scale is None else tuple(float(s) for s in raw_scale)
     return (
-        None if shape is None else tuple(int(v) for v in shape[-3:]),
+        shape,
         None if affine is None else affine.tobytes(),
         scale,
     )
+
+
+def layer_time_axis(layer: Any) -> int | None:
+    """Array axis holding time on a 3D+t layer (``0`` when shown time-first), else ``None``."""
+    shape = _layer_shape(layer)
+    if shape is None or len(shape) != 4:
+        return None
+    from nvitk.gui.core.spatial import _time_axis_index
+
+    return int(_time_axis_index(layer))
+
+
+def layer_time_count(layer: Any) -> int:
+    """Number of time points of *layer* (1 for a plain volume)."""
+    axis = layer_time_axis(layer)
+    shape = _layer_shape(layer)
+    return int(shape[axis]) if axis is not None and shape is not None else 1
+
+
+def _spatial_shape(layer: Any) -> tuple[int, int, int] | None:
+    """The three spatial dimensions of *layer*'s array, time axis removed."""
+    shape = _layer_shape(layer)
+    if shape is None or len(shape) < 3:
+        return None
+    axis = layer_time_axis(layer)
+    if axis is not None:
+        return tuple(int(v) for i, v in enumerate(shape) if i != axis)  # type: ignore[return-value]
+    return tuple(int(v) for v in shape[-3:])  # type: ignore[return-value]
 
 
 def _layer_shape(layer: Any) -> tuple[int, ...] | None:
@@ -436,11 +483,12 @@ def is_drawable_layer(layer: Any) -> bool:
     return shape is not None and len(shape) >= 3
 
 
-def _layer_volume(layer: Any) -> np.ndarray | None:
+def _layer_volume(layer: Any, time_index: int = 0) -> np.ndarray | None:
     """*layer*'s 3D host array, or ``None`` when it has none to draw.
 
     One place for the label-source choice, the multiscale unwrap and the 4D
-    reduction, all of which were previously repeated at each call site.
+    reduction, all of which were previously repeated at each call site. A 3D+t
+    layer contributes the volume at *time_index* (clamped), as a view.
     """
     data = getattr(layer, "data", None)
     if data is None:
@@ -455,10 +503,12 @@ def _layer_volume(layer: Any) -> np.ndarray | None:
         arr = to_numpy(label_source_data(layer) if is_label_like_layer(layer) else layer.data)
     except Exception:  # noqa: BLE001
         return None
-    arr = np.asarray(arr)
-    if arr.ndim > 3:
-        # A 4D layer contributes its first volume, the way the rest of the panel
-        # treats one.
+    if arr.ndim == 4:
+        axis = layer_time_axis(layer)
+        axis = arr.ndim - 1 if axis is None else axis
+        t = int(np.clip(int(time_index), 0, int(arr.shape[axis]) - 1))
+        arr = arr[_axis_index(arr.ndim, axis, t)]  # a view (np.take would copy all frames)
+    elif arr.ndim > 4:
         arr = arr[(0,) * (arr.ndim - 3)]
     return arr if arr.ndim == 3 else None
 
@@ -472,18 +522,7 @@ def _same_grid(layer: Any, reference: Any) -> bool:
     """
     from nvitk.gui.core.spatial import layer_affine
 
-    def _shape(obj: Any) -> tuple[int, ...] | None:
-        """Trailing three dimensions of a layer's data, without copying it."""
-        data = getattr(obj, "data", None)
-        shape = getattr(data, "shape", None)
-        if shape is None:
-            try:
-                shape = data[0].shape
-            except (TypeError, IndexError, KeyError, AttributeError):
-                return None
-        return tuple(int(v) for v in shape)[-3:]
-
-    if _shape(layer) != _shape(reference):
+    if _spatial_shape(layer) != _spatial_shape(reference):
         return False
     a, b = layer_affine(layer), layer_affine(reference)
     if a is None or b is None:
@@ -500,6 +539,31 @@ def resample_layer_to(
     with no affine and a different shape — because a panel that cannot draw one
     layer should say so and draw the rest.
     """
+    from nvitk.gui.core.spatial import layer_affine
+
+    # Both grids known: compose the voxel-to-voxel map and resample slab-parallel
+    # on the worker pool (~7x on 8 threads) — the same composition resample_to
+    # uses, without building Image objects for a display copy.
+    src_aff, ref_aff = layer_affine(layer), layer_affine(reference)
+    ref_shape = _spatial_shape(reference)
+    if src_aff is not None and ref_aff is not None and ref_shape is not None:
+        try:
+            from nvitk.transform.threaded import affine_transform
+
+            vox = np.linalg.inv(ref_aff) @ src_aff          # source voxel → reference voxel
+            inv = np.linalg.inv(vox)                        # reference voxel → source voxel
+            host = to_numpy(data)
+            # A display copy: intensities in float32 (half of a float64 CT's
+            # footprint, far below what a screen can show); labels keep their ids.
+            out_dtype = host.dtype if int(order) == 0 else np.float32
+            return affine_transform(
+                host, inv[:3, :3], offset=inv[:3, 3], output_shape=ref_shape,
+                order=int(order), mode="constant", cval=0.0, prefilter=int(order) > 1,
+                output=out_dtype,
+            )
+        except Exception:  # noqa: BLE001 — fall through to the generic aligner
+            pass
+
     from nvitk.core.backend import using
     from nvitk.gui.core.spatial import align_mask_to_reference_layer
 
@@ -508,16 +572,33 @@ def resample_layer_to(
             _ref, aligned, _resampled = align_mask_to_reference_layer(
                 layer, reference, data, order=int(order)
             )
-        return np.asarray(to_numpy(aligned.data))
+        return to_numpy(aligned.data)
     except Exception:  # noqa: BLE001 — reported by the caller, never raised into paint
         return None
 
 
+def _axis_index(ndim: int, axis: int, index: int) -> tuple:
+    """Basic-indexing key selecting *index* along *axis* — a view, never a copy."""
+    key: list[Any] = [slice(None)] * int(ndim)
+    key[int(axis)] = int(index)
+    return tuple(key)
+
+
 def _slice_of(data: np.ndarray, axis: int, index: int) -> np.ndarray:
-    """The 2D slice of *data* at *index* along *axis*, clamped into range."""
+    """The 2D slice of *data* at *index* along *axis*, clamped into range.
+
+    Basic indexing, deliberately not ``np.take``: ``take`` first makes the whole
+    input C-contiguous, and a NIfTI volume comes off disk in Fortran order — so
+    every slice of a 512x512x416 CT copied the full 870 MB volume (~1.4 s per
+    slice, per layer, per view). An indexed view reads only the slice.
+    """
     n = int(data.shape[axis])
     idx = int(np.clip(index, 0, max(n - 1, 0)))
-    return np.take(data, idx, axis=axis)
+    return data[_axis_index(data.ndim, axis, idx)]
+
+
+#: Guards every panel's shared reordered-slice budget across render threads.
+_POOL_LOCK = threading.Lock()
 
 
 class SliceCache:
@@ -529,9 +610,11 @@ class SliceCache:
     that axis into its own contiguous copy makes every axis equally cheap.
 
     The copy is built lazily, on the first scroll of that axis, and only for the
-    *last* axis: that is the one whose slice is a gather with a stride between
-    every element. A middle axis still yields contiguous rows, and measures no
-    faster reordered than read directly — so reordering it was pure memory.
+    *innermost* axis (the smallest stride — last for C order, first for the
+    Fortran order NIfTI arrays arrive in): that is the one whose slice is a
+    gather with a stride between every element. The other axes yield
+    contiguous runs and measure no faster reordered — so reordering them was
+    pure memory.
 
     Panels share a *pool* so that the ceiling is on the session rather than on
     each array: the per-array limit alone said nothing about how many arrays
@@ -550,14 +633,19 @@ class SliceCache:
         self._budget = int(budget_bytes)
         self._pool = pool
         self._reordered: dict[int, np.ndarray | None] = {}
+        # Views render on worker threads: two of them asking for the same axis
+        # must not both build (and both charge the pool for) the same copy.
+        self._lock = threading.Lock()
 
     def _worth_reordering(self, axis: int, arr: np.ndarray) -> bool:
         """Whether a contiguous copy of *axis* would earn its memory."""
-        # Axis 0 of a C-ordered array is already contiguous; nothing to gain.
-        if axis == 0 and bool(arr.flags.c_contiguous):
-            return False
-        # Only the innermost axis is genuinely slow to slice.
-        if axis != arr.ndim - 1:
+        # Only the innermost (smallest-stride) axis is genuinely slow to slice:
+        # its slice gathers one element per stride. That is the *last* axis of
+        # a C-ordered array but the *first* of a Fortran-ordered one, which is
+        # how nibabel hands NIfTI volumes over — so ask the strides, not the
+        # axis number.
+        strides = [abs(int(st)) for st in arr.strides]
+        if not strides or axis != int(np.argmin(strides)):
             return False
         if arr.nbytes > self._budget:
             return False
@@ -570,24 +658,34 @@ class SliceCache:
         """A contiguous copy with *axis* first, or ``None`` if it is not worth making."""
         if axis in self._reordered:
             return self._reordered[axis]
-        arr = self._data
-        if not self._worth_reordering(axis, arr):
-            self._reordered[axis] = None
-            return None
-        try:
-            self._reordered[axis] = np.ascontiguousarray(np.moveaxis(arr, axis, 0))
-            if self._pool is not None:
-                self._pool["used"] += int(arr.nbytes)
-        except (MemoryError, ValueError):
-            self._reordered[axis] = None
-        return self._reordered[axis]
+        with self._lock:
+            if axis in self._reordered:
+                return self._reordered[axis]
+            arr = self._data
+            with _POOL_LOCK:
+                worth = self._worth_reordering(axis, arr)
+                if worth and self._pool is not None:
+                    self._pool["used"] += int(arr.nbytes)  # reserve before building
+            if not worth:
+                self._reordered[axis] = None
+                return None
+            try:
+                self._reordered[axis] = np.ascontiguousarray(np.moveaxis(arr, axis, 0))
+            except (MemoryError, ValueError):
+                self._reordered[axis] = None
+                if self._pool is not None:
+                    with _POOL_LOCK:
+                        self._pool["used"] = max(self._pool["used"] - int(arr.nbytes), 0)
+            return self._reordered[axis]
 
     def release(self) -> None:
         """Give the reordered copies back to the pool."""
-        for arr in self._reordered.values():
-            if arr is not None and self._pool is not None:
-                self._pool["used"] = max(self._pool["used"] - int(arr.nbytes), 0)
-        self._reordered.clear()
+        with self._lock:
+            for arr in self._reordered.values():
+                if arr is not None and self._pool is not None:
+                    with _POOL_LOCK:
+                        self._pool["used"] = max(self._pool["used"] - int(arr.nbytes), 0)
+            self._reordered.clear()
 
     def slice(self, axis: int, index: int) -> np.ndarray:
         """The 2D slice at *index* along *axis*."""
@@ -1305,6 +1403,10 @@ def displayed_axes(viewer: Any, ndim: int = 3) -> list[int]:
     """
     try:
         order = [int(a) for a in viewer.dims.displayed]
+        # With a 3D+t layer open the world has a leading time dim; the spatial
+        # dims (the trailing three, where every 3D layer aligns) are what count.
+        offset = int(viewer.dims.ndim) - int(ndim)
+        order = [a - offset for a in order]
     except Exception:
         order = []
     if len(order) != ndim or sorted(order) != list(range(ndim)):
@@ -1374,6 +1476,45 @@ def remove_ortho_planes(viewer: Any, source_name: str) -> int:
     return removed
 
 
+#: Display properties a slice plane copies from the layer it shows, so the cut in
+#: 3D reads with the same window, colours and brightness as the 2D views.
+_IMAGE_STYLE_ATTRS: tuple[str, ...] = ("colormap", "contrast_limits", "gamma")
+_LABEL_STYLE_ATTRS: tuple[str, ...] = ("colormap",)
+
+
+def copy_plane_style(source: Any, plane: Any) -> None:
+    """Give a slice *plane* the display window and colours of the *source* layer.
+
+    Planes used to be added with Napari's defaults — the full data range and a
+    grey ramp — so a CT windowed for soft tissue appeared washed out in 3D, and
+    additive blending brightened it further wherever it crossed the volume.
+    Only properties that differ are written: each assignment is an event.
+    """
+    labels = type(source).__name__ == "Labels" or is_label_like_layer(source)
+    for attr in (_LABEL_STYLE_ATTRS if labels else _IMAGE_STYLE_ATTRS):
+        if not hasattr(source, attr) or not hasattr(plane, attr):
+            continue
+        try:
+            value = getattr(source, attr)
+            current = getattr(plane, attr)
+            if attr == "contrast_limits":
+                if np.allclose(np.asarray(current, float), np.asarray(value, float)):
+                    continue
+                # Widen the range first: limits outside it are clipped otherwise.
+                lo, hi = (float(v) for v in value)
+                rng = getattr(plane, "contrast_limits_range", None)
+                if rng is not None and (lo < float(rng[0]) or hi > float(rng[1])):
+                    plane.contrast_limits_range = (min(lo, float(rng[0])), max(hi, float(rng[1])))
+            elif attr == "colormap":
+                if getattr(current, "name", current) == getattr(value, "name", value) and not labels:
+                    continue
+            elif current == value:
+                continue
+            setattr(plane, attr, value)
+        except Exception:  # noqa: BLE001 — a style that will not copy is not worth a failed sync
+            continue
+
+
 def sync_ortho_planes(
     viewer: Any,
     layer: Any,
@@ -1382,6 +1523,7 @@ def sync_ortho_planes(
     axes: tuple[int, ...] = (0, 1, 2),
     frames: Sequence[PlaneFrame] | None = None,
     spacing: Sequence[float] | None = None,
+    time_index: int = 0,
 ) -> list[Any]:
     """Show *layer* as three ``depiction="plane"`` slices at *position* on the canvas.
 
@@ -1389,34 +1531,49 @@ def sync_ortho_planes(
     three of them at the crosshair give the 3D view the same three cuts the 2D
     views show. Existing plane layers are moved rather than recreated — rebuilding
     them on every scroll re-uploads the volume to the GPU each time.
+
+    The planes carry *layer*'s window, colormap and gamma (labels: its colours),
+    and a 3D+t layer is shown at *time_index* — its planes are re-fed only when
+    the time point changes.
     """
     from nvitk.gui.core.spatial import layer_spatial_kwargs
 
     source_name = str(getattr(layer, "name", "volume"))
     by_name = {str(getattr(l, "name", "")): l for l in viewer.layers}
     wanted = [_plane_layer_name(source_name, a) for a in axes]
+    is_4d = layer_time_axis(layer) is not None
+    t_key = int(time_index) if is_4d else 0
     # Moving existing planes needs only their shape, not the volume: re-deriving
     # the array on every scroll step is what made scrolling crawl.
     if all(name in by_name for name in wanted):
-        shape = tuple(int(v) for v in by_name[wanted[0]].data.shape[-3:])
+        planes = [by_name[name] for name in wanted]
+        stale = any(
+            (getattr(pl, "metadata", None) or {}).get("nvitk_ortho_t", 0) != t_key for pl in planes
+        )
+        data = _layer_volume(layer, t_key) if stale else None
+        shape = tuple(int(v) for v in planes[0].data.shape[-3:])
         displayed = displayed_axes(viewer, len(shape))
         out = []
-        for i, (axis, name) in enumerate(zip(axes, wanted)):
+        for i, (axis, existing) in enumerate(zip(axes, planes)):
             point, normal = _plane_geometry(
                 axis, position, shape, displayed,
                 frames[i] if frames is not None and i < len(frames) else None,
                 spacing,
             )
-            existing = by_name[name]
+            if data is not None:
+                existing.data = data
+                existing.metadata["nvitk_ortho_t"] = t_key
+            copy_plane_style(layer, existing)
             existing.plane = {"position": point, "normal": normal, "thickness": 1.0}
             out.append(existing)
         return out
 
-    data = to_numpy(label_source_data(layer) if is_label_like_layer(layer) else layer.data)
-    if data.ndim != 3:
-        raise ValueError("3D planes need a 3D layer.")
+    data = _layer_volume(layer, t_key)
+    if data is None or data.ndim != 3:
+        raise ValueError("3D planes need a 3D (or 3D+t) layer.")
 
-    spatial = layer_spatial_kwargs(layer)
+    spatial = layer_spatial_kwargs(layer, ndim=3)
+    labels = type(layer).__name__ == "Labels" or is_label_like_layer(layer)
     # Adding a layer makes it active, which would re-bind anything watching the
     # active layer — including the panel that asked for these planes.
     try:
@@ -1435,15 +1592,22 @@ def sync_ortho_planes(
             spacing,
         )
         if existing is None:
-            existing = viewer.add_image(
-                data,
-                name=name,
-                depiction="plane",
-                rendering="mip",
-                blending="additive",
-                opacity=0.9,
-                **spatial,
-            )
+            if labels:
+                existing = viewer.add_labels(
+                    np.asarray(data).astype(np.int32, copy=False),
+                    name=name, depiction="plane", opacity=1.0, **spatial,
+                )
+                existing._nvitk_label_like = True
+            else:
+                # Translucent at full opacity draws the slice exactly as the 2D
+                # view does; additive (the old setting) added the volume's own
+                # brightness on top wherever the plane crossed it.
+                existing = viewer.add_image(
+                    data, name=name, depiction="plane", rendering="mip",
+                    blending="translucent", opacity=1.0, **spatial,
+                )
+            existing.metadata["nvitk_ortho_t"] = t_key
+        copy_plane_style(layer, existing)
         existing.plane = {"position": point, "normal": normal, "thickness": 1.0}
         out.append(existing)
 
@@ -1547,19 +1711,12 @@ def sync_ortho_boxes(
     # Read the shape off the array, never through ``asarray``: the layer's data may
     # live on the GPU, and materialising a whole volume on the host to learn how
     # big it is costs a full copy per crosshair move.
-    data = getattr(layer, "data", None)
-    shape = getattr(data, "shape", None)
-    if shape is None:
-        # Multiscale layers hold a list of arrays; the first is the full grid.
-        try:
-            shape = data[0].shape
-        except (TypeError, IndexError, KeyError, AttributeError):
-            raise ValueError("Slice outlines need a layer with a 3D array.") from None
-    shape = tuple(int(v) for v in shape)[-3:]
-    if len(shape) != 3:
-        raise ValueError("Slice outlines need a 3D layer.")
+    shape = _spatial_shape(layer)
+    if shape is None or len(shape) != 3:
+        raise ValueError("Slice outlines need a 3D (or 3D+t) layer.")
     by_name = {str(getattr(l, "name", "")): l for l in viewer.layers}
-    spatial = layer_spatial_kwargs(layer)
+    # The outlines are 3D shapes: a 3D+t layer lends them its spatial placement.
+    spatial = layer_spatial_kwargs(layer, ndim=3)
 
     try:
         previously_active = viewer.layers.selection.active
@@ -1622,7 +1779,10 @@ def _scene_point(layer: Any, displayed: list[int], data_point: list[float]) -> n
     it any other way means guessing at a convention, and the two differ exactly
     when ``dims.order`` is a permutation — which is nvitk's normal case.
     """
-    transform = layer._transforms.simplified.set_slice(list(displayed))
+    # A 3D+t layer's spatial dims are its trailing three; *displayed* and
+    # *data_point* are spatial (0-2), so shift them onto the layer's own dims.
+    lead = max(int(getattr(layer, "ndim", 3)) - 3, 0)
+    transform = layer._transforms.simplified.set_slice([lead + int(d) for d in displayed])
     ordered = [float(data_point[d]) for d in displayed]
     world = np.asarray(transform(ordered), dtype=float)
     # Napari reverses the axes when handing the transform to vispy.
@@ -1647,7 +1807,7 @@ def clip_geometry(
     Both vectors are computed in scene coordinates through Napari's own transform
     and then pre-reversed, so Napari's reversal restores them exactly.
     """
-    shape = tuple(int(v) for v in np.asarray(layer.data).shape[-3:])
+    shape = _spatial_shape(layer) or tuple(int(v) for v in layer.data.shape[-3:])
     order = list(displayed) if displayed else list(range(3))
 
     cut = [float(v) / 2.0 for v in shape]
@@ -1749,6 +1909,16 @@ class OrthoViewerPanel(QWidget):
         #: the overwhelmingly common case.
         self._frames: list[PlaneFrame] = []
         self._base_frames: list[PlaneFrame] = []
+        #: Current time point for 3D+t layers, and how many the drawn layers have.
+        self._time = 0
+        self._n_time = 1
+        #: Per-layer choices from the layers table, keyed by ``id(layer)``:
+        #: which layers get a slice image in 3D, and which ones the cut opens.
+        self._plane_choice: dict[int, bool] = {}
+        self._cut_choice: dict[int, bool] = {}
+        #: Source names whose 3D slice planes are on the canvas.
+        self._planed: set[str] = set()
+        self._table_guard = False
 
         # Pushing planes and clipping planes to the canvas re-uploads volumes, which
         # is far too heavy to do on every step of a scroll. Coalesce them.
@@ -1762,7 +1932,7 @@ class OrthoViewerPanel(QWidget):
         self._style_timer = QTimer(self)
         self._style_timer.setSingleShot(True)
         self._style_timer.setInterval(_STYLE_SYNC_MS)
-        self._style_timer.timeout.connect(lambda: self._redraw(force=True))
+        self._style_timer.timeout.connect(self._on_style_settled)
 
         # Adding or moving layers arrives in bursts — a tool that drops four
         # overlays on the canvas fires four inserts. Rebuild once when they stop.
@@ -1778,9 +1948,40 @@ class OrthoViewerPanel(QWidget):
         self._rebuild_timer.setInterval(_REBUILD_SYNC_MS)
         self._rebuild_timer.timeout.connect(self._rebuild_sources)
 
-        self._status = QLabel("Select a 3D image or labels layer.")
+        self._status = QLabel("Select a 3D or 3D+t image or labels layer.")
         self._status.setWordWrap(True)
         self._status.setStyleSheet(f"color: {COLOR_MUTED};")
+
+        # Time row: only shown while a drawn layer is 3D+t. Kept in step with the
+        # Napari time slider both ways, so the cine played there drives these
+        # views too.
+        self._time_label = QLabel("t 1 / 1")
+        self._time_label.setStyleSheet(f"color: {COLOR_TEXT}; font-size: 10px;")
+        self._time_label.setMinimumWidth(110)
+        self._time_slider = QSlider(Qt.Horizontal)
+        self._time_slider.setRange(0, 0)
+        self._time_slider.setToolTip(
+            "Time point shown for 3D+t layers. Follows (and drives) the Napari time slider."
+        )
+        self._time_slider.valueChanged.connect(self._on_time_slider)
+        time_row = QHBoxLayout()
+        time_row.setContentsMargins(0, 0, 0, 0)
+        time_row.setSpacing(SPACE_TIGHT)
+        time_head = QLabel("TIME")
+        self._time_head = time_head
+        time_head.setStyleSheet(
+            f"color: {COLOR_MUTED}; font-size: 10px; font-weight: bold; letter-spacing: 1px;"
+        )
+        time_row.addWidget(time_head)
+        time_row.addWidget(self._time_slider, stretch=1)
+        time_row.addWidget(self._time_label)
+        self._time_box = QWidget()
+        self._time_box.setLayout(time_row)
+        self._time_box.setVisible(False)
+        try:
+            viewer.dims.events.current_step.connect(self._on_viewer_dims)
+        except Exception:  # noqa: BLE001 — a viewer without dims events has no time to follow
+            pass
 
         self._slice_views: list[SliceView] = []
         grid = QGridLayout()
@@ -1807,6 +2008,7 @@ class OrthoViewerPanel(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(SPACE_TIGHT)
         root.addWidget(self._status)
+        root.addWidget(self._time_box)
         root.addLayout(grid, stretch=1)
 
     def _build_controls(self) -> QWidget:
@@ -1824,6 +2026,27 @@ class OrthoViewerPanel(QWidget):
 
         card = Card("3D view")
         card.add(self._composite_label)
+
+        # One row per drawn layer: whether it gets a slice image in 3D, and
+        # whether the see-inside cut opens it. A mask can stay whole while the
+        # CT around it is cut away — or the other way round.
+        self._layers_table = QTableWidget(0, 3)
+        self._layers_table.setHorizontalHeaderLabels(["Layer", "3D slice", "Cut"])
+        self._layers_table.verticalHeader().setVisible(False)
+        self._layers_table.setSelectionMode(QAbstractItemView.NoSelection)
+        self._layers_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        header = self._layers_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self._layers_table.setMinimumHeight(70)
+        self._layers_table.setMaximumHeight(150)
+        self._layers_table.setToolTip(
+            "3D slice: draw this layer's slice image on the 3D planes (needs "
+            "'…and the slice image' below). Cut: let 'See inside' open this layer."
+        )
+        self._layers_table.itemChanged.connect(self._on_table_item_changed)
+        card.add(self._layers_table)
 
         self._show_planes = QCheckBox("Show the three slices in 3D")
         self._show_planes.setToolTip(
@@ -1891,12 +2114,12 @@ class OrthoViewerPanel(QWidget):
     def refresh_from_layer(self, layer: Any | None) -> None:
         """Bind *layer* and redraw all three views, or show why it cannot be shown."""
         usable = layer is not None and getattr(layer, "data", None) is not None
-        if usable and int(getattr(layer.data, "ndim", 0)) != 3:
+        if usable and int(getattr(layer.data, "ndim", 0)) not in (3, 4):
             usable = False
         if not usable:
             self._layer = None
             self._data = None
-            self._status.setText("Select a 3D image or labels layer.")
+            self._status.setText("Select a 3D or 3D+t image or labels layer.")
             for view in self._slice_views:
                 view.set_slice(None, index=0, count=1)
             return
@@ -1917,9 +2140,11 @@ class OrthoViewerPanel(QWidget):
             and _grid_key(layer) == _grid_key(self._layer)
         )
         self._layer = layer
-        self._data = to_numpy(
-            label_source_data(layer) if is_label_like_layer(layer) else layer.data
-        )
+        self._data = _layer_volume(layer, self._time)
+        if self._data is None:
+            self._layer = None
+            self._status.setText("This layer has no 3D volume to show.")
+            return
         self._views = _axis_views(layer)
         # Keep what stays valid. On the same grid the rendered slices are the
         # ones already on screen, so clearing them would force a redraw that
@@ -1958,9 +2183,7 @@ class OrthoViewerPanel(QWidget):
             self._clip_axis.addItem(view.title, view.axis)
         self._clip_axis.blockSignals(False)
 
-        name = getattr(layer, "name", "layer")
-        shape = " x ".join(str(int(s)) for s in self._data.shape)
-        self._status.setText(f"{name} - {shape} voxels")
+        self._update_status()
         if same_grid:
             # Sources, crosshair and rendered slices all still stand.
             self._update_composite_label()
@@ -2004,18 +2227,21 @@ class OrthoViewerPanel(QWidget):
         """
         if self._layer is None or _same_grid(layer, self._layer):
             return data, False
-        key = (id(layer), self._reference_key())
+        t_key = self._time if layer_time_axis(layer) is not None else None
+        key = (id(layer), self._reference_key(), t_key)
         hit = self._resample_cache.get(key)
         if hit is not None:
             return hit, True
-        self._evict_resamples(int(self._data.nbytes))
-        if int(self._data.nbytes) > _RESAMPLE_BUDGET_BYTES:
+        order = 0 if is_label_like_layer(layer) else 1
+        itemsize = np.dtype(data.dtype).itemsize if order == 0 else 4
+        incoming = int(np.prod(self._data.shape)) * itemsize
+        self._evict_resamples(incoming)
+        if incoming > _RESAMPLE_BUDGET_BYTES:
             self._status.setText(
                 f"“{getattr(layer, 'name', '?')}” is on another grid and there is no "
                 "room left to resample it; it is not drawn."
             )
             return None, False
-        order = 0 if is_label_like_layer(layer) else 1
         out = resample_layer_to(layer, self._layer, data, order=order)
         if out is None:
             self._status.setText(
@@ -2047,7 +2273,8 @@ class OrthoViewerPanel(QWidget):
 
     def _source_for(self, layer: Any) -> RenderSource | None:
         """Build the draw-time description of *layer*, or ``None`` if it cannot be."""
-        raw = _layer_volume(layer)
+        timed = layer_time_axis(layer) is not None
+        raw = _layer_volume(layer, self._time)
         if raw is None:
             return None
         data, resampled = self._aligned_data(layer, raw)
@@ -2066,6 +2293,7 @@ class OrthoViewerPanel(QWidget):
             gamma=layer_gamma(layer),
             order=0 if is_label else 1,
             resampled=resampled,
+            time=min(self._time, layer_time_count(layer) - 1) if timed else None,
         )
         self._refresh_style(source)
         return source
@@ -2108,7 +2336,14 @@ class OrthoViewerPanel(QWidget):
             if not bool(getattr(layer, "visible", True)):
                 continue
             source = keep.get(id(layer))
-            if source is None or source.layer is not layer:
+            stale_time = (
+                source is not None
+                and source.time is not None
+                and source.time != min(self._time, layer_time_count(layer) - 1)
+            )
+            if source is None or source.layer is not layer or stale_time:
+                if stale_time and source.cache is not None:
+                    source.cache.release()
                 source = self._source_for(layer)
             if source is not None:
                 self._refresh_style(source)
@@ -2125,6 +2360,8 @@ class OrthoViewerPanel(QWidget):
         self._rendered.clear()
         self._watch_layers()
         self._update_composite_label()
+        self._update_time_range()
+        self._refresh_layers_table()
         self._redraw(force=True)
         self._apply_clip()
 
@@ -2303,15 +2540,13 @@ class OrthoViewerPanel(QWidget):
         """The RGB image for *view*: every visible layer, in layer-list order."""
         index = self._position[view.axis]
         oblique = self.is_oblique()
-        planes: list[np.ndarray] = []
-        blendings: list[str] = []
-        opacities: list[float] = []
-        for source in self._sources:
-            if source.opacity <= 0.0:
-                continue
+        drawn = [source for source in self._sources if source.opacity > 0.0]
+
+        def _rgba(source: RenderSource) -> np.ndarray:
+            """One layer's slice for this view, as RGBA (thread-safe: pure NumPy)."""
             if oblique:
                 plane = self._resample(view, view_index, source.data, source.order)
-                rgba = (
+                return (
                     _label_rgba(plane, source.layer, source.lut)
                     if source.is_label
                     else image_rgba(
@@ -2322,15 +2557,17 @@ class OrthoViewerPanel(QWidget):
                         else colormap_table(layer_colormap(source.layer), source.gamma),
                     )
                 )
-            else:
-                rgba = slice_to_rgba(
-                    source.layer, source.data, view.axis, index, view,
-                    contrast=source.contrast, table=source.table, lut=source.lut,
-                    cache=source.cache, label_table=source.label_table,
-                )
-            planes.append(rgba)
-            blendings.append(source.blending)
-            opacities.append(source.opacity)
+            return slice_to_rgba(
+                source.layer, source.data, view.axis, index, view,
+                contrast=source.contrast, table=source.table, lut=source.lut,
+                cache=source.cache, label_table=source.label_table,
+            )
+
+        # Layers render concurrently on the worker pool (serially when this view
+        # is itself already one of several rendering in parallel).
+        planes = parallel_map(_rgba, drawn)
+        blendings = [source.blending for source in drawn]
+        opacities = [source.opacity for source in drawn]
         if not planes:
             shape = (
                 int(self._data.shape[view.rows]),
@@ -2349,27 +2586,40 @@ class OrthoViewerPanel(QWidget):
             return
         oblique = self.is_oblique()
         self._btn_reset_orient.setEnabled(oblique)
+        todo: list[int] = []
         for position, (widget, view) in enumerate(zip(self._slice_views, self._views)):
             widget._view = view
             widget._title.setText(view.title + ("  ·  oblique" if oblique else ""))
             index = self._position[view.axis]
-            crosshair = view.to_pixel(self._position, self._data.shape)
             widget.set_lines(self._crosshair_lines(position))
             # A turned plane moves with the crosshair in every direction, so the
             # "same index, skip the redraw" shortcut no longer holds.
             if force or oblique or self._rendered.get(view.axis) != index:
                 self._rendered[view.axis] = index
-                aspect = self._spacing[view.rows] / max(self._spacing[view.cols], 1e-6)
-                widget.set_slice(
-                    self._render_view(view, position),
-                    index=index,
-                    count=int(self._data.shape[view.axis]),
-                    aspect=aspect,
-                    crosshair=crosshair,
-                )
+                todo.append(position)
             else:
                 # Same slice, new crosshair: repaint the lines, keep the image.
-                widget.set_crosshair(crosshair)
+                widget.set_crosshair(view.to_pixel(self._position, self._data.shape))
+        if not todo:
+            return
+        # Render off the GUI thread's critical path: the moved views concurrently
+        # (each oblique view instead parallelises its own resampling, which is
+        # where an oblique view spends its time). Qt widgets are only touched
+        # back here, on the GUI thread.
+        if oblique:
+            images = [self._render_view(self._views[i], i) for i in todo]
+        else:
+            images = parallel_map(lambda i: self._render_view(self._views[i], i), todo)
+        for position, rgb in zip(todo, images):
+            view = self._views[position]
+            aspect = self._spacing[view.rows] / max(self._spacing[view.cols], 1e-6)
+            self._slice_views[position].set_slice(
+                rgb,
+                index=self._position[view.axis],
+                count=int(self._data.shape[view.axis]),
+                aspect=aspect,
+                crosshair=view.to_pixel(self._position, self._data.shape),
+            )
 
     # ── interaction ──────────────────────────────────────────────────────────
 
@@ -2494,10 +2744,9 @@ class OrthoViewerPanel(QWidget):
         """Add or remove the 3D cut layers on the canvas."""
         if self._layer is None:
             return
-        name = self._cut_source_name()
         if not enabled:
-            remove_ortho_planes(self._viewer, name)
-            remove_ortho_boxes(self._viewer, name)
+            self._remove_all_planes()
+            remove_ortho_boxes(self._viewer, self._cut_source_name())
             self._show_slice_image.setEnabled(False)
             return
         self._show_slice_image.setEnabled(True)
@@ -2516,15 +2765,88 @@ class OrthoViewerPanel(QWidget):
         if self._layer is None or not self._show_planes.isChecked():
             return
         if not self._wants_slice_image():
-            remove_ortho_planes(self._viewer, self._cut_source_name())
+            self._remove_all_planes()
         try:
             self._draw_cuts()
         except Exception as exc:  # noqa: BLE001
             self._status.setText(f"Could not redraw the 3D cuts: {exc}")
 
+    def _remove_all_planes(self) -> None:
+        """Drop every slice-image plane this panel put on the canvas."""
+        self._suspend_rebuild = True
+        try:
+            for name in set(self._planed) | {self._cut_source_name()}:
+                remove_ortho_planes(self._viewer, name)
+        finally:
+            self._suspend_rebuild = False
+        self._planed.clear()
+
     def _cut_source_name(self) -> str:
         """Name the 3D cut layers are keyed on — the bound layer's."""
         return str(getattr(self._layer, "name", "volume"))
+
+    # ── per-layer choices ────────────────────────────────────────────────────
+
+    def _wants_plane(self, source: RenderSource) -> bool:
+        """Whether *source*'s slice image goes on the 3D planes.
+
+        Defaults to the bound layer only — the historical behaviour. A layer
+        resampled from another grid cannot: plane positions are voxel indices
+        of the bound grid, which are not its own.
+        """
+        if source.resampled:
+            return False
+        return self._plane_choice.get(id(source.layer), source.layer is self._layer)
+
+    def _wants_cut(self, layer: Any) -> bool:
+        """Whether the see-inside cut opens *layer* (default: every drawn layer)."""
+        return self._cut_choice.get(id(layer), True)
+
+    def _refresh_layers_table(self) -> None:
+        """One row per drawn layer, with its 3D-slice and cut checkboxes."""
+        self._table_guard = True
+        try:
+            table = self._layers_table
+            table.setRowCount(len(self._sources))
+            self._table_layers = [s.layer for s in self._sources]
+            for row, source in enumerate(self._sources):
+                name = QTableWidgetItem(str(getattr(source.layer, "name", "?")))
+                name.setFlags(Qt.ItemIsEnabled)
+                table.setItem(row, 0, name)
+                plane = QTableWidgetItem()
+                flags = Qt.ItemIsUserCheckable | (Qt.ItemIsEnabled if not source.resampled else Qt.NoItemFlags)
+                plane.setFlags(flags)
+                plane.setCheckState(Qt.Checked if self._wants_plane(source) else Qt.Unchecked)
+                if source.resampled:
+                    plane.setToolTip("Resampled from another grid: no 3D slice image.")
+                table.setItem(row, 1, plane)
+                cut = QTableWidgetItem()
+                cut.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+                cut.setCheckState(Qt.Checked if self._wants_cut(source.layer) else Qt.Unchecked)
+                table.setItem(row, 2, cut)
+        finally:
+            self._table_guard = False
+
+    def _on_table_item_changed(self, item: Any) -> None:
+        """A 3D-slice or cut checkbox was toggled in the layers table."""
+        if self._table_guard or item is None:
+            return
+        row, col = item.row(), item.column()
+        layers = getattr(self, "_table_layers", [])
+        if row >= len(layers) or col not in (1, 2):
+            return
+        layer = layers[row]
+        checked = item.checkState() == Qt.Checked
+        if col == 1:
+            self._plane_choice[id(layer)] = checked
+            if self._show_planes.isChecked():
+                try:
+                    self._draw_cuts()
+                except Exception as exc:  # noqa: BLE001
+                    self._status.setText(f"Could not redraw the 3D cuts: {exc}")
+        else:
+            self._cut_choice[id(layer)] = checked
+            self._apply_clip()
 
     def _draw_cuts(self) -> None:
         """Push the three cuts to the canvas: outlines always, images on request.
@@ -2548,13 +2870,41 @@ class OrthoViewerPanel(QWidget):
                 self._viewer, self._layer, tuple(self._position),
                 frames=frames, spacing=self._spacing, views=views,
             )
+            wanted: set[str] = set()
             if self._wants_slice_image():
-                sync_ortho_planes(
-                    self._viewer, self._layer, tuple(self._position),
-                    frames=frames, spacing=self._spacing,
-                )
+                for source in self._sources:
+                    if not self._wants_plane(source):
+                        continue
+                    name = str(getattr(source.layer, "name", "volume"))
+                    sync_ortho_planes(
+                        self._viewer, source.layer, tuple(self._position),
+                        frames=frames, spacing=self._spacing, time_index=self._time,
+                    )
+                    wanted.add(name)
+            for name in self._planed - wanted:
+                remove_ortho_planes(self._viewer, name)
+            self._planed = wanted
         finally:
             self._suspend_rebuild = False
+
+    def _sync_plane_styles(self) -> None:
+        """Re-copy window, colours and gamma onto the planes of every planed layer."""
+        if not self._planed:
+            return
+        by_name = {str(getattr(l, "name", "")): l for l in self._viewer.layers}
+        for source in self._sources:
+            name = str(getattr(source.layer, "name", ""))
+            if name not in self._planed:
+                continue
+            for axis in (0, 1, 2):
+                plane = by_name.get(_plane_layer_name(name, axis))
+                if plane is not None:
+                    copy_plane_style(source.layer, plane)
+
+    def _on_style_settled(self) -> None:
+        """A burst of colour/opacity changes ended: redraw, and restyle the 3D planes."""
+        self._redraw(force=True)
+        self._sync_plane_styles()
 
     def _sync_canvas(self) -> None:
         """Push the crosshair to the 3D planes and the clip, once per settle."""
@@ -2571,11 +2921,12 @@ class OrthoViewerPanel(QWidget):
             pass
 
     def _apply_clip(self) -> None:
-        """Apply (or clear) the see-inside cut on the bound layer and its overlay.
+        """Apply (or clear) the see-inside cut on the layers ticked for it.
 
-        The overlay is cut with it. Cutting only the base leaves a segmentation
-        floating in front of the opened volume, covering the very interior the cut
-        was made to expose — and reading as if the mask extended past the tissue.
+        Every drawn layer is cut by default, overlays included: cutting only the
+        base leaves a segmentation floating in front of the opened volume,
+        covering the very interior the cut was made to expose. The layers table
+        takes any of them out — keep a mask whole while the CT around it opens.
         """
         if self._layer is None:
             return
@@ -2583,9 +2934,10 @@ class OrthoViewerPanel(QWidget):
         axis_data = self._clip_axis.currentData()
         axis = int(axis_data) if axis_data is not None else 0
         displayed = displayed_axes(self._viewer)
-        targets = [s.layer for s in self._sources] or [self._layer]
-        # A layer that dropped out of the composite keeps whatever cut it was
-        # given otherwise, and nothing here would ever take it off again.
+        drawn = [s.layer for s in self._sources] or [self._layer]
+        targets = [layer for layer in drawn if self._wants_cut(layer)]
+        # A layer that dropped out of the composite — or was unticked — keeps
+        # whatever cut it was given otherwise, and nothing would take it off.
         for stale in self._clipped:
             if stale not in targets:
                 clear_clip(stale)
@@ -2595,6 +2947,124 @@ class OrthoViewerPanel(QWidget):
                 apply_clip(target, axis, self._position[axis], side, displayed)
             except Exception as exc:  # noqa: BLE001
                 self._status.setText(f"Could not clip {getattr(target, 'name', '?')}: {exc}")
+
+    # ── time (3D+t) ──────────────────────────────────────────────────────────
+
+    def _time_layer(self) -> Any | None:
+        """The 3D+t layer whose time axis the panel follows (bound first)."""
+        if self._layer is not None and layer_time_axis(self._layer) is not None:
+            return self._layer
+        for source in self._sources:
+            if layer_time_axis(source.layer) is not None:
+                return source.layer
+        return None
+
+    def _time_dim(self) -> int | None:
+        """World (dims) index of the followed time axis, or ``None``."""
+        layer = self._time_layer()
+        if layer is None:
+            return None
+        try:
+            offset = int(self._viewer.dims.ndim) - int(layer.data.ndim)
+            return offset + int(layer_time_axis(layer))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _update_time_range(self) -> None:
+        """Show the time row when something drawn is 3D+t, sized to the longest."""
+        counts = [layer_time_count(s.layer) for s in self._sources]
+        if self._layer is not None:
+            counts.append(layer_time_count(self._layer))
+        n = max(counts or [1])
+        self._n_time = int(n)
+        self._time_box.setVisible(self._n_time > 1)
+        self._time_slider.blockSignals(True)
+        self._time_slider.setRange(0, max(self._n_time - 1, 0))
+        self._time = int(np.clip(self._time, 0, max(self._n_time - 1, 0)))
+        self._time_slider.setValue(self._time)
+        self._time_slider.blockSignals(False)
+        self._update_time_label()
+
+    def _update_time_label(self) -> None:
+        """``t 3 / 15  ·  0.120 s`` — the frame and, when known, its time."""
+        text = f"t {self._time + 1} / {self._n_time}"
+        layer = self._time_layer()
+        if layer is not None:
+            from nvitk.gui.core.spatial import nvitk_metadata_from_layer
+
+            md = nvitk_metadata_from_layer(layer)
+            times = md.get("frame_times_s")
+            phases = md.get("cardiac_phases_percent")
+            energies = md.get("spectral_energies_kev")
+            self._time_head.setText("ENERGY" if isinstance(energies, (list, tuple)) else "TIME")
+            if isinstance(energies, (list, tuple)) and self._time < len(energies):
+                text = f"E {self._time + 1} / {self._n_time}  ·  {float(energies[self._time]):g} keV"
+            elif isinstance(phases, (list, tuple)) and self._time < len(phases):
+                text += f"  ·  {float(phases[self._time]):g}% R-R"
+            elif isinstance(times, (list, tuple)) and self._time < len(times):
+                text += f"  ·  {float(times[self._time]):.3g} s"
+            else:
+                t_res = md.get("t_res", md.get("temporal_resolution"))
+                if t_res:
+                    text += f"  ·  {self._time * float(t_res):.3g} s"
+        self._time_label.setText(text)
+
+    def _update_status(self) -> None:
+        """Bound layer, its grid, and the time point when it is 3D+t."""
+        if self._layer is None or self._data is None:
+            return
+        name = getattr(self._layer, "name", "layer")
+        shape = " x ".join(str(int(v)) for v in self._data.shape)
+        extra = ""
+        if layer_time_axis(self._layer) is not None:
+            extra = f"  ·  3D+t, {layer_time_count(self._layer)} time points"
+        self._status.setText(f"{name} - {shape} voxels{extra}")
+
+    def _on_time_slider(self, value: int) -> None:
+        """The panel's own time slider moved."""
+        self._set_time(int(value), sync_viewer=True)
+
+    def _on_viewer_dims(self, _event: Any = None) -> None:
+        """Follow the Napari time slider (cheap: compares one index per event)."""
+        if self._n_time <= 1 or getattr(self, "_time_guard", False):
+            return
+        dim = self._time_dim()
+        if dim is None:
+            return
+        try:
+            t = int(self._viewer.dims.current_step[dim])
+        except Exception:  # noqa: BLE001
+            return
+        if t != self._time:
+            self._set_time(t, sync_viewer=False)
+
+    def _set_time(self, t: int, *, sync_viewer: bool) -> None:
+        """Show time point *t* in every 3D+t layer the panel draws."""
+        t = int(np.clip(int(t), 0, max(self._n_time - 1, 0)))
+        if t == self._time:
+            return
+        self._time = t
+        self._time_slider.blockSignals(True)
+        self._time_slider.setValue(t)
+        self._time_slider.blockSignals(False)
+        self._update_time_label()
+        if self._layer is not None and layer_time_axis(self._layer) is not None:
+            data = _layer_volume(self._layer, t)
+            if data is not None:
+                self._data = data
+        # 3D+t sources are rebuilt at the new time point; 3D ones are reused.
+        self._rebuild_sources()
+        self._canvas_timer.start()
+        if sync_viewer:
+            dim = self._time_dim()
+            if dim is not None:
+                self._time_guard = True
+                try:
+                    self._viewer.dims.set_current_step(dim, t)
+                except Exception:  # noqa: BLE001
+                    pass
+                finally:
+                    self._time_guard = False
 
     def position(self) -> tuple[int, int, int]:
         """Current crosshair, as voxel indices in array-axis order."""
@@ -2688,6 +3158,9 @@ def attach_ortho_dock(viewer: Any, panel: OrthoViewerPanel) -> Any:
 
 
 __all__ = [
+    "copy_plane_style",
+    "layer_time_axis",
+    "layer_time_count",
     "colormap_table",
     "composite",
     "image_rgba",

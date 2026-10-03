@@ -53,6 +53,24 @@ from .window import StatmodelsWindow
 
 log = Logger()
 
+#: ``gui.json`` keys for the remembered Statmodels arrangement — the counterpart of
+#: the main window's ``dock_state``. The dock layout is one session's
+#: ``QMainWindow.saveState()``; every new session opens on it. The geometry is the
+#: shell's own (size, position, maximised), from ``saveGeometry()``.
+LAYOUT_PREF_KEY = "statmodels_dock_state"
+GEOMETRY_PREF_KEY = "statmodels_geometry"
+
+
+def _stored(key: str) -> str:
+    """A remembered base64 blob from ``gui.json``, or ``""``."""
+    try:
+        from nvitk.gui.core.prefs import load_prefs
+
+        value = load_prefs().get(key)
+    except Exception:  # noqa: BLE001 — preferences fail soft
+        return ""
+    return value if isinstance(value, str) else ""
+
 
 #: Edge of a tab-bar button, in pixels. A ``QPushButton`` honours an explicit stylesheet
 #: geometry exactly — a ``QToolButton`` adds three pixels of frame to its size hint that no
@@ -100,6 +118,9 @@ class StatmodelsShell(QMainWindow):
         self.setWindowFlags(self.windowFlags() | Qt.Window)
         fit_to_screen(self, 1700, 1000)
         apply_dark_theme(self)
+        #: Whether a remembered window geometry was applied — decides whether
+        #: opening the shell maximises it (first run) or restores where it was.
+        self._geometry_restored = self._restore_geometry()
 
         #: Pipeline kind new sessions open on. The launcher's dropdown writes here, so the choice
         #: made before opening the window still applies to the second tab and the tenth.
@@ -134,6 +155,12 @@ class StatmodelsShell(QMainWindow):
         self.setCentralWidget(self._tabs)
         self._install_shortcuts()
         self.new_session()
+        # The shell is a top-level window of its own: when the Napari window quits
+        # the application, Qt does not send it a close event — so the layout is
+        # also saved on the way out, not only when this window is closed.
+        app = QApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self.save_layout)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Sessions
@@ -168,6 +195,11 @@ class StatmodelsShell(QMainWindow):
             session = StatmodelsWindow(initial_pipeline_kind=kind, embedded=True)
         finally:
             QApplication.restoreOverrideCursor()
+
+        # Open on the remembered arrangement — the layout the last session was
+        # left in — rather than the factory one. A loaded config that carries its
+        # own layout_state still replaces this when it is applied.
+        self._restore_session_layout(session)
 
         self._counter += 1
         name = self._unique_title(title or f"Session {self._counter}")
@@ -205,22 +237,78 @@ class StatmodelsShell(QMainWindow):
             session.set_pipeline_kind(self._pipeline_kind)
 
     def show_maximized_floating(self) -> None:
-        """Show, maximize, raise, and focus the shell."""
+        """Show, raise and focus the shell — where it was left, or maximised the first time."""
         self.show()
-        self.showMaximized()
+        if not self._geometry_restored:
+            self.showMaximized()
         self.raise_()
         self.activateWindow()
 
     def closeEvent(self, event: Any) -> None:
-        """Give every session a chance to stop its workers before the pages are torn down.
+        """Remember the layout, then let every session stop its workers before the pages go.
 
         Qt destroys child widgets without delivering ``closeEvent`` to them, and a page's close
         handler is what joins its loader and mediation threads — threads that would otherwise
         outlive the widgets their signals are wired to.
         """
+        self.save_layout()
         for session in self.sessions():
             session.close()
         super().closeEvent(event)
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Remembered layout
+    # ──────────────────────────────────────────────────────────────────────────
+    def save_layout(self) -> bool:
+        """Store the current session's dock arrangement and the shell's geometry.
+
+        The *current* session's, because that is the one on screen — the arrangement
+        the user just left. ``True`` when ``gui.json`` was written.
+        """
+        values: dict[str, str] = {}
+        try:
+            values[GEOMETRY_PREF_KEY] = bytes(self.saveGeometry().toBase64()).decode("ascii")
+        except Exception:  # noqa: BLE001
+            pass
+        session = self.current_session()
+        if session is not None:
+            try:
+                # Leave focus mode first: saving its collapsed docks would make every
+                # later session open with its panels hidden.
+                if getattr(session, "_btn_focus", None) is not None and session._btn_focus.isChecked():
+                    session._btn_focus.setChecked(False)
+                encoded = session._encoded_dock_state()
+            except RuntimeError:  # the page is already being destroyed
+                encoded = ""
+            if encoded:
+                values[LAYOUT_PREF_KEY] = encoded
+        if not values:
+            return False
+        try:
+            from nvitk.gui.core.prefs import save_prefs
+
+            return bool(save_prefs(values))
+        except Exception:  # noqa: BLE001 — never block a close on a preference
+            return False
+
+    def _restore_geometry(self) -> bool:
+        """Put the shell back where it was; ``True`` when a stored geometry applied."""
+        encoded = _stored(GEOMETRY_PREF_KEY)
+        if not encoded:
+            return False
+        try:
+            from qtpy.QtCore import QByteArray
+
+            return bool(self.restoreGeometry(QByteArray.fromBase64(encoded.encode("ascii"))))
+        except Exception:  # noqa: BLE001 — a geometry from another screen setup is not fatal
+            return False
+
+    @staticmethod
+    def _restore_session_layout(session: StatmodelsWindow) -> None:
+        """Apply the remembered dock arrangement to a freshly built *session*."""
+        encoded = _stored(LAYOUT_PREF_KEY)
+        if encoded:
+            session._restore_encoded_dock_state(encoded)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Tab bar

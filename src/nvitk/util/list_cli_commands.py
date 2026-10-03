@@ -46,6 +46,8 @@ def categorize_command(cmd: str, module: str) -> str:
         return "PESA-Brain Analysis"
     if cmd.startswith("nvitk-topbrain"):
         return "Vessel Segmentation Challenges"
+    if cmd.startswith("nvitk-cvit"):
+        return "Deep Learning Segmentation"
     if cmd.startswith((
         "nvitk-morph", "nvitk-restore", "nvitk-filter", "nvitk-measure", "nvitk-transform",
         "nvitk-voxelwise",

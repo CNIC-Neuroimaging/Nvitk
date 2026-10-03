@@ -77,7 +77,12 @@ _FILTER_PREVIEW_VOXELS = 8_000_000
 
 
 class _FloatSlider(QWidget):
-    """A slider over a float range, with the value shown beside it."""
+    """A slider over a float range, with an editable value box beside it.
+
+    The box is what makes an absolute range usable: a CT window is typed as
+    ``-160 … 240`` HU far more precisely than it is dragged across 4000 HU of
+    slider. Both edit the same value; whichever moves updates the other.
+    """
 
     def __init__(self, param: quick_ops.OpParam, parent: QWidget | None = None) -> None:
         """Build a slider spanning *param*'s range, starting at its default."""
@@ -89,36 +94,62 @@ class _FloatSlider(QWidget):
 
         self._slider = QSlider(Qt.Horizontal)
         self._slider.setRange(0, _SLIDER_STEPS)
-        self._readout = QLabel("")
-        self._readout.setMinimumWidth(84)
-        self._readout.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self._box = QDoubleSpinBox()
+        self._box.setDecimals(max(self._decimals, 0))
+        self._box.setRange(self._lo, self._hi)
+        self._box.setSingleStep((self._hi - self._lo) / 100.0)
+        self._box.setKeyboardTracking(False)
+        self._box.setMinimumWidth(96)
+        self._box.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(SPACE_TIGHT)
         row.addWidget(self._slider, stretch=1)
-        row.addWidget(self._readout)
+        row.addWidget(self._box)
 
-        self._slider.valueChanged.connect(lambda _v: self._sync_readout())
+        self._slider.valueChanged.connect(self._slider_moved)
+        self._box.valueChanged.connect(self._box_edited)
         self.set_value(float(param.default))
 
-    def _sync_readout(self) -> None:
-        """Show the slider's current value."""
-        self._readout.setText(f"{self.value():.{self._decimals}g}")
+    def _slider_moved(self, _v: int) -> None:
+        """Slider → box."""
+        self._box.blockSignals(True)
+        self._box.setValue(self._from_slider())
+        self._box.blockSignals(False)
 
-    def value(self) -> float:
-        """Current value in the parameter's own units."""
+    def _box_edited(self, value: float) -> None:
+        """Box → slider (which then reports the change)."""
+        self._set_slider(float(value))
+        # The slider may not move for a sub-step edit; report it anyway.
+        for callback in getattr(self, "_callbacks", []):
+            callback()
+
+    def _from_slider(self) -> float:
         frac = self._slider.value() / float(_SLIDER_STEPS)
         return self._lo + frac * (self._hi - self._lo)
 
-    def set_value(self, value: float) -> None:
-        """Move the slider to *value*, clamped into range."""
+    def _set_slider(self, value: float) -> None:
         frac = (float(value) - self._lo) / (self._hi - self._lo)
+        self._slider.blockSignals(True)
         self._slider.setValue(int(round(float(np.clip(frac, 0.0, 1.0)) * _SLIDER_STEPS)))
-        self._sync_readout()
+        self._slider.blockSignals(False)
+
+    def value(self) -> float:
+        """Current value in the parameter's own units — exactly what the box shows."""
+        return float(self._box.value())
+
+    def set_value(self, value: float) -> None:
+        """Move slider and box to *value*, clamped into range."""
+        v = float(np.clip(float(value), self._lo, self._hi))
+        self._box.blockSignals(True)
+        self._box.setValue(v)
+        self._box.blockSignals(False)
+        self._set_slider(v)
 
     def on_change(self, callback: Callable[[], None]) -> None:
-        """Call *callback* whenever the slider moves."""
+        """Call *callback* whenever the value changes, from either control."""
+        self._callbacks = getattr(self, "_callbacks", []) + [callback]
         self._slider.valueChanged.connect(lambda _v: callback())
 
 
@@ -285,13 +316,14 @@ class QuickOpDialog(QDialog):
             if self._op_name == "ct_window":
                 lo, hi = quick_ops.ct_window_limits(str(self.values()["preset"]))
             else:
-                lo, hi = quick_ops.contrast_window(
-                    self._source, float(self.values()["low"]), float(self.values()["high"])
-                )
+                # Absolute intensities, straight from the sliders.
+                lo, hi = sorted((float(self.values()["low"]), float(self.values()["high"])))
+                if hi <= lo:
+                    return
         except Exception:
             return
         try:
-            self._source.contrast_limits = (lo, hi)
+            quick_ops.set_display_window(self._source, lo, hi)
         except Exception:
             pass
 

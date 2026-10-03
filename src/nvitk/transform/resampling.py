@@ -30,6 +30,7 @@ def resample_to(
     mode: str = "constant",
     cval: float = 0.0,
     prefilter: bool | None = None,
+    threaded: bool = False,
 ) -> Image:
     """
     Resample *source* onto *target*'s voxel grid via affine composition.
@@ -50,6 +51,12 @@ def resample_to(
         Boundary handling passed to ``ndi.affine_transform``.
     prefilter
         Defaults to ``False`` when ``order == 0`` and ``True`` otherwise.
+    threaded
+        Resample host arrays slab-parallel on the shared worker pool
+        (:func:`nvitk.transform.threaded.affine_transform`, ~7x on 8 threads).
+        Off by default so pipeline outputs stay bit-for-bit what they were: the
+        threaded path can decide a voxel lying exactly on the source's edge the
+        other way (see that module). Interactive callers turn it on.
 
     Returns
     -------
@@ -74,7 +81,11 @@ def resample_to(
     if prefilter is None:
         prefilter = order != 0
 
-    resampled = ndi.affine_transform(
+    if threaded:
+        from nvitk.transform.threaded import affine_transform as _affine_transform
+    else:
+        _affine_transform = ndi.affine_transform
+    resampled = _affine_transform(
         source.data,
         matrix=as_backend_array(inv_linear),
         offset=as_backend_array(inv_offset),

@@ -12,6 +12,8 @@ from typing import Any
 from nvitk.core.backend import setup
 from nvitk.core import as_backend_array
 
+from nvitk.transform.threaded import map_coordinates as threaded_map_coordinates
+
 setup(globals())
 
 
@@ -55,7 +57,8 @@ def oblique_slice_with_coords(
     cval: float = 0.0,
 ):
     """Sample *vol* on a plane using a precomputed :class:`ObliquePlaneCoords` grid."""
-    return ndi.map_coordinates(
+    # Slab-parallel on the host, bit-identical to ndi.map_coordinates.
+    return threaded_map_coordinates(
         as_backend_array(vol),
         plane.coords,
         order=int(order),

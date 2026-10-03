@@ -186,6 +186,28 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Export an animated GIF: one 3D screenshot per cardiac phase (4D image or "
         "4D flow vectors overlay)."
     ),
+    "time_extract_frame": "One time point of a 3D+t layer as a 3D layer (-1 = the frame on screen).",
+    "time_projection": (
+        "Collapse a 3D+t layer over time: max/mean/min/std/sum/median, or ttp (time to peak, "
+        "seconds) and auc (area under the curve) maps for dynamic CT / perfusion."
+    ),
+    "time_curve": (
+        "Time–intensity curve at the cursor voxel or over a mask label (HU vs keV on a "
+        "monoenergetic stack), in a plot window that collects curves and saves them as CSV."
+    ),
+    "time_stack_layers": (
+        "Stack same-grid 3D image layers into one 3D+t layer, ordered by energy (monoE) or "
+        "cardiac phase when known."
+    ),
+    "kspace_fft": (
+        "K-space of the active image: log-magnitude (or phase/real/imag) on the same grid; the "
+        "complex data stays attached for Inverse FFT. 2D mode transforms slice by slice."
+    ),
+    "kspace_ifft": (
+        "Inverse FFT of the active k-space layer; an optional mask keeps (or removes) the "
+        "painted part of k-space."
+    ),
+    "kspace_filter": "Radial low/high/band-pass filtering in k-space, with a smooth or ideal edge.",
     "volume_projection": (
         "Maximum / mean / median (etc.) intensity projection along a chosen axis."
     ),

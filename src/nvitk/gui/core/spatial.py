@@ -90,8 +90,14 @@ def layer_spacing(layer: Any) -> tuple[float, ...] | None:
     return None
 
 
-def layer_spatial_kwargs(layer: Any) -> dict[str, Any]:
+def layer_spatial_kwargs(layer: Any, ndim: int | None = None) -> dict[str, Any]:
     """Keyword args for ``add_image`` / ``add_labels`` / ``add_surface``.
+
+    With *ndim*, the placement is cut down to an output with that many
+    (trailing) dimensions — a 3D result computed from a 3D+t layer takes the
+    trailing ``scale``/``translate`` entries and the spatial 4x4 block of the
+    layer's 5x5 affine. Napari aligns layers by trailing dimension, so that is
+    exactly where the result belongs.
 
     Napari composes its transforms — data, then ``scale``/``translate``, then
     ``affine``, then world — so reproducing a layer's placement means carrying
@@ -118,7 +124,106 @@ def layer_spatial_kwargs(layer: Any) -> dict[str, Any]:
         # makes the kwargs harder to read when something goes wrong.
         if matrix.shape[0] and not np.allclose(matrix, np.eye(matrix.shape[0])):
             kwargs["affine"] = matrix
+    if ndim is not None:
+        kwargs = _subset_spatial_kwargs(kwargs, _output_dims(layer, int(ndim)))
     return kwargs
+
+
+def _output_dims(layer: Any, ndim: int) -> list[int]:
+    """Which of *layer*'s dims an *ndim*-dimensional output corresponds to.
+
+    Its spatial (``X``/``Y``/``Z``) dims when it has exactly *ndim* of them — the
+    trailing three of a time-first layer, the leading three of a legacy ``XYZT``
+    one — else the trailing *ndim*, which is how Napari aligns layers anyway.
+    """
+    from nvitk.gui.core.orientation import _axes_string_from_layer, layer_display_ndim
+
+    total = layer_display_ndim(layer)
+    axes = (_axes_string_from_layer(layer) or "").upper()
+    if len(axes) == total:
+        spatial = [i for i, ch in enumerate(axes) if ch in "XYZ"]
+        if len(spatial) == ndim:
+            return spatial
+    return list(range(max(total - ndim, 0), total))
+
+
+def _subset_spatial_kwargs(kwargs: dict[str, Any], dims: list[int]) -> dict[str, Any]:
+    """*kwargs* restricted to layer dims *dims* (see :func:`layer_spatial_kwargs`)."""
+    out: dict[str, Any] = {}
+    nd = len(dims)
+    for key in ("scale", "translate"):
+        if key in kwargs:
+            values = tuple(kwargs[key])
+            if len(values) > max(dims, default=-1):
+                trimmed = tuple(values[d] for d in dims)
+                neutral = 1.0 if key == "scale" else 0.0
+                if any(abs(v - neutral) > 1e-12 for v in trimmed):
+                    out[key] = trimmed
+    if "affine" in kwargs:
+        matrix = np.asarray(kwargs["affine"], dtype=float)
+        n = matrix.shape[0] - 1
+        if n == nd:
+            out["affine"] = matrix
+        elif n > max(dims, default=-1):
+            # The chosen block and its translation: a block-diagonal display
+            # affine never couples them to the dims being dropped.
+            sub = np.eye(nd + 1)
+            sub[:nd, :nd] = matrix[np.ix_(dims, dims)]
+            sub[:nd, nd] = matrix[dims, n]
+            out["affine"] = sub
+    return out
+
+
+def layer_source_axes(layer: Any) -> str | None:
+    """The file's axis order for *layer* (``XYZT`` for a time-first 3D+t layer)."""
+    from nvitk.gui.core.orientation import (
+        SOURCE_AXES_KEY,
+        _axes_string_from_layer,
+        layer_is_time_leading,
+    )
+
+    if layer_is_time_leading(layer):
+        src = nvitk_metadata_from_layer(layer).get(SOURCE_AXES_KEY)
+        nested = (getattr(layer, "metadata", None) or {}).get("nvitk_metadata") or {}
+        src = nested.get(SOURCE_AXES_KEY, src)
+        if src:
+            return str(src).upper()
+    return _axes_string_from_layer(layer)
+
+
+def layer_source_order(layer: Any, data: Any = None) -> Any:
+    """*layer*'s array (or *data* in the layer's order) back in the file's axis order.
+
+    A time-first 3D+t layer holds a ``TXYZ`` view of an ``XYZT`` file; code that
+    reads the voxels the way the file stores them — 4D-flow phase arithmetic,
+    export — calls this instead of ``layer.data``. A zero-copy view; any other
+    layer's array comes back unchanged.
+    """
+    from nvitk.gui.core.orientation import _axes_string_from_layer, layer_is_time_leading
+
+    arr = layer.data if data is None else data
+    if not layer_is_time_leading(layer):
+        return arr
+    display = (_axes_string_from_layer(layer) or "").upper()
+    source = (layer_source_axes(layer) or "").upper()
+    if len(display) != arr.ndim or sorted(display) != sorted(source):
+        return arr
+    perm = [display.index(ch) for ch in source]
+    return arr.transpose(perm)
+
+
+def to_layer_order(layer: Any, data: Any) -> Any:
+    """Inverse of :func:`layer_source_order`: a file-ordered array in *layer*'s order."""
+    from nvitk.gui.core.orientation import _axes_string_from_layer, layer_is_time_leading
+
+    if not layer_is_time_leading(layer):
+        return data
+    display = (_axes_string_from_layer(layer) or "").upper()
+    source = (layer_source_axes(layer) or "").upper()
+    if len(source) != getattr(data, "ndim", -1) or sorted(display) != sorted(source):
+        return data
+    perm = [source.index(ch) for ch in display]
+    return data.transpose(perm)
 
 
 def data_indices_to_world(points: np.ndarray, layer: Any) -> np.ndarray:
@@ -305,6 +410,21 @@ def spatial_volume_image(layer: Any, data: np.ndarray | None = None) -> Image:
         from nvitk.io._common import default_nifti_axes
 
         meta["axes"] = default_nifti_axes(data3.ndim)
+
+    from nvitk.gui.core.orientation import layer_is_time_leading
+
+    if layer_is_time_leading(layer):
+        # Spacing and the spatial affine are real for a time-first layer (its
+        # scale is all ones; the geometry is in the 5x5 affine): keep them.
+        aff4 = layer_affine(layer)
+        if aff4 is not None:
+            meta["affine"] = aff4
+        return Image(
+            data=data3,
+            metadata=meta,
+            axes=meta.get("axes"),
+            name=getattr(layer, "name", "layer"),
+        )
 
     scale = getattr(layer, "scale", None)
     if scale is not None and len(scale) >= arr.ndim:
@@ -607,7 +727,16 @@ def layer_spatial_properties(layer: Any) -> LayerSpatialProperties:
     ndim = len(shape)
     # ``layer_spacing`` reports at most three axes, so a 4D+ layer (displayed
     # scale-only by ``prepare_for_napari``) takes its per-axis step from ``scale``.
-    if ndim > 3 and scale_t is not None and len(scale_t) >= ndim:
+    from nvitk.gui.core.orientation import layer_is_time_leading
+
+    if ndim == 4 and layer_is_time_leading(layer):
+        # Time-first: the frame step on axis 0, the real mm spacing after it.
+        md_t = nvitk_metadata_from_layer(layer)
+        t_step = md_t.get("t_res", md_t.get("temporal_resolution"))
+        per_axis = [float(t_step) if t_step is not None else None] + [
+            float(sp[i]) if sp is not None and i < len(sp) else None for i in range(3)
+        ]
+    elif ndim > 3 and scale_t is not None and len(scale_t) >= ndim:
         per_axis = [float(scale_t[i]) for i in range(ndim)]
     else:
         per_axis = [

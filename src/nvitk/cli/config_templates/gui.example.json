@@ -1,5 +1,13 @@
 {
   "_comment": "Window state the nvitk GUI manages for itself. Unlike the other configuration files there is nothing here to fill in: the GUI writes these values when it closes and reads them when it opens, so the layout you leave is the layout you come back to.",
   "_comment_dock_state": "Base64 QMainWindow.saveState(). Panel sizes, which docks are tabbed together, and which are floating. Delete the value to start again from the default arrangement; delete the file and the GUI will recreate it.",
-  "dock_state": ""
+  "dock_state": "",
+  "_comment_performance": "CPU threads for the interactive views, resampling, reformats and FFTs. 'workers' is a count, a share of the cores ('75%', the default) or 'all'; $NVITK_WORKERS overrides it for one session. 'async_slicing' turns on Napari's experimental off-thread slicing. Set from the 'CPU: N / M threads' button in the Tools dock.",
+  "performance": {
+    "workers": "75%",
+    "async_slicing": false
+  },
+  "_comment_statmodels": "Statmodels window: dock arrangement of the last session on screen (base64 QMainWindow.saveState) and the window's geometry (base64 saveGeometry). Every new session opens on that arrangement; delete either value to start again from the defaults.",
+  "statmodels_dock_state": "",
+  "statmodels_geometry": ""
 }

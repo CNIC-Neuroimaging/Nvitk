@@ -190,6 +190,14 @@ CUDA 13. `torch`/`torchvision` from the `cu130` PyPI wheel index, plus `cupy-cud
 `cutensor-cu13`, `nvidia-nccl-cu13`. Requires **Python 3.11**. Conda channels needed for the
 pixi `gpu` feature: `nvidia`, `pytorch` (public) and `morpheme`, `mosaic`.
 
+The deep-learning pipelines ({doc}`pipelines/topbrain`, {doc}`pipelines/cvit`) and
+`nvitk.nn` need this stack: `torch` plus nnU-Net's own dependencies (`batchgenerators`,
+`batchgeneratorsv2`, `blosc2`, `acvl-utils`), all pulled in by the `nnunetv2` requirement. The
+vendored nnU-Net / nnssl builds under `src/nvitk/pipes/_engines/` are **not** installed; the
+pipelines put them on the training subprocess's `PYTHONPATH`, so run them from a source checkout
+or the cluster container. Check an environment with
+`python -c "import torch, nnunetv2; print(torch.cuda.is_available())"`.
+
 ## External prerequisites (not installed by conda or pixi)
 
 Separately licensed or with no package-manager distribution — install these yourself and

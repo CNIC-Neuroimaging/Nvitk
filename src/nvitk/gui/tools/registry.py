@@ -95,6 +95,7 @@ _CATEGORY_ORDER = (
     "Registration",
     "Visualization",
     "Transform",
+    "Time & frequency",
     "Measure",
     "Lab",
     "Pipelines",
@@ -1356,6 +1357,118 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         ),
         description=(
             "Collapse a 3D or 4D image along one axis (max, mean, median, min, std, sum)."
+        ),
+    ),
+    # ---- Time (3D+t) ------------------------------------------------------------
+    GuiToolSpec(
+        "time_extract_frame",
+        "Time & frequency",
+        "3D+t: extract time frame",
+        (ParamSpec("time_frame", "Frame (-1 = current)", "int", -1, min=-1, max=100000),),
+        run_mode="notify",
+        description="One time point of the active 3D+t layer as a 3D layer on its spatial grid.",
+    ),
+    GuiToolSpec(
+        "time_projection",
+        "Time & frequency",
+        "3D+t: temporal projection",
+        (
+            ParamSpec(
+                "time_method", "Method", "choice", "max",
+                choices=("max", "mean", "min", "std", "sum", "median", "ttp", "auc"),
+            ),
+        ),
+        run_mode="notify",
+        description=(
+            "Collapse time: MIP, mean, std… or perfusion-style maps — ttp (time to peak, s) "
+            "and auc (area under the curve)."
+        ),
+    ),
+    GuiToolSpec(
+        "time_curve",
+        "Time & frequency",
+        "3D+t: time–intensity curve",
+        (
+            ParamSpec("time_mask_layer", "Region mask (none = cursor voxel)", "layer", ""),
+            ParamSpec("time_label_id", "Label id (0 = all non-zero)", "int", 0, min=0, max=99999),
+            ParamSpec("time_append", "Add to the plotted curves", "bool", True),
+        ),
+        run_mode="notify",
+        description=(
+            "Plot intensity over time at the cursor voxel, or averaged over a mask (label) — "
+            "bolus tracking, enhancement, cine. On a monoenergetic stack it plots the spectral "
+            "curve (HU vs keV). Curves can be saved as CSV."
+        ),
+    ),
+    GuiToolSpec(
+        "time_stack_layers",
+        "Time & frequency",
+        "3D+t: stack layers into a time series",
+        (
+            ParamSpec("stack_layers", "Layers (comma-separated; empty = visible on this grid)", "str", ""),
+            ParamSpec("stack_t_res", "Frame interval s (0 = index / phase)", "float", 0.0, min=0.0, max=3600.0),
+        ),
+        run_mode="notify",
+        description=(
+            "Combine 3D image layers on one grid into a single 3D+t layer, ordered by energy for "
+            "monoenergetic spectral results (40/70/100 keV…) or by cardiac phase when the layers "
+            "carry one (e.g. 73 %, 78 %, 83 % reconstructions)."
+        ),
+    ),
+    # ---- Frequency (k-space) ----------------------------------------------------
+    GuiToolSpec(
+        "kspace_fft",
+        "Time & frequency",
+        "K-space (FFT)",
+        (
+            ParamSpec("kspace_mode", "Transform", "choice", "3d", choices=("3d", "2d")),
+            ParamSpec(
+                "kspace_component", "Show", "choice", "log_magnitude",
+                choices=("log_magnitude", "magnitude", "phase", "real", "imag"),
+            ),
+            ParamSpec("kspace_add_phase", "Also add the phase layer", "bool", False),
+            ParamSpec("kspace_centered", "Centred (DC in the middle)", "bool", True),
+        ),
+        run_mode="notify",
+        description=(
+            "Spatial FFT of the active image (3D, or 2D slice-by-slice; 3D+t per time point). "
+            "Adds the k-space log-magnitude on the same grid and keeps the complex data for "
+            "'Inverse FFT'. Uses the GPU when GPU computing is on."
+        ),
+    ),
+    GuiToolSpec(
+        "kspace_ifft",
+        "Time & frequency",
+        "Inverse FFT (from k-space)",
+        (
+            ParamSpec("kspace_mask_layer", "k-space mask (optional)", "layer", ""),
+            ParamSpec("kspace_mask_remove", "Remove the masked region instead of keeping it", "bool", False),
+        ),
+        run_mode="notify",
+        description=(
+            "Back to image space from the active k-space layer. Paint a Labels mask over the "
+            "k-space to keep (or remove) frequencies — e.g. the centre only for a blurred image, "
+            "a line to remove a spike artefact."
+        ),
+    ),
+    GuiToolSpec(
+        "kspace_filter",
+        "Time & frequency",
+        "K-space filter (low/high/band-pass)",
+        (
+            ParamSpec(
+                "kspace_filter_kind", "Filter", "choice", "lowpass",
+                choices=("lowpass", "highpass", "bandpass", "bandstop"),
+            ),
+            ParamSpec("kspace_cutoff", "Cutoff (× Nyquist)", "float", 0.5, min=0.01, max=1.8),
+            ParamSpec("kspace_cutoff_high", "Upper cutoff, band filters (× Nyquist)", "float", 0.8, min=0.01, max=1.8),
+            ParamSpec("kspace_window", "Edge", "choice", "hann", choices=("hann", "gaussian", "butterworth", "ideal")),
+            ParamSpec("kspace_mode", "Transform", "choice", "3d", choices=("3d", "2d")),
+        ),
+        run_mode="notify",
+        description=(
+            "FFT → radial weighting → inverse FFT. Cutoffs are fractions of the Nyquist "
+            "frequency of each axis; 'ideal' edges ring (Gibbs), the others roll off smoothly."
         ),
     ),
     GuiToolSpec(

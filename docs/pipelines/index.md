@@ -15,6 +15,7 @@ qvtpy-hemodynamics
 qvtpy-morphometrics
 qvtpy-autoqc
 topbrain
+cvit
 ```
 
 ::::{grid} 1 2 2 2
@@ -41,9 +42,17 @@ measurement, and TOF morphometrics, in 12 chainable stages.
 self-supervised pre-training with nnssl, nnU-Net fine-tuning with selectable losses, and a
 Grand Challenge submission container.
 :::
+
+:::{grid-item-card} {octicon}`cpu` CViT
+:link: cvit
+:link-type: doc
+Convolutional Vision Transformers for any 2D/3D segmentation dataset — conv tokenizers
+(hierarchical, intra-patch, linear), SimMIM/MAE pre-training, nnU-Net training and inference,
+skip controls and an attention-usage probe, portable model export.
+:::
 ::::
 
 ```{note}
-This section currently covers PESA-Fat, QVTPy and TopBrain. Sibling cohort pipelines already exist in
+This section currently covers PESA-Fat, QVTPy, TopBrain and CViT. Sibling cohort pipelines already exist in
 <../gui/index>`'s Pipelines category) and are planned for future documentation passes.
 ```

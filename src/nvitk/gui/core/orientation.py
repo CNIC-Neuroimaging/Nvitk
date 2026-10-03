@@ -259,6 +259,111 @@ def napari_affine_for_display(
     return aff
 
 
+# ── 3D+t display: time-leading layers ──────────────────────────────────────────
+#
+# Napari aligns layers by *trailing* dimension. A 4D volume stored ``XYZT`` puts
+# time last, so a 3D mask of the same grid lands on world dims (Y, Z, T) — the
+# reason 3D overlays used to inflate the time slider and never line up. Showing
+# 3D+t layers time-first (``TXYZ``, a zero-copy view) makes the spatial axes the
+# trailing three, exactly where every 3D layer sits, and lets the layer keep its
+# full oblique affine as the spatial block of a block-diagonal 5x5 matrix: time
+# and space cannot couple, which was the reason 4D layers were scale-only.
+
+#: Metadata flag on a layer shown time-first (its array is a view of the file's).
+TIME_LEADING_KEY = "time_leading"
+#: Metadata key recording the file's axis order, to undo the view on export.
+SOURCE_AXES_KEY = "source_axes"
+
+
+def time_leading_permutation(axes: str | None, ndim: int) -> tuple[int, ...] | None:
+    """Array-axis permutation putting the single ``T``/``C`` axis of a 3D+t array first.
+
+    ``None`` unless the array is 4D with exactly one time/channel axis and three
+    spatial ones — anything else keeps its historical display path.
+    """
+    from nvitk.io._common import default_nifti_axes
+
+    if int(ndim) != 4:
+        return None
+    ax = (axes or default_nifti_axes(4)).upper()
+    if len(ax) != 4:
+        return None
+    t_axes = [i for i, ch in enumerate(ax) if ch in ("T", "C")]
+    spatial = [i for i, ch in enumerate(ax) if ch in "XYZ"]
+    if len(t_axes) != 1 or len(spatial) != 3:
+        return None
+    return (t_axes[0], *spatial)
+
+
+def time_leading_affine(spatial_affine: np.ndarray | None, t_scale: float,
+                        spacing: tuple[float, ...] | None = None) -> np.ndarray:
+    """``5x5`` display affine: time step on dim 0, the spatial 4x4 block on dims 1-3.
+
+    Without a spatial affine the block is the diagonal *spacing* (or identity).
+    """
+    aff = np.eye(5, dtype=float)
+    aff[0, 0] = float(t_scale) if t_scale and np.isfinite(t_scale) and t_scale > 0 else 1.0
+    if spatial_affine is not None and np.asarray(spatial_affine).shape == (4, 4):
+        sp = to_numpy(spatial_affine).astype(float)
+        aff[1:4, 1:4] = sp[:3, :3]
+        aff[1:4, 4] = sp[:3, 3]
+    elif spacing is not None and len(spacing) >= 3:
+        for i in range(3):
+            aff[1 + i, 1 + i] = float(spacing[i])
+    return aff
+
+
+def prepare_time_leading_for_napari(
+    data: np.ndarray,
+    affine: np.ndarray | None,
+    *,
+    axes: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> tuple[np.ndarray, np.ndarray, str] | None:
+    """``(time-first view, 5x5 affine, display axes)`` for a 3D+t array, or ``None``.
+
+    The view costs nothing (``np.transpose`` of the host array); the 5x5 affine
+    keeps the file's full spatial placement, so the layer overlays any 3D layer
+    of the same patient exactly. ``None`` for arrays this does not apply to.
+    """
+    from nvitk.io._common import default_nifti_axes
+
+    perm = time_leading_permutation(axes, int(getattr(data, "ndim", 0)))
+    if perm is None:
+        return None
+    ax = (axes or default_nifti_axes(4)).upper()
+    md = metadata or {}
+    t_scale = _resolution_from_metadata(md, ax[perm[0]]) or 1.0
+    spacing = tuple(_resolution_from_metadata(md, ax[i]) or 1.0 for i in perm[1:])
+    # The spatial axes keep their file order, so the file affine applies as-is
+    # once its columns are read in that same order (identity for XYZ).
+    spatial_aff = None
+    if affine is not None and np.asarray(affine).shape == (4, 4):
+        src = to_numpy(affine).astype(float)
+        order = ["XYZ".index(ax[i]) for i in perm[1:]]
+        spatial_aff = np.eye(4)
+        spatial_aff[:3, :3] = src[:3, order]
+        spatial_aff[:3, 3] = src[:3, 3]
+    view = np.transpose(to_numpy(data), perm)
+    display_axes = "".join(ax[i] for i in perm)
+    affine5 = time_leading_affine(spatial_aff, t_scale, spacing)
+    energies = md.get("spectral_energies_kev")
+    if isinstance(energies, (list, tuple)) and len(energies) == int(data.shape[perm[0]]):
+        # An energy stack: start the axis at its first level, so the slider reads keV.
+        try:
+            affine5[0, 4] = float(energies[0])
+        except (TypeError, ValueError):
+            pass
+    return view, affine5, display_axes
+
+
+def layer_is_time_leading(layer: Any) -> bool:
+    """True for a 3D+t layer shown time-first (see :func:`prepare_time_leading_for_napari`)."""
+    if layer_display_ndim(layer) != 4:
+        return False
+    return bool(_metadata_for_layer(layer).get(TIME_LEADING_KEY))
+
+
 def prepare_for_napari(
     data: np.ndarray,
     affine: np.ndarray | None,
@@ -421,7 +526,12 @@ def layer_orientation_codes(layer: Any) -> str | None:
     try:
         import nibabel as nib
 
-        return "".join(nib.orientations.aff2axcodes(to_numpy(aff).astype(float)))
+        matrix = to_numpy(aff).astype(float)
+        if matrix.shape == (5, 5) and layer_is_time_leading(layer):
+            # Time-first 3D+t: the spatial axes are the trailing block, and the
+            # codes describe those three (what every 3D consumer expects).
+            matrix = matrix[1:5, 1:5]
+        return "".join(nib.orientations.aff2axcodes(matrix))
     except Exception:
         return None
 
@@ -510,6 +620,10 @@ def ensure_4d_scale_only_layer(layer: Any) -> None:
     ndim = int(data.ndim)
     if ndim <= 3:
         return
+    if layer_is_time_leading(layer):
+        # Its affine is block-diagonal by construction: nothing couples time and
+        # space, and dropping it would throw away the oblique placement.
+        return
     axes_str = _axes_string_from_layer(layer)
     sc = napari_scale_for_display(tuple(int(x) for x in data.shape), axes_str, _metadata_for_layer(layer))
     layer.scale = sc
@@ -526,6 +640,13 @@ def _synchronize_4d_dims(
     """Force Napari dims range/point from array shape (15 phases, not ~62)."""
     from napari.components.dims import RangeTuple
 
+    if layer_is_time_leading(layer):
+        # World ranges come straight from the block-diagonal affine and are
+        # already right; overwriting them with voxel-index ranges would put the
+        # spatial sliders in index units against millimetre world coordinates.
+        _focus_time_leading(viewer, layer)
+        return
+
     ndim = len(shape)
     sc = _layer_display_scale(layer, ndim)
     ranges = []
@@ -541,6 +662,18 @@ def _synchronize_4d_dims(
                 point[i] = float(max(0, shape[i] - 1)) / 2.0 * sc[i]
     viewer.dims.range = tuple(ranges)
     viewer.dims.point = tuple(point)
+
+
+def _focus_time_leading(viewer: Any, layer: Any, *, superior: int | None = None) -> None:
+    """First frame, middle slice: where a 3D+t layer should open."""
+    try:
+        offset = int(viewer.dims.ndim) - 4
+        viewer.dims.set_current_step(offset, 0)
+        if superior is not None and 0 <= superior < 3:
+            axis = offset + 1 + int(superior)
+            viewer.dims.set_current_step(axis, int(viewer.dims.nsteps[axis]) // 2)
+    except Exception:  # noqa: BLE001 — focus is cosmetic
+        pass
 
 
 def configure_viewer_for_layer(
@@ -572,6 +705,28 @@ def configure_viewer_for_layer(
         if ndim > 3:
             ensure_4d_scale_only_layer(layer)
         if not configure_dims:
+            return
+
+        if layer_is_time_leading(layer):
+            # A 3D+t volume opens like a 3D one — axial, 2D — with the time
+            # slider on its first frame; the play button on that slider is the cine.
+            from nvitk.gui.core.spatial import layer_affine
+
+            spatial = layer_affine(layer)
+            order3 = dim_order_2d_for_display(spatial, 3)
+            offset = int(viewer.dims.ndim) - 3
+            viewer.dims.ndisplay = 2
+            viewer.dims.order = tuple(range(offset)) + tuple(offset + o for o in order3)
+            labels = list(viewer.dims.axis_labels)
+            axes_str = _axes_string_from_layer(layer) or "TXYZ"
+            if len(labels) >= 4 and len(axes_str) == 4:
+                labels[offset - 1:offset + 3] = list(axes_str)
+                viewer.dims.axis_labels = tuple(labels)
+            _focus_time_leading(viewer, layer, superior=order3[0])
+            try:
+                viewer.camera.angles = (0, 0, 0)
+            except Exception:
+                pass
             return
 
         if ndim == 3:

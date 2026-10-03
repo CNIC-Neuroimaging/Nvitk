@@ -57,8 +57,20 @@ def dcm2nii(
     align_oct: bool = False,
     map_zeiss_laterality: bool = False,
     j2k_decode: bool = False,
+    stack_phases: bool = False,
+    stack_energies: bool = False,
+    sbi: str = "manifest",
 ) -> str | list[str]:
-    """Convert a DICOM series (or directory of series) to NIfTI; library entry point behind the ``dcm2nii`` CLI."""
+    """Convert a DICOM series (or directory of series) to NIfTI; library entry point behind the ``dcm2nii`` CLI.
+
+    With *stack_phases*, single-phase cardiac reconstructions of one acquisition
+    (``IMR, 73%`` / ``78%`` / ``83%``) are additionally written as one 3D+t volume
+    ordered by R-R phase (see :mod:`._dicom_phases`); the per-phase files stay.
+    With *stack_energies*, monoenergetic spectral results of one reconstruction become one
+    ``X x Y x Z x E`` volume ordered by keV (see :mod:`._dicom_spectral`). *sbi* chooses what
+    is kept of Philips Spectral Base Images, which cannot be converted: ``skip``,
+    ``manifest`` (default) or ``copy``.
+    """
     output_path = Path(output_folder)
     explicit_output_path = str(output_path) if _is_nifti_file_path(output_path) else None
     output_root = str(output_path.parent if explicit_output_path else output_path)
@@ -84,6 +96,9 @@ def dcm2nii(
         align_oct=align_oct,
         map_zeiss_laterality=map_zeiss_laterality,
         j2k_decode=j2k_decode,
+        stack_phases=stack_phases and not explicit_output_path,
+        stack_energies=stack_energies and not explicit_output_path,
+        sbi=sbi,
     )
     if explicit_output_path and len(outputs) == 1:
         return outputs[0]
@@ -138,6 +153,34 @@ def dcm2nii(
         "Without this flag those series are skipped as before."
     ),
 )
+@_click_option(
+    "--stack-phases",
+    is_flag=True,
+    help=(
+        "Also write cardiac phase reconstructions of one acquisition (e.g. 'IMR, 73%', "
+        "'IMR, 78%', 'IMR, 83%') as a single 3D+t NIfTI ordered by R-R phase. The "
+        "per-phase volumes are kept."
+    ),
+)
+@_click_option(
+    "--stack-energies",
+    is_flag=True,
+    help=(
+        "Also write monoenergetic spectral results of one reconstruction (e.g. MonoE 40/70/100 "
+        "keV) as a single 4D NIfTI ordered by energy, for spectral HU-vs-keV curves."
+    ),
+)
+@_click_option(
+    "--sbi",
+    type=click.Choice(["skip", "manifest", "copy"], case_sensitive=False) if click is not None else None,
+    default="manifest",
+    show_default=True,
+    help=(
+        "Philips Spectral Base Images (compressed spectral data, never converted): 'manifest' "
+        "lists each SBI series, its files and matching reconstruction in "
+        "spectral_base_images.json; 'copy' also copies the SBI DICOM into sbi/; 'skip' keeps nothing."
+    ),
+)
 @_click_option("--rescale-type", type=click.Choice(["DV", "FP"], case_sensitive=False) if click is not None else None, default="DV", help="Rescale type for scaling conversion: DV or FP.")
 @_click_option("--tmp-dir", type=click.Path(path_type=Path) if click is not None else None, default=None, help="Temporary directory for intermediate files.")
 def main(
@@ -161,6 +204,9 @@ def main(
     align_oct: bool,
     map_zeiss_laterality: bool,
     j2k_decode: bool,
+    stack_phases: bool,
+    stack_energies: bool,
+    sbi: str,
 ) -> None:
     """CLI entry point: convert one series (or, with ``--multifile``, every immediate subdirectory as a separate case)."""
     if click is None:
@@ -206,6 +252,9 @@ def main(
                         align_oct=align_oct,
                         map_zeiss_laterality=map_zeiss_laterality,
                         j2k_decode=j2k_decode,
+                        stack_phases=stack_phases,
+                        stack_energies=stack_energies,
+                        sbi=sbi,
                     )
                     ok += 1
                 except Exception:
@@ -233,6 +282,9 @@ def main(
             align_oct=align_oct,
             map_zeiss_laterality=map_zeiss_laterality,
             j2k_decode=j2k_decode,
+            stack_phases=stack_phases,
+            stack_energies=stack_energies,
+            sbi=sbi,
         )
         if isinstance(outputs, str):
             click.echo(outputs)

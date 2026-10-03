@@ -46,6 +46,9 @@ mesh = mesh_from_image(img)  # binary; use multilabel=True for label maps
 | `rotate` / `rotation` | Rotation about arbitrary axes, incl. Z-rotation helpers used by several pipelines. |
 | `swap_axes` | Axis-order manipulation. |
 | `oblique` | Oblique slice extraction. |
+| `threaded` | Slab-parallel `affine_transform` / `map_coordinates` on the shared worker pool (`map_coordinates` bit-identical to SciPy; slab layout independent of the thread count). `resample_to(..., threaded=True)` opts in. |
+| `fourier` | K-space: `kspace` / `inverse_kspace` (centred, orthonormal; 3D or 2D slice-wise; 3D+t per frame), display components, radial `kspace_filter`. CPU (`scipy.fft`, multi-threaded) or GPU (CuPy). |
+| `temporal` | 3D+t: `extract_frame`, `temporal_projection` (incl. time-to-peak and AUC), `time_intensity_curve`, `stack_frames`. |
 
 ```{code-block} python
 from nvitk.transform import isotropy, resample_pet_to_mask

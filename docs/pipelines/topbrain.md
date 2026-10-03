@@ -31,19 +31,24 @@ nvitk-topbrain --stages stage0,stage1,stage2 \
 
 ## In-tree frameworks
 
-Two frameworks live inside the pipeline rather than being installed:
+Two frameworks live inside the repository rather than being installed. They sit in
+`src/nvitk/pipes/_engines/`, shared with the {doc}`CViT pipeline <cvit>`; topbrain reaches them through
+`util/nnunet_env.py`, `util/nnssl_env.py` and `util/nnunet_run.py`, which adapt the shared
+helpers in `nvitk.pipes._engines` to `TopBrainPaths`.
 
-`pipes/topbrain/nnssl`
+`pipes/_engines/nnssl`
   Self-supervised pre-training. Not installable (no packaging metadata), so it is used off
   `PYTHONPATH`. It targets Python 3.12 and imports `typing.override`; a shim backfills that on
   3.11, without which **all** nnssl trainer discovery fails.
 
-`pipes/topbrain/nnunet`
+`pipes/_engines/nnunet`
   An nnU-Net build carrying the nnssl fine-tuning support — `nnUNetv2_preprocess_like_nnssl`,
   `PretrainedTrainer`, `PretrainedTrainer_Primus` — that released `nnunetv2` does not have. It is
   **deliberately not installed**: the rest of nvitk (TotalSegmentator especially) depends on the
   released `nnunetv2`, and shadowing that globally would break it. Stage 2 invokes it in a
-  subprocess whose `PYTHONPATH` puts it first, so only the child sees it.
+  subprocess whose `PYTHONPATH` puts it first, so only the child sees it. The ToPBrain loss
+  trainers live inside it at `nnunetv2/training/nnUNetTrainer/topbrain/` (and CViT's at
+  `…/cvit/`), because the build only discovers trainers within its own package.
 
 ## stage0 — data preparation
 

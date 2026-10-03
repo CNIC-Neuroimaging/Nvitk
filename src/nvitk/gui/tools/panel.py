@@ -1250,7 +1250,10 @@ def build_tool_panel(
             return
 
         name = f"{layer.name}_{tool_id}"
-        out_kwargs = layer_display_kwargs(layer, name=name)
+        try:
+            out_kwargs = layer_display_kwargs(layer, name=name, ndim=int(np.ndim(result)))
+        except TypeError:  # a caller-supplied builder without the ndim keyword
+            out_kwargs = layer_display_kwargs(layer, name=name)
         can_replace = (
             overlay_mode == "replace_active"
             and tuple(result.shape) == tuple(layer.data.shape)
@@ -1281,7 +1284,7 @@ def build_tool_panel(
                     spatial_src = next(ly for ly in viewer.layers if ly.name == ref_name)
                 except StopIteration:
                     pass
-            spatial = layer_spatial_kwargs(spatial_src)
+            spatial = layer_spatial_kwargs(spatial_src, ndim=int(result_arr.ndim))
             try:
                 lab = viewer.add_labels(
                     result_arr.astype(np.int32, copy=False),

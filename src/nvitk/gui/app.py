@@ -47,15 +47,29 @@ def _record_step(state: dict[str, Any], step: dict[str, Any]) -> None:
     state["steps"].append(step)
 
 
-def _layer_display_kwargs(layer: Any, *, name: str) -> dict[str, Any]:
-    """Preserve spatial metadata from a source layer when adding tool outputs."""
+def _layer_display_kwargs(layer: Any, *, name: str, ndim: int | None = None) -> dict[str, Any]:
+    """Preserve spatial metadata from a source layer when adding tool outputs.
+
+    *ndim* is the output's dimensionality, when it differs from the source's (a
+    3D result of a 3D+t layer): the placement is cut down to the trailing dims.
+    """
     from nvitk.gui.labels.visibility import copy_layer_metadata_for_output
 
     kwargs = {"name": name}
     meta = copy_layer_metadata_for_output(getattr(layer, "metadata", None))
     if meta:
+        if ndim is not None and ndim != int(getattr(layer.data, "ndim", ndim)):
+            # A 3D output of a time-first layer is not itself time-first.
+            nested = meta.get("nvitk_metadata")
+            if isinstance(nested, dict):
+                nested = dict(nested)
+                for key in ("time_leading", "source_axes", "axes"):
+                    nested.pop(key, None)
+                meta = dict(meta, nvitk_metadata=nested)
+            meta.pop("axes", None)
         kwargs["metadata"] = meta
-    kwargs.update(layer_spatial_kwargs(layer))
+    same = ndim is None or ndim == int(getattr(layer.data, "ndim", ndim))
+    kwargs.update(layer_spatial_kwargs(layer) if same else layer_spatial_kwargs(layer, ndim=ndim))
     return kwargs
 
 
@@ -119,6 +133,13 @@ def run_app() -> None:
     # every panel then builds from the palette it will be shown in, rather than
     # being restyled after the fact.
     set_theme(stored_theme())
+    # CPU worker budget (and Napari async slicing) before any panel starts work.
+    try:
+        from nvitk.gui.core.performance import apply_performance
+
+        apply_performance()
+    except Exception:  # noqa: BLE001 — a preference must never block a launch
+        pass
     # Register before the viewer exists so its chrome is painted from the nvitk
     # palette on the first frame, rather than flashing Napari's default dark.
     theme_id = register_napari_theme()

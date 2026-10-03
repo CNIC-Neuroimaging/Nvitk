@@ -493,6 +493,12 @@ def _install_phase_dims(viewer: Any, phase_layer: Any) -> None:
 
     if getattr(phase_layer, "data", None) is None or int(phase_layer.data.ndim) <= 3:
         return
+    from nvitk.gui.core.orientation import layer_is_time_leading
+
+    if layer_is_time_leading(phase_layer):
+        # Time-first layers already own correct world ranges, and the vectors
+        # (3D, trailing-aligned) land on the spatial dims: nothing to install.
+        return
 
     ensure_4d_scale_only_layer(phase_layer)
     ndim = int(phase_layer.data.ndim)
@@ -525,6 +531,10 @@ def _repair_time_dim_range(viewer: Any, phase_layer: Any) -> None:
 
     if getattr(phase_layer, "data", None) is None or int(phase_layer.data.ndim) <= 3:
         return
+    from nvitk.gui.core.orientation import layer_is_time_leading
+
+    if layer_is_time_leading(phase_layer):
+        return  # nothing right-aligns onto its time axis, so nothing to repair
     t_ax = _time_axis_index_from_layer(phase_layer)
     n_time = int(phase_layer.data.shape[t_ax])
     if t_ax >= len(viewer.dims.range):

@@ -10,12 +10,17 @@ Submodules:
 - :mod:`nvitk.transform.rotate` — rotate a volume around a spatial axis.
 - :mod:`nvitk.transform.reorient` — permute / flip / match reference or mouse preset.
 - :mod:`nvitk.transform.swap_axes` — swap or permute array axes.
+- :mod:`nvitk.transform.threaded` — slab-parallel ``affine_transform`` /
+  ``map_coordinates`` on the shared CPU worker pool.
+- :mod:`nvitk.transform.fourier` — k-space (FFT) forward/inverse transforms and
+  k-space filtering.
 - :mod:`nvitk.transform.rotation` — detect and correct rigid Z-rotation between
   image grids.
 """
 
 from __future__ import annotations
 
+from .fourier import inverse_kspace, kspace, kspace_component, kspace_filter
 from .isotropy import isotropy
 from .oblique import oblique_slice
 from .reorient import mouse_reorient_volume, reorient_volume
@@ -23,6 +28,7 @@ from .resampling import resample_mask_to_pet, resample_pet_to_mask, resample_to
 from .rotate import rotate_volume
 from .rotation import check_and_correct_rotation, correct_z_rotation
 from .swap_axes import permute_axes, swap_axes
+from .temporal import extract_frame, stack_frames, temporal_projection, time_intensity_curve
 
 __all__ = [
     "isotropy",
@@ -37,4 +43,12 @@ __all__ = [
     "swap_axes",
     "correct_z_rotation",
     "check_and_correct_rotation",
+    "kspace",
+    "inverse_kspace",
+    "kspace_component",
+    "kspace_filter",
+    "extract_frame",
+    "temporal_projection",
+    "time_intensity_curve",
+    "stack_frames",
 ]

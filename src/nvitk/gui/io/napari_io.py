@@ -10,7 +10,10 @@ import numpy as np
 from nvitk.core.array import to_numpy
 from nvitk.gui.core.orientation import (
     configure_viewer_for_layer,
+    SOURCE_AXES_KEY,
+    TIME_LEADING_KEY,
     prepare_for_napari,
+    prepare_time_leading_for_napari,
     suppress_nonorthogonal_slice_warning,
 )
 from nvitk.gui.core.warnings import install_napari_display_warnings
@@ -190,6 +193,31 @@ def _prepare_layer_tuple(img: Image, path: Path) -> LayerData:
         return _prepare_rgb_layer_tuple(img, path, data, raw_affine, channel_axis)
     axis_labels = _axis_labels_for_image(img, data.ndim)
     axes_str = "".join(axis_labels)
+
+    # 3D+t: shown time-first with its full affine, so 3D layers of the same
+    # patient overlay it (see orientation.prepare_time_leading_for_napari).
+    timed = prepare_time_leading_for_napari(
+        data, raw_affine, axes=axes_str, metadata=img.metadata
+    )
+    if timed is not None:
+        view, affine5, display_axes = timed
+        meta = _nvitk_layer_metadata(img, path, affine_source=raw_affine)
+        meta["nvitk_metadata"][TIME_LEADING_KEY] = True
+        meta["nvitk_metadata"][SOURCE_AXES_KEY] = axes_str
+        meta["nvitk_metadata"]["axes"] = display_axes
+        meta["axes"] = display_axes
+        return (
+            view,
+            {
+                "name": img.name or path.stem,
+                "metadata": meta,
+                "axis_labels": tuple(display_axes),
+                "affine": affine5,
+                "rgb": False,
+            },
+            "image",
+        )
+
     data, affine, scale = prepare_for_napari(
         data,
         raw_affine,
@@ -397,6 +425,12 @@ def _on_active_layer_sync_dims(viewer: Any, _event: Any) -> None:
         return
     layer_type = type(layer).__name__
     if layer_type in ("Vectors", "Points", "Shapes", "Surface"):
+        return
+    from nvitk.gui.core.orientation import layer_is_time_leading
+
+    if layer_is_time_leading(layer):
+        # Its dims come from its affine like any 3D layer's; re-forcing them on
+        # every selection would yank the slider back to frame 0.
         return
     ensure_4d_scale_only_layer(layer)
     axes_str = _axes_string_from_layer(layer)
