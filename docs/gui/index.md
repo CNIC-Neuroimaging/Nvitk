@@ -15,24 +15,70 @@ pip install -e ".[gui]"   # if installing the GUI extra from a pixi/dev checkout
 
 ## Layout
 
-The main window (`nvitk.gui.app.run_app`) is napari's viewer plus a right-hand dock of tabs:
+The main window (`nvitk.gui.app.run_app`) is napari's viewer plus a right-hand group of
+panels, each its own dock, tabbed together:
 
-| Tab | What it's for |
+| Panel | What it's for |
 |---|---|
-| **Tools** | The full tool catalog (below), form-driven via magicgui. |
+| **Tools** | The full tool catalog (below), form-driven via magicgui. The theme toggle sits on its title bar. |
+| **Labels** | Label selection for any label layer, whatever tool is selected (below). |
+| **Image properties** | Spacing, affine, orientation, and other metadata for the active layer. |
+| **DICOM tags** | DICOM header inspection. |
 | **Data** | Dataset/subject browser over a `DataRepo` ({doc}`../api/db`). |
 | **QC** | Quality-control review panels for pipeline outputs. |
 | **Statmodels** | Launches {doc}`the Stats GUI <../stats-gui/index>` as a floating window. |
-| **Image properties** | Spacing, affine, orientation, and other metadata for the active layer. |
-| **DICOM tags** | DICOM header inspection. |
-| **Mesh** | Reconstructs a `Mesh` from the active binary/label layer via marching cubes and adds it as a napari Surface layer. |
-| **Layers** | Layer management, a "record pipeline steps" toggle, and the CT display window picker (below). |
 | **Export** | Layer export to disk. |
+| **Layers** | Layer management, a "record pipeline steps" toggle, and the CT display window picker (below). |
+| **Mesh** | Reconstructs a `Mesh` from the active binary/label layer via marching cubes and adds it as a napari Surface layer. |
 | **Pipeline** | Writes the recorded step sequence (open/mesh/export/...) as JSON. |
 
 Keybindings: <kbd>Ctrl</kbd>+<kbd>T</kbd> transpose axes, <kbd>Ctrl</kbd>+<kbd>O</kbd> open,
-<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> save the active layer. A bottom dock streams
-the shared nvitk logger's output.
+<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> save the active layer,
+<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> show the Labels panel with the cursor in its
+filter. A bottom dock streams the shared nvitk logger's output.
+
+### Panels and the workspace window
+
+Every panel, nvitk's and napari's own (layer list, layer controls, console, plugin
+docks), is a dock (`nvitk.gui.core.workspace`):
+
+- **Pop out / dock back**: the ⧉ button on an nvitk panel's title bar, or a double-click
+  on it; napari's docks keep their own float button. ⛶ fills the screen with a panel.
+- **Panels menu** (in the menu bar of both windows): show or hide any panel, pop it out,
+  or move it between the main window and the **workspace**. The workspace is a second
+  window with no fixed content, where panels are split and tabbed freely by dragging
+  their title bars. Qt cannot drag a dock from one window to another, so moving between
+  the two windows goes through this menu.
+- Closing the workspace gives its panels back to the main window.
+
+The layout is remembered in `gui.json`: the main window's dock state, plus the
+workspace's panels, dock state, geometry and whether it was open (`workspace_layout`).
+A layout saved before panels became separate docks (`dock_layout_version` < 2) keeps
+napari's docks and the orthogonal views where they were and regroups the nvitk panels
+as tabs once.
+
+### Label selection
+
+The **Labels** panel lists the labels of a label layer: Labels layers and Image masks
+with few integer values. It follows the active layer, or the one picked in its *Layer*
+list. Each label has a checkbox to show or hide it and a colour dot to recolour it.
+The *Mapping* names the ids (eICAB, TotalSegmentator, …), and the filter box narrows
+long vocabularies by name or id. **All** and **None** act on the labels the filter
+shows.
+
+Each label layer's row in napari's layer list also carries a **▾** button. It unfolds the
+row to list that layer's labels underneath it, and **▴** folds it back. Each line shows a
+show/hide box, the label's colour as drawn on the canvas, and its name. Click a line to
+show or hide that label; <kbd>Alt</kbd>+click shows only that label (and again brings the
+others back). Click the colour dot to recolour a label. **All** and **None** act on the
+whole layer, and **Panel** opens the full Labels panel on it. A list longer than twelve
+labels scrolls with the mouse wheel.
+
+Names come from the layer's own vocabulary: the one picked for it in a picker, otherwise
+the one guessed from its name, path and contents. Each layer keeps its own, so moving
+between two segmentations never names one with the other's labels. Every picker (this
+panel, the layer list, and the Tools panel's picker) edits the same per-layer filter, so
+they always agree.
 
 ## CT display windows
 
@@ -90,15 +136,44 @@ and nothing couples time and space.
 - 4D-flow phase arithmetic reads the file order through
   `nvitk.gui.core.spatial.layer_source_order`, so the flow tools work unchanged.
 
+### Sagittal, coronal and single-slice series
+
+napari slices a layer assuming its data axis *i* runs along world axis *i*. A file stored in
+another order (a sagittal MR volume, a coronal cine, any non-axial single slice) breaks that.
+In the axial view, a coronal plane is seen edge-on, and napari raises `Singular matrix` on
+every repaint. Such files open **world-ordered**: the same voxels, read in world axis order
+(a view, no copy), with every flip and obliquity kept in the affine.
+
+A 2D image with a real position (localizer, surview, a single DICOM slice) opens as a
+**one-voxel-thick 3D layer at that position**. It overlays the volume where the planes
+cross, instead of sitting on the viewer's last two axes in coordinates of its own. Export
+writes the file's own axis order (2D stays 2D) and affine back; the image properties show
+the axes as displayed. Colour captures (dose sheets, tracker graphs) and plain 2D images
+without a position keep the ordinary 2D path.
+
 ## Orthogonal views
 
-The **Orthogonal views** dock shows axial / coronal / sagittal through one crosshair, drawing
-every visible layer on the bound layer's grid (off-grid layers are resampled once and cached).
+The **Orthogonal views** dock opens with the window (tabbed with napari's layer controls; a
+position you give it is remembered) and shows axial / coronal / sagittal through one crosshair,
+drawing every visible layer on the bound layer's grid (off-grid layers are resampled once and
+cached). It follows the active layer only onto real volumes. Selecting a localizer, a
+single-slice series or a colour capture keeps the volume already shown rather than rebinding
+to a one-voxel grid.
+
+- **Display follows the layers**: colormap, window, gamma, opacity, blending — and
+  **interpolation**. Each layer is magnified with its napari `interpolation2d` (napari's default,
+  `nearest`, stays blocky; `linear`/`cubic` smooth), labels always nearest as on the canvas; an
+  oblique plane is resliced with the matching spline order (0 / 1 / 3), and an off-grid layer set to
+  `nearest` is resampled nearest. The 3D slice planes copy the interpolation too.
+- **Zoom**: Ctrl+wheel, 10 % per wheel notch in proportion to the wheel's travel (touchpads and
+  high-resolution wheels no longer race through the range); double-click resets. The plain wheel
+  steps one slice per notch the same way.
 
 - **3D+t**: a 4D layer binds like a 3D one; a *Time* slider appears above the views and stays in
   step with napari's time slider both ways, so playing the cine drives the views and the 3D
-  planes too. The label shows the frame time, the cardiac phase, or — for a monoenergetic stack —
-  the energy in keV.
+  planes too. **▶ Play / ⏸ Pause** beside it runs the cine from the panel itself (looping, rate in
+  fps), moving napari's slider with it. The label shows the frame time, the cardiac phase, or — for
+  a monoenergetic stack — the energy in keV.
 - **3D slices**: *Show the three slices in 3D* puts the cuts on the canvas; *…and the slice
   image* draws them with the **same window, colormap and gamma** as the layer (labels keep
   their colours) and follows later edits — they used to appear in napari's default grey range.
@@ -164,7 +239,7 @@ each backed by the same functions documented in the {doc}`Main API Reference <..
 | Pipelines | 3 | Pipeline CLI shortcuts |
 
 The dock (`nvitk.gui.tools.dock`) wires the category/operation form to a label picker (shown
-for label-like layers), a TotalSegmentator ROI checklist (shown only for that tool), a
+for label-like layers with tools that take label ids; the **Labels** panel is always available), a TotalSegmentator ROI checklist (shown only for that tool), a
 pipeline-CLI form (for the Pipelines category), the GPU toggle, the CPU-threads button, and a "Run SGE" button
 (enabled per-tool via `is_sge_capable`).
 

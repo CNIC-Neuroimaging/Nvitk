@@ -241,6 +241,8 @@ from .frame_table import AnalysisFrameView, ColumnFilterDialog, FilterChipBar
 from .helpers import (
     checked_variable_ids,
     grouping_columns,
+    VISIT_ALL,
+    checked_variable_series,
     checked_variable_visits,
     dropped_rows_note,
     filter_list_widget,
@@ -465,6 +467,11 @@ class StatmodelsWindow(QMainWindow):
         self._wide_complete: int = 0
         # Measurement families melted back to long after the wide pivot (may be several at once).
         self._melt_families: list[str] = []
+        # Visit families spread down the rows (one row per subject × visit), after the derived
+        # columns so longitudinal summaries (AUC, slope…) are computed on the wide visit columns
+        # and repeat on every visit row. The time column comes from *_melt_visit_time*.
+        self._melt_visits: list[str] = []
+        self._melt_visit_time: str = ""
         # Columns hidden from the working frame. Held as names rather than by dropping them from
         # ``_analysis_df``, so a reload or a restore brings them back without re-querying.
         self._dropped_columns: set[str] = set()
@@ -662,6 +669,64 @@ class StatmodelsWindow(QMainWindow):
         except Exception:
             # A layout from another Qt build is not worth failing a config load over.
             pass
+
+    def dock_sizes(self) -> dict[str, list[Any]]:
+        """``{dock key: [area, size]}`` for every docked, visible panel.
+
+        The width for a panel on the left or right, the height for one on the top or bottom —
+        the one dimension a dock area lets the user drag. Saved beside the ``saveState`` blob
+        because that blob cannot be relied on for sizes: restored into a window that is not yet
+        laid out at its final size, Qt clamps the dock extents to the provisional one, and the
+        panels come back narrow however wide they were left.
+        """
+        areas = {
+            Qt.LeftDockWidgetArea: "left", Qt.RightDockWidgetArea: "right",
+            Qt.TopDockWidgetArea: "top", Qt.BottomDockWidgetArea: "bottom",
+        }
+        out: dict[str, list[Any]] = {}
+        for key, dock in self._docks.items():
+            # The panel actually on screen: a tab hidden behind another reports itself visible
+            # but was never laid out, and its provisional extent would shrink the whole group.
+            if dock.isFloating() or not dock.isVisible() or dock.visibleRegion().isEmpty():
+                continue
+            area = areas.get(self.dockWidgetArea(dock))
+            if area is None:
+                continue
+            size = dock.width() if area in ("left", "right") else dock.height()
+            out[key] = [area, int(size)]
+        return out
+
+    def apply_dock_sizes(self, sizes: Any) -> None:
+        """Re-apply :meth:`dock_sizes` output (ignores panels that moved or vanished)."""
+        if not isinstance(sizes, dict):
+            return
+        areas = {
+            "left": Qt.LeftDockWidgetArea, "right": Qt.RightDockWidgetArea,
+            "top": Qt.TopDockWidgetArea, "bottom": Qt.BottomDockWidgetArea,
+        }
+        horizontal: tuple[list, list] = ([], [])
+        vertical: tuple[list, list] = ([], [])
+        covered: set[int] = set()
+        for key, entry in sizes.items():
+            dock = self._docks.get(str(key))
+            try:
+                area, size = str(entry[0]), int(entry[1])
+            except (TypeError, ValueError, IndexError):
+                continue
+            if dock is None or dock.isFloating() or size <= 0 or id(dock) in covered:
+                continue
+            if self.dockWidgetArea(dock) != areas.get(area):
+                continue  # rearranged since: the stored extent no longer applies
+            # One extent per tab group: its members share one rectangle.
+            covered.add(id(dock))
+            covered.update(id(d) for d in self.tabifiedDockWidgets(dock))
+            target = horizontal if area in ("left", "right") else vertical
+            target[0].append(dock)
+            target[1].append(size)
+        if horizontal[0]:
+            self.resizeDocks(horizontal[0], horizontal[1], Qt.Horizontal)
+        if vertical[0]:
+            self.resizeDocks(vertical[0], vertical[1], Qt.Vertical)
 
     def _reset_dock_layout(self) -> None:
         """Put every dock back where it started."""
@@ -1610,6 +1675,16 @@ class StatmodelsWindow(QMainWindow):
         self._btn_melt.clicked.connect(self._on_melt_frame)
         self._btn_melt.setEnabled(False)
         row_flow.addWidget(self._btn_melt)
+        self._btn_melt_visits = QPushButton("Melt visits…")
+        self._btn_melt_visits.setToolTip(
+            "Spread variables loaded at every visit (covariate visit picker → 'all visits') down "
+            "the rows: one row per subject × visit, with 'visit' and 'visit_time' columns — for "
+            "trajectory models such as plaque ~ visit_time + (visit_time | subject_uid).\n\n"
+            "Derived 'Across visits' columns (AUC, slope…) are computed first and repeat on every row."
+        )
+        self._btn_melt_visits.clicked.connect(self._on_melt_visits)
+        self._btn_melt_visits.setEnabled(False)
+        row_flow.addWidget(self._btn_melt_visits)
         self._btn_export = QPushButton("Export table…")
         self._btn_export.setToolTip(
             "Save exactly what this table shows — measurements joined, derived columns computed, "
@@ -1757,6 +1832,7 @@ class StatmodelsWindow(QMainWindow):
         "clinical",
         "cognitive",
         "visit_overrides",
+        "visit_series",
         "combinations",
         "derived",
         "filters",
@@ -1765,6 +1841,8 @@ class StatmodelsWindow(QMainWindow):
         "dropped_columns",
         "wide",
         "melt_families",
+        "melt_visits",
+        "melt_visit_time",
     )
 
     #: What :meth:`import_session` takes from the session it is pointed at.
@@ -1879,6 +1957,8 @@ class StatmodelsWindow(QMainWindow):
             recipe.append("wide")
         if self._melt_families:
             recipe.append("melted: " + ", ".join(self._melt_families))
+        if self._melt_visits:
+            recipe.append("visits melted: " + ", ".join(self._melt_visits))
         if self._dropped_columns:
             recipe.append(f"{len(self._dropped_columns)} dropped")
         if recipe:
@@ -2024,8 +2104,14 @@ class StatmodelsWindow(QMainWindow):
         cognitive_checked = checked_variable_ids(self._cognitive_list)
         # Rebuilding the rows destroys the combos, so the visit picks have to be carried across
         # exactly as the check states are.
-        clinical_visits = checked_variable_visits(self._clinical_list)
-        cognitive_visits = checked_variable_visits(self._cognitive_list)
+        clinical_visits = {
+            **checked_variable_visits(self._clinical_list),
+            **{v: VISIT_ALL for v in checked_variable_series(self._clinical_list)},
+        }
+        cognitive_visits = {
+            **checked_variable_visits(self._cognitive_list),
+            **{v: VISIT_ALL for v in checked_variable_series(self._cognitive_list)},
+        }
         populate_checklist(
             self._clinical_list,
             [
@@ -2086,6 +2172,13 @@ class StatmodelsWindow(QMainWindow):
             **checked_variable_visits(self._cognitive_list),
         }
 
+    def _visit_series(self) -> list[str]:
+        """Checked covariates set to "all visits": loaded as ``<variable>_v<visit>`` families."""
+        return [
+            *checked_variable_series(self._clinical_list),
+            *checked_variable_series(self._cognitive_list),
+        ]
+
     def _on_primary_measurement_changed(self) -> None:
         """Mirror the inline Data-selection form into measurement 0."""
         self._measurements.set_primary(self._data_form.spec())
@@ -2127,6 +2220,7 @@ class StatmodelsWindow(QMainWindow):
             grain=self._measurements.grain(),
             attach_qc=self._measurements.attach_qc(),
             visit_overrides=self._visit_overrides(),
+            visit_series=self._visit_series(),
         )
         worker.finished_ok.connect(self._on_frame_loaded)
         worker.failed.connect(self._on_frame_load_failed)
@@ -2404,6 +2498,12 @@ class StatmodelsWindow(QMainWindow):
             if post_combine:
                 reference, _, _ = apply_region_combinations(reference, self._combinations)
             derived_frame, _ = apply_derived_columns(reference, self._derived)
+
+        # Visits down the rows last: the cross-visit derived columns above needed the wide
+        # <variable>_v<visit> columns this removes.
+        if self._melt_visits:
+            working = self._melt_visits_working(working)
+            reshaped = True
 
         # Reported once, after every stage has had its say: a combination deferred past the reshape
         # has no error to show until here.
@@ -2793,6 +2893,13 @@ class StatmodelsWindow(QMainWindow):
         # least one region column to spread down the rows.
         self._btn_melt.setEnabled(bool(families) or bool(self._melt_families))
         self._btn_melt.setText(self._melt_button_text())
+        from nvitk.stats.visit_series import visit_families
+
+        has_visits = bool(visit_families(df)) if df is not None and not df.empty else False
+        self._btn_melt_visits.setEnabled(has_visits or bool(self._melt_visits))
+        self._btn_melt_visits.setText(
+            f"Melt visits: {', '.join(self._melt_visits)}"[:40] if self._melt_visits else "Melt visits…"
+        )
 
         already_wide = bool(families) or (
             df is not None and "territory" not in df.columns and not self._melt_families
@@ -2932,6 +3039,57 @@ class StatmodelsWindow(QMainWindow):
             f"'territory' is a model term again; every other column repeats down the rows."
         )
         notify(f"Melted {melted_label} — {levels} territory levels.")
+
+    def _melt_visits_working(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Spread ``self._melt_visits`` down the rows, or return *df* unchanged."""
+        from nvitk.stats.visit_series import melt_visit_families
+
+        if df is None or df.empty or not self._melt_visits:
+            return df
+        try:
+            return melt_visit_families(df, self._melt_visits, time_family=self._melt_visit_time)
+        except ValueError as exc:
+            notify(f"Cannot melt visits: {exc}", error=True)
+            self._melt_visits = []
+            return df
+
+    def _on_melt_visits(self) -> None:
+        """Choose visit families to spread into one row per subject × visit."""
+        from nvitk.stats.visit_series import visit_families
+
+        # Families of the un-melted frame: once melted, their columns are gone.
+        probe, probe_time = list(self._melt_visits), self._melt_visit_time
+        self._melt_visits = []
+        self._recompute_frame(announce=False)
+        frame = self._working_df
+        families = visit_families(frame) if frame is not None else {}
+        if not families:
+            self._melt_visits = probe
+            self._recompute_frame(announce=False)
+            notify(
+                "No variable is loaded at every visit. In Covariates, set a variable's visit picker "
+                "to 'all visits' and reload: it arrives as variable_v1, variable_v2, … columns.",
+                error=True,
+            )
+            return
+        dialog = MeltVisitsDialog(self, families=families, selected=probe, time_family=probe_time)
+        if not dialog.exec():
+            self._melt_visits, self._melt_visit_time = probe, probe_time
+            self._recompute_frame(announce=False)
+            return
+        self._melt_visits, self._melt_visit_time = dialog.selected()
+        self._recompute_frame(announce=False)
+        frame = self._working_df
+        if not self._melt_visits:
+            self._status.setText("Visits kept as columns (one row per subject).")
+            return
+        unit = (frame.attrs.get("visit_time_unit") if frame is not None else None) or "visit number"
+        self._status.setText(
+            f"Melted {', '.join(self._melt_visits)} into {len(frame)} row(s): one per subject × visit, "
+            f"'visit' and 'visit_time' ({unit}) added. Try e.g. "
+            f"{self._melt_visits[0]} ~ visit_time + (visit_time | subject_uid)."
+        )
+        notify(f"Melted visits — {len(frame)} rows.")
 
     def _coverage_note(self) -> str:
         """One line naming the vessels that decide listwise deletion, or ``""``."""
@@ -5809,6 +5967,8 @@ class StatmodelsWindow(QMainWindow):
             # Which visit a covariate came from is part of the frame recipe, not a preference: the
             # same formula fitted on plaque at visit 3 and at visit 4 is two different models.
             "visit_overrides": self._visit_overrides(),
+            # Variables loaded at every visit (visit families) — part of the frame recipe too.
+            "visit_series": self._visit_series(),
             "filters": [rule.to_dict() for rule in self._chips.rules()],
             "derived": [column.to_dict() for column in self._derived],
             "combinations": [c.to_dict() for c in self._combinations],
@@ -5819,6 +5979,8 @@ class StatmodelsWindow(QMainWindow):
             "reference_levels": dict(self._reference_levels),
             "wide": self._wide_mode,
             "melt_families": list(self._melt_families),
+            "melt_visits": list(self._melt_visits),
+            "melt_visit_time": self._melt_visit_time,
             "analysis_type": self._analysis_kind(),
             "mm_formula": self._formula.toPlainText().strip(),
             "groups": self._groups.text().strip(),
@@ -5915,6 +6077,7 @@ class StatmodelsWindow(QMainWindow):
         overrides = {
             str(k): str(v) for k, v in (cfg.get("visit_overrides") or {}).items() if str(v).strip()
         }
+        overrides.update({str(v): VISIT_ALL for v in (cfg.get("visit_series") or []) if str(v).strip()})
         # Applied to both lists: a variable id belongs to exactly one of them, and the setter
         # ignores ids it does not hold.
         set_variable_visits(self._clinical_list, overrides)
@@ -5945,6 +6108,8 @@ class StatmodelsWindow(QMainWindow):
         else:
             legacy = str(cfg.get("melt_family") or "").strip()
             self._melt_families = [legacy] if legacy else []
+        self._melt_visits = [str(f).strip() for f in (cfg.get("melt_visits") or []) if str(f).strip()]
+        self._melt_visit_time = str(cfg.get("melt_visit_time") or "")
         self._btn_reshape.setText("Reshape → long" if self._wide_mode else "Reshape → wide")
         self._btn_melt.setEnabled(self._wide_mode)
         self._btn_melt.setText(self._melt_button_text())
@@ -6833,6 +6998,66 @@ class StatmodelsWindow(QMainWindow):
             QMessageBox.No,
         )
         return answer == QMessageBox.Yes
+
+
+class MeltVisitsDialog(QDialog):
+    """Pick visit families to spread down the rows, and the time axis for ``visit_time``."""
+
+    def __init__(
+        self,
+        parent: QWidget | None,
+        *,
+        families: dict[str, dict[str, str]],
+        selected: Sequence[str],
+        time_family: str = "",
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Melt visits")
+        self.resize(520, 420)
+        lay = QVBoxLayout(self)
+        hint = QLabel(
+            "One row per subject × visit. Each selected variable becomes one column (its value at "
+            "that visit); 'visit' holds the visit and 'visit_time' when it happened. Every other "
+            "column — covariates, Across-visits summaries — repeats down the rows."
+        )
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+        self._list = QListWidget()
+        picked = set(selected)
+        for name, visits in families.items():
+            item = QListWidgetItem(f"{name}  (visits {', '.join(visits)})")
+            item.setData(Qt.UserRole, name)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if name in picked else Qt.Unchecked)
+            self._list.addItem(item)
+        lay.addWidget(self._list, stretch=1)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("visit_time from"))
+        self._time = QComboBox()
+        self._time.addItem("visit number", "")
+        for name in families:
+            self._time.addItem(f"{name} (date → years since first visit / numeric)", name)
+        idx = self._time.findData(time_family)
+        if idx < 0 and not time_family:
+            idx = next((i for i in range(self._time.count())
+                        if "date" in str(self._time.itemData(i) or "").lower()), 0)
+        self._time.setCurrentIndex(max(idx, 0))
+        row.addWidget(self._time, stretch=1)
+        lay.addLayout(row)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+
+    def selected(self) -> tuple[list[str], str]:
+        """``(families to melt, time family)`` — the time family is never melted as a value."""
+        time_family = str(self._time.currentData() or "")
+        names = [
+            str(self._list.item(i).data(Qt.UserRole))
+            for i in range(self._list.count())
+            if self._list.item(i).checkState() == Qt.Checked
+        ]
+        return [n for n in names if n != time_family], time_family
 
 
 class MeltFamiliesDialog(QDialog):

@@ -343,12 +343,49 @@ def guess_schema_from_layer(layer: Any | None) -> str | None:
     return _guess_topbrain_schema(layer, blob)
 
 
+#: Attribute holding the vocabulary chosen (or guessed) for a layer's ids. On the
+#: layer object, not its metadata: it is a display choice, not something to export.
+_SCHEMA_ATTR = "_nvitk_label_schema"
+
+
+def layer_schema_key(layer: Any | None) -> str | None:
+    """The vocabulary for *layer*'s ids: the one picked for it, else the guess.
+
+    Kept per layer, so a picker that moves between two segmentations names each
+    with its own vocabulary instead of carrying the last one across. The guess is
+    cached too — on TopBrain masks it inspects the data — including a failed one.
+    """
+    if layer is None:
+        return None
+    stored = getattr(layer, _SCHEMA_ATTR, None)
+    if stored is not None:
+        return stored or None
+    guessed = guess_schema_from_layer(layer)
+    try:
+        setattr(layer, _SCHEMA_ATTR, guessed or "")
+    except Exception:  # noqa: BLE001
+        pass
+    return guessed
+
+
+def remember_layer_schema(layer: Any | None, key: str | None) -> None:
+    """Record *key* as the vocabulary picked for *layer*."""
+    if layer is None:
+        return
+    try:
+        setattr(layer, _SCHEMA_ATTR, str(key or ""))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 __all__ = [
     "LabelSchema",
     "TOPBRAIN_SCHEMA_KEYS",
     "all_schemas",
     "get_schema",
     "guess_schema_from_layer",
+    "layer_schema_key",
+    "remember_layer_schema",
     "schema_for_totalsegmentator_task",
     "schema_keys",
 ]

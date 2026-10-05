@@ -10,15 +10,19 @@ import numpy as np
 from nvitk.core.array import to_numpy
 from nvitk.gui.core.orientation import (
     configure_viewer_for_layer,
+    install_affine_ndim_guard,
+    DISPLAY_REORDERED_KEY,
     SOURCE_AXES_KEY,
     TIME_LEADING_KEY,
     prepare_for_napari,
     prepare_time_leading_for_napari,
+    prepare_world_ordered_for_napari,
     suppress_nonorthogonal_slice_warning,
 )
 from nvitk.gui.core.warnings import install_napari_display_warnings
 
 install_napari_display_warnings()
+install_affine_ndim_guard()
 from nvitk.io import imread
 from nvitk.io._common import default_nifti_axes, guess_read_type
 from nvitk.types import Image
@@ -183,6 +187,11 @@ def _prepare_rgb_layer_tuple(
     return (np.ascontiguousarray(data), layer_meta, "image")
 
 
+def _spatial(axes: str) -> str:
+    """The spatial letters of *axes*, in order."""
+    return "".join(ch for ch in axes.upper() if ch in "XYZ")
+
+
 def _prepare_layer_tuple(img: Image, path: Path) -> LayerData:
     """Build a napari-plugin-style ``(data, layer_kwargs, layer_type)`` tuple for *img*, reorienting
     the array for display and computing scale/affine, axis labels, and nvitk metadata from *path*."""
@@ -206,6 +215,8 @@ def _prepare_layer_tuple(img: Image, path: Path) -> LayerData:
         meta["nvitk_metadata"][SOURCE_AXES_KEY] = axes_str
         meta["nvitk_metadata"]["axes"] = display_axes
         meta["axes"] = display_axes
+        if _spatial(display_axes) != _spatial(axes_str):
+            meta["nvitk_metadata"][DISPLAY_REORDERED_KEY] = True
         return (
             view,
             {
@@ -213,6 +224,28 @@ def _prepare_layer_tuple(img: Image, path: Path) -> LayerData:
                 "metadata": meta,
                 "axis_labels": tuple(display_axes),
                 "affine": affine5,
+                "rgb": False,
+            },
+            "image",
+        )
+
+    # A slice or volume whose axes are not in world order (sagittal or coronal
+    # storage, any positioned 2D image): shown world-ordered, a view of the file.
+    ordered = prepare_world_ordered_for_napari(data, raw_affine, axes=axes_str)
+    if ordered is not None:
+        view, affine4, display_axes = ordered
+        meta = _nvitk_layer_metadata(img, path, affine_source=raw_affine)
+        meta["nvitk_metadata"][DISPLAY_REORDERED_KEY] = True
+        meta["nvitk_metadata"][SOURCE_AXES_KEY] = axes_str
+        meta["nvitk_metadata"]["axes"] = display_axes
+        meta["axes"] = display_axes
+        return (
+            view,
+            {
+                "name": img.name or path.stem,
+                "metadata": meta,
+                "axis_labels": tuple(display_axes),
+                "affine": affine4,
                 "rgb": False,
             },
             "image",
@@ -247,6 +280,55 @@ def _prepare_layer_tuple(img: Image, path: Path) -> LayerData:
     return (data, layer_meta, "image")
 
 
+def _dicom_series_name(img: Image) -> str | None:
+    """A layer name for a DICOM series: its description, else its protocol, else
+    its number — with the part a mixed series was split into (``COR``, ``SAG``,
+    ``512x512``) in parentheses. ``None`` when *img* carries no series tags."""
+    md = img.metadata or {}
+
+    def _text(*keys: str) -> str:
+        for key in keys:
+            value = str(md.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    number = _text("series_number", "SeriesNumber")
+    name = _text("series_description", "SeriesDescription", "ProtocolName")
+    if not name and number:
+        name = f"Series {number}"
+    if not name:
+        return None
+    part = _text("geometry_subseries")
+    return f"{name} ({part})" if part else name
+
+
+def _name_image(img: Image, path: Path, suffix: str = "") -> None:
+    """Name *img* for its layer.
+
+    A DICOM series (folder or file) is named by its description rather than by the
+    folder it was read from: a study folder holds a dozen series, and the folder name made them
+    all ``studyid_<uid>``, ``[1]``, ``[2]``… An explicit name the reader chose is
+    kept; the folder/file name is only the fallback.
+    """
+    default = {path.name, path.stem, f"{path.stem}{suffix}"}
+    if img.name and img.name not in default:
+        return
+    series = _dicom_series_name(img) if _is_dicom_source(path) else None
+    img.name = series or img.name or f"{path.stem}{suffix}"
+
+
+def _is_dicom_source(path: Path) -> bool:
+    """A DICOM folder or file. A NIfTI converted from DICOM carries the same series
+    tags in its sidecar, but its file name was chosen and is kept."""
+    if path.is_dir():
+        return True
+    try:
+        return guess_read_type(path) == "dicom"
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _read_layer_data(path: str) -> list[LayerData] | None:
     """Read one path into Napari layer tuples."""
     pth = Path(path)
@@ -259,8 +341,7 @@ def _read_layer_data(path: str) -> list[LayerData] | None:
     images = result if isinstance(result, list) else [result]
     out = []
     for i, img in enumerate(images):
-        if not img.name:
-            img.name = f"{pth.stem}_{i}" if len(images) > 1 else pth.stem
+        _name_image(img, pth, f"_{i}" if len(images) > 1 else "")
         out.append(_prepare_layer_tuple(img, pth))
     return out or None
 
@@ -340,8 +421,7 @@ def open_paths_with_nvitk(
         images = result if isinstance(result, list) else [result]
         for i, img in enumerate(images):
             suffix = f"_{i}" if len(images) > 1 else ""
-            if not img.name:
-                img.name = f"{path.stem}{suffix}"
+            _name_image(img, path, suffix)
             layers.append(_add_image_to_viewer(viewer, img, path))
 
     return layers

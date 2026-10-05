@@ -2913,9 +2913,9 @@ def _label_schema_for(layer: Any, params: dict[str, Any]) -> str:
     if key and key != "generic":
         return key
     try:
-        from nvitk.gui.labels.catalog import guess_schema_from_layer
+        from nvitk.gui.labels.catalog import layer_schema_key
 
-        return str(guess_schema_from_layer(layer) or "")
+        return str(layer_schema_key(layer) or "")
     except Exception:  # noqa: BLE001
         return ""
 
@@ -3977,9 +3977,9 @@ def _layer_kwargs_from(layer: Any, name: str) -> dict[str, Any]:
 def _label_display(viewer: Any, layer: Any, label_id: int) -> str:
     """``"3 — Left ICA"`` when a schema names the label, ``"3"`` when none does."""
     try:
-        from nvitk.gui.labels.catalog import get_schema, guess_schema_from_layer
+        from nvitk.gui.labels.catalog import get_schema, layer_schema_key
 
-        key = guess_schema_from_layer(layer)
+        key = layer_schema_key(layer)
         if key:
             name = get_schema(key).name_for(int(label_id))
             if name:

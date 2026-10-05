@@ -23,17 +23,27 @@ def layer_to_image(layer: Any, *, use_file_affine: bool = True) -> Image:
     with its 4x4 spatial affine, so the saved NIfTI is the standard layout and
     reopens identically.
     """
-    from nvitk.gui.core.orientation import layer_is_time_leading
+    from nvitk.gui.core.orientation import layer_is_time_leading, layer_spatially_reordered
     from nvitk.gui.core.spatial import layer_source_axes, layer_source_order
 
     img = spatial_layer_to_image(layer)
-    if layer_is_time_leading(layer):
+    reordered = layer_spatially_reordered(layer)
+    if layer_is_time_leading(layer) or (reordered and use_file_affine):
+        # Shown in another axis order than the file's (time-first, or world-ordered
+        # for a sagittal/coronal file or a positioned 2D slice): written back in
+        # the file's order, with the file's affine, so it reopens identically.
         meta = dict(img.metadata or {})
         src_axes = layer_source_axes(layer) or img.axes
         meta["axes"] = src_axes
-        aff = layer_affine(layer)
+        aff = meta.get("affine_source") if reordered else None
+        aff = layer_affine(layer) if aff is None else np.asarray(aff, dtype=float)
         if aff is not None:
             meta["affine"] = aff
+        if reordered and aff is not None:
+            # The layer's spacing is in its own axis order; the file's is per column.
+            meta.pop("spacing", None)
+            norms = [float(np.linalg.norm(aff[:3, i])) for i in range(3)]
+            meta["x_res"], meta["y_res"], meta["z_res"] = norms
         data = layer_source_order(layer, img.data)
         meta["shape"] = tuple(int(v) for v in data.shape)
         return Image(data=data, metadata=meta, axes=src_axes, name=img.name)

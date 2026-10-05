@@ -352,8 +352,13 @@ draggable rows, per its own module docstring:
 3. **Bottom** — clinical/cognitive covariate pickers and the analysis dataframe table.
 
 The arrangement is remembered like the main window's: closing the Statmodels window (or quitting
-the GUI) saves the current session's dock layout and the window geometry to `gui.json`
-(`statmodels_dock_state`, `statmodels_geometry`), and every new session opens on that layout.
+the GUI) saves the current session's dock layout, the width of the side panels (the
+*Data / Model / Covariates* tabs and *Results*) and the window geometry to `gui.json`
+(`statmodels_dock_state`, `statmodels_dock_sizes`, `statmodels_geometry`), and every new session
+opens on that layout. The panel widths are re-applied once the window is on screen, because Qt
+squeezes docks restored before the window has its final size. A panel left floating — the
+dataframe popped out into its own window — comes back floating where it was (pulled back onto
+the screen if that monitor is gone).
 *View → Reset panel layout* still returns to the factory arrangement, and a loaded session config
 that carries its own layout replaces the remembered one.
 
@@ -365,6 +370,46 @@ measurements → analysis_df (raw, never mutated)
              → derived columns
              → filter rules
              → working_df (what actually gets fitted)
+```
+
+## Variables across visits
+
+A covariate's visit selector has an **all visits** entry next to *auto* and the single visits.
+Picking it loads the variable once per visit, `<variable>_v1 … _v4`, one row per subject, instead
+of collapsing it to one value. Pick the exam date (`peqdate`) the same way to measure time in years
+instead of visit numbers.
+
+Those columns feed two things:
+
+- **Derived columns → Across visits (longitudinal)** reduce one variable's visits to one
+  value per subject. *From / To* choose the pair for the two-visit operations; the visit list
+  restricts which visits enter (all by default); *Time axis* is visit number, a date family
+  (years since the first visit), or any numeric family; the dialog previews the result.
+
+  | Operation | Value |
+  |---|---|
+  | `delta`, `pct_change` | change between two visits (absolute, %) |
+  | `annualized` | change per year between two visits |
+  | `auc`, `auc_mean` | trapezoidal area under the trajectory; the same divided by the follow-up time (time-weighted mean) |
+  | `slope` | least-squares slope over the visits (per year with a date axis) |
+  | `mean`, `max`, `min`, `sd`, `first`, `last`, `n_visits` | summary over the visits |
+  | `progressed` | 1 when the later visit exceeds the earlier one |
+  | `new_onset` | 1 when the variable is at or below *threshold* at the first visit and above it at any later one (0 when already above at the first; e.g. plaque volume 0 → incident plaque) |
+
+  Visits missing for a subject are skipped; *Min. visits* sets how many must be present for a
+  value (otherwise NaN). The definition is saved with the session config like any derived column
+  (`kind: "visits"`).
+- **Melt visits…** (next to *Melt by…*) reshapes chosen families to long format: one row per
+  subject × visit, with a `visit` column, the value under the family's own name, and
+  `visit_time` from the time axis. This is the frame for a trajectory model,
+  e.g. `total_carotid_plaque_vol ~ visit_time + age + (1 | subject_uid)`. Per-subject
+  derived columns (an AUC, a slope) repeat on every visit row.
+
+```{code-block} python
+from nvitk.stats.visit_series import visit_series_values, melt_visit_families
+
+auc = visit_series_values(df, "total_carotid_plaque_vol", "auc", time_family="peqdate")
+long = melt_visit_families(df, ["total_carotid_plaque_vol"], time_family="peqdate")
 ```
 
 ## Statistical capabilities
@@ -380,7 +425,7 @@ measurements → analysis_df (raw, never mutated)
 | **Domain plotting** | Brain-surface / cortical-parcel plots and circle-of-Willis vascular schematic plots. |
 | **Pairwise significance** | A *Signif.* toggle on the model plots draws Holm-adjusted level-versus-level brackets \u2014 see [Significance brackets](#significance-brackets). |
 | **Column distributions** | Right-click a column → *Plot* for a violin / box / strip / histogram / density / ECDF of it, split or panelled by another column. Every level is labelled with its own N — see [Group sizes](#group-sizes). |
-| **Derived columns** | `transform` (canned function), `expression` (free-form over columns), or `bins` (continuous → labeled groups). |
+| **Derived columns** | `transform` (canned function), `expression` (free-form over columns), `bins` (continuous → labeled groups), or `visits` (AUC, change, slope… across visits — see [Variables across visits](#variables-across-visits)). |
 | **Region combinations** | Row-wise arithmetic across a subject's regions (e.g. `TCBF = RICA + LICA + BASI`), with prefills for standard composites and vessel-network conservation-balance residuals. |
 | **Report / export** | A stat-chip strip (n, groups, convergence, AIC/BIC/LLF) over sortable, significance-shaded coefficient tables; `.xlsx` export includes a second **provenance** sheet documenting how the frame was built. |
 | **DB publish** | Upserts a derived column back into the dataset as a first-class variable, with a preview-before-write dialog since it's the one action that writes to shared state. |

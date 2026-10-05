@@ -1073,6 +1073,7 @@ def resolve_covariate_frame(
     cognitive_vars: list[str] | None = None,
     visit_policy: str = "latest",
     visit_overrides: Mapping[str, str] | None = None,
+    visit_series: Sequence[str] | None = None,
 ) -> tuple[pd.DataFrame, list[str]]:
     """
     Subject-level covariate frame assembled from the clinical / subjects / image / cognitive tables.
@@ -1086,6 +1087,10 @@ def resolve_covariate_frame(
     visit_overrides : mapping, optional
         ``{variable_id: visit_id}`` pinning a covariate to one visit instead of letting
         *visit_policy* choose. Passed straight through to :func:`collapse_visits_to_subject`.
+    visit_series : sequence of str, optional
+        Clinical / cognitive variables to load at **every** visit rather than collapsed: each
+        becomes a visit family ``<variable>_v<visit>`` (see :mod:`nvitk.stats.visit_series`),
+        from which longitudinal derivatives — change, AUC, slope… — are computed downstream.
 
     Returns
     -------
@@ -1098,6 +1103,12 @@ def resolve_covariate_frame(
     """
     clinical_vars = list(clinical_vars or [])
     cognitive_vars = list(cognitive_vars or [])
+    # "All visits" variables leave the collapse path: they arrive as a visit family instead.
+    series = {str(v) for v in (visit_series or [])}
+    series_clinical = [v for v in clinical_vars if v in series]
+    series_cognitive = [v for v in cognitive_vars if v in series]
+    clinical_vars = [v for v in clinical_vars if v not in series]
+    cognitive_vars = [v for v in cognitive_vars if v not in series]
 
     # Covariates. Prefer ``clinical_measurements`` whenever the requested name has rows there
     # (covers a stale in-memory catalog after ``import_sex.py``). Only fall back to the
@@ -1155,6 +1166,41 @@ def resolve_covariate_frame(
         dict.fromkeys([*clinical_vars, *subject_vars, *annotation_vars, *cognitive_vars])
     )
     present = [c for c in covariate_vars if c in covariates.columns] if not covariates.empty else []
+
+    # ---- visit families: one column per visit for the "all visits" variables ----
+    series_columns: list[str] = []
+    if series_clinical or series_cognitive:
+        from nvitk.stats.visit_series import pivot_visits
+
+        for fetch, names in ((getattr(repo, "clinical", None), series_clinical),
+                             (getattr(repo, "cognitive", None), series_cognitive)):
+            if not names or fetch is None:
+                continue
+            try:
+                per_visit = pivot_visits(fetch(variables=names, wide=True), names)
+            except Exception as exc:
+                log.debug("Per-visit covariates unavailable: %s", exc)
+                continue
+            cols = [c for c in per_visit.columns if c != "subject_uid"]
+            if not cols:
+                continue
+            if covariates.empty or "subject_uid" not in covariates.columns:
+                covariates = per_visit
+            else:
+                covariates = covariates.merge(
+                    per_visit.drop(columns=[c for c in cols if c in covariates.columns]),
+                    on="subject_uid", how="outer",
+                )
+            series_columns.extend(cols)
+            for column in cols:
+                provenance[column] = [column.rsplit("_v", 1)[-1]]
+        if series_columns:
+            log.info(
+                "Loaded %d variable(s) at every visit: %s → %d per-visit column(s).",
+                len(series_clinical) + len(series_cognitive),
+                ", ".join([*series_clinical, *series_cognitive]), len(series_columns),
+            )
+    present = [*present, *series_columns]
     covariates.attrs["visit_provenance"] = {k: v for k, v in provenance.items() if k in present}
     return covariates, present
 
@@ -1780,6 +1826,7 @@ def build_multi_feature_analysis_frame(
     grain: str = "territory",
     attach_qc: bool = True,
     visit_overrides: Mapping[str, str] | None = None,
+    visit_series: Sequence[str] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """
     Analysis frame combining one or more image measurements plus subject covariates.
@@ -1800,6 +1847,9 @@ def build_multi_feature_analysis_frame(
         ``{variable_id: visit_id}`` pinning a covariate to one visit rather than letting the
         collapse policy pick. Only meaningful for a variable recorded at more than one visit; see
         :meth:`~nvitk.db.repo.DataRepo.variable_visits`.
+    visit_series : sequence of str, optional
+        Covariates to load at every visit, as ``<variable>_v<visit>`` columns (see
+        :func:`resolve_covariate_frame`).
     grain : {"territory", "subject"}
         What a row is. ``"territory"`` keeps the long shape and joins on the shared
         ``(subject, territory)`` cell — right when the measurements share a parcellation, and the
@@ -1915,6 +1965,7 @@ def build_multi_feature_analysis_frame(
         clinical_vars=clinical_vars,
         cognitive_vars=cognitive_vars,
         visit_overrides=visit_overrides,
+        visit_series=visit_series,
     )
     if present and not covariates.empty and not wide.empty:
         before = len(wide)

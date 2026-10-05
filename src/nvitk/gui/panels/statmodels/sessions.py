@@ -27,7 +27,7 @@ from __future__ import annotations
 # ──────────────────────────────────────────────────────────────────────────────
 from typing import Any
 
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import QKeySequence
 from qtpy.QtWidgets import (
     QApplication,
@@ -59,17 +59,24 @@ log = Logger()
 #: shell's own (size, position, maximised), from ``saveGeometry()``.
 LAYOUT_PREF_KEY = "statmodels_dock_state"
 GEOMETRY_PREF_KEY = "statmodels_geometry"
+#: Explicit dock extents (``{dock: [area, px]}``), re-applied once a session is on screen at its
+#: final size — the ``saveState`` blob alone brings the side panels back narrow.
+SIZES_PREF_KEY = "statmodels_dock_sizes"
+
+#: When the stored extents are re-applied after a session first appears: once the layout has run,
+#: and again after a maximise has had time to settle (the window manager resizes asynchronously).
+_SIZE_REAPPLY_MS = (0, 300)
 
 
-def _stored(key: str) -> str:
-    """A remembered base64 blob from ``gui.json``, or ``""``."""
+def _stored(key: str) -> Any:
+    """A remembered value from ``gui.json`` (``""`` when absent)."""
     try:
         from nvitk.gui.core.prefs import load_prefs
 
         value = load_prefs().get(key)
     except Exception:  # noqa: BLE001 — preferences fail soft
         return ""
-    return value if isinstance(value, str) else ""
+    return value if value is not None else ""
 
 
 #: Edge of a tab-bar button, in pixels. A ``QPushButton`` honours an explicit stylesheet
@@ -264,8 +271,19 @@ class StatmodelsShell(QMainWindow):
 
         The *current* session's, because that is the one on screen — the arrangement
         the user just left. ``True`` when ``gui.json`` was written.
+
+        Skipped while the shell is hidden or minimised: :meth:`hideEvent` has already written
+        the layout and then taken the detached windows down, so a save now — the application's
+        ``aboutToQuit`` after the window was closed — would record a floated dataframe panel as
+        closed, and it would not come back on the next launch.
         """
-        values: dict[str, str] = {}
+        if not self.isVisible() or self.isMinimized():
+            return False
+        return self._write_layout()
+
+    def _write_layout(self) -> bool:
+        """Write the layout unconditionally; see :meth:`save_layout`."""
+        values: dict[str, Any] = {}
         try:
             values[GEOMETRY_PREF_KEY] = bytes(self.saveGeometry().toBase64()).decode("ascii")
         except Exception:  # noqa: BLE001
@@ -282,6 +300,14 @@ class StatmodelsShell(QMainWindow):
                 encoded = ""
             if encoded:
                 values[LAYOUT_PREF_KEY] = encoded
+            try:
+                sizes = session.dock_sizes()
+            except RuntimeError:
+                sizes = {}
+            # Empty when nothing is docked on screen (a minimised window has no visible
+            # region): keep the widths saved last time rather than erasing them.
+            if sizes:
+                values[SIZES_PREF_KEY] = sizes
         if not values:
             return False
         try:
@@ -294,7 +320,7 @@ class StatmodelsShell(QMainWindow):
     def _restore_geometry(self) -> bool:
         """Put the shell back where it was; ``True`` when a stored geometry applied."""
         encoded = _stored(GEOMETRY_PREF_KEY)
-        if not encoded:
+        if not isinstance(encoded, str) or not encoded:
             return False
         try:
             from qtpy.QtCore import QByteArray
@@ -303,12 +329,36 @@ class StatmodelsShell(QMainWindow):
         except Exception:  # noqa: BLE001 — a geometry from another screen setup is not fatal
             return False
 
-    @staticmethod
-    def _restore_session_layout(session: StatmodelsWindow) -> None:
-        """Apply the remembered dock arrangement to a freshly built *session*."""
+    def _restore_session_layout(self, session: StatmodelsWindow) -> None:
+        """Apply the remembered dock arrangement to a freshly built *session*.
+
+        The arrangement (which panel where, tabbed, hidden) restores now; the panel *sizes* are
+        re-applied once the session is on screen at its final size — see :data:`SIZES_PREF_KEY`.
+        """
         encoded = _stored(LAYOUT_PREF_KEY)
-        if encoded:
+        if isinstance(encoded, str) and encoded:
             session._restore_encoded_dock_state(encoded)
+        sizes = _stored(SIZES_PREF_KEY)
+        if isinstance(sizes, dict) and sizes:
+            session._pending_dock_sizes = sizes
+            if self.isVisible():
+                self._schedule_dock_sizes(session)
+
+    def _schedule_dock_sizes(self, session: StatmodelsWindow) -> None:
+        """Re-apply *session*'s stored dock sizes after the layout (and a maximise) settle."""
+        sizes = getattr(session, "_pending_dock_sizes", None)
+        if not sizes:
+            return
+
+        def _apply() -> None:
+            try:
+                session.apply_dock_sizes(sizes)
+            except RuntimeError:  # the session was closed in the meantime
+                pass
+
+        for delay in _SIZE_REAPPLY_MS:
+            QTimer.singleShot(delay, _apply)
+        QTimer.singleShot(max(_SIZE_REAPPLY_MS) + 50, lambda: setattr(session, "_pending_dock_sizes", None))
 
     # ──────────────────────────────────────────────────────────────────────────
     # Tab bar
@@ -408,7 +458,11 @@ class StatmodelsShell(QMainWindow):
 
         Closing or hiding the shell otherwise leaves a floated dataframe panel behind on the
         desktop, with nothing left on screen to put it back.
+
+        The layout is written first, while the floated panels are still up — the last moment
+        it is the arrangement the user left (see :meth:`save_layout`).
         """
+        self._write_layout()
         for session in self.sessions():
             self._suspend(session)
         super().hideEvent(event)
@@ -419,6 +473,10 @@ class StatmodelsShell(QMainWindow):
         session = self.current_session()
         if session is not None:
             session.restore_detached_windows()
+        # The first time the shell appears, sessions built before it was visible get their
+        # remembered panel sizes — now that there is a real window size to fit them into.
+        for each in self.sessions():
+            self._schedule_dock_sizes(each)
 
     def _on_rename_tab(self, index: int) -> None:
         """Rename a session from a double-click on its tab."""

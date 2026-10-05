@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
-from qtpy.QtCore import Qt, Signal
+from qtpy.QtCore import QObject, Qt, Signal
 from qtpy.QtGui import QColor
 from qtpy.QtWidgets import (
     QCheckBox,
@@ -14,6 +14,7 @@ from qtpy.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -27,6 +28,7 @@ from nvitk.gui.labels.catalog import (
     all_schemas,
     get_schema,
     guess_schema_from_layer,
+    remember_layer_schema,
     schema_keys,
 )
 from nvitk.gui.labels.visibility import (
@@ -36,6 +38,9 @@ from nvitk.gui.labels.visibility import (
     get_label_color,
     is_label_like_layer,
     label_source_data,
+    layer_in_viewer,
+    restore_label_visibility,
+    apply_label_visibility,
     set_label_color,
     stored_label_colormap,
     stored_visible_ids,
@@ -44,6 +49,54 @@ from nvitk.gui.labels.visibility import (
 )
 
 LABEL_SELECTOR_SCROLL_MIN = 80
+
+
+class _LabelFilterHub(QObject):
+    """Announces that a layer's live label filter changed, so every picker bound to
+    that layer — the Labels panel, the Tools picker, a layer-list popup — shows it."""
+
+    changed = Signal(object)
+
+
+_HUB: _LabelFilterHub | None = None
+
+
+def label_filter_hub() -> _LabelFilterHub:
+    """The process-wide :class:`_LabelFilterHub`."""
+    global _HUB
+    if _HUB is None:
+        _HUB = _LabelFilterHub()
+    return _HUB
+
+
+def apply_selection_to_layer(selector: "LabelSelectorWidget", viewer: Any) -> None:
+    """Filter *selector*'s bound layer to its checked ids and tell the other pickers.
+
+    The filter is recorded on the layer itself, so a layer keeps the selection it
+    was given while other layers are active; checking every id present is what
+    clears it again.
+    """
+    layer = selector.current_layer()
+    if layer is None or not is_label_like_layer(layer):
+        return
+    if not layer_in_viewer(layer, viewer):
+        return
+    set_layer_visible_ids(layer, selector.selected_ids(), viewer, present=selector.available_ids())
+
+
+def set_layer_visible_ids(
+    layer: Any, ids: list[int], viewer: Any, *, present: list[int] | None = None
+) -> None:
+    """Show only *ids* of *layer* — every id present clears the filter — and tell
+    every picker bound to it."""
+    if present is None:
+        present = layer_label_ids(layer)
+    ids = sorted(int(i) for i in ids)
+    if ids and present and set(ids) >= set(present):
+        restore_label_visibility(layer, viewer=viewer)
+    else:
+        apply_label_visibility(layer, ids)
+    label_filter_hub().changed.emit(layer)
 
 
 def _rgba_to_qcolor(rgba: np.ndarray) -> QColor:
@@ -85,12 +138,18 @@ class LabelSelectorWidget(QGroupBox):
 
     selection_changed = Signal()
 
-    def __init__(self, parent: QWidget | None = None) -> None:
-        """Build the schema picker, All/None/Refresh buttons, and scrollable checkbox list."""
-        super().__init__("Label selection", parent)
+    def __init__(self, parent: QWidget | None = None, *, compact: bool = False) -> None:
+        """Build the schema picker, filter, All/None/Refresh buttons, and scrollable checkbox list.
+
+        *compact* drops the colormap, full-schema and Refresh controls, for the
+        small per-layer popup opened from the layer list.
+        """
+        super().__init__("" if compact else "Label selection", parent)
+        self._compact = compact
         self._checks: list[QCheckBox] = []
         self._color_buttons: dict[int, QToolButton] = {}
         self._layer_ids: list[int] = []
+        self._base_hint = ""
         self._schema_key = "generic"
         self._hint = QLabel("Choose a label mapping, then select labels below.")
         self._hint.setWordWrap(True)
@@ -124,10 +183,23 @@ class LabelSelectorWidget(QGroupBox):
             "List every id in the mapping, not only ids present in the active layer"
         )
 
+        # Long vocabularies (TotalSegmentator lists over a hundred structures) are
+        # unusable as a bare checkbox column: type part of a name or an id instead.
+        self._filter = QLineEdit()
+        self._filter.setPlaceholderText("Filter by name or id…")
+        self._filter.setClearButtonEnabled(True)
+        self._filter.setToolTip(
+            "Show only matching labels. All / None then act on the matches only."
+        )
+        self._filter.textChanged.connect(lambda _text: self._apply_filter())
+
         btn_row = QHBoxLayout()
         self._btn_all = QPushButton("All")
+        self._btn_all.setToolTip("Show every label listed (only the filtered ones while filtering).")
         self._btn_none = QPushButton("None")
+        self._btn_none.setToolTip("Hide every label listed (only the filtered ones while filtering).")
         self._btn_refresh = QPushButton("Refresh")
+        self._btn_refresh.setToolTip("Re-read the labels present in the layer.")
         btn_row.addWidget(self._btn_all)
         btn_row.addWidget(self._btn_none)
         btn_row.addWidget(self._btn_refresh)
@@ -147,20 +219,59 @@ class LabelSelectorWidget(QGroupBox):
         root.addLayout(schema_row)
         root.addLayout(cmap_row)
         root.addWidget(self._show_full)
+        root.addWidget(self._filter)
         root.addLayout(btn_row)
         root.addWidget(self._scroll, stretch=1)
         self.setLayout(root)
+        if compact:
+            root.setContentsMargins(4, 4, 4, 4)
+            self._btn_guess.setVisible(False)
+            self._show_full.setVisible(False)
+            self._btn_refresh.setVisible(False)
+            for i in range(cmap_row.count()):
+                item = cmap_row.itemAt(i).widget()
+                if item is not None:
+                    item.setVisible(False)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
 
         self._btn_all.clicked.connect(self.select_all)
         self._btn_none.clicked.connect(self.select_none)
         self._schema_combo.currentIndexChanged.connect(self._on_schema_changed)
+        # Only a choice made by hand is remembered for the layer; a guess is
+        # re-derived, and a programmatic switch must not stick to the wrong layer.
+        self._schema_combo.activated.connect(
+            lambda _i: remember_layer_schema(self._layer_ref, self._schema_combo.currentData())
+        )
         self._show_full.toggled.connect(lambda _: self._refresh_current_layer())
         self._btn_guess.clicked.connect(self._guess_schema)
         self._cmap_combo.currentIndexChanged.connect(self._on_colormap_changed)
 
         self._layer_ref: Any | None = None
         self._viewer: Any | None = None
+        label_filter_hub().changed.connect(self._on_layer_filter_changed)
+
+    def _on_layer_filter_changed(self, layer: Any) -> None:
+        """Another picker filtered *layer*: show its selection here too."""
+        try:
+            if layer is not None and layer is self._layer_ref:
+                self.sync_checks_from_layer()
+        except RuntimeError:  # this widget's C++ side is already gone
+            pass
+
+    def sync_checks_from_layer(self) -> None:
+        """Tick exactly the ids the bound layer's live filter keeps, without rebuilding."""
+        layer = self._layer_ref
+        if layer is None:
+            return
+        remembered = stored_visible_ids(layer)
+        present = set(self._layer_ids)
+        for cb in self._checks:
+            lid = int(cb.property("label_id"))
+            want = (lid in present) if remembered is None else (lid in remembered)
+            if cb.isChecked() != want:
+                cb.blockSignals(True)
+                cb.setChecked(want)
+                cb.blockSignals(False)
 
     def set_viewer(self, viewer: Any | None) -> None:
         """Napari viewer used to promote Image masks to Labels for color editing."""
@@ -190,6 +301,7 @@ class LabelSelectorWidget(QGroupBox):
         if not guessed:
             self._hint.setText("Could not guess mapping from layer name/path.")
             return
+        remember_layer_schema(self._layer_ref, guessed)
         idx = self._schema_combo.findData(guessed)
         if idx >= 0:
             self._schema_combo.setCurrentIndex(idx)
@@ -198,9 +310,21 @@ class LabelSelectorWidget(QGroupBox):
         """Re-render the checkbox list for whichever layer is currently bound."""
         self.refresh_from_layer(self._layer_ref)
 
-    def set_schema_key(self, key: str) -> None:
-        """Select a catalog schema by key (e.g. ``ts:total``, ``eicab``)."""
+    def set_schema_key(self, key: str, *, refresh: bool = True) -> None:
+        """Select a catalog schema by key (e.g. ``ts:total``, ``eicab``).
+
+        With ``refresh=False`` only the choice changes — for a caller about to
+        bind a new layer, which would otherwise rebuild the list for the old one
+        first.
+        """
         idx = self._schema_combo.findData(key)
+        if not refresh:
+            self._schema_combo.blockSignals(True)
+            if idx >= 0:
+                self._schema_combo.setCurrentIndex(idx)
+            self._schema_combo.blockSignals(False)
+            self._schema_key = key
+            return
         if idx >= 0:
             self._schema_combo.setCurrentIndex(idx)
         else:
@@ -372,11 +496,12 @@ class LabelSelectorWidget(QGroupBox):
             if self._supports_color_edit(layer)
             else ""
         )
-        self._hint.setText(
+        self._base_hint = (
             f"{len(ids)} label(s) in “{layer.name}” — {schema_title}"
             + (f" ({mapped} named)" if schema and schema.id_to_name else "")
             + color_hint
         )
+        self._hint.setText(self._base_hint)
 
         # The combo describes *this* layer, so a layer using Napari's own colours
         # must not read as though a colormap were applied to it.
@@ -412,13 +537,48 @@ class LabelSelectorWidget(QGroupBox):
             row_layout.addWidget(cb, stretch=1)
             self._inner_layout.addWidget(row)
             self._checks.append(cb)
-        self._emit_selection_changed()
+        self._apply_filter()
+        # No selection_changed here: the boxes now show the layer's own filter, so
+        # there is nothing to apply. Emitting made every picker re-apply its state
+        # a beat after a rebind — over the top of an edit made meanwhile in another.
+
+    def filter_text(self) -> str:
+        """The current filter text."""
+        return self._filter.text()
+
+    def set_filter_text(self, text: str) -> None:
+        """Filter the list to labels whose name or id contains *text*."""
+        self._filter.setText(text)
+
+    def _apply_filter(self) -> None:
+        """Hide the rows whose label text and id do not contain the filter text."""
+        needle = self._filter.text().strip().lower()
+        shown = 0
+        for cb in self._checks:
+            row = cb.parentWidget()
+            hit = (
+                not needle
+                or needle in cb.text().lower()
+                or needle == str(cb.property("label_id"))
+            )
+            if row is not None:
+                row.setVisible(hit)
+            shown += int(hit)
+        if needle and self._layer_ref is not None:
+            self._hint.setText(f"{shown} of {len(self._checks)} label(s) match “{needle}”.")
+        elif self._layer_ref is not None and self._checks:
+            self._hint.setText(self._base_hint)
+
+    def _row_shown(self, cb: QCheckBox) -> bool:
+        """True when *cb*'s row passes the filter."""
+        row = cb.parentWidget()
+        return row is None or not row.isHidden()
 
     def select_all(self) -> None:
-        """Check every enabled label checkbox."""
+        """Check every enabled label checkbox the filter shows."""
         changed = False
         for cb in self._checks:
-            if cb.isEnabled() and not cb.isChecked():
+            if cb.isEnabled() and not cb.isChecked() and self._row_shown(cb):
                 cb.blockSignals(True)
                 cb.setChecked(True)
                 cb.blockSignals(False)
@@ -427,10 +587,10 @@ class LabelSelectorWidget(QGroupBox):
             self._emit_selection_changed()
 
     def select_none(self) -> None:
-        """Uncheck every enabled label checkbox."""
+        """Uncheck every enabled label checkbox the filter shows."""
         changed = False
         for cb in self._checks:
-            if cb.isEnabled() and cb.isChecked():
+            if cb.isEnabled() and cb.isChecked() and self._row_shown(cb):
                 cb.blockSignals(True)
                 cb.setChecked(False)
                 cb.blockSignals(False)

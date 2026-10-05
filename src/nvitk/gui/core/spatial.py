@@ -31,6 +31,9 @@ def layer_affine(layer: Any) -> np.ndarray | None:
         aff = to_numpy(aff).astype(float)
         if aff.shape == (4, 4):
             return aff
+        if aff.shape == (5, 5):
+            # Time-first 3D+t: the spatial block, in the layer's own axis order.
+            return aff[1:, 1:]
     meta = nvitk_metadata_from_layer(layer)
     src = meta.get("affine_source")
     if src is None:
@@ -49,6 +52,13 @@ def layer_spacing(layer: Any) -> tuple[float, ...] | None:
     layer is displayed with an affine, Napari typically leaves ``scale`` at
     ``(1,1,1)``, which must not override the real mm spacing.
     """
+    from nvitk.gui.core.orientation import layer_spatially_reordered
+
+    if layer_spatially_reordered(layer):
+        # The file's per-axis spacing is in the file's axis order, not the layer's.
+        aff = layer_affine(layer)
+        if aff is not None:
+            return tuple(float(np.linalg.norm(aff[:3, i])) for i in range(3))
     meta = nvitk_metadata_from_layer(layer)
     sp = meta.get("spacing")
     if sp is not None:
@@ -179,10 +189,10 @@ def layer_source_axes(layer: Any) -> str | None:
     from nvitk.gui.core.orientation import (
         SOURCE_AXES_KEY,
         _axes_string_from_layer,
-        layer_is_time_leading,
+        layer_is_reordered,
     )
 
-    if layer_is_time_leading(layer):
+    if layer_is_reordered(layer):
         src = nvitk_metadata_from_layer(layer).get(SOURCE_AXES_KEY)
         nested = (getattr(layer, "metadata", None) or {}).get("nvitk_metadata") or {}
         src = nested.get(SOURCE_AXES_KEY, src)
@@ -199,14 +209,23 @@ def layer_source_order(layer: Any, data: Any = None) -> Any:
     export — calls this instead of ``layer.data``. A zero-copy view; any other
     layer's array comes back unchanged.
     """
-    from nvitk.gui.core.orientation import _axes_string_from_layer, layer_is_time_leading
+    from nvitk.gui.core.orientation import _axes_string_from_layer, layer_is_reordered
 
     arr = layer.data if data is None else data
-    if not layer_is_time_leading(layer):
+    if not layer_is_reordered(layer):
         return arr
     display = (_axes_string_from_layer(layer) or "").upper()
     source = (layer_source_axes(layer) or "").upper()
-    if len(display) != arr.ndim or sorted(display) != sorted(source):
+    if len(display) != arr.ndim:
+        return arr
+    # A 2D file shown as a one-slice 3D layer: drop the axis the file never had.
+    extra = [i for i, ch in enumerate(display) if ch not in source]
+    if extra:
+        if any(int(arr.shape[i]) != 1 for i in extra):
+            return arr
+        arr = arr[tuple(0 if i in extra else slice(None) for i in range(arr.ndim))]
+        display = "".join(ch for ch in display if ch in source)
+    if sorted(display) != sorted(source):
         return arr
     perm = [display.index(ch) for ch in source]
     return arr.transpose(perm)
@@ -214,13 +233,19 @@ def layer_source_order(layer: Any, data: Any = None) -> Any:
 
 def to_layer_order(layer: Any, data: Any) -> Any:
     """Inverse of :func:`layer_source_order`: a file-ordered array in *layer*'s order."""
-    from nvitk.gui.core.orientation import _axes_string_from_layer, layer_is_time_leading
+    from nvitk.gui.core.orientation import _axes_string_from_layer, layer_is_reordered
 
-    if not layer_is_time_leading(layer):
+    if not layer_is_reordered(layer):
         return data
     display = (_axes_string_from_layer(layer) or "").upper()
     source = (layer_source_axes(layer) or "").upper()
-    if len(source) != getattr(data, "ndim", -1) or sorted(display) != sorted(source):
+    if len(source) != getattr(data, "ndim", -1):
+        return data
+    for ch in display:
+        if ch not in source:  # the slice axis a 2D file is shown with
+            data = data[..., None]
+            source += ch
+    if sorted(display) != sorted(source):
         return data
     perm = [source.index(ch) for ch in display]
     return data.transpose(perm)

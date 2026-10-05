@@ -1081,7 +1081,7 @@ class DerivedColumn:
     ----------
     name : str
         Output column name. Must be a valid identifier — see :data:`IDENTIFIER_RE`.
-    kind : {"transform", "expression", "bins", "binarize", "merge"}
+    kind : {"transform", "expression", "bins", "binarize", "merge", "visits"}
         ``transform`` applies :data:`TRANSFORMS`\\ ``[transform]`` to *source*;
         ``expression`` evaluates *expression* via :func:`evaluate_expression`;
         ``bins`` cuts *source* into an ordered categorical at *cut_points*, the
@@ -1089,7 +1089,9 @@ class DerivedColumn:
         ``binarize`` collapses *source* to numeric 0/1 either side of *threshold*, the
         ``plaque_vol`` → ``has_plaque`` pattern;
         ``merge`` pools levels of a categorical *source* into fewer groups via *mapping*, the
-        ``apoe`` → ``E4_carrier`` / ``E2_carrier`` / ``E3E3`` pattern.
+        ``apoe`` → ``E4_carrier`` / ``E2_carrier`` / ``E3E3`` pattern;
+        ``visits`` summarises a visit family (``plaque_v1`` … ``plaque_v4``) per subject — change,
+        AUC, slope… — via :func:`nvitk.stats.visit_series.visit_series_values`.
     mapping : tuple of (level, group)
         For ``kind="merge"``: which source level goes into which new group. Stored as pairs rather
         than a dict so the definition round-trips through JSON with a stable order.
@@ -1123,6 +1125,20 @@ class DerivedColumn:
     # ---- kind="merge" ----------------------------------------------------------
     mapping: tuple[tuple[str, str], ...] = ()
     unmapped: str = "keep"
+    # ---- kind="visits" ---------------------------------------------------------
+    #: Visit family (``<family>_v1``, ``<family>_v2``, …) the summary is computed over.
+    family: str = ""
+    #: Operation from :data:`nvitk.stats.visit_series.VISIT_OPERATIONS`.
+    visit_op: str = "delta"
+    #: Visits to use (empty = every visit of the family).
+    visits: tuple[str, ...] = ()
+    #: Date / numeric visit family giving each visit's time ("" = the visit number).
+    time_family: str = ""
+    #: "From" / "to" visits for the two-visit operations ("" = first / last selected).
+    visit_a: str = ""
+    visit_b: str = ""
+    #: Fewest non-missing visits a row needs for AUC, slope and the summaries.
+    min_visits: int = 2
 
     def n_bins(self) -> int:
         """Number of bins this definition produces (one more than the interior cut points)."""
@@ -1156,6 +1172,16 @@ class DerivedColumn:
             shown = "; ".join(f"{g} ← {'+'.join(v)}" for g, v in list(groups.items())[:3])
             more = f" (+{len(groups) - 3})" if len(groups) > 3 else ""
             return f"{self.name} = merge({self.source}: {shown}{more})"
+        if self.kind == "visits":
+            visits = ",".join(self.visits) if self.visits else "all"
+            pair = ""
+            if self.visit_op in ("delta", "pct_change", "annualized", "progressed"):
+                pair = f" v{self.visit_a or 'first'}→v{self.visit_b or 'last'}"
+            from nvitk.stats.visit_series import VISIT_OPERATIONS
+
+            uses_time = VISIT_OPERATIONS.get(self.visit_op, ("", False, False))[2]
+            time = f", t={self.time_family}" if self.time_family and uses_time else ""
+            return f"{self.name} = {self.visit_op}({self.family}{pair}; visits {visits}{time})"
         return f"{self.name} = {self.expression}"
 
     def validate(self) -> str:
@@ -1209,6 +1235,17 @@ class DerivedColumn:
                 seen.add(level)
             if len(self.merge_groups()) < 2 and self.unmapped == "drop":
                 return "Merging everything into one group leaves nothing to compare."
+        elif self.kind == "visits":
+            from nvitk.stats.visit_series import VISIT_OPERATIONS
+
+            if not self.family:
+                return "No visit family selected."
+            if self.visit_op not in VISIT_OPERATIONS:
+                return f"Unknown visit operation {self.visit_op!r}."
+            if self.visit_a and self.visit_b and self.visit_a == self.visit_b:
+                return "'From' and 'to' must be different visits."
+            if int(self.min_visits) < 1:
+                return "At least one visit is needed."
         else:
             return f"Unknown derived-column kind {self.kind!r}."
         return ""
@@ -1229,6 +1266,13 @@ class DerivedColumn:
             "binarize_op": self.binarize_op,
             "mapping": [[str(a), str(b)] for a, b in self.mapping],
             "unmapped": self.unmapped,
+            "family": self.family,
+            "visit_op": self.visit_op,
+            "visits": list(self.visits),
+            "time_family": self.time_family,
+            "visit_a": self.visit_a,
+            "visit_b": self.visit_b,
+            "min_visits": int(self.min_visits),
         }
 
     @classmethod
@@ -1252,6 +1296,13 @@ class DerivedColumn:
                 if len(pair) == 2
             ),
             unmapped=str(data.get("unmapped") or "keep"),
+            family=str(data.get("family") or ""),
+            visit_op=str(data.get("visit_op") or "delta"),
+            visits=tuple(str(v) for v in (data.get("visits") or ())),
+            time_family=str(data.get("time_family") or ""),
+            visit_a=str(data.get("visit_a") or ""),
+            visit_b=str(data.get("visit_b") or ""),
+            min_visits=int(data.get("min_visits") or 2),
         )
 
 
@@ -1305,6 +1356,15 @@ def apply_derived_columns(
                     raise ValueError(f"source column {spec.source!r} is not in the frame")
                 series = binarize_series(
                     out[spec.source], threshold=spec.threshold, op=spec.binarize_op
+                )
+            elif spec.kind == "visits":
+                from nvitk.stats.visit_series import visit_series_values
+
+                series = visit_series_values(
+                    out, spec.family, spec.visit_op,
+                    visits=spec.visits, time_family=spec.time_family,
+                    visit_a=spec.visit_a, visit_b=spec.visit_b,
+                    threshold=spec.threshold, min_visits=spec.min_visits,
                 )
             else:
                 series = evaluate_expression(out, spec.expression)

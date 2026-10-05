@@ -24,13 +24,10 @@ from nvitk.gui.core.design import COLOR_MUTED, SPACE, SPACE_TIGHT
 
 from nvitk.gui.tools.gpu_toggle import build_gpu_toggle_button
 from nvitk.gui.tools.orient_quick import build_orientation_quick_button
-from nvitk.gui.labels.catalog import guess_schema_from_layer, schema_for_totalsegmentator_task
-from nvitk.gui.labels.selector import LabelSelectorWidget
+from nvitk.gui.labels.catalog import layer_schema_key, schema_for_totalsegmentator_task
+from nvitk.gui.labels.selector import LabelSelectorWidget, apply_selection_to_layer
 from nvitk.gui.labels.visibility import (
-    apply_label_visibility,
     is_label_like_layer,
-    layer_in_viewer,
-    restore_label_visibility,
 )
 from nvitk.gui.pipeline.form import PipelineCliForm
 from nvitk.gui.tools.presets import cursor_voxel_indices
@@ -212,25 +209,10 @@ def build_tools_dock(
         return viewer.layers.selection.active or viewer.layers[-1]
 
     def _apply_label_visibility() -> None:
-        """Filter the picker's bound layer to the checked label ids.
-
-        Each filter is recorded on the layer itself, so a layer keeps the selection
-        it was given while other layers are active; checking every id present is
-        what clears it again.
-        """
+        """Filter the picker's bound layer to the checked label ids."""
         if not label_selector.isVisible():
             return
-        layer = label_selector.current_layer()
-        if layer is None or not is_label_like_layer(layer):
-            return
-        if not layer_in_viewer(layer, viewer):
-            return
-        ids = label_selector.selected_ids()
-        present = set(label_selector.available_ids())
-        if ids and present and set(ids) >= present:
-            restore_label_visibility(layer, viewer=viewer)
-            return
-        apply_label_visibility(layer, ids)
+        apply_selection_to_layer(label_selector, viewer)
 
     def _schedule_label_visibility() -> None:
         """Debounce a call to :func:`_apply_label_visibility` via the visibility timer."""
@@ -256,9 +238,8 @@ def build_tools_dock(
                 task_val = str(task.value if task is not None else "total")
                 label_selector.set_schema_key(schema_for_totalsegmentator_task(task_val))
             else:
-                guessed = guess_schema_from_layer(layer)
-                if guessed:
-                    label_selector.set_schema_key(guessed)
+                # The layer's own vocabulary, not whatever the last layer used.
+                label_selector.set_schema_key(layer_schema_key(layer) or "generic", refresh=False)
             label_selector.refresh_from_layer(layer)
             # refresh may promote Image → Labels; track the live layer.
             layer = label_selector.current_layer() or _active_layer()
@@ -320,9 +301,8 @@ def build_tools_dock(
                 task_val = str(task.value if task is not None else "total")
                 label_selector.set_schema_key(schema_for_totalsegmentator_task(task_val))
             else:
-                guessed = guess_schema_from_layer(layer)
-                if guessed:
-                    label_selector.set_schema_key(guessed)
+                # The layer's own vocabulary, not whatever the last layer used.
+                label_selector.set_schema_key(layer_schema_key(layer) or "generic", refresh=False)
             label_selector.refresh_from_layer(layer)
             layer = label_selector.current_layer() or _active_layer()
             _apply_label_visibility()
@@ -744,7 +724,7 @@ def build_tools_dock(
         active layer."""
         layer = _active_layer()
         if label_selector.schema_key() == "generic":
-            guessed = guess_schema_from_layer(layer)
+            guessed = layer_schema_key(layer)
             if guessed:
                 label_selector.set_schema_key(guessed)
         label_selector.refresh_from_layer(layer)

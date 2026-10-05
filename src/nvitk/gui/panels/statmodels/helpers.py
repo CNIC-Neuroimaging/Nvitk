@@ -261,6 +261,11 @@ def dropped_rows_note(meta: dict[str, Any]) -> str:
 SEARCH_ROLE = Qt.UserRole + 1
 
 
+#: Visit-picker value meaning "load this variable at every visit" — one ``<variable>_v<visit>``
+#: column each, for longitudinal derivatives (change, AUC, slope…) instead of a single collapsed value.
+VISIT_ALL = "__all__"
+
+
 class CovariateRow(QWidget):
     """
     One covariate: a checkbox, and which visit its values should come from.
@@ -303,9 +308,17 @@ class CovariateRow(QWidget):
             # "latest" first so the stored default keeps the behaviour a config saved before this
             # picker existed described — an explicit visit is opt-in.
             self.combo.addItem("latest", "")
+            self.combo.addItem("all visits", VISIT_ALL)
+            self.combo.setItemData(
+                1,
+                f"Load {variable_id} at every visit ({', '.join('v' + v for v in self._visits)}) as "
+                f"{variable_id}_v<visit> columns — for change, AUC, slope… (Derived columns → "
+                "Across visits) or a long reshape (Melt visits…).",
+                Qt.ToolTipRole,
+            )
             for visit in self._visits:
                 self.combo.addItem(f"v{visit}", visit)
-            self.combo.setMaximumWidth(84)
+            self.combo.setMaximumWidth(104)
             lay.addWidget(self.combo)
         elif len(self._visits) == 1:
             badge = QLabel(f"v{self._visits[0]}")
@@ -397,6 +410,15 @@ def set_checked_variable_ids(widget: QListWidget, ids: list[str]) -> None:
         row.check.setChecked(row.variable_id in want)
 
 
+def checked_variable_series(widget: QListWidget) -> list[str]:
+    """Checked variables set to "all visits" (:data:`VISIT_ALL`), in list order."""
+    return [
+        row.variable_id
+        for _item, row in _rows(widget)
+        if row.check.isChecked() and row.visit() == VISIT_ALL
+    ]
+
+
 def checked_variable_visits(widget: QListWidget) -> dict[str, str]:
     """
     ``{variable_id: visit_id}`` for every checked row that pinned a visit.
@@ -408,7 +430,7 @@ def checked_variable_visits(widget: QListWidget) -> dict[str, str]:
     out: dict[str, str] = {}
     for _item, row in _rows(widget):
         visit = row.visit()
-        if row.check.isChecked() and visit:
+        if row.check.isChecked() and visit and visit != VISIT_ALL:
             out[row.variable_id] = visit
     return out
 
@@ -438,6 +460,8 @@ __all__ = [
     "SEARCH_ROLE",
     "CovariateRow",
     "checked_variable_ids",
+    "VISIT_ALL",
+    "checked_variable_series",
     "checked_variable_visits",
     "dropped_rows_note",
     "filter_list_widget",

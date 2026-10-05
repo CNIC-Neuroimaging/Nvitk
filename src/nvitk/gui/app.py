@@ -35,6 +35,7 @@ from nvitk.gui.panels.dicom_tags import DicomTagsPanel, layer_has_dicom_tags
 from nvitk.gui.panels.image_properties import ImagePropertiesPanel
 from nvitk.gui.viz.ct_window_panel import CTWindowPanel
 from nvitk.gui.tools.dock import build_tools_dock
+from nvitk.gui.core.notifications import install_notification_timeout
 from nvitk.gui.core.warnings import install_napari_display_warnings
 
 
@@ -92,12 +93,13 @@ def _refresh_layer_list(widget: Any, viewer: Any, registry: dict[str, Any]) -> N
 
 
 def _scrollable_tab(widget: Any) -> Any:
-    """Wrap a dock tab so its content scrolls instead of setting the dock's floor.
+    """Wrap a panel so its content scrolls instead of setting the dock's floor.
 
-    A ``QTabWidget``'s minimum size is the largest of its pages, and a dock passes
-    that minimum up to the window: one tall panel (the data browser wants ~1000 px)
-    made the whole nvitk dock refuse to be shorter than it, so the window could
-    not be resized down and would not go fullscreen on a shorter screen.
+    Tabbed docks share one minimum size, the largest of their pages, and a dock
+    passes that minimum up to the window: one tall panel (the data browser wants
+    ~1000 px) made the whole panel group refuse to be shorter than it, so the
+    window could not be resized down and would not go fullscreen on a shorter
+    screen.
 
     ``widgetResizable`` keeps the page filling the tab whenever it fits, so tables
     and canvases still expand — only content taller than the dock scrolls.
@@ -115,16 +117,15 @@ def _scrollable_tab(widget: Any) -> Any:
 
 def run_app() -> None:
     """Build and launch the nvitk Napari GUI: creates the viewer, installs nvitk's I/O hooks, and
-    assembles the Tools/Data/QC/Statmodels/Layers/Export/Pipeline dock tabs."""
+    assembles the Tools/Labels/Data/QC/Statmodels/Layers/Export/Pipeline panel docks."""
     install_napari_display_warnings()
+    install_notification_timeout()
     import napari
     from magicgui import magicgui
     from qtpy.QtWidgets import (
         QFileDialog,
         QLabel,
         QListWidget,
-        QSizePolicy,
-        QTabWidget,
         QVBoxLayout,
         QWidget,
     )
@@ -495,21 +496,6 @@ def run_app() -> None:
     layers_layout.addStretch(1)
     layers_tab.setLayout(layers_layout)
 
-    dock = QWidget()
-    layout = QVBoxLayout()
-    layout.setContentsMargins(SPACE, SPACE, SPACE, SPACE)
-    layout.setSpacing(SPACE)
-    tabs = QTabWidget()
-    tabs.setDocumentMode(True)
-    tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-    tabs.addTab(_scrollable_tab(tools_widget), "Tools")
-    tabs.addTab(_scrollable_tab(xnat_panel), data_tab_label)
-    tabs.addTab(_scrollable_tab(qc_panel), "QC")
-    tabs.addTab(_scrollable_tab(statmodels_panel), "Statmodels")
-    image_props_tab_index = tabs.addTab(_scrollable_tab(image_props_panel), "Image properties")
-    dicom_tab_index = tabs.addTab(_scrollable_tab(dicom_tags_panel), "DICOM tags")
-    tabs.addTab(_scrollable_tab(mesh_panel.native), "Mesh")
-    tabs.addTab(_scrollable_tab(layers_tab), "Layers")
     export_tab = QWidget()
     export_layout = QVBoxLayout()
     export_layout.setAlignment(Qt.AlignTop)
@@ -520,98 +506,184 @@ def run_app() -> None:
     export_layout.addWidget(save_panel.native)
     export_layout.addStretch(1)
     export_tab.setLayout(export_layout)
-    tabs.addTab(_scrollable_tab(export_tab), "Export")
-    tabs.addTab(_scrollable_tab(export_panel.native), "Pipeline")
-    # In the tab bar's own corner: visible from every tab, costs no vertical space
-    # in a dock that never has enough, and sits inside the nvitk stylesheet rather
-    # than in Napari's title bar, which clamps its buttons to 12px.
-    tabs.setCornerWidget(theme_toggle_button(viewer, tabs), Qt.TopRightCorner)
-    layout.addWidget(tabs, stretch=1)
-    dock.setLayout(layout)
-    dock.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-    # One call restyles every widget in the dock, including the magicgui-built
-    # tool panels, so individual panels do not carry their own palettes.
-    apply_theme(dock)
-    viewer.window.add_dock_widget(dock, area="right", name="nvitk")
+
+    # One dock per panel rather than tabs in a single dock, so each can be popped
+    # out, moved to the workspace window, or split beside another. Tabbed
+    # together on the right they look as the old tab widget did. Order: what is
+    # used on the active layer first (tools, labels, its properties and tags),
+    # then data management, then output and housekeeping.
+    from nvitk.gui.core.workspace import install_panel_manager, make_panel_dock
+    from nvitk.gui.labels.panel import build_labels_dock
+
+    panel_manager = install_panel_manager(viewer)
+    qt_main = viewer.window._qt_window
+
+    def _panel_dock(widget: Any, key: str, title: str, **kwargs: Any) -> Any:
+        return make_panel_dock(
+            viewer, _scrollable_tab(widget), object_name=f"nvitk:{key}", title=title, **kwargs
+        )
+
+    # On the Tools panel's own title bar: the panel most often on screen, and
+    # inside the nvitk stylesheet rather than Napari's, which clamps buttons to 12px.
+    theme_button = theme_toggle_button(viewer, None)
+    tools_dock = _panel_dock(tools_widget, "tools", "Tools", extras=[theme_button])
+    labels_dock = build_labels_dock(viewer)
+    image_props_dock = _panel_dock(image_props_panel, "image_properties", "Image properties")
+    dicom_dock = _panel_dock(dicom_tags_panel, "dicom_tags", "DICOM tags")
+    panel_docks = [
+        tools_dock,
+        labels_dock,
+        image_props_dock,
+        dicom_dock,
+        _panel_dock(xnat_panel, "data", data_tab_label),
+        _panel_dock(qc_panel, "qc", "QC"),
+        _panel_dock(statmodels_panel, "statmodels", "Statmodels"),
+        _panel_dock(export_tab, "export", "Export"),
+        _panel_dock(layers_tab, "layers", "Layers"),
+        _panel_dock(mesh_panel.native, "mesh", "Mesh"),
+        _panel_dock(export_panel.native, "pipeline", "Pipeline"),
+    ]
+    qt_main.addDockWidget(Qt.RightDockWidgetArea, tools_dock)
+    for panel_dock in panel_docks[1:]:
+        qt_main.tabifyDockWidget(tools_dock, panel_dock)
+    tools_dock.raise_()
+    if panel_manager is not None:
+        panel_manager.set_labels_dock(labels_dock)
+        panel_manager.theme_button = theme_button
+
     log_dock = build_log_dock_widget()
     apply_theme(log_dock)
     viewer.window.add_dock_widget(log_dock, area="bottom", name="nvitk log")
+
+    # A ▾ on each label layer's row in the layer list unfolds it into its labels.
+    try:
+        from nvitk.gui.labels.layer_list import install_layer_list_label_buttons
+
+        install_layer_list_label_buttons(viewer)
+    except Exception as exc:  # noqa: BLE001 — Napari's own layer list still works
+        gui_log(f"Layer-list label buttons unavailable: {exc}", error=True)
+
+    # The orthogonal views open with the window. Created before the saved layout
+    # is restored, so a position the user gave the dock last time is honoured.
+    ortho_panel = None
+    try:
+        from nvitk.gui.viz.ortho_panel import open_ortho_views
+
+        ortho_panel = open_ortho_views(viewer, None)
+    except Exception as exc:  # noqa: BLE001 — a missing panel must not block a launch
+        from nvitk.gui.core.log_panel import gui_log as _gui_log
+
+        _gui_log(f"Orthogonal views unavailable: {exc}", error=True)
 
     # Both nvitk docks now exist, so a saved layout has something to match
     # against. Napari's own restore ran inside ``napari.Viewer(...)`` far above,
     # when neither of these existed, and ``restoreState`` silently drops entries
     # whose objectName it cannot find — hence a second, explicit restore here.
     try:
-        from nvitk.gui.core.prefs import ensure_prefs_file, restore_dock_state
+        from nvitk.gui.core.prefs import (
+            DOCK_LAYOUT_VERSION,
+            ensure_prefs_file,
+            restore_dock_state,
+            stored_dock_layout_version,
+        )
 
         # Seed gui.json beside the rest of the configuration the first time a
         # configured install opens the GUI, so there is somewhere for the layout
         # to be remembered rather than it only appearing after a clean exit.
         ensure_prefs_file()
-        restore_dock_state(viewer.window._qt_window)
+        legacy_layout = stored_dock_layout_version() < DOCK_LAYOUT_VERSION
+        # The workspace first: it takes its panels out of the main window, and
+        # the main layout is then restored around the ones that stay.
+        if panel_manager is not None:
+            panel_manager.restore()
+        restore_dock_state(qt_main)
+        if legacy_layout:
+            # Saved when the panels were tabs of one "nvitk" dock: the state
+            # places Napari's docks and the ortho views, but knows none of the
+            # panel docks, and Qt stacks those one under another. Tab them back
+            # together, once — the next save is in the new format.
+            for panel_dock in panel_docks[1:]:
+                if not panel_dock.isFloating() and qt_main.dockWidgetArea(panel_dock) != Qt.NoDockWidgetArea:
+                    qt_main.tabifyDockWidget(tools_dock, panel_dock)
+            tools_dock.raise_()
     except Exception:  # noqa: BLE001 — a stored layout must not block a launch
         pass
+    if panel_manager is not None:
+        panel_manager.watch_all()
+    # On screen at launch whatever the stored layout says: a layout saved before
+    # the dock existed — or with it closed — would otherwise leave it hidden.
+    ortho_dock = getattr(ortho_panel, "_nvitk_dock", None)
+    if ortho_dock is not None:
+        ortho_dock.show()
+        ortho_dock.raise_()
 
     _refresh_layer_list(layer_list, viewer, app_state)
 
+    # Panels whose contents are rebuilt from the active layer. Refreshing one that
+    # nobody is looking at — tabbed behind another, closed, or in a hidden
+    # workspace — is pure latency on every click in the layer list, so it only
+    # records that it is out of date and catches up when it is next shown. The
+    # panels themselves still refresh on demand, so direct callers (and tests)
+    # are unaffected.
+    _stale_docks: set[str] = set()
+
+    def _on_screen(dock: Any) -> bool:
+        """True when *dock*'s contents can be seen."""
+        return bool(dock.isVisible() and dock.widget() is not None and dock.widget().isVisible())
+
     def _refresh_dicom_tags_tab(force: bool = False) -> None:
-        """Update the DICOM tags tab for the active layer, enabling the tab only when it has tags."""
+        """Update the DICOM tags panel for the active layer, greying it out when it has no tags."""
         layer = (
             viewer.layers.selection.active
             if viewer.layers
             else None
         )
         has_tags = layer_has_dicom_tags(layer)
-        # The enabled state is a visible property of the tab bar, so it is kept
-        # current even while the tab's own contents wait to be looked at.
-        if not force and tabs.currentIndex() != dicom_tab_index:
-            _stale_tabs.add(dicom_tab_index)
-            tabs.setTabEnabled(dicom_tab_index, has_tags)
+        # The enabled state is visible even from a neighbouring tab, so it is kept
+        # current while the panel's own contents wait to be looked at.
+        dicom_tags_panel.setEnabled(has_tags)
+        dicom_dock.setToolTip(
+            "DICOM metadata for the active layer" if has_tags
+            else "The active layer has no DICOM tags."
+        )
+        if not force and not _on_screen(dicom_dock):
+            _stale_docks.add("dicom")
             return
-        _stale_tabs.discard(dicom_tab_index)
+        _stale_docks.discard("dicom")
         dicom_tags_panel.refresh_from_layer(layer)
-        tabs.setTabEnabled(dicom_tab_index, has_tags)
-        if has_tags:
-            tabs.setTabToolTip(
-                dicom_tab_index,
-                "DICOM metadata for the active layer",
-            )
-
-    # Tabs whose contents are rebuilt from the active layer. Refreshing one that
-    # nobody is looking at is pure latency on every click in the layer list, so
-    # a hidden tab only records that it is out of date and catches up when it is
-    # next selected. The panels themselves still refresh on demand, so direct
-    # callers (and tests) are unaffected.
-    _stale_tabs: set[int] = set()
 
     def _refresh_image_properties_tab(force: bool = False) -> None:
-        """Update the Image properties tab for the active layer."""
-        if not force and tabs.currentIndex() != image_props_tab_index:
-            _stale_tabs.add(image_props_tab_index)
+        """Update the Image properties panel for the active layer."""
+        if not force and not _on_screen(image_props_dock):
+            _stale_docks.add("image_properties")
             return
-        _stale_tabs.discard(image_props_tab_index)
+        _stale_docks.discard("image_properties")
         layer = viewer.layers.selection.active if viewer.layers else None
         image_props_panel.refresh_from_layer(layer)
 
-    def _on_tab_changed(index: int) -> None:
-        """Bring a tab up to date the moment it becomes the one on screen."""
-        if index in _stale_tabs:
-            if index == image_props_tab_index:
-                _refresh_image_properties_tab(force=True)
-            elif index == dicom_tab_index:
-                _refresh_dicom_tags_tab(force=True)
+    def _catch_up(key: str, refresh: Any) -> Any:
+        """A ``visibilityChanged`` slot bringing the panel up to date when shown."""
 
-    tabs.currentChanged.connect(_on_tab_changed)
+        def _slot(visible: bool) -> None:
+            if visible and key in _stale_docks:
+                refresh(force=True)
+
+        return _slot
+
+    dicom_dock.visibilityChanged.connect(_catch_up("dicom", _refresh_dicom_tags_tab))
+    image_props_dock.visibilityChanged.connect(
+        _catch_up("image_properties", _refresh_image_properties_tab)
+    )
 
     @viewer.layers.selection.events.active.connect
     def _on_active_layer_changed(_event: Any) -> None:
-        """Refresh the DICOM tags and image properties tabs when the active layer selection changes."""
+        """Refresh the DICOM tags and image properties panels when the active layer selection changes."""
         _refresh_dicom_tags_tab()
         _refresh_image_properties_tab()
 
     @viewer.layers.events.inserted.connect
     def _on_layer_inserted_dicom(_event: Any) -> None:
-        """Refresh the DICOM tags and image properties tabs when a new layer is added."""
+        """Refresh the DICOM tags and image properties panels when a new layer is added."""
         _refresh_dicom_tags_tab()
         _refresh_image_properties_tab()
 
@@ -643,6 +715,10 @@ def run_app() -> None:
                 from nvitk.gui.core.prefs import save_dock_state
 
                 save_dock_state(qt_window)
+                if panel_manager is not None:
+                    panel_manager.save()
+                    # Its own window: left open, it would keep the app running.
+                    panel_manager.shutdown()
             except Exception:  # noqa: BLE001 — never block a close on a preference
                 pass
             if _orig_close is not None:

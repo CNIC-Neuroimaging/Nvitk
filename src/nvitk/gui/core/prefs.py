@@ -28,6 +28,13 @@ PREFS_FILE = "gui.json"
 #: Key holding the base64 ``QMainWindow.saveState()`` blob.
 DOCK_STATE_KEY = "dock_state"
 
+#: Generation of the dock layout. 1: every nvitk panel a tab in a single "nvitk"
+#: dock. 2: each panel its own dock. A v1 state knows none of the v2 docks, and Qt
+#: stacks docks a restored state does not mention, so a v1 layout needs them
+#: regrouped once after it is restored.
+DOCK_LAYOUT_VERSION_KEY = "dock_layout_version"
+DOCK_LAYOUT_VERSION = 2
+
 
 def prefs_path() -> Path:
     """Where the preferences file lives, whether or not it exists yet.
@@ -140,7 +147,18 @@ def save_dock_state(window: Any) -> bool:
         encoded = bytes(window.saveState().toBase64()).decode("ascii")
     except Exception:  # noqa: BLE001
         return False
-    return save_prefs({DOCK_STATE_KEY: encoded})
+    return save_prefs({DOCK_STATE_KEY: encoded, DOCK_LAYOUT_VERSION_KEY: DOCK_LAYOUT_VERSION})
+
+
+def stored_dock_layout_version() -> int:
+    """Layout generation of the stored dock state; 1 for one saved before versions."""
+    prefs = load_prefs()
+    if not prefs.get(DOCK_STATE_KEY):
+        return DOCK_LAYOUT_VERSION
+    try:
+        return int(prefs.get(DOCK_LAYOUT_VERSION_KEY) or 1)
+    except (TypeError, ValueError):
+        return 1
 
 
 def restore_dock_state(window: Any) -> bool:
@@ -173,5 +191,6 @@ __all__ = [
     "prefs_path",
     "restore_dock_state",
     "save_dock_state",
+    "stored_dock_layout_version",
     "save_prefs",
 ]

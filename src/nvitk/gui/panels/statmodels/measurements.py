@@ -768,6 +768,7 @@ class FrameLoadWorker(QThread):
         grain: str = "territory",
         attach_qc: bool = True,
         visit_overrides: Mapping[str, str] | None = None,
+        visit_series: Sequence[str] | None = None,
     ) -> None:
         """Store the query parameters; the repo is only touched from :meth:`run`."""
         super().__init__()
@@ -779,6 +780,7 @@ class FrameLoadWorker(QThread):
         self._grain = grain
         self._attach_qc = attach_qc
         self._visit_overrides = dict(visit_overrides or {})
+        self._visit_series = list(visit_series or [])
 
     def run(self) -> None:
         """Build the frame and emit it, or report the failure."""
@@ -793,6 +795,7 @@ class FrameLoadWorker(QThread):
                 grain=self._grain,
                 attach_qc=self._attach_qc,
                 visit_overrides=self._visit_overrides,
+                visit_series=self._visit_series,
             )
         except Exception as exc:
             log.exception("Analysis frame load failed.")

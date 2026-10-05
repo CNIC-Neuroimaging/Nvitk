@@ -199,6 +199,88 @@ def napari_scale_for_display(
     return tuple(_resolution_from_metadata(metadata, ch) or 1.0 for ch in axes_u)
 
 
+def in_plane_affine(affine: np.ndarray) -> np.ndarray:
+    """
+    3x3 display affine for a 2D image from its 4x4 voxel-to-world affine.
+
+    Napari accepts a 4x4 affine on a 2D layer and only fails when it composes the
+    layer's transforms at draw time — on every repaint. Each voxel axis keeps the
+    world axis it runs along most, so the result stays invertible for axial, coronal
+    and sagittal slices alike.
+    """
+    aff = to_numpy(affine).astype(float)
+    rows = [int(np.argmax(np.abs(aff[:3, j]))) for j in range(2)]
+    out = np.eye(3, dtype=float)
+    if rows[0] != rows[1]:
+        out[:2, :2] = aff[np.ix_(rows, [0, 1])]
+        out[:2, 2] = aff[rows, 3]
+    if abs(float(np.linalg.det(out[:2, :2]))) < 1e-12:
+        spacing = np.linalg.norm(aff[:3, :2], axis=0)
+        out = np.diag([*(float(s) if s > 0 else 1.0 for s in spacing), 1.0])
+    return out
+
+
+def fit_affine_to_ndim(affine: np.ndarray, ndim: int) -> np.ndarray:
+    """
+    Homogeneous *affine* resized to a layer of *ndim* axes.
+
+    A 3D affine on a 2D layer keeps its in-plane part (:func:`in_plane_affine`);
+    otherwise Napari's own rule applies — layers align on their trailing axes.
+    """
+    from napari.utils.transforms import Affine
+
+    aff = to_numpy(affine).astype(float)
+    n = int(aff.shape[0]) - 1
+    if n == ndim:
+        return aff
+    if ndim == 2 and n == 3:
+        return in_plane_affine(aff)
+    tf = Affine(affine_matrix=aff)
+    if n > ndim:
+        return tf.set_slice(range(n - ndim, n)).affine_matrix
+    return tf.expand_dims(range(ndim - n)).affine_matrix
+
+
+def install_affine_ndim_guard() -> None:
+    """
+    Fit every layer affine to its layer's dimensionality as Napari coerces it.
+
+    Napari accepts a 4x4 affine on a 2D layer, then raises ``matmul ... size 3 is
+    different from 4`` composing its transforms. The insert that hits it first
+    leaves the layer in the list, so every later repaint raises again — a loop of
+    tracebacks. Guarding the coercion covers every path a layer arrives by (nvitk
+    readers, tools, plugins) and later ``layer.affine = ...`` assignments.
+    """
+    try:
+        from napari.layers.base import base as napari_base
+        from napari.utils.transforms import Affine
+    except Exception:  # noqa: BLE001 — no Napari, nothing to guard
+        return
+    original = napari_base.coerce_affine
+    if getattr(original, "_nvitk_ndim_guard", False):
+        return
+
+    def coerce_affine(affine: Any, *, ndim: int, name: str | None = None) -> Any:
+        """Napari's ``coerce_affine`` after fitting a mismatched matrix to *ndim*."""
+        try:
+            if isinstance(affine, Affine):
+                if int(affine.ndim) != ndim:
+                    fitted = Affine(affine_matrix=fit_affine_to_ndim(affine.affine_matrix, ndim))
+                    fitted.name = affine.name
+                    affine = fitted
+            elif isinstance(affine, (np.ndarray, list)):
+                arr = np.asarray(affine, dtype=float)
+                # N x N is a valid linear matrix and (N+1) x (N+1) a homogeneous one.
+                if arr.ndim == 2 and arr.shape[0] == arr.shape[1] and arr.shape[0] not in (ndim, ndim + 1):
+                    affine = fit_affine_to_ndim(arr, ndim)
+        except Exception:  # noqa: BLE001 — fall back to Napari's own handling
+            pass
+        return original(affine, ndim=ndim, name=name)
+
+    coerce_affine._nvitk_ndim_guard = True
+    napari_base.coerce_affine = coerce_affine
+
+
 def napari_affine_for_display(
     affine: np.ndarray | None,
     shape: tuple[int, ...],
@@ -218,7 +300,9 @@ def napari_affine_for_display(
         if affine is None:
             return None
         aff = to_numpy(affine).astype(float)
-        return aff if aff.shape == (4, 4) else None
+        if aff.shape != (4, 4):
+            return None
+        return in_plane_affine(aff) if ndim == 2 else aff
 
     axes_u = (axes or default_nifti_axes(ndim)).upper()
     if len(axes_u) != ndim:
@@ -273,6 +357,100 @@ def napari_affine_for_display(
 TIME_LEADING_KEY = "time_leading"
 #: Metadata key recording the file's axis order, to undo the view on export.
 SOURCE_AXES_KEY = "source_axes"
+#: Metadata flag on a layer whose spatial axes are shown in another order than the
+#: file's (see :func:`world_ordered_columns`); its array is a view of the file's.
+DISPLAY_REORDERED_KEY = "display_reordered"
+
+
+def world_ordered_columns(affine: np.ndarray | None) -> list[int] | None:
+    """The affine's voxel columns sorted by the world axis each runs along most.
+
+    Napari slices a layer assuming its data axis *i* runs along world axis *i*.
+    A file stored sagittally or coronally — and every non-axial single slice —
+    breaks that: the plane on screen is fed by an axis that is not on screen, and
+    Napari's slicing inverts a singular matrix on every draw. Reading the axes in
+    this order instead keeps every flip and obliquity in the affine and only
+    changes which array axis is which. ``None`` when the affine cannot say.
+    """
+    if affine is None:
+        return None
+    aff = to_numpy(affine).astype(float)
+    if aff.shape != (4, 4):
+        return None
+    try:
+        import nibabel as nib
+
+        ornt = nib.orientations.io_orientation(aff)
+    except Exception:  # noqa: BLE001 — a degenerate affine: leave the order alone
+        return None
+    if np.isnan(ornt).any():
+        return None
+    world = [int(w) for w in ornt[:, 0]]
+    if sorted(world) != [0, 1, 2]:
+        return None
+    return [world.index(w) for w in range(3)]
+
+
+def _with_slice_normal(affine: np.ndarray) -> np.ndarray:
+    """*affine* with a usable third column: a 2D image's file may leave it empty."""
+    aff = to_numpy(affine).astype(float).copy()
+    if np.linalg.norm(aff[:3, 2]) < 1e-9:
+        normal = np.cross(aff[:3, 0], aff[:3, 1])
+        norm = float(np.linalg.norm(normal))
+        if norm > 1e-12:
+            aff[:3, 2] = normal / norm
+        else:
+            aff[2, 2] = 1.0
+    return aff
+
+
+def prepare_world_ordered_for_napari(
+    data: np.ndarray,
+    affine: np.ndarray | None,
+    *,
+    axes: str | None = None,
+) -> tuple[np.ndarray, np.ndarray, str] | None:
+    """``(view, 4x4 affine, display axes)`` for a 2D slice or 3D volume, or ``None``.
+
+    Two cases need it:
+
+    * a 3D volume stored in another axis order than world (sagittal, coronal):
+      the axes are read in world order (:func:`world_ordered_columns`);
+    * a 2D slice with a real position — a localizer, a surview, one DICOM
+      image: it becomes a one-voxel-thick 3D layer *at that position*. As a 2D
+      layer Napari pins it to the viewer's last two axes in coordinates of its
+      own, where it stretches every slider and lands nowhere near the anatomy.
+
+    The view is free (``transpose`` / a new axis on the host array). ``None``
+    leaves the layer on the ordinary path: no affine, an identity one (a photo or
+    a plain TIFF), colour, or already in world order.
+    """
+    from nvitk.io._common import default_nifti_axes
+
+    if affine is None or np.asarray(affine).shape != (4, 4):
+        return None
+    arr = to_numpy(data)
+    ax = (axes or default_nifti_axes(arr.ndim)).upper()
+    aff = to_numpy(affine).astype(float)
+    if arr.ndim == 2:
+        if len(ax) != 2 or not set(ax) <= set("XYZ") or np.allclose(aff, np.eye(4)):
+            return None
+        missing = next(ch for ch in "XYZ" if ch not in ax)
+        arr = arr[:, :, None]
+        ax = ax + missing
+        aff = _with_slice_normal(aff)
+    elif arr.ndim != 3 or sorted(ax) != ["X", "Y", "Z"]:
+        return None
+    order = world_ordered_columns(aff)
+    if order is None:
+        order = [0, 1, 2]
+    if order == [0, 1, 2] and np.asarray(data).ndim == 3:
+        return None
+    view = np.transpose(arr, order) if order != [0, 1, 2] else arr
+    out = np.eye(4, dtype=float)
+    out[:3, :3] = aff[:3, order]
+    out[:3, 3] = aff[:3, 3]
+    return view, out, "".join(ax[i] for i in order)
 
 
 def time_leading_permutation(axes: str | None, ndim: int) -> tuple[int, ...] | None:
@@ -332,14 +510,22 @@ def prepare_time_leading_for_napari(
     if perm is None:
         return None
     ax = (axes or default_nifti_axes(4)).upper()
+    # Spatial axes in world order (identity for an axial acquisition): a coronal
+    # or sagittal cine keeps its file order otherwise, and the axial view is then
+    # fed by its slice axis — a singular matrix Napari inverts on every draw.
+    if affine is not None and np.asarray(affine).shape == (4, 4):
+        columns = world_ordered_columns(_with_slice_normal(affine))
+        if columns is not None:
+            by_letter = {ax[i]: i for i in perm[1:]}
+            perm = (perm[0], *[by_letter["XYZ"[c]] for c in columns])
     md = metadata or {}
     t_scale = _resolution_from_metadata(md, ax[perm[0]]) or 1.0
     spacing = tuple(_resolution_from_metadata(md, ax[i]) or 1.0 for i in perm[1:])
-    # The spatial axes keep their file order, so the file affine applies as-is
-    # once its columns are read in that same order (identity for XYZ).
+    # The file affine applies once its columns are read in the spatial order
+    # shown (identity for XYZ).
     spatial_aff = None
     if affine is not None and np.asarray(affine).shape == (4, 4):
-        src = to_numpy(affine).astype(float)
+        src = _with_slice_normal(affine)
         order = ["XYZ".index(ax[i]) for i in perm[1:]]
         spatial_aff = np.eye(4)
         spatial_aff[:3, :3] = src[:3, order]
@@ -362,6 +548,20 @@ def layer_is_time_leading(layer: Any) -> bool:
     if layer_display_ndim(layer) != 4:
         return False
     return bool(_metadata_for_layer(layer).get(TIME_LEADING_KEY))
+
+
+def layer_is_reordered(layer: Any) -> bool:
+    """True when *layer*'s array is a view of the file's in another axis order:
+    time-first 3D+t layers and world-ordered slices/volumes alike."""
+    if layer_is_time_leading(layer):
+        return True
+    return bool(_metadata_for_layer(layer).get(DISPLAY_REORDERED_KEY))
+
+
+def layer_spatially_reordered(layer: Any) -> bool:
+    """True when *layer*'s spatial axes differ from the file's: its spacing and
+    affine must come from the layer, not the file's per-axis metadata."""
+    return bool(_metadata_for_layer(layer).get(DISPLAY_REORDERED_KEY))
 
 
 def prepare_for_napari(

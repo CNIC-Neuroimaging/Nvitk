@@ -122,8 +122,11 @@ _BUTTON_PX = 22
 _FLOAT_FALLBACK = (1100, 700)
 
 
-def install_expand_button(dock: Any, title: str) -> Any:
+def install_expand_button(dock: Any, title: str, *, extras: list[Any] | None = None) -> Any:
     """Put an expand/restore button in *dock*'s title bar.
+
+    *extras* are widgets placed in the bar ahead of its own buttons (the theme
+    toggle on the Tools panel).
 
     Napari's own docks carry only a float and a close button, and floating one
     leaves it at whatever size the sidebar had — so every panel that wants room
@@ -188,6 +191,8 @@ def install_expand_button(dock: Any, title: str) -> Any:
     caption.setStyleSheet(f"color: {COLOR_TEXT}; font-weight: bold;")
     layout.addWidget(caption)
     layout.addStretch(1)
+    for extra in extras or ():
+        layout.addWidget(extra)
     layout.addWidget(pop)
     layout.addWidget(button)
     close = _button("✕")

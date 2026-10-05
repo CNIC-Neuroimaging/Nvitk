@@ -34,6 +34,7 @@ from qtpy.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSlider,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -99,7 +100,15 @@ _REBUILD_SYNC_MS = 60
 #: the view", which is what the panels do without a zoom at all.
 _MIN_ZOOM = 1.0
 _MAX_ZOOM = 12.0
-_ZOOM_STEP = 1.25
+#: Per *standard* notch (120 eighths of a degree). Applied in proportion to the
+#: wheel's actual delta: high-resolution wheels and touchpads send many small
+#: events per notch, and treating each as a full notch is what made a 25 % step
+#: race through the whole zoom range in one flick.
+_ZOOM_STEP = 1.1
+_WHEEL_NOTCH = 120.0
+
+#: Default cine rate of the time/energy play button.
+_PLAY_FPS = 8
 
 #: How close to a crosshair line a press must be to grab it, and how far from the
 #: centre it must be for that grab to mean "rotate" rather than "move".
@@ -383,6 +392,8 @@ class RenderSource:
     resampled: bool = False
     #: Time point ``data`` was taken at, for a 3D+t layer (``None`` for a 3D one).
     time: int | None = None
+    #: Drawn smoothed when magnified — the layer's napari 2D interpolation.
+    smooth: bool = False
     #: Distinct label ids in ``data``, computed once. Finding them is a full
     #: ``np.unique`` over the volume (~24 ms on a 50 MB mask) and they cannot
     #: change without ``data`` changing, which rebuilds the source anyway — so
@@ -476,11 +487,25 @@ def is_drawable_layer(layer: Any) -> bool:
     """
     if type(layer).__name__ not in DRAWN_LAYER_TYPES:
         return False
+    if bool(getattr(layer, "rgb", False)):
+        # A colour capture (dose sheet, tracker graph): its last axis is RGB, not depth.
+        return False
     name = str(getattr(layer, "name", ""))
     if _PLANE_LAYER_SUFFIX in name or _BOX_LAYER_SUFFIX in name:
         return False
     shape = _layer_shape(layer)
     return shape is not None and len(shape) >= 3
+
+
+def is_volume_layer(layer: Any) -> bool:
+    """A layer the panel can bind to as its grid: three spatial axes, none of them
+    a single voxel. A positioned 2D slice is a one-slice 3D layer, and a 2D+t
+    series a one-slice 3D+t one — drawable over a volume, but no grid of their own.
+    """
+    if not is_drawable_layer(layer):
+        return False
+    shape = _layer_shape(layer) or ()
+    return len(shape) >= 3 and all(int(n) > 1 for n in shape[-3:])
 
 
 def _layer_volume(layer: Any, time_index: int = 0) -> np.ndarray | None:
@@ -1024,6 +1049,129 @@ def slice_to_rgb(
     return _grayscale_rgb(plane, contrast)
 
 
+# ── interpolation ─────────────────────────────────────────────────────────────
+
+
+def layer_interpolation_smooth(layer: Any) -> bool:
+    """Whether *layer* is drawn smoothed when magnified (its napari 2D interpolation).
+
+    Labels never are — napari draws them nearest-neighbour, whatever the image
+    layers under them do — and an Image layer follows ``interpolation2d``
+    (napari's own default is ``nearest``).
+    """
+    if type(layer).__name__ == "Labels" or is_label_like_layer(layer):
+        return False
+    return str(getattr(layer, "interpolation2d", "nearest") or "nearest").lower() != "nearest"
+
+
+def layer_interpolation_order(layer: Any) -> int:
+    """Spline order matching *layer*'s interpolation: 0 nearest, 1 linear, 3 the cubic family."""
+    if type(layer).__name__ == "Labels" or is_label_like_layer(layer):
+        return 0
+    mode = str(getattr(layer, "interpolation2d", "nearest") or "nearest").lower()
+    if mode == "nearest":
+        return 0
+    if mode in ("linear", "bilinear"):
+        return 1
+    return 3
+
+
+@dataclass(frozen=True)
+class PaintRun:
+    """A run of consecutive layers drawn with one interpolation, ready to paint.
+
+    *mode* says how it lands on what is under it: ``"base"`` is opaque RGB (the
+    bottom run), ``"over"`` premultiplied RGBA painted source-over, ``"plus"`` RGB
+    added on top (additive layers).
+    """
+
+    image: np.ndarray
+    smooth: bool
+    mode: str = "base"
+
+
+def composite_over_rgba(
+    planes: Sequence[np.ndarray],
+    blendings: Sequence[str],
+    opacities: Sequence[float],
+) -> np.ndarray:
+    """Translucent/opaque *planes* over transparency → premultiplied RGBA uint8."""
+    shape = np.asarray(planes[0]).shape[:2]
+    rgb = np.zeros((*shape, 3), dtype=np.float32)
+    acc = np.zeros((*shape, 1), dtype=np.float32)
+    for plane, blending, opacity in zip(planes, blendings, opacities):
+        src = np.asarray(plane)
+        if src.shape[:2] != shape:
+            continue
+        a = src[..., 3:4].astype(np.float32) * (float(np.clip(opacity, 0.0, 1.0)) / 255.0)
+        colour = src[..., :3].astype(np.float32)
+        if str(blending) == "opaque":
+            hit = a > 0
+            np.copyto(rgb, colour, where=hit)
+            np.copyto(acc, 1.0, where=hit)
+            continue
+        rgb = colour * a + rgb * (1.0 - a)
+        acc = a + acc * (1.0 - a)
+    out = np.empty((*shape, 4), dtype=np.uint8)
+    out[..., :3] = np.clip(rgb, 0, 255).astype(np.uint8)
+    out[..., 3:] = np.clip(acc * 255.0, 0, 255).astype(np.uint8)
+    return out
+
+
+def composite_runs(
+    planes: Sequence[np.ndarray],
+    blendings: Sequence[str],
+    opacities: Sequence[float],
+    smooth: Sequence[bool],
+) -> list[PaintRun]:
+    """Split the layer stack into runs that share an interpolation, each composited.
+
+    The bottom run is composited exactly as :func:`composite` does; each later run
+    becomes premultiplied RGBA (translucent/opaque layers) or an additive RGB, so
+    Qt can scale every run with its own filter and stack them in order. A later
+    run mixing other blend modes (minimum, multiplicative) cannot be expressed
+    that way, so the whole stack then falls back to one run, smoothed if any layer
+    in it is.
+    """
+    if not len(planes):
+        return [PaintRun(np.zeros((1, 1, 3), dtype=np.uint8), False)]
+    groups: list[list[int]] = []
+    for i, flag in enumerate(smooth):
+        if groups and bool(smooth[groups[-1][-1]]) == bool(flag):
+            groups[-1].append(i)
+        else:
+            groups.append([i])
+
+    def _pick(indices: list[int]) -> tuple[list, list, list]:
+        return ([planes[i] for i in indices], [blendings[i] for i in indices],
+                [opacities[i] for i in indices])
+
+    runs = [PaintRun(composite(*_pick(groups[0])), bool(smooth[groups[0][0]]), "base")]
+    for group in groups[1:]:
+        p, b, o = _pick(group)
+        modes = {str(m or "translucent") for m in b}
+        if modes <= {"translucent", "translucent_no_depth", "opaque"}:
+            runs.append(PaintRun(composite_over_rgba(p, b, o), bool(smooth[group[0]]), "over"))
+        elif modes == {"additive"}:
+            runs.append(PaintRun(composite(p, b, o), bool(smooth[group[0]]), "plus"))
+        else:
+            return [PaintRun(composite(planes, blendings, opacities), any(smooth), "base")]
+    return runs
+
+
+def flatten_runs(runs: Sequence[PaintRun]) -> np.ndarray:
+    """The runs merged at native resolution: what the view shows, before scaling."""
+    out = np.asarray(runs[0].image, dtype=np.float32)[..., :3].copy()
+    for run in runs[1:]:
+        img = np.asarray(run.image, dtype=np.float32)
+        if run.mode == "over":
+            a = img[..., 3:4] / 255.0
+            out = img[..., :3] + out * (1.0 - a)
+        elif run.mode == "plus":
+            out = out + img[..., :3]
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
 class SliceView(QWidget):
     """One scrollable orthogonal slice, with crosshairs marking the other two."""
 
@@ -1040,6 +1188,11 @@ class SliceView(QWidget):
         super().__init__(parent)
         self._view = view
         self._rgb: np.ndarray | None = None
+        #: The slice as interpolation runs (see :class:`PaintRun`); ``_rgb`` is
+        #: their flattened native-resolution composite.
+        self._runs: list[PaintRun] = []
+        #: Wheel travel not yet turned into a slice step (eighths of a degree).
+        self._wheel_accum = 0.0
         self._aspect = 1.0
         self._cross: tuple[int, int] | None = None
         self._count = 1
@@ -1102,8 +1255,20 @@ class SliceView(QWidget):
         aspect: float = 1.0,
         crosshair: tuple[int, int] | None = None,
     ) -> None:
-        """Show *rgb* as this view's slice, at *index* of *count*."""
-        self._rgb = rgb
+        """Show *rgb* as this view's slice, at *index* of *count*.
+
+        *rgb* is an RGB array, or a list of :class:`PaintRun` — the layer stack split
+        by interpolation, each run scaled with its own filter when painted.
+        """
+        if isinstance(rgb, (list, tuple)):
+            self._runs = list(rgb)
+            self._rgb = (
+                np.asarray(self._runs[0].image)[..., :3] if len(self._runs) == 1
+                else flatten_runs(self._runs)
+            ) if self._runs else None
+        else:
+            self._rgb = rgb
+            self._runs = [PaintRun(np.asarray(rgb), True, "base")] if rgb is not None else []
         self._aspect = float(aspect) if np.isfinite(aspect) and aspect > 0 else 1.0
         self._cross = crosshair
         self._count = max(int(count), 1)
@@ -1238,19 +1403,30 @@ class SliceView(QWidget):
             self._canvas.setText("No slice")
             return
         scaled_w, scaled_h, off_x, off_y = geometry
-        rgb = np.ascontiguousarray(self._rgb, dtype=np.uint8)
-        h, w = rgb.shape[:2]
-        image = QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).copy()
-        slice_map = QPixmap.fromImage(image).scaled(
-            scaled_w, scaled_h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation
-        )
 
         # Painted into a canvas-sized pixmap rather than handed over directly, so a
         # zoomed slice is cropped by the view instead of resizing the widget.
         canvas = QPixmap(self._canvas.size())
         canvas.fill(QColor("#000000"))
         painter = QPainter(canvas)
-        painter.drawPixmap(int(round(off_x)), int(round(off_y)), slice_map)
+        # Each interpolation run is scaled with the filter its layers use in
+        # napari — nearest stays blocky, linear/cubic smooth — then stacked.
+        for run in self._runs or [PaintRun(np.asarray(self._rgb), True, "base")]:
+            data = np.ascontiguousarray(run.image, dtype=np.uint8)
+            h, w = data.shape[:2]
+            if data.ndim == 3 and data.shape[2] == 4:
+                image = QImage(data.data, w, h, 4 * w, QImage.Format_RGBA8888_Premultiplied).copy()
+            else:
+                rgb3 = np.ascontiguousarray(data[..., :3])
+                image = QImage(rgb3.data, w, h, 3 * w, QImage.Format_RGB888).copy()
+            filt = Qt.SmoothTransformation if run.smooth else Qt.FastTransformation
+            run_map = QPixmap.fromImage(image).scaled(scaled_w, scaled_h, Qt.IgnoreAspectRatio, filt)
+            painter.setCompositionMode(
+                QPainter.CompositionMode_Plus if run.mode == "plus"
+                else QPainter.CompositionMode_SourceOver
+            )
+            painter.drawPixmap(int(round(off_x)), int(round(off_y)), run_map)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
         for cx, cy, dx, dy, colour in self._line_geometry() or []:
             pen = QPen(QColor(colour))
             pen.setWidth(1)
@@ -1289,18 +1465,26 @@ class SliceView(QWidget):
         if obj is not self._canvas:
             return False
         if event.type() == QEvent.Wheel:
-            up = event.angleDelta().y() > 0
+            delta = float(event.angleDelta().y())
             modifiers = event.modifiers()
             # Ctrl+wheel zooms, plain wheel scrolls slices. Scrolling is the far
             # commoner gesture here, so it keeps the unmodified wheel.
             if modifiers & Qt.ControlModifier:
+                # In proportion to the travel: a standard notch is one 10 % step,
+                # a touchpad's stream of small deltas adds up to the same thing.
                 self.set_zoom(
-                    self._zoom * (_ZOOM_STEP if up else 1.0 / _ZOOM_STEP),
+                    self._zoom * (_ZOOM_STEP ** (delta / _WHEEL_NOTCH)),
                     about=self._normalised_at(event),
                 )
                 return True
-            step = 1 if up else -1
-            self._slider.setValue(int(np.clip(self._slider.value() + step, 0, self._count - 1)))
+            # One slice per notch, however the travel arrives.
+            self._wheel_accum += delta
+            steps = int(self._wheel_accum / _WHEEL_NOTCH)
+            if steps:
+                self._wheel_accum -= steps * _WHEEL_NOTCH
+                self._slider.setValue(
+                    int(np.clip(self._slider.value() + steps, 0, self._count - 1))
+                )
             return True
         if event.type() == QEvent.MouseButtonDblClick:
             self.set_zoom(1.0)
@@ -1478,7 +1662,9 @@ def remove_ortho_planes(viewer: Any, source_name: str) -> int:
 
 #: Display properties a slice plane copies from the layer it shows, so the cut in
 #: 3D reads with the same window, colours and brightness as the 2D views.
-_IMAGE_STYLE_ATTRS: tuple[str, ...] = ("colormap", "contrast_limits", "gamma")
+_IMAGE_STYLE_ATTRS: tuple[str, ...] = (
+    "colormap", "contrast_limits", "gamma", "interpolation2d", "interpolation3d",
+)
 _LABEL_STYLE_ATTRS: tuple[str, ...] = ("colormap",)
 
 
@@ -1972,9 +2158,27 @@ class OrthoViewerPanel(QWidget):
         time_head.setStyleSheet(
             f"color: {COLOR_MUTED}; font-size: 10px; font-weight: bold; letter-spacing: 1px;"
         )
+        # Cine for the panel itself: steps the time (or energy) axis on a timer and
+        # moves the Napari slider with it, so the canvas and the 3D planes follow.
+        self._play_btn = QPushButton("▶ Play")
+        self._play_btn.setCheckable(True)
+        self._play_btn.setToolTip("Play / pause the time (or energy) axis, looping.")
+        self._play_btn.toggled.connect(self._on_play_toggled)
+        self._play_fps = QSpinBox()
+        self._play_fps.setRange(1, 60)
+        self._play_fps.setValue(_PLAY_FPS)
+        self._play_fps.setSuffix(" fps")
+        self._play_fps.setToolTip("Playback rate (frames per second).")
+        # Single-shot, re-armed after each frame is drawn: a frame slower than the
+        # interval delays the next instead of queueing a backlog of them.
+        self._play_timer = QTimer(self)
+        self._play_timer.setSingleShot(True)
+        self._play_timer.timeout.connect(self._play_tick)
         time_row.addWidget(time_head)
+        time_row.addWidget(self._play_btn)
         time_row.addWidget(self._time_slider, stretch=1)
         time_row.addWidget(self._time_label)
+        time_row.addWidget(self._play_fps)
         self._time_box = QWidget()
         self._time_box.setLayout(time_row)
         self._time_box.setVisible(False)
@@ -2117,6 +2321,8 @@ class OrthoViewerPanel(QWidget):
         if usable and int(getattr(layer.data, "ndim", 0)) not in (3, 4):
             usable = False
         if not usable:
+            if self._play_btn.isChecked():
+                self._play_btn.setChecked(False)
             self._layer = None
             self._data = None
             self._status.setText("Select a 3D or 3D+t image or labels layer.")
@@ -2228,11 +2434,13 @@ class OrthoViewerPanel(QWidget):
         if self._layer is None or _same_grid(layer, self._layer):
             return data, False
         t_key = self._time if layer_time_axis(layer) is not None else None
-        key = (id(layer), self._reference_key(), t_key)
+        # Nearest stays nearest; anything smoother resamples linearly (a cubic
+        # whole-volume resample would cost far more than it shows).
+        order = min(layer_interpolation_order(layer), 1)
+        key = (id(layer), self._reference_key(), t_key, order)
         hit = self._resample_cache.get(key)
         if hit is not None:
             return hit, True
-        order = 0 if is_label_like_layer(layer) else 1
         itemsize = np.dtype(data.dtype).itemsize if order == 0 else 4
         incoming = int(np.prod(self._data.shape)) * itemsize
         self._evict_resamples(incoming)
@@ -2303,6 +2511,10 @@ class OrthoViewerPanel(QWidget):
         layer = source.layer
         source.opacity = float(getattr(layer, "opacity", 1.0) or 1.0)
         source.blending = str(getattr(layer, "blending", "translucent"))
+        # Interpolation is display state too: the screen filter, and the spline
+        # order an oblique plane is resliced with.
+        source.smooth = layer_interpolation_smooth(layer)
+        source.order = layer_interpolation_order(layer)
         if source.is_label:
             if source.label_ids is None:
                 # Asked of the *layer*, not of ``source.data``: that cache
@@ -2420,6 +2632,12 @@ class OrthoViewerPanel(QWidget):
                 emitter = getattr(events, name, None)
                 if emitter is not None:
                     self._connect(emitter, self._on_style_changed)
+            for name in ("interpolation2d", "interpolation3d"):
+                emitter = getattr(events, name, None)
+                if emitter is not None:
+                    self._connect(
+                        emitter, functools.partial(self._on_interpolation_changed, layer=layer)
+                    )
             # ``data`` (the array was replaced) and ``paint`` (a brush stroke),
             # but deliberately **not** ``set_data``. Despite the name, Napari
             # emits set_data from ``Layer._refresh_sync(data_displayed=True)`` —
@@ -2448,6 +2666,24 @@ class OrthoViewerPanel(QWidget):
         for source in self._sources:
             self._refresh_style(source)
         self._style_timer.start()
+
+    def _on_interpolation_changed(self, _event: Any = None, *, layer: Any = None) -> None:
+        """A layer's interpolation changed: new screen filter, reslice order, planes.
+
+        A layer resampled from another grid is resampled again — its cached copy
+        was made with the previous order.
+        """
+        source = next((s for s in self._sources if s.layer is layer), None)
+        if source is not None and source.resampled:
+            for key in [k for k in self._resample_cache if k[0] == id(layer)]:
+                self._resample_cache.pop(key, None)
+            self._source_cache.pop(id(layer), None)
+            self._rebuild_sources()
+        else:
+            for src in self._sources:
+                self._refresh_style(src)
+            self._redraw(force=True)
+        self._sync_plane_styles()
 
     def _on_layer_data_changed(self, _event: Any = None, *, layer: Any = None) -> None:
         """Queue *layer*'s caches for invalidation on the next event-loop turn.
@@ -2536,8 +2772,9 @@ class OrthoViewerPanel(QWidget):
             order=order,
         )
 
-    def _render_view(self, view: AxisView, view_index: int = 0) -> np.ndarray:
-        """The RGB image for *view*: every visible layer, in layer-list order."""
+    def _render_view(self, view: AxisView, view_index: int = 0) -> list[PaintRun]:
+        """*view* as paint runs: every visible layer, in layer-list order, grouped by
+        interpolation (see :func:`composite_runs`)."""
         index = self._position[view.axis]
         oblique = self.is_oblique()
         drawn = [source for source in self._sources if source.opacity > 0.0]
@@ -2573,8 +2810,8 @@ class OrthoViewerPanel(QWidget):
                 int(self._data.shape[view.rows]),
                 int(self._data.shape[view.cols]),
             )
-            return np.zeros((*shape, 3), dtype=np.uint8)
-        return composite(planes, blendings, opacities)
+            return [PaintRun(np.zeros((*shape, 3), dtype=np.uint8), False)]
+        return composite_runs(planes, blendings, opacities, [source.smooth for source in drawn])
 
     def _redraw(self, *, force: bool = False) -> None:
         """Refresh the views, re-rendering only those whose slice actually moved.
@@ -2978,6 +3215,8 @@ class OrthoViewerPanel(QWidget):
         n = max(counts or [1])
         self._n_time = int(n)
         self._time_box.setVisible(self._n_time > 1)
+        if self._n_time <= 1 and self._play_btn.isChecked():
+            self._play_btn.setChecked(False)
         self._time_slider.blockSignals(True)
         self._time_slider.setRange(0, max(self._n_time - 1, 0))
         self._time = int(np.clip(self._time, 0, max(self._n_time - 1, 0)))
@@ -3019,6 +3258,25 @@ class OrthoViewerPanel(QWidget):
         if layer_time_axis(self._layer) is not None:
             extra = f"  ·  3D+t, {layer_time_count(self._layer)} time points"
         self._status.setText(f"{name} - {shape} voxels{extra}")
+
+    def _on_play_toggled(self, playing: bool) -> None:
+        """Start or stop the cine."""
+        self._play_btn.setText("⏸ Pause" if playing else "▶ Play")
+        if playing and self._n_time > 1:
+            self._play_timer.start(int(1000 / max(int(self._play_fps.value()), 1)))
+        else:
+            self._play_timer.stop()
+
+    def _play_tick(self) -> None:
+        """Advance one frame (looping) and re-arm the timer."""
+        if not self._play_btn.isChecked() or self._n_time <= 1:
+            return
+        self._set_time((self._time + 1) % self._n_time, sync_viewer=True)
+        self._play_timer.start(int(1000 / max(int(self._play_fps.value()), 1)))
+
+    def is_playing(self) -> bool:
+        """True while the cine is running."""
+        return bool(self._play_btn.isChecked())
 
     def _on_time_slider(self, value: int) -> None:
         """The panel's own time slider moved."""
@@ -3131,6 +3389,18 @@ def attach_ortho_dock(viewer: Any, panel: OrthoViewerPanel) -> Any:
         # are layers — so rebinding here threw away the crosshair and the plane
         # rotation every time those were drawn.
         if active is None and panel.bound_layer() is not None:
+            return
+        # Nor is selecting something that is not a volume — a localizer, a single
+        # tracker slice, a screen capture. Binding one makes it the grid every
+        # other layer is resampled onto (a one-voxel slab), or blanks the panel;
+        # the volume already on screen is what the user still wants to look at.
+        bound = panel.bound_layer()
+        if (
+            active is not None
+            and not is_volume_layer(active)
+            and bound is not None
+            and bound in viewer.layers
+        ):
             return
         # Napari emits `active` twice for a single click, with the same layer
         # both times. Re-binding is not free — it re-materialises the volume,

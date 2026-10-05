@@ -19,6 +19,9 @@ Five kinds:
                 question is "any plaque at all" rather than "how much"
 ``merge``       levels of a categorical column pooled into fewer groups, e.g. a six-level APOE
                 genotype folded to ``E4_carrier`` / ``E2_carrier`` / ``E3E3``
+``visits``      a longitudinal summary of a variable loaded at every visit (covariate visit picker →
+                "all visits"): change between two visits, AUC, slope, mean/max, progression… —
+                e.g. ``total_carotid_plaque_vol`` v1–v4 → its AUC over the exam dates
 
 Bin cut points are stored as explicit numbers, never as a rule: a rule would be recomputed against
 whatever rows are loaded, so the same label would silently mean a different range once a filter
@@ -207,6 +210,7 @@ class DerivedColumnsDialog(QDialog):
         self._kind.addItem("Grouped bins (categorical)", "bins")
         self._kind.addItem("Binarize at a threshold (0/1)", "binarize")
         self._kind.addItem("Merge categorical levels", "merge")
+        self._kind.addItem("Across visits (longitudinal)", "visits")
         self._kind.currentIndexChanged.connect(self._on_kind_changed)
         self._name = QLineEdit()
         self._name.setPlaceholderText("log_pi")
@@ -245,6 +249,7 @@ class DerivedColumnsDialog(QDialog):
         self._stack.addWidget(self._build_bins_page())
         self._stack.addWidget(self._build_binarize_page())
         self._stack.addWidget(self._build_merge_page())
+        self._stack.addWidget(self._build_visits_page())
 
         lay.addWidget(self._stack)
 
@@ -271,6 +276,192 @@ class DerivedColumnsDialog(QDialog):
 
         self._refresh_sources()
         return panel
+
+    def _build_visits_page(self) -> QWidget:
+        """
+        Summarise a visit family across visits — change, AUC, slope, progression….
+
+        A family is a variable loaded at every visit (the covariate's visit picker set to
+        "all visits"), i.e. columns ``<variable>_v1``, ``<variable>_v2``, …. The time axis is the
+        visit number, or — far better when visits are unevenly spaced — another family holding
+        each visit's date (``peqdate``) or a numeric time (age), turned into years.
+        """
+        from nvitk.stats.visit_series import VISIT_OPERATIONS
+
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        form = QFormLayout()
+        self._vs_family = QComboBox()
+        self._vs_family.currentIndexChanged.connect(self._on_vs_family_changed)
+        form.addRow("Variable (visit family)", self._vs_family)
+        self._vs_op = QComboBox()
+        for key, (label, _two, _time) in VISIT_OPERATIONS.items():
+            self._vs_op.addItem(label, key)
+        self._vs_op.currentIndexChanged.connect(self._on_vs_changed)
+        form.addRow("Operation", self._vs_op)
+        pair = QHBoxLayout()
+        self._vs_from = QComboBox()
+        self._vs_to = QComboBox()
+        for combo in (self._vs_from, self._vs_to):
+            combo.currentIndexChanged.connect(self._on_vs_changed)
+        pair.addWidget(QLabel("from"))
+        pair.addWidget(self._vs_from, 1)
+        pair.addWidget(QLabel("to"))
+        pair.addWidget(self._vs_to, 1)
+        self._vs_pair = QWidget()
+        self._vs_pair.setLayout(pair)
+        form.addRow("Visits", self._vs_pair)
+        self._vs_time = QComboBox()
+        self._vs_time.setToolTip(
+            "When each visit happened. 'Visit number' spaces visits 1, 2, 3…; a date family "
+            "(e.g. peqdate) gives years since the subject's first visit; a numeric family (age) "
+            "is used as is."
+        )
+        self._vs_time.currentIndexChanged.connect(self._on_vs_changed)
+        form.addRow("Time axis", self._vs_time)
+        self._vs_threshold = QDoubleSpinBox()
+        self._vs_threshold.setRange(-1e9, 1e9)
+        self._vs_threshold.setDecimals(4)
+        self._vs_threshold.setToolTip("New onset: values at or below this count as 'absent'.")
+        self._vs_threshold.valueChanged.connect(self._on_vs_changed)
+        form.addRow("Absent at ≤", self._vs_threshold)
+        self._vs_min = QSpinBox()
+        self._vs_min.setRange(1, 20)
+        self._vs_min.setValue(2)
+        self._vs_min.setToolTip(
+            "Subjects with fewer measured visits get a missing value (AUC, slope, mean…)."
+        )
+        self._vs_min.valueChanged.connect(self._on_vs_changed)
+        form.addRow("Min. visits", self._vs_min)
+        lay.addLayout(form)
+
+        lay.addWidget(QLabel("Include visits"))
+        self._vs_visits = QListWidget()
+        self._vs_visits.setMaximumHeight(96)
+        self._vs_visits.itemChanged.connect(lambda _i: self._on_vs_changed())
+        lay.addWidget(self._vs_visits)
+
+        self._vs_preview = QLabel("")
+        self._vs_preview.setWordWrap(True)
+        self._vs_preview.setStyleSheet(muted_label_style())
+        lay.addWidget(self._vs_preview)
+        self._vs_hint = QLabel(
+            "No visit families in the frame. In Covariates, set a variable's visit picker to "
+            "<b>all visits</b> and reload: it arrives as <code>variable_v1</code>, "
+            "<code>variable_v2</code>, … columns. Load the exam date (e.g. <code>peqdate</code>) "
+            "the same way to measure time in years."
+        )
+        self._vs_hint.setWordWrap(True)
+        self._vs_hint.setTextFormat(Qt.RichText)
+        self._vs_hint.setStyleSheet(muted_label_style())
+        lay.addWidget(self._vs_hint)
+        lay.addStretch(1)
+        return page
+
+    def _visit_families(self) -> dict[str, dict[str, str]]:
+        """Visit families of the current preview frame."""
+        from nvitk.stats.visit_series import visit_families
+
+        frame = self._preview_frame if self._preview_frame is not None else self._frame
+        return visit_families(frame) if frame is not None else {}
+
+    def _on_vs_family_changed(self) -> None:
+        """Repopulate the visit pickers for the chosen family."""
+        families = self._visit_families()
+        visits = list(families.get(self._vs_family.currentText(), {}))
+        for combo, first in ((self._vs_from, "first"), (self._vs_to, "last")):
+            current = combo.currentData()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem(f"{first} selected", "")
+            for v in visits:
+                combo.addItem(f"v{v}", v)
+            idx = combo.findData(current)
+            combo.setCurrentIndex(idx if idx >= 0 else 0)
+            combo.blockSignals(False)
+        self._vs_visits.blockSignals(True)
+        self._vs_visits.clear()
+        for v in visits:
+            item = QListWidgetItem(f"v{v}")
+            item.setData(Qt.UserRole, v)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked)
+            self._vs_visits.addItem(item)
+        self._vs_visits.blockSignals(False)
+        self._on_vs_changed()
+
+    def _vs_selected_visits(self) -> tuple[str, ...]:
+        """Checked visits; empty when all are checked (= "every visit", robust to new visits)."""
+        items = [self._vs_visits.item(i) for i in range(self._vs_visits.count())]
+        picked = tuple(str(it.data(Qt.UserRole)) for it in items if it.checkState() == Qt.Checked)
+        return () if len(picked) == len(items) else picked
+
+    def _on_vs_changed(self, *_args) -> None:
+        """Enable the controls the operation uses, suggest a name, preview the values."""
+        from nvitk.stats.visit_series import VISIT_OPERATIONS, visit_series_values
+
+        op = str(self._vs_op.currentData() or "delta")
+        _label, two_visit, uses_time = VISIT_OPERATIONS.get(op, ("", False, False))
+        self._vs_pair.setEnabled(two_visit)
+        self._vs_time.setEnabled(uses_time)
+        self._vs_threshold.setEnabled(op == "new_onset")
+        self._vs_min.setEnabled(not two_visit and op != "n_visits")
+        self._suggest_name()
+        family = self._vs_family.currentText()
+        if not family:
+            self._vs_preview.setText("")
+            return
+        frame = self._preview_frame if self._preview_frame is not None else self._frame
+        try:
+            values = visit_series_values(
+                frame, family, op, visits=self._vs_selected_visits(),
+                time_family=str(self._vs_time.currentData() or ""),
+                visit_a=str(self._vs_from.currentData() or ""),
+                visit_b=str(self._vs_to.currentData() or ""),
+                threshold=float(self._vs_threshold.value()), min_visits=int(self._vs_min.value()),
+            )
+        except Exception as exc:  # noqa: BLE001 — shown, not raised
+            self._vs_preview.setText(f"⚠ {exc}")
+            return
+        n = int(values.notna().sum())
+        if not n:
+            self._vs_preview.setText(f"0 of {len(values)} rows get a value.")
+            return
+        self._vs_preview.setText(
+            f"{n} of {len(values)} rows: {values.min():.4g} … {values.max():.4g}, mean {values.mean():.4g}"
+        )
+
+    def _refresh_visit_sources(self) -> None:
+        """Repopulate the family and time-axis combos from the frame's visit families."""
+        families = self._visit_families()
+        current = self._vs_family.currentText()
+        current_time = self._vs_time.currentData()
+        self._vs_family.blockSignals(True)
+        self._vs_family.clear()
+        for name in families:
+            self._vs_family.addItem(name)
+        idx = self._vs_family.findText(current)
+        if idx >= 0:
+            self._vs_family.setCurrentIndex(idx)
+        self._vs_family.blockSignals(False)
+        self._vs_time.blockSignals(True)
+        self._vs_time.clear()
+        self._vs_time.addItem("Visit number", "")
+        for name in families:
+            self._vs_time.addItem(f"{name} (date / time per visit)", name)
+        tidx = self._vs_time.findData(current_time)
+        # A date-like family is the better default when there is one (peqdate, *date*).
+        if tidx < 0:
+            tidx = next(
+                (i for i in range(self._vs_time.count())
+                 if "date" in str(self._vs_time.itemData(i) or "").lower()),
+                0,
+            )
+        self._vs_time.setCurrentIndex(tidx)
+        self._vs_time.blockSignals(False)
+        self._vs_hint.setVisible(not families)
+        if self._vs_family.count() and self._vs_visits.count() == 0:
+            self._on_vs_family_changed()
 
     def _build_merge_page(self) -> QWidget:
         """
@@ -763,6 +954,8 @@ class DerivedColumnsDialog(QDialog):
             self._bin_source.setCurrentIndex(bidx)
         self._bin_source.blockSignals(False)
 
+        self._refresh_visit_sources()
+
         # Binarizing needs a number line too — the same candidates as the bins page.
         current_bz = self._bz_source.currentText()
         self._bz_source.blockSignals(True)
@@ -835,6 +1028,19 @@ class DerivedColumnsDialog(QDialog):
             cut_points = parse_cut_points(self._bin_cuts.text())
             raw_labels = [t.strip() for t in self._bin_labels.text().split(",") if t.strip()]
             labels = tuple(raw_labels)
+        if kind == "visits":
+            return DerivedColumn(
+                name=self._name.text().strip(),
+                kind="visits",
+                family=self._vs_family.currentText().strip(),
+                visit_op=str(self._vs_op.currentData() or "delta"),
+                visits=self._vs_selected_visits(),
+                time_family=str(self._vs_time.currentData() or ""),
+                visit_a=str(self._vs_from.currentData() or ""),
+                visit_b=str(self._vs_to.currentData() or ""),
+                threshold=float(self._vs_threshold.value()),
+                min_visits=int(self._vs_min.value()),
+            )
         return DerivedColumn(
             name=self._name.text().strip(),
             kind=kind,
@@ -867,11 +1073,25 @@ class DerivedColumnsDialog(QDialog):
             self._on_binarize_source_changed()
         elif kind == "merge":
             self._on_merge_source_changed()
+        elif kind == "visits":
+            self._refresh_visit_sources()
+            self._on_vs_family_changed()
         else:
             self._suggest_name()
 
     def _suggest_name(self) -> None:
         """Fill the name field with the conventional name while the user has not typed one."""
+        if self._kind.currentData() == "visits":
+            family = self._vs_family.currentText().strip()
+            op = str(self._vs_op.currentData() or "")
+            if not family or not op:
+                return
+            suggested = f"{family}_{op}"
+            a, b = str(self._vs_from.currentData() or ""), str(self._vs_to.currentData() or "")
+            if op in ("delta", "pct_change", "annualized", "progressed") and (a or b):
+                suggested += f"_v{a or 'first'}_v{b or 'last'}"
+            self._set_suggested_name(suggested)
+            return
         if self._kind.currentData() != "transform":
             return
         source = self._source.currentText()
@@ -879,10 +1099,20 @@ class DerivedColumnsDialog(QDialog):
         if not (source and transform):
             return
         suggested = default_derived_name(source, transform)
-        current = self._name.text().strip()
         known = {default_derived_name(source, key) for key in TRANSFORM_LABELS}
-        if not current or current in known:
+        self._set_suggested_name(suggested, also_replace=known)
+
+    def _set_suggested_name(self, suggested: str, *, also_replace: set[str] | frozenset = frozenset()) -> None:
+        """Write *suggested* unless the name field holds a name the user typed.
+
+        Any name this dialog suggested earlier — on any page — is ours to replace, so
+        switching from a transform to an across-visits column renames as expected.
+        """
+        suggested_before = self.__dict__.setdefault("_suggested_names", set())
+        current = self._name.text().strip()
+        if not current or current in suggested_before or current in also_replace:
             self._name.setText(suggested)
+        suggested_before.add(suggested)
 
     def _validate(self, spec: DerivedColumn, *, ignore_index: int | None = None) -> str:
         """Return why *spec* cannot be added, or ``""``."""
@@ -1015,6 +1245,27 @@ class DerivedColumnsDialog(QDialog):
                 edit = self._merge_edits.get(str(level))
                 if edit is not None:
                     edit.setText(str(group))
+        elif spec.kind == "visits":
+            self._refresh_visit_sources()
+            fidx = self._vs_family.findText(spec.family)
+            if fidx >= 0:
+                self._vs_family.setCurrentIndex(fidx)
+            self._on_vs_family_changed()
+            for combo, value in ((self._vs_op, spec.visit_op), (self._vs_time, spec.time_family),
+                                 (self._vs_from, spec.visit_a), (self._vs_to, spec.visit_b)):
+                idx = combo.findData(value)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+            self._vs_threshold.setValue(float(spec.threshold))
+            self._vs_min.setValue(int(spec.min_visits))
+            wanted = set(spec.visits)
+            for i in range(self._vs_visits.count()):
+                item = self._vs_visits.item(i)
+                item.setCheckState(
+                    Qt.Checked if not wanted or str(item.data(Qt.UserRole)) in wanted else Qt.Unchecked
+                )
+            self._name.setText(spec.name)
+            self._on_vs_changed()
         else:
             self._expression.setText(spec.expression)
         self._error.setText("")
