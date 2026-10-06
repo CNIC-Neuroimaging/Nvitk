@@ -16,11 +16,16 @@ Two payload shapes are supported, both flowing through :func:`show_results`:
     a flat metric table, rendered as two columns.
 ``{1: {"dice": 0.91}, 2: {"dice": 0.88}}`` with ``row_header="Label"``
     a matrix, rendered with one row per key and one column per metric.
+
+A result may come with an ``on_select`` callback: selecting a row calls it with
+that row's key (a branch, a frame…) so the viewer can show what the row is
+about, and ``None`` when that should go (*Clear highlight*, another result, the
+window closing).
 """
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
@@ -96,12 +101,14 @@ class _Result:
         subtitle: str = "",
         row_header: str = "",
         note: str = "",
+        on_select: Callable[[str | None], None] | None = None,
     ) -> None:
         self.title = title
         self.payload = dict(payload)
         self.subtitle = subtitle
         self.row_header = row_header
         self.note = note
+        self.on_select = on_select
 
     def as_text(self) -> str:
         """The result as plain text, for the clipboard and the GUI log."""
@@ -158,6 +165,8 @@ class ResultsWindow(QDialog):
         self.setModal(False)
 
         self._results: list[_Result] = []
+        self._shown: _Result | None = None
+        self._filling = False
 
         self._heading = QLabel("")
         self._heading.setStyleSheet(f"color: {COLOR_ACCENT}; font-weight: 600;")
@@ -173,6 +182,11 @@ class ResultsWindow(QDialog):
         copy_button.setToolTip("Copy this result to the clipboard as text")
         copy_button.clicked.connect(self._copy)
 
+        self._clear_highlight = QPushButton("Clear highlight")
+        self._clear_highlight.setToolTip("Stop showing the selected row in the viewer")
+        self._clear_highlight.clicked.connect(self._unhighlight)
+        self._clear_highlight.setVisible(False)
+
         self._table = QTableWidget(0, 0)
         self._table.setFont(mono_font(10))
         self._table.setAlternatingRowColors(True)
@@ -180,6 +194,7 @@ class ResultsWindow(QDialog):
         self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._table.verticalHeader().setVisible(False)
         self._table.setSortingEnabled(True)
+        self._table.itemSelectionChanged.connect(self._on_row_selected)
 
         self._note = QLabel("")
         self._note.setWordWrap(True)
@@ -189,6 +204,7 @@ class ResultsWindow(QDialog):
         toolbar.setSpacing(SPACE_TIGHT)
         toolbar.addWidget(QLabel("History"))
         toolbar.addWidget(self._history, stretch=1)
+        toolbar.addWidget(self._clear_highlight)
         toolbar.addWidget(copy_button)
 
         root = QVBoxLayout(self)
@@ -207,9 +223,12 @@ class ResultsWindow(QDialog):
         subtitle: str = "",
         row_header: str = "",
         note: str = "",
+        on_select: Callable[[str | None], None] | None = None,
     ) -> None:
         """Show *payload* and keep the previous results in the history picker."""
-        result = _Result(title, payload, subtitle=subtitle, row_header=row_header, note=note)
+        if on_select is not None and not note:
+            note = "Click a row to show it in the viewer."
+        result = _Result(title, payload, subtitle=subtitle, row_header=row_header, note=note, on_select=on_select)
         self._results.insert(0, result)
         del self._results[_HISTORY_LIMIT:]
         # Repopulating fires currentIndexChanged; suppress it so rebuilding the
@@ -239,8 +258,43 @@ class ResultsWindow(QDialog):
         if clipboard is not None:
             clipboard.setText(self.current_text())
 
+    def _notify_row(self, result: _Result | None, key: str | None) -> None:
+        """Tell *result*'s owner which row is selected (``None``: none)."""
+        if result is None or result.on_select is None:
+            return
+        try:
+            result.on_select(key)
+        except Exception:  # noqa: BLE001 — a highlight must never break the window
+            pass
+
+    def _on_row_selected(self) -> None:
+        if self._filling or self._shown is None or self._shown.on_select is None:
+            return
+        rows = {i.row() for i in self._table.selectedItems()}
+        if not rows:
+            self._notify_row(self._shown, None)
+            return
+        item = self._table.item(min(rows), 0)
+        self._notify_row(self._shown, item.text() if item is not None else None)
+
+    def _unhighlight(self) -> None:
+        self._filling = True
+        self._table.clearSelection()
+        self._filling = False
+        self._notify_row(self._shown, None)
+
+    def hideEvent(self, event: Any) -> None:  # noqa: N802 — Qt naming
+        """A closed window leaves nothing highlighted."""
+        self._notify_row(self._shown, None)
+        super().hideEvent(event)
+
     def _show(self, result: _Result) -> None:
         """Lay *result* out in the table."""
+        if self._shown is not None and self._shown is not result:
+            self._notify_row(self._shown, None)
+        self._shown = result
+        self._clear_highlight.setVisible(result.on_select is not None)
+        self._filling = True
         self.setWindowTitle(result.title or "Results")
         self._heading.setText(result.title)
         self._subtitle.setText(result.subtitle)
@@ -275,6 +329,8 @@ class ResultsWindow(QDialog):
         header = self._table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeToContents)
         header.setStretchLastSection(True)
+        self._table.clearSelection()
+        self._filling = False
 
 
 def _item(text: str, *, align_left: bool = False) -> QTableWidgetItem:
@@ -324,8 +380,12 @@ def show_results(
     subtitle: str = "",
     row_header: str = "",
     note: str = "",
+    on_select: Callable[[str | None], None] | None = None,
 ) -> str:
     """Show *payload* in the viewer's results window; return it as text.
+
+    With *on_select*, selecting a row calls it with the row's key (and ``None``
+    when the highlight should go).
 
     The text is returned rather than logged here so the caller keeps control of
     the log — every measurement already writes one line, and this must not
@@ -335,7 +395,7 @@ def show_results(
     window = results_window(viewer)
     if window is None:
         return text
-    window.add_result(title, payload, subtitle=subtitle, row_header=row_header, note=note)
+    window.add_result(title, payload, subtitle=subtitle, row_header=row_header, note=note, on_select=on_select)
     window.show()
     window.raise_()
     return text

@@ -10,8 +10,6 @@ from typing import Any
 import numpy as np
 
 from nvitk.core.array import to_numpy
-from nvitk.meshlab import mesh_from_image, marching_cubes_multilabel
-from nvitk.types import Image, Mesh
 
 from nvitk.gui.io.export import export_selected_layer
 from nvitk.gui.io.napari_io import (
@@ -92,6 +90,54 @@ def _refresh_layer_list(widget: Any, viewer: Any, registry: dict[str, Any]) -> N
         widget.addItem(f"  {item.get('name', '?')}")
 
 
+def _top_aligned(widget: Any) -> Any:
+    """*widget* pinned to the top of a container that takes any spare height.
+
+    A magicgui form dropped straight into a resizable scroll area shares the
+    dock's extra height out between its rows, so three controls ended up spread
+    over the whole panel with large gaps between them.
+    """
+    from qtpy.QtWidgets import QVBoxLayout, QWidget
+
+    host = QWidget()
+    lay = QVBoxLayout(host)
+    lay.setContentsMargins(SPACE_TIGHT, SPACE, SPACE_TIGHT, SPACE)
+    lay.setSpacing(SPACE)
+    lay.addWidget(widget)
+    lay.addStretch(1)
+    return host
+
+
+def _move_tab_after(window: Any, anchor: Any, dock: Any) -> bool:
+    """Put *dock*'s tab right after *anchor*'s, when both are tabbed together.
+
+    ``tabifyDockWidget`` only ever appends, so *dock* and every tab that followed
+    *anchor* are re-appended in order. The tab that was showing stays showing.
+    """
+    from qtpy.QtWidgets import QTabBar
+
+    if anchor.isFloating() or dock.isFloating() or dock not in window.tabifiedDockWidgets(anchor):
+        return False
+    group = {d.windowTitle(): d for d in (anchor, *window.tabifiedDockWidgets(anchor))}
+    bar = next(
+        (tb for tb in window.findChildren(QTabBar)
+         if {anchor.windowTitle(), dock.windowTitle()} <= {tb.tabText(i) for i in range(tb.count())}),
+        None,
+    )
+    if bar is None:
+        return False
+    titles = [bar.tabText(i) for i in range(bar.count())]
+    current = group.get(bar.tabText(bar.currentIndex()))
+    order = [group[t] for t in titles if t in group]
+    trailing = [d for d in order[order.index(anchor) + 1:] if d is not dock]
+    window.tabifyDockWidget(anchor, dock)
+    for other in trailing:
+        window.tabifyDockWidget(anchor, other)
+    if current is not None:
+        current.raise_()
+    return True
+
+
 def _scrollable_tab(widget: Any) -> Any:
     """Wrap a panel so its content scrolls instead of setting the dock's floor.
 
@@ -117,7 +163,7 @@ def _scrollable_tab(widget: Any) -> Any:
 
 def run_app() -> None:
     """Build and launch the nvitk Napari GUI: creates the viewer, installs nvitk's I/O hooks, and
-    assembles the Tools/Labels/Data/QC/Statmodels/Layers/Export/Pipeline panel docks."""
+    assembles the Imaging (tools)/Labels/Meshlab/Data/QC/Statmodels/Layers/Export/Pipeline panel docks."""
     install_napari_display_warnings()
     install_notification_timeout()
     import napari
@@ -230,54 +276,6 @@ def run_app() -> None:
     from nvitk.gui.core.log_panel import gui_log
 
     gui_log(f"Compute backend: {backend_label()}")
-
-    @magicgui(call_button="Reconstruct mesh")
-    def mesh_panel(multilabel: bool = False) -> None:
-        """Reconstruct a surface mesh from the active layer via marching cubes and add it as a
-        Surface layer (one mesh per label id when ``multilabel``)."""
-        if not viewer.layers:
-            notify("No layers loaded.", error=True)
-            return
-        layer = viewer.layers.selection.active or viewer.layers[-1]
-        from nvitk.gui.core.spatial import layer_to_image
-
-        img = layer_to_image(layer)
-        spatial = layer_spatial_kwargs(layer)
-        try:
-            if multilabel:
-                meshes = marching_cubes_multilabel(img, world_space=False) or []
-            else:
-                m = mesh_from_image(img, multilabel=False, world_space=False)
-                meshes = [m] if m is not None else []
-        except Exception as exc:
-            notify(f"Mesh reconstruction failed: {exc}", error=True)
-            return
-
-        if not meshes:
-            notify("No surface found (empty mask or no labels).", error=True)
-            return
-
-        for mesh in meshes:
-            if not isinstance(mesh, Mesh):
-                continue
-            surf = mesh.to_napari_surface()
-            surf_kwargs = {"name": mesh.name, **spatial}
-            viewer.add_surface(
-                (surf["vertices"], surf["faces"]),
-                **surf_kwargs,
-            )
-            app_state["meshes"].append({"name": mesh.name})
-            _record_step(
-                app_state,
-                {
-                    "type": "mesh",
-                    "source_layer": layer.name,
-                    "mesh_layer": mesh.name,
-                    "multilabel": multilabel,
-                },
-            )
-        notify(f"Added {len(meshes)} surface layer(s).")
-        _refresh_layer_list(layer_list, viewer, app_state)
 
     @magicgui(
         record_steps={"label": "Record pipeline steps", "value": False},
@@ -443,8 +441,11 @@ def run_app() -> None:
             return
         layer_type = layer.__class__.__name__
         if layer_type == "Surface":
-            filt = "STL (*.stl);;All (*)"
+            filt = "STL (*.stl);;PLY (*.ply);;OBJ (*.obj);;VTK PolyData (*.vtp);;OFF (*.off);;GIfTI (*.gii);;All (*)"
             default = f"{layer.name}.stl"
+        elif layer_type == "Points":
+            filt = "XYZ (*.xyz);;CSV (*.csv);;PLY (*.ply);;VTK PolyData (*.vtp);;All (*)"
+            default = f"{layer.name}.xyz"
         else:
             filt = "NIfTI (*.nii *.nii.gz);;TIFF (*.tif *.tiff);;MetaImage (*.mha);;All (*)"
             default = f"{layer.name}.nii.gz"
@@ -467,6 +468,7 @@ def run_app() -> None:
             "Open image",
             "",
             "Images (*.nii *.nii.gz *.mha *.tif *.tiff *.b2nd);;"
+            "Meshes and point clouds (*.stl *.obj *.off *.ply *.vtk *.vtp *.gii *.xyz *.pcd *.pvd);;"
             "Preprocessed (nnU-Net/nnssl) (*.b2nd *.pkl);;"
             "All (*)",
         )
@@ -507,6 +509,10 @@ def run_app() -> None:
     export_layout.addStretch(1)
     export_tab.setLayout(export_layout)
 
+    from nvitk.gui.mesh.panel import build_mesh_panel
+
+    mesh_panel = build_mesh_panel(viewer)
+
     # One dock per panel rather than tabs in a single dock, so each can be popped
     # out, moved to the workspace window, or split beside another. Tabbed
     # together on the right they look as the old tab widget did. Order: what is
@@ -523,16 +529,18 @@ def run_app() -> None:
             viewer, _scrollable_tab(widget), object_name=f"nvitk:{key}", title=title, **kwargs
         )
 
-    # On the Tools panel's own title bar: the panel most often on screen, and
+    # On the Imaging panel's own title bar: the panel most often on screen, and
     # inside the nvitk stylesheet rather than Napari's, which clamps buttons to 12px.
     theme_button = theme_toggle_button(viewer, None)
-    tools_dock = _panel_dock(tools_widget, "tools", "Tools", extras=[theme_button])
+    tools_dock = _panel_dock(tools_widget, "tools", "Imaging", extras=[theme_button])
     labels_dock = build_labels_dock(viewer)
     image_props_dock = _panel_dock(image_props_panel, "image_properties", "Image properties")
     dicom_dock = _panel_dock(dicom_tags_panel, "dicom_tags", "DICOM tags")
+    mesh_dock = _panel_dock(mesh_panel, "mesh", "Meshlab")
     panel_docks = [
         tools_dock,
         labels_dock,
+        mesh_dock,
         image_props_dock,
         dicom_dock,
         _panel_dock(xnat_panel, "data", data_tab_label),
@@ -540,8 +548,7 @@ def run_app() -> None:
         _panel_dock(statmodels_panel, "statmodels", "Statmodels"),
         _panel_dock(export_tab, "export", "Export"),
         _panel_dock(layers_tab, "layers", "Layers"),
-        _panel_dock(mesh_panel.native, "mesh", "Mesh"),
-        _panel_dock(export_panel.native, "pipeline", "Pipeline"),
+        _panel_dock(_top_aligned(export_panel.native), "pipeline", "Pipeline"),
     ]
     qt_main.addDockWidget(Qt.RightDockWidgetArea, tools_dock)
     for panel_dock in panel_docks[1:]:
@@ -559,9 +566,18 @@ def run_app() -> None:
     try:
         from nvitk.gui.labels.layer_list import install_layer_list_label_buttons
 
-        install_layer_list_label_buttons(viewer)
+        label_delegate = install_layer_list_label_buttons(viewer)
     except Exception as exc:  # noqa: BLE001 — Napari's own layer list still works
+        label_delegate = None
         gui_log(f"Layer-list label buttons unavailable: {exc}", error=True)
+
+    # Folders and subfolders in the layer list (headers painted by that delegate).
+    try:
+        from nvitk.gui.core.layer_folders import install_layer_folders
+
+        install_layer_folders(viewer, label_delegate)
+    except Exception as exc:  # noqa: BLE001 — the flat list still works
+        gui_log(f"Layer folders unavailable: {exc}", error=True)
 
     # The orthogonal views open with the window. Created before the saved layout
     # is restored, so a position the user gave the dock last time is honoured.
@@ -591,7 +607,8 @@ def run_app() -> None:
         # configured install opens the GUI, so there is somewhere for the layout
         # to be remembered rather than it only appearing after a clean exit.
         ensure_prefs_file()
-        legacy_layout = stored_dock_layout_version() < DOCK_LAYOUT_VERSION
+        stored_version = stored_dock_layout_version()
+        legacy_layout = stored_version < 2
         # The workspace first: it takes its panels out of the main window, and
         # the main layout is then restored around the ones that stay.
         if panel_manager is not None:
@@ -606,6 +623,10 @@ def run_app() -> None:
                 if not panel_dock.isFloating() and qt_main.dockWidgetArea(panel_dock) != Qt.NoDockWidgetArea:
                     qt_main.tabifyDockWidget(tools_dock, panel_dock)
             tools_dock.raise_()
+        elif stored_version < DOCK_LAYOUT_VERSION:
+            # Version 3 moved the Meshlab tab next to Labels; a saved layout keeps its
+            # own tab order, so move it there once.
+            _move_tab_after(qt_main, labels_dock, mesh_dock)
     except Exception:  # noqa: BLE001 — a stored layout must not block a launch
         pass
     if panel_manager is not None:

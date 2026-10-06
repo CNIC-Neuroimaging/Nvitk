@@ -64,6 +64,21 @@ def _metadata_from_image(
     return meta
 
 
+def _outward(mesh: Mesh) -> Mesh:
+    """Wind the faces so normals point out of the enclosed volume.
+
+    scikit-image's winding depends on its gradient convention, and a mirroring
+    affine (``det < 0``, e.g. LPS data) reverses it again; area, volume signs,
+    curvature and lighting all assume outward normals.
+    """
+    if mesh.n_faces:
+        tri = mesh.vertices[mesh.faces]
+        signed = np.einsum("ij,ij->i", tri[:, 0], np.cross(tri[:, 1], tri[:, 2])).sum()
+        if signed < 0:
+            mesh.faces = mesh.faces[:, ::-1].copy()
+    return mesh
+
+
 def marching_cubes_binary(
     mask: Image | Any,
     *,
@@ -107,7 +122,7 @@ def marching_cubes_binary(
         )
     else:
         verts_out = verts
-    return Mesh(vertices=verts_out, faces=faces.astype(np.int32), metadata=meta)
+    return _outward(Mesh(vertices=verts_out, faces=faces.astype(np.int32), metadata=meta))
 
 
 def marching_cubes_multilabel(
@@ -160,7 +175,7 @@ def marching_cubes_multilabel(
             )
         else:
             verts_out = verts
-        meshes.append(Mesh(vertices=verts_out, faces=faces.astype(np.int32), metadata=meta))
+        meshes.append(_outward(Mesh(vertices=verts_out, faces=faces.astype(np.int32), metadata=meta)))
     return meshes
 
 

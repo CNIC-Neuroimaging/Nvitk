@@ -120,7 +120,7 @@ dependencies = [
   # -----------------------------------------------------------------------------
   # "trimesh>=",
   # "open3d>=",
-  # "pymeshlab>=",
+  "pymeshlab>=2023.12",            # MeshLab filters (nvitk.meshlab.pymeshlab_filters, GUI Mesh panel)
 ]
 
 # ──────────────────────────────────────────────────────────────────────────────

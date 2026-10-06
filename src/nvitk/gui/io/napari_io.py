@@ -329,9 +329,44 @@ def _is_dicom_source(path: Path) -> bool:
         return False
 
 
+#: Surface / point files the reader hands to :mod:`nvitk.meshlab.io` (``.csv`` and
+#: ``.txt`` are left out: too often tables rather than point lists).
+_SURFACE_SUFFIXES = (".stl", ".obj", ".off", ".ply", ".vtk", ".vtp", ".vtu", ".gii", ".xyz", ".pcd", ".pvd")
+
+
+def _is_surface_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in _SURFACE_SUFFIXES
+
+
+def _read_surface_layer_data(path: Path) -> list[LayerData] | None:
+    """A mesh (Surface) or point cloud (Points) file as a layer tuple, in world mm."""
+    from nvitk.meshlab.io import read_pvd, read_surface
+    from nvitk.types import Mesh
+
+    try:
+        if path.suffix.lower() == ".pvd":
+            # A time series needs its frame controller: add it through the Mesh panel.
+            series = read_pvd(path)
+            mesh = series[0]
+            return [((mesh.vertices, mesh.faces), {"name": path.stem, "metadata": {"nvitk_mesh": {"space": "world"}}},
+                     "surface")]
+        obj = read_surface(path)
+    except Exception as exc:  # noqa: BLE001
+        _notify_error(f"Could not read {path} as a mesh / point cloud:\n{exc}")
+        return None
+    meta = {"nvitk_mesh": {"space": "world", "source": str(path)}}
+    if isinstance(obj, Mesh):
+        return [((obj.vertices.astype("float32"), obj.faces.astype("int64")),
+                 {"name": obj.name, "metadata": meta, "shading": "smooth"}, "surface")]
+    return [(obj.points.astype("float32"), {"name": obj.name, "metadata": meta, "size": 1.0,
+                                            "border_width": 0, "face_color": "#5fb8ff"}, "points")]
+
+
 def _read_layer_data(path: str) -> list[LayerData] | None:
     """Read one path into Napari layer tuples."""
     pth = Path(path)
+    if _is_surface_file(pth):
+        return _read_surface_layer_data(pth)
     if not _nvitk_can_open(pth):
         return None
     try:
@@ -361,7 +396,7 @@ def read_paths(path: str | list[str]) -> ReaderFunc | list[LayerData] | None:
                 layer_data.extend(chunk)
         return layer_data or None
 
-    if not _nvitk_can_open(Path(path)):
+    if not (_nvitk_can_open(Path(path)) or _is_surface_file(Path(path))):
         return None
     return _read_layer_data
 
@@ -410,6 +445,17 @@ def open_paths_with_nvitk(
     layers = []
 
     for path in path_list:
+        if _is_surface_file(path):
+            panel = getattr(viewer, "_nvitk_mesh_panel", None)
+            try:
+                if panel is not None:
+                    layers.extend(panel.open_paths([str(path)]))
+                else:
+                    for data, kwargs, kind in _read_surface_layer_data(path) or []:
+                        layers.append(getattr(viewer, f"add_{kind}")(data, **kwargs))
+            except Exception as exc:  # noqa: BLE001
+                _notify_error(f"Could not read {path}:\n{exc}")
+            continue
         if not _nvitk_can_open(path):
             continue
         try:

@@ -24,4 +24,13 @@ contributions:
         - "*.dcm"
         - "*.b2nd"
         - "*.pkl"
+        - "*.stl"
+        - "*.obj"
+        - "*.off"
+        - "*.ply"
+        - "*.vtk"
+        - "*.vtp"
+        - "*.gii"
+        - "*.xyz"
+        - "*.pcd"
       accepts_directories: true

@@ -40,6 +40,61 @@ from nvitk.gui.pipeline.stages import (
 
 PIPELINE_FORM_SCROLL_MIN = 120
 
+#: Widest a stage-input or option name may get before it wraps; past it, the
+#: field column would be squeezed to nothing in a normal-width dock.
+_FORM_LABEL_MAX_WIDTH = 130
+
+
+def _wrapping_form() -> QFormLayout:
+    """A form whose rows wrap under their label when the dock is narrow.
+
+    The default policy keeps ``[label | field]`` side by side however narrow the
+    panel gets, so one long option name pushed every field off the right edge
+    and the form grew a horizontal scrollbar.
+    """
+    form = QFormLayout()
+    form.setRowWrapPolicy(QFormLayout.WrapLongRows)
+    form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+    form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+    form.setContentsMargins(0, 0, 0, 0)
+    form.setVerticalSpacing(4)
+    return form
+
+
+def _form_label(text: str) -> QLabel:
+    """A form row label that wraps rather than widening the form.
+
+    Only a label longer than the cap wraps: a wrapping label reports a tiny minimum
+    width, and the form then squeezed even "CT volume:" onto two clipped lines.
+    """
+    label = QLabel(text)
+    natural = label.fontMetrics().horizontalAdvance(text) + 6
+    if natural <= _FORM_LABEL_MAX_WIDTH:
+        # Fits on one line: no wrapping, so the row is laid out one line tall.
+        label.setMinimumWidth(natural)
+        return label
+    label.setWordWrap(True)
+    label.setMinimumWidth(_FORM_LABEL_MAX_WIDTH // 2)
+    label.setMaximumWidth(_FORM_LABEL_MAX_WIDTH)
+    return label
+
+
+def _shrinkable(widget: QWidget) -> QWidget:
+    """Let a field shrink to the column it is given instead of setting the form's width."""
+    if isinstance(widget, QComboBox):
+        widget.setMinimumContentsLength(6)
+        widget.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+    widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+    widget.setMinimumWidth(60)
+    return widget
+
+
+def _flag_caption(flag: str) -> str:
+    """``--skip-existing`` → ``Skip existing``: a checkbox caption that fits a dock."""
+    words = flag.lstrip("-").replace("_", "-").split("-")
+    text = " ".join(w for w in words if w)
+    return text[:1].upper() + text[1:]
+
 
 def _cli_long_option(param: click.Parameter) -> str:
     """The longest ``--flag`` name registered for a Click *param* (or a derived ``--param-name``)."""
@@ -134,23 +189,36 @@ class PipelineStageForm(QGroupBox):
         self._hint.setWordWrap(True)
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
-        self._scroll.setMinimumHeight(160)
+        self._scroll.setFrameShape(QScrollArea.NoFrame)
+        # Fields shrink and labels wrap instead: a sideways scrollbar in a dock
+        # hides half of every row.
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._scroll.setMinimumHeight(PIPELINE_FORM_SCROLL_MIN)
         self._scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._content = QWidget()
+        self._content.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self._content_layout = QVBoxLayout()
+        self._content_layout.setContentsMargins(0, 0, 4, 0)
+        self._content_layout.setSpacing(6)
         self._content_layout.setAlignment(Qt.AlignTop)
         self._stages_host = QWidget()
         self._stages_layout = QVBoxLayout()
+        self._stages_layout.setContentsMargins(0, 0, 0, 0)
+        self._stages_layout.setSpacing(6)
         self._stages_layout.setAlignment(Qt.AlignTop)
         self._stages_host.setLayout(self._stages_layout)
-        self._params_host = QWidget()
-        self._params_form = QFormLayout()
-        self._params_host.setLayout(self._params_form)
+        self._params_box = QGroupBox("Options")
+        self._params_form = _wrapping_form()
+        self._params_form.setContentsMargins(8, 6, 8, 6)
+        self._params_box.setLayout(self._params_form)
+        self._params_host = self._params_box
         self._content_layout.addWidget(self._stages_host)
         self._content_layout.addWidget(self._params_host)
         self._content.setLayout(self._content_layout)
         self._scroll.setWidget(self._content)
         root = QVBoxLayout()
+        root.setContentsMargins(6, 6, 6, 6)
+        root.setSpacing(6)
         root.addWidget(self._hint)
         root.addWidget(self._scroll, stretch=1)
         self.setLayout(root)
@@ -208,16 +276,20 @@ class PipelineStageForm(QGroupBox):
     def _build_stage_rows(self, stages: tuple[PipelineStageSpec, ...]) -> None:
         """Add one enable-checkbox group box (with an empty inputs sub-form) per stage in *stages*."""
         for stage in stages:
-            box = QGroupBox(stage.label)
+            # A bare "&" is a mnemonic marker to Qt: "Measure & export" would show
+            # as "Measure _export" with the e underlined.
+            box = QGroupBox(stage.label.replace("&", "&&"))
             box_layout = QVBoxLayout()
+            box_layout.setContentsMargins(8, 6, 8, 6)
+            box_layout.setSpacing(4)
             cb = QCheckBox(f"Run {stage.id}")
             cb.setChecked(stage.default_enabled)
             cb.toggled.connect(self._refresh_stage_inputs)
             desc = QLabel(stage.description)
             desc.setWordWrap(True)
-            desc.setStyleSheet("color: palette(mid);")
+            desc.setStyleSheet("color: palette(mid); font-size: 10px; font-weight: normal;")
             inputs_host = QWidget()
-            inputs_form = QFormLayout()
+            inputs_form = _wrapping_form()
             inputs_host.setLayout(inputs_form)
             input_widgets = {}
             box_layout.addWidget(cb)
@@ -244,21 +316,26 @@ class PipelineStageForm(QGroupBox):
             flag = _cli_long_option(param)
             label = f"{flag.lstrip('-')}{' *' if param.required else ''}"
             if isinstance(param, click.Option) and param.is_flag:
-                w = QCheckBox(param.help or param.name)
+                # The flag's name as the caption and its help as the tooltip: the
+                # help sentence as a caption cannot wrap, and set the form's width.
+                w = QCheckBox(_flag_caption(flag))
+                w.setToolTip(param.help or flag)
                 default = param.default
                 w.setChecked(bool(default) if default is not CLICK_UNSET else False)
-                self._params_form.addRow(label, w)
+                self._params_form.addRow(w)
                 self._param_fields.append(_ParamField(param, w))
                 continue
-            edit = QLineEdit()
+            edit = _shrinkable(QLineEdit())
             if param.default is not None and param.default is not CLICK_UNSET:
                 edit.setPlaceholderText(str(param.default))
             if param.help:
                 edit.setToolTip(param.help)
             row = QWidget()
+            row.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
             h = QHBoxLayout()
             h.setContentsMargins(0, 0, 0, 0)
-            h.addWidget(edit)
+            h.setSpacing(4)
+            h.addWidget(edit, 1)
             if isinstance(param.type, click.Path):
                 browse = QPushButton("…")
                 browse.setFixedWidth(28)
@@ -277,8 +354,9 @@ class PipelineStageForm(QGroupBox):
                 browse.clicked.connect(_pick)
                 h.addWidget(browse)
             row.setLayout(h)
-            self._params_form.addRow(label, row)
+            self._params_form.addRow(_form_label(label), row)
             self._param_fields.append(_ParamField(param, edit))
+        self._params_box.setVisible(bool(self._param_fields))
 
     def _enabled_stages(self) -> dict[str, bool]:
         """``{stage_id: is_checked}`` for every stage row in the form."""
@@ -351,11 +429,11 @@ class PipelineStageForm(QGroupBox):
                     value = active_name or "(no active layer)"
                     w = QLabel(value)
                     w.setWordWrap(True)
-                    row.inputs_form.addRow(f"{label}:", w)
+                    row.inputs_form.addRow(_form_label(f"{label}:"), w)
                     row.input_widgets[key] = w
                     continue
 
-                combo = QComboBox()
+                combo = _shrinkable(QComboBox())
                 combo.addItem("(none)", None)
                 for name in self._layer_names():
                     combo.addItem(name, name)
@@ -363,7 +441,7 @@ class PipelineStageForm(QGroupBox):
                     combo_idx = combo.findText(active_name)
                     if combo_idx >= 0:
                         combo.setCurrentIndex(combo_idx)
-                row.inputs_form.addRow(f"{label}:", combo)
+                row.inputs_form.addRow(_form_label(f"{label}:"), combo)
                 row.input_widgets[key] = combo
 
     def _layer_selections(self) -> dict[tuple[str, str], str | None]:

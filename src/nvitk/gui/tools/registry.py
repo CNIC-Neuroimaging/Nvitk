@@ -95,6 +95,7 @@ _CATEGORY_ORDER = (
     "Registration",
     "Visualization",
     "Transform",
+    "Interpolation",
     "Time & frequency",
     "Measure",
     "Lab",
@@ -169,6 +170,54 @@ _MORPH_PARAMS = (
     ParamSpec("iterations", "Iterations", "int", 1, min=1, max=20),
     ParamSpec("mode", "Mode", "choice", "binary", choices=("binary", "gray")),
     ParamSpec("connectivity", "Connectivity", "int", 2, min=1, max=3),
+)
+
+def _registration_choices() -> dict[str, tuple[str, ...]]:
+    """Option lists of the registration backends, read from the wrappers themselves."""
+    out: dict[str, tuple[str, ...]] = {
+        "flirt_dof": ("6", "7", "9", "12"),
+        "flirt_cost": ("corratio", "mutualinfo", "normmi", "normcorr", "leastsq", "labeldiff"),
+        "flirt_interp": ("trilinear", "nearestneighbour", "sinc", "spline"),
+        "ants_transform": ("SyN", "Rigid", "Affine"),
+        "ants_aff_metric": ("mattes", "GC", "meansquares"),
+        "ants_syn_metric": ("mattes", "CC", "meansquares", "demons"),
+        "ants_interpolator": ("linear", "nearestNeighbor", "genericLabel"),
+        "fireants_transform": ("rigid+affine+syn",),
+        "fireants_loss": ("cc", "mi", "mse"),
+    }
+    try:
+        from nvitk.registration.fsl import flirt as _flirt
+
+        out["flirt_dof"] = tuple(str(d) for d in _flirt.FLIRT_DOF)
+        out["flirt_cost"] = tuple(_flirt.FLIRT_COSTS)
+        out["flirt_interp"] = tuple(_flirt.FLIRT_INTERPS)
+    except Exception:  # noqa: BLE001 — the registry must import without nipype
+        pass
+    try:
+        from nvitk.registration import ants as _ants
+
+        transforms = list(_ants.ANTSPY_TRANSFORM_CHOICES)
+        # SyN first: the default, and the most common ask.
+        transforms.remove("SyN")
+        out["ants_transform"] = ("SyN", *transforms)
+        out["ants_aff_metric"] = tuple(_ants.ANTSPY_AFF_METRICS)
+        out["ants_syn_metric"] = tuple(_ants.ANTSPY_SYN_METRICS)
+        out["ants_interpolator"] = tuple(_ants.ANTSPY_INTERPOLATORS)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from nvitk.registration import fireants as _fa
+
+        out["fireants_transform"] = tuple(_fa.FIREANTS_TRANSFORMS)
+        out["fireants_loss"] = tuple(_fa.FIREANTS_LOSSES)
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+_REG_CHOICES = _registration_choices()
+_REG_ALSO_WARP = ParamSpec(
+    "reg_also_warp", "Also warp layers (comma-separated names)", "str", ""
 )
 
 _TOOLS: tuple[GuiToolSpec, ...] = (
@@ -1359,6 +1408,88 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "Collapse a 3D or 4D image along one axis (max, mean, median, min, std, sum)."
         ),
     ),
+    # ---- Interpolation -----------------------------------------------------------
+    GuiToolSpec(
+        "interp_resample_axes",
+        "Interpolation",
+        "Resample axes (up / down-sample)",
+        (
+            ParamSpec("interp_axes", "Axes (e.g. all · 2 · X,Y · T)", "str", "all"),
+            ParamSpec("interp_mode", "Target given as", "choice", "factor", choices=("factor", "spacing", "size")),
+            ParamSpec("interp_values", "Factor / spacing / size (one, or one per axis)", "str", "2"),
+            ParamSpec(
+                "interp_order", "Interpolation", "choice", "linear",
+                choices=("nearest", "linear", "quadratic", "cubic", "quartic", "quintic"),
+            ),
+            ParamSpec("interp_antialias", "Anti-alias axes that shrink", "bool", True),
+            ParamSpec(
+                "interp_label_method", "Masks: nearest or shape-based (smooth)", "choice", "shape",
+                choices=("shape", "nearest"),
+            ),
+        ),
+        run_mode="notify",
+        description=(
+            "Up- or down-sample any axes — spatial, or time on a 3D+t layer — by a factor "
+            "(2 doubles, 0.5 halves), to a spacing (mm / s) or to a voxel count. The field of "
+            "view is kept and the result overlays the source. Masks resample by nearest "
+            "neighbour or shape-based interpolation, which turns a staircase into a smooth "
+            "surface when upsampling."
+        ),
+    ),
+    GuiToolSpec(
+        "interp_block_reduce",
+        "Interpolation",
+        "Downsample by blocks (mean / max / majority)",
+        (
+            ParamSpec("interp_axes", "Axes (e.g. all · 2 · X,Y · T)", "str", "all"),
+            ParamSpec("interp_factors", "Block size (one, or one per axis)", "str", "2"),
+            ParamSpec(
+                "interp_reduce", "Reduction", "choice", "mean",
+                choices=("mean", "max", "min", "median", "sum", "mode"),
+            ),
+        ),
+        run_mode="notify",
+        description=(
+            "Integer downsampling: each block of voxels becomes one, by its mean, max, min, "
+            "median or sum. Label maps take a majority vote (mode), so no new ids appear."
+        ),
+    ),
+    GuiToolSpec(
+        "interp_mask_slices",
+        "Interpolation",
+        "Interpolate mask between slices",
+        (
+            ParamSpec("interp_slice_axes", "Axes (auto = sparsest per label; e.g. 2 or X,Z)", "str", "auto"),
+            ParamSpec(
+                "interp_slice_method", "Method", "choice", "shape", choices=("shape", "nearest"),
+            ),
+            ParamSpec("interp_max_gap", "Skip gaps longer than (slices, 0 = any)", "int", 0, min=0, max=10000),
+            ParamSpec("interp_overwrite", "May overwrite other labels", "bool", False),
+        ),
+        run_mode="notify",
+        description=(
+            "Draw a mask on every few slices and fill the ones between: each shown label is "
+            "morphed from one annotated slice to the next (shape-based, signed distance) or "
+            "copied from the nearest. Several axes are filled independently and united. "
+            "'Replace active' writes into the layer itself."
+        ),
+    ),
+    GuiToolSpec(
+        "interp_fill_slices",
+        "Interpolation",
+        "Fill missing slices",
+        (
+            ParamSpec("interp_axis", "Axis (e.g. 2 or Z)", "str", "2"),
+            ParamSpec("interp_slices", "Slices (e.g. 10,14-16; empty = auto)", "str", ""),
+            ParamSpec("interp_order", "Interpolation", "choice", "linear", choices=("nearest", "linear")),
+        ),
+        run_mode="notify",
+        description=(
+            "Rebuild dropped or corrupted slices from their neighbours along an axis — the "
+            "listed ones, or by default every slice that holds a NaN or is empty between "
+            "slices with data."
+        ),
+    ),
     # ---- Time (3D+t) ------------------------------------------------------------
     GuiToolSpec(
         "time_extract_frame",
@@ -1398,6 +1529,24 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "Plot intensity over time at the cursor voxel, or averaged over a mask (label) — "
             "bolus tracking, enhancement, cine. On a monoenergetic stack it plots the spectral "
             "curve (HU vs keV). Curves can be saved as CSV."
+        ),
+    ),
+    GuiToolSpec(
+        "time_interpolate_frames",
+        "Time & frequency",
+        "3D+t: interpolate time frames",
+        (
+            ParamSpec("interp_time_mode", "Target given as", "choice", "factor", choices=("factor", "size", "spacing")),
+            ParamSpec("interp_time_value", "Factor / frame count / frame interval (s)", "float", 2.0, min=0.001, max=100000.0),
+            ParamSpec(
+                "interp_order", "Interpolation", "choice", "linear",
+                choices=("nearest", "linear", "quadratic", "cubic", "quartic", "quintic"),
+            ),
+        ),
+        run_mode="notify",
+        description=(
+            "Resample the time axis of a 3D+t layer: more frames for a smoother cine or "
+            "fewer to match another series. The frame interval (t_res) is updated."
         ),
     ),
     GuiToolSpec(
@@ -1474,25 +1623,34 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
     GuiToolSpec(
         "reg_flirt_rigid",
         "Registration",
-        "FLIRT rigid register",
+        "FLIRT register (rigid / affine)",
         (
             ParamSpec("reference_layer", "Fixed / reference layer", "layer", ""),
             _OUTPUT_DIR,
-            ParamSpec("dof", "Degrees of freedom", "int", 6, min=6, max=12),
-            ParamSpec("cost", "FLIRT cost", "str", "corratio"),
             ParamSpec(
-                "searchr_x",
-                "Search range X (deg, 0=default)",
-                "float",
-                0.0,
-                min=0.0,
-                max=180.0,
+                "dof",
+                "Degrees of freedom (6 rigid · 7 +scale · 9 traditional · 12 affine)",
+                "choice",
+                "6",
+                choices=_REG_CHOICES["flirt_dof"],
             ),
+            ParamSpec("cost", "Cost function", "choice", "corratio", choices=_REG_CHOICES["flirt_cost"]),
+            ParamSpec("flirt_searchr", "Search range ±deg, all axes (0 = FLIRT default ±90)", "float", 0.0, min=0.0, max=180.0),
+            ParamSpec("flirt_no_search", "No search (images already roughly aligned)", "bool", False),
+            ParamSpec("flirt_interp", "Output interpolation", "choice", "trilinear", choices=_REG_CHOICES["flirt_interp"]),
+            ParamSpec("flirt_bins", "Histogram bins", "int", 256, min=16, max=1024),
+            _REG_ALSO_WARP,
             ParamSpec("warped_name", "Warped output filename", "str", "moving_warped.nii.gz"),
             ParamSpec("matrix_name", "Matrix output filename", "str", "affine.mat"),
         ),
         needs_reference_layer=True,
         run_mode="notify",
+        description=(
+            "FSL FLIRT: align the active (moving) layer to the reference. 6 DOF is rigid, "
+            "7 adds a global scale, 9 per-axis scales, 12 a full affine. Writes the .mat "
+            "matrix and adds the resliced moving image; 'Also warp' reslices more layers "
+            "(masks with nearest neighbour)."
+        ),
     ),
     GuiToolSpec(
         "reg_flirt_apply",
@@ -1502,24 +1660,45 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("reference_layer", "Reference space layer", "layer", ""),
             ParamSpec("mat_path", "FLIRT matrix (.mat)", "str", ""),
             ParamSpec("out_path", "Output NIfTI path (empty=temp)", "str", ""),
-            ParamSpec("interp", "Interpolation", "str", "trilinear"),
+            ParamSpec("interp", "Interpolation", "choice", "trilinear", choices=_REG_CHOICES["flirt_interp"]),
         ),
         needs_reference_layer=True,
         run_mode="notify",
+        description="Reslice the active layer into the reference space with an existing FLIRT .mat.",
     ),
     GuiToolSpec(
         "reg_ants_register",
         "Registration",
-        "ANTsPy register (ants.registration)",
+        "ANTsPy register",
         (
             ParamSpec("reference_layer", "Fixed / reference layer", "layer", ""),
             _OUTPUT_DIR,
-            ParamSpec("type_of_transform", "type_of_transform", "str", "SyN"),
+            ParamSpec("type_of_transform", "Transform type", "choice", "SyN", choices=_REG_CHOICES["ants_transform"]),
+            ParamSpec("ants_aff_metric", "Linear-stage metric", "choice", "mattes", choices=_REG_CHOICES["ants_aff_metric"]),
+            ParamSpec("ants_syn_metric", "Deformable-stage metric", "choice", "mattes", choices=_REG_CHOICES["ants_syn_metric"]),
+            ParamSpec("ants_aff_iterations", "Linear iterations per level", "str", "2100,1200,1200,10"),
+            ParamSpec("ants_reg_iterations", "Deformable iterations per level", "str", "40,20,0"),
+            ParamSpec("ants_aff_sampling", "Linear metric sampling (bins / radius)", "int", 32, min=1, max=512),
+            ParamSpec("ants_syn_sampling", "Deformable metric sampling (bins / radius)", "int", 32, min=1, max=512),
+            ParamSpec("ants_grad_step", "Gradient step", "float", 0.2, min=0.001, max=5.0),
+            ParamSpec("ants_flow_sigma", "Update-field smoothing (flow sigma)", "float", 3.0, min=0.0, max=50.0),
+            ParamSpec("ants_total_sigma", "Total-field smoothing (total sigma)", "float", 0.0, min=0.0, max=50.0),
+            ParamSpec("ants_random_seed", "Random seed (0 = random)", "int", 0, min=0, max=2**31 - 1),
+            ParamSpec("ants_fixed_mask", "Fixed mask layer (optional)", "layer", ""),
+            ParamSpec("ants_moving_mask", "Moving mask layer (optional)", "layer", ""),
+            ParamSpec("ants_initial_transform", "Initial transform file (optional)", "str", ""),
+            _REG_ALSO_WARP,
             ParamSpec("write_composite_transform", "Write composite transform", "bool", False),
             ParamSpec("verbose", "Verbose", "bool", False),
         ),
         needs_reference_layer=True,
         run_mode="notify",
+        description=(
+            "ants.registration of the active (moving) layer to the reference: Rigid, Affine, "
+            "SyN, the antsRegistrationSyN[r/a/s/b] presets… with the stage metrics, iteration "
+            "schedules and smoothing exposed. Adds the warped image and lists the forward "
+            "transforms; 'Also warp' maps more layers with them (masks with genericLabel)."
+        ),
     ),
     GuiToolSpec(
         "reg_ants_apply",
@@ -1528,25 +1707,47 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         (
             ParamSpec("reference_layer", "Fixed / reference layer", "layer", ""),
             ParamSpec("transform_paths", "Transforms (comma-separated paths)", "str", ""),
+            ParamSpec("ants_invert", "Invert flags (comma-separated 0/1, optional)", "str", ""),
             ParamSpec("out_path", "Output NIfTI path (empty=temp)", "str", ""),
-            ParamSpec("interpolator", "Interpolator", "str", "linear"),
+            ParamSpec("interpolator", "Interpolator", "choice", "linear", choices=_REG_CHOICES["ants_interpolator"]),
             ParamSpec("verbose", "Verbose", "bool", False),
         ),
         needs_reference_layer=True,
         run_mode="notify",
+        description=(
+            "ants.apply_transforms: map the active layer into the reference space. List the "
+            "transforms in ANTs order (warp first, then affine); invert flags apply per "
+            "transform (1 on an affine .mat to go fixed → moving). Use genericLabel or "
+            "nearestNeighbor for masks."
+        ),
     ),
     GuiToolSpec(
         "reg_fireants_register",
         "Registration",
-        "FireANTs register (fireantsRegistration)",
+        "FireANTs register (GPU)",
         (
             ParamSpec("reference_layer", "Fixed / reference layer", "layer", ""),
             _OUTPUT_DIR,
-            ParamSpec("device", "Device (e.g. cuda:0)", "str", "cuda:0"),
+            ParamSpec("fireants_transform", "Stages", "choice", "rigid+affine+syn", choices=_REG_CHOICES["fireants_transform"]),
+            ParamSpec("fireants_loss", "Similarity loss", "choice", "cc", choices=_REG_CHOICES["fireants_loss"]),
+            ParamSpec("fireants_scales", "Pyramid scales (downsampling per level)", "str", "4,2,1"),
+            ParamSpec("fireants_iterations", "Iterations per level (linear stages)", "str", "200,100,50"),
+            ParamSpec("fireants_def_iterations", "Iterations per level, deformable (empty = same)", "str", ""),
+            ParamSpec("fireants_lr", "Learning rate (0 = FireANTs default)", "float", 0.0, min=0.0, max=10.0),
+            ParamSpec("fireants_cc_kernel", "CC kernel size (voxels)", "int", 5, min=3, max=15),
+            ParamSpec("fireants_smooth_warp", "Warp smoothing sigma", "float", 0.5, min=0.0, max=10.0),
+            ParamSpec("fireants_smooth_grad", "Gradient smoothing sigma", "float", 1.0, min=0.0, max=10.0),
+            ParamSpec("device", "Device (e.g. cuda:0, cpu)", "str", "cuda:0"),
+            _REG_ALSO_WARP,
             ParamSpec("verbose", "Verbose", "bool", False),
         ),
         needs_reference_layer=True,
         run_mode="notify",
+        description=(
+            "GPU registration with FireANTs: any chain of moments → rigid → affine → greedy / "
+            "SyN, each stage starting from the previous one, with a multi-resolution pyramid. "
+            "Transforms are saved in ANTs format, so 'FireANTs apply' or ANTsPy maps more images."
+        ),
     ),
     GuiToolSpec(
         "reg_fireants_apply",
@@ -1556,9 +1757,11 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("reference_layer", "Fixed / reference layer", "layer", ""),
             ParamSpec("transform_paths", "Transforms (comma-separated paths)", "str", ""),
             ParamSpec("out_path", "Output NIfTI path (empty=temp)", "str", ""),
+            ParamSpec("interpolator", "Interpolator", "choice", "linear", choices=_REG_CHOICES["ants_interpolator"]),
         ),
         needs_reference_layer=True,
         run_mode="notify",
+        description="Map the active layer into the reference space with FireANTs (ANTs-format) transforms.",
     ),
     GuiToolSpec(
         "orient_volume",

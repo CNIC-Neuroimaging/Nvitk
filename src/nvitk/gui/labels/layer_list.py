@@ -104,7 +104,113 @@ def _delegate_class() -> type:
             super().__init__(parent)
             self._viewer = viewer
             self._expanded: dict[int, _Expansion] = {}
+            #: Folder state of the layer list (:mod:`nvitk.gui.core.layer_folders`),
+            #: once folders are installed: headers above rows, members indented.
+            self._folders: Any | None = None
             label_filter_hub().changed.connect(lambda _layer: self._repaint())
+
+        # -- folders ----------------------------------------------------------
+        #
+        # A row in a folder is a header band (one per folder that starts on it)
+        # over the layer item, indented by its depth. Everything the label chips
+        # and Napari's own delegate do happens inside the item part: they are
+        # handed an option whose rect *is* that part.
+
+        def set_folders(self, folders: Any) -> None:
+            self._folders = folders
+            folders.changed.connect(self._repaint)
+
+        def _entry(self, index: Any) -> Any | None:
+            if self._folders is None:
+                return None
+            return self._folders.entry(self._layer(index))
+
+        @staticmethod
+        def _plain(entry: Any) -> bool:
+            return entry is None or (not entry.headers and entry.depth == 0 and entry.item_visible and not entry.hidden)
+
+        def inner_rect(self, rect: QRect, index: Any) -> QRect:
+            """The part of a row's *rect* the layer item is drawn in."""
+            from nvitk.gui.core.layer_folders import item_rect
+
+            entry = self._entry(index)
+            return rect if self._plain(entry) else item_rect(rect, entry)
+
+        def _inner(self, option: QStyleOptionViewItem, index: Any) -> QStyleOptionViewItem:
+            entry = self._entry(index)
+            if self._plain(entry):
+                return option
+            inner = QStyleOptionViewItem(option)
+            inner.rect = self.inner_rect(option.rect, index)
+            return inner
+
+        def sizeHint(self, option: QStyleOptionViewItem, index: Any) -> QSize:
+            size = self._item_size_hint(option, index)
+            entry = self._entry(index)
+            if self._plain(entry):
+                return size
+            if entry.hidden:
+                return QSize(size.width(), 0)
+            size.setHeight(entry.band + (size.height() if entry.item_visible else 0))
+            return size
+
+        def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: Any) -> None:
+            entry = self._entry(index)
+            if self._plain(entry):
+                self._paint_item(painter, option, index)
+                return
+            if entry.hidden:
+                return
+            from nvitk.gui.core.layer_folders import header_rects, paint_guides, paint_header
+
+            folders = self._folders
+            for path, rect in header_rects(option.rect, entry):
+                paint_header(
+                    painter, option, rect, path,
+                    collapsed=path in folders.collapsed,
+                    count=len(folders.members(path)),
+                    visibility=folders.visibility(path),
+                    selected=folders.is_selected(path),
+                )
+            if entry.item_visible:
+                paint_guides(painter, option, option.rect, entry)
+                self._paint_item(painter, self._inner(option, index), index)
+
+        def editorEvent(self, event: Any, model: Any, option: QStyleOptionViewItem, index: Any) -> bool:
+            entry = self._entry(index)
+            if not self._plain(entry) and hasattr(event, "pos"):
+                # Header clicks are taken by the folder mouse filter before the
+                # view sees them; anything that still lands in the band is not
+                # the layer item's.
+                if entry.hidden or event.pos().y() < option.rect.top() + entry.band or not entry.item_visible:
+                    return True
+            return self._item_editor_event(event, model, self._inner(option, index), index)
+
+        def helpEvent(self, event: Any, view: Any, option: QStyleOptionViewItem, index: Any) -> bool:
+            entry = self._entry(index)
+            if index.isValid() and not self._plain(entry) and entry.headers:
+                from nvitk.gui.core.layer_folders import folder_name, header_parts, header_rects
+
+                pos = event.pos()
+                for path, rect in header_rects(option.rect, entry):
+                    if rect.top() <= pos.y() <= rect.bottom():
+                        parts = header_parts(rect)
+                        if parts["arrow"].contains(pos):
+                            tip = "Fold / unfold the folder"
+                        elif parts["box"].contains(pos):
+                            tip = "Show or hide every layer in the folder"
+                        else:
+                            n = len(self._folders.members(path))
+                            tip = (
+                                f"Folder “{folder_name(path)}” — {n} layer(s). Click: select them · "
+                                "double-click: rename · right-click: folder menu"
+                            )
+                        QToolTip.showText(event.globalPos(), tip, view)
+                        return True
+            return self._item_help_event(event, view, self._inner(option, index), index)
+
+        def updateEditorGeometry(self, editor: Any, option: QStyleOptionViewItem, index: Any) -> None:
+            super().updateEditorGeometry(editor, self._inner(option, index), index)
 
         # -- state ------------------------------------------------------------
 
@@ -130,7 +236,7 @@ def _delegate_class() -> type:
             footer = _FOOTER_H if n > _MAX_LINES else 0
             return _HEADER_H + shown * _LINE_H + footer + 2 * _PAD
 
-        def sizeHint(self, option: QStyleOptionViewItem, index: Any) -> QSize:
+        def _item_size_hint(self, option: QStyleOptionViewItem, index: Any) -> QSize:
             size = super().sizeHint(option, index)
             layer = self._layer(index)
             if self.is_expanded(layer):
@@ -191,7 +297,7 @@ def _delegate_class() -> type:
 
         # -- painting ---------------------------------------------------------
 
-        def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: Any) -> None:
+        def _paint_item(self, painter: QPainter, option: QStyleOptionViewItem, index: Any) -> None:
             if not self._has_chip(index):
                 super().paint(painter, option, index)
                 return
@@ -312,7 +418,7 @@ def _delegate_class() -> type:
 
         # -- interaction ------------------------------------------------------
 
-        def editorEvent(self, event: Any, model: Any, option: QStyleOptionViewItem, index: Any) -> bool:
+        def _item_editor_event(self, event: Any, model: Any, option: QStyleOptionViewItem, index: Any) -> bool:
             if not self._has_chip(index) or not hasattr(event, "pos"):
                 return super().editorEvent(event, model, option, index)
             kind = event.type()
@@ -388,7 +494,7 @@ def _delegate_class() -> type:
             if manager is not None:
                 manager.show_labels()
 
-        def helpEvent(self, event: Any, view: Any, option: QStyleOptionViewItem, index: Any) -> bool:
+        def _item_help_event(self, event: Any, view: Any, option: QStyleOptionViewItem, index: Any) -> bool:
             if index.isValid() and self._has_chip(index):
                 pos = event.pos()
                 tip = None
@@ -499,7 +605,7 @@ class _WheelInLabels(QObject):
         layer = self._delegate._layer(index)
         if not self._delegate.is_expanded(layer):
             return False
-        rect = self._view.visualRect(index)
+        rect = self._delegate.inner_rect(self._view.visualRect(index), index)
         if not self._delegate._panel_rect(rect, index).contains(pos):
             return False
         delta = event.angleDelta().y()

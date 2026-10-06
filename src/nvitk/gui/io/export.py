@@ -115,16 +115,22 @@ def export_layer(
         imsave(path, img, force_type=force_type)
         return
 
-    if layer_type == "Surface":
-        mesh = layer_to_mesh(layer)
+    if layer_type in ("Surface", "Points"):
+        from nvitk.gui.mesh.layers import layer_to_mesh as world_mesh
+        from nvitk.gui.mesh.layers import layer_to_point_cloud, series_controller
+        from nvitk.meshlab.io import write_mesh_series, write_surface
+
         suffix = path.suffix.lower()
-        if force_type == "stl" or suffix == ".stl":
-            write_mesh_stl(path, mesh)
+        if force_type == "stl" and suffix != ".stl":
+            path = path.with_suffix(".stl")
+        ctrl = series_controller(layer)
+        if ctrl is not None and suffix in ("", ".pvd"):
+            write_mesh_series(ctrl.series, path.with_suffix("") if suffix else path)
             return
-        raise ValueError(
-            f"Surface export supports .stl (got {path.suffix!r}). "
-            "Use a .stl path or force_type='stl'."
-        )
+        # World coordinates (mm): what the layer shows, whatever its transform.
+        obj = world_mesh(layer) if layer_type == "Surface" else layer_to_point_cloud(layer)
+        write_surface(path, obj)
+        return
 
     raise ValueError(f"Cannot export layer type {layer_type!r} with nvitk I/O.")
 
@@ -144,7 +150,9 @@ def export_selected_layer(
     try:
         if force_type is None and path:
             suffix = Path(path).suffix.lower()
-            if suffix == ".stl":
+            if layer.__class__.__name__ in ("Surface", "Points"):
+                pass  # the mesh writers pick the format from the suffix
+            elif suffix == ".stl":
                 force_type = "stl"
             else:
                 guess_write_type(path)

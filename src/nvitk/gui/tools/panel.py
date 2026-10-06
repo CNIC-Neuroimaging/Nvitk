@@ -1,4 +1,4 @@
-"""Magicgui Tools tab with category/operation pickers and per-tool parameters."""
+"""Magicgui Imaging tab (the tool catalog) with category/operation pickers and per-tool parameters."""
 
 from __future__ import annotations
 
@@ -41,11 +41,25 @@ def _collect_params(widget: Any, tool_id: str) -> dict[str, Any]:
     return out
 
 
+def _registry_param_names() -> tuple[str, ...]:
+    """Every parameter name any registered tool declares, in first-seen order."""
+    from nvitk.gui.tools.registry import all_tools
+
+    names: dict[str, None] = {}
+    for spec in all_tools():
+        for param in spec.params:
+            names.setdefault(param.name, None)
+    return tuple(names)
+
+
 def _set_param_visibility(widget: Any, tool_id: str) -> None:
     """Show only the parameter widgets on *widget* that *tool_id* actually uses; hide the rest of the
     shared parameter pool."""
     visible = {p.name for p in params_for_tool(tool_id)}
-    all_names = (
+    # The registry's own names as well as the form's: a parameter a tool declares
+    # without a hand-written widget gets one from :func:`_add_registry_widgets`,
+    # and it has to be hidden again when another tool is selected.
+    all_names = _registry_param_names() + (
         "footprint",
         "iterations",
         "mode",
@@ -384,6 +398,119 @@ def _update_phase_layers(widget: Any, viewer: Any) -> None:
     _update_reference_layers(widget, viewer)
 
 
+#: Bounds for spin boxes whose :class:`ParamSpec` leaves them open — magicgui's own
+#: defaults (0..999) would silently clamp a seed or an iteration count.
+_INT_BOUND = 2**31 - 1
+_FLOAT_BOUND = 1e12
+
+
+def _widget_for_param(spec: Any) -> Any:
+    """A magicgui widget for a registry :class:`ParamSpec` the static form does not declare.
+
+    ``gui_only`` keeps it out of the ``tool_panel`` call signature (magicgui binds
+    every other widget as a keyword argument); :func:`_collect_params` reads it by
+    name like any other.
+    """
+    from magicgui.widgets import create_widget
+
+    kind = spec.kind
+    options: dict[str, Any] = {}
+    default = spec.default
+    if kind == "int":
+        annotation: Any = int
+        options["min"] = int(spec.min) if spec.min is not None else -_INT_BOUND
+        options["max"] = int(spec.max) if spec.max is not None else _INT_BOUND
+        default = int(default if default is not None else 0)
+    elif kind == "float":
+        annotation = float
+        options["min"] = float(spec.min) if spec.min is not None else -_FLOAT_BOUND
+        options["max"] = float(spec.max) if spec.max is not None else _FLOAT_BOUND
+        default = float(default if default is not None else 0.0)
+        span = abs(default) or (float(spec.max) if spec.max else 1.0)
+        options["step"] = 0.01 if span < 1 else (0.1 if span < 10 else 1.0)
+    elif kind == "bool":
+        annotation = bool
+        default = bool(default)
+    elif kind == "choice":
+        annotation = str
+        choices = [str(c) for c in (spec.choices or ())] or [str(default or "")]
+        options["choices"] = choices
+        default = str(default) if str(default) in choices else choices[0]
+        return create_widget(
+            value=default, name=spec.name, label=spec.label, annotation=annotation,
+            widget_type="ComboBox", options=options, gui_only=True,
+        )
+    elif kind == "layer":
+        return create_widget(
+            value=_LAYER_NONE, name=spec.name, label=spec.label, annotation=str,
+            widget_type="ComboBox", options={"choices": [_LAYER_NONE]}, gui_only=True,
+        )
+    else:
+        annotation = str
+        default = "" if default is None else str(default)
+    return create_widget(
+        value=default, name=spec.name, label=spec.label, annotation=annotation,
+        options=options, gui_only=True,
+    )
+
+
+def _order_params(panel: Any, tool_id: str) -> None:
+    """Lay *tool_id*'s parameter widgets out in the order its registry entry lists them.
+
+    Widgets are shared between tools, so the form's own order is whatever the
+    first tool to need each one implied; a tool whose parameters arrive scattered
+    (its output options above its transform type) reads as nonsense. Moved only
+    when out of order, so switching between tools that already agree costs nothing.
+    """
+    widgets = [getattr(panel, p.name, None) for p in params_for_tool(tool_id)]
+    widgets = [w for w in widgets if w is not None]
+    if len(widgets) < 2:
+        return
+    current = list(panel)
+    try:
+        positions = [current.index(w) for w in widgets]
+    except ValueError:
+        return
+    if positions == sorted(positions):
+        return
+    anchor = min(positions)
+    for widget in widgets:
+        panel.remove(widget)
+    for offset, widget in enumerate(widgets):
+        panel.insert(anchor + offset, widget)
+
+
+def _add_registry_widgets(panel: Any) -> list[str]:
+    """Give every registry parameter without a hand-written widget one of its own.
+
+    The form below declares widgets by hand, and a parameter a tool lists in the
+    registry but nobody added there was silently dropped: :func:`_collect_params`
+    found no widget and the tool ran on its built-in default (the registration
+    tools could not be configured at all). Inserted just above the Run button.
+    """
+    from nvitk.gui.tools.registry import all_tools
+
+    existing = {w.name for w in panel}
+    call_button = getattr(panel, "_call_button", None)
+    added: list[str] = []
+    for tool in all_tools():
+        for spec in tool.params:
+            if spec.name in existing:
+                continue
+            widget = _widget_for_param(spec)
+            widget.visible = False
+            index = len(panel)
+            if call_button is not None:
+                try:
+                    index = list(panel).index(call_button)
+                except ValueError:
+                    pass
+            panel.insert(index, widget)
+            existing.add(spec.name)
+            added.append(spec.name)
+    return added
+
+
 def build_tool_panel(
     viewer: Any,
     app_state: dict[str, Any],
@@ -397,7 +524,7 @@ def build_tool_panel(
     get_totalseg_roi = None,
     label_selector = None,
 ) -> Any:
-    """Return magicgui FunctionGui for the Tools tab."""
+    """Return magicgui FunctionGui for the Imaging tab."""
     _ = label_selector
 
     @magicgui(
@@ -414,7 +541,7 @@ def build_tool_panel(
             ),
             "enabled": False,
         },
-        label_ids={"label": "Label id(s) (comma-separated)", "value": ""},
+        label_ids={"label": "Label id(s) (empty = the labels shown)", "value": ""},
         overlay_mode={"choices": ["add_layer", "replace_active"], "label": "Output mode"},
         footprint={"label": "Footprint (radius)", "min": 1, "max": 32, "value": 1},
         iterations={"label": "Iterations", "min": 1, "max": 20, "value": 1},
@@ -1336,6 +1463,7 @@ def build_tool_panel(
             tool_panel.operation.value = ops[0]
         tid = tool_id_from_label(cat, tool_panel.operation.value)
         if tid:
+            _order_params(tool_panel, tid)
             _set_param_visibility(tool_panel, tid)
             _update_choice_params(tool_panel, tid)
         _sync_operation_help()
@@ -1346,6 +1474,7 @@ def build_tool_panel(
         operation."""
         tid = tool_id_from_label(tool_panel.category.value, _signal_value(event))
         if tid:
+            _order_params(tool_panel, tid)
             _set_param_visibility(tool_panel, tid)
             _update_choice_params(tool_panel, tid)
         _update_reference_layers(tool_panel, viewer)
@@ -1353,8 +1482,11 @@ def build_tool_panel(
             _prefill_vessel_cross_section_layers(tool_panel, viewer)
         _sync_operation_help()
 
+    _add_registry_widgets(tool_panel)
+
     tid0 = tool_id_from_label(default_category(), default_operation(default_category()))
     if tid0:
+        _order_params(tool_panel, tid0)
         _set_param_visibility(tool_panel, tid0)
         _update_choice_params(tool_panel, tid0)
         _update_reference_layers(tool_panel, viewer)

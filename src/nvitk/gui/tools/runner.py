@@ -491,6 +491,14 @@ def run_gui_tool(
         _run_viz_ortho_views(viewer, layer)
         return None
 
+    from nvitk.gui.tools.interpolation_tools import INTERPOLATION_TOOL_IDS
+
+    if tool_id in INTERPOLATION_TOOL_IDS:
+        from nvitk.gui.tools.interpolation_tools import run_interpolation_tool
+
+        run_interpolation_tool(tool_id, viewer, layer, params, label_ids=label_ids)
+        return None
+
     # 3D+t and k-space tools manage their own output layers (a 3D result of a
     # 3D+t layer, a k-space view with its complex data kept beside it).
     _time_freq = {
@@ -1649,205 +1657,316 @@ def run_gui_tool(
         )
         return None
 
-    if tool_id == "reg_flirt_rigid":
-        from nvitk.registration.fsl.flirt import flirt_register_rigid
+    if tool_id.startswith("reg_"):
+        return _run_registration_tool(tool_id, viewer, layer, params)
 
-        ref_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
+    raise NotImplementedError(f"Tool '{tool_id}' is not implemented in the GUI runner.")
+
+
+# ── registration ─────────────────────────────────────────────────────────────
+
+
+def _transform_list(params: dict[str, Any]) -> list[Path]:
+    """The ``transform_paths`` field as existing files, in the order given."""
+    raw = str(params.get("transform_paths") or "").strip()
+    if not raw:
+        raise ValueError("Set the transform path(s) (comma-separated).")
+    paths = [Path(p.strip()) for p in raw.split(",") if p.strip()]
+    for path in paths:
+        if not path.is_file():
+            raise ValueError(f"Transform not found: {path}")
+    return paths
+
+
+def _output_path(params: dict[str, Any], prefix: str) -> Path:
+    """``out_path``, or a fresh temp file when it is left empty."""
+    out_s = str(params.get("out_path") or "").strip()
+    if out_s:
+        return Path(out_s)
+    return Path(tempfile.mkdtemp(prefix=f"nvitk_{prefix}_")) / "resampled.nii.gz"
+
+
+def _output_dir(params: dict[str, Any], prefix: str) -> Path:
+    """``output_dir``, or a fresh temp directory when it is left empty."""
+    out = Path(str(params.get("output_dir") or "").strip() or tempfile.mkdtemp(prefix=f"nvitk_{prefix}_"))
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+def _optional_layer_nifti(viewer: Any, params: dict[str, Any], key: str, prefix: str) -> Path | None:
+    """A layer picked in an optional dropdown, written to a temp NIfTI (``None`` if unset)."""
+    name = _layer_param(params, key)
+    if not name:
+        return None
+    return _export_layer_nifti(_resolve_layer(viewer, name), prefix=prefix)
+
+
+def _add_volume_file(viewer: Any, path: Path, name: str, *, labels: bool = False) -> Any:
+    """Open a registration output with nvitk's own reader and add it as a layer.
+
+    Going through the reader, rather than borrowing the reference layer's placement,
+    is what keeps a sagittal- or coronal-stored reference right: the file carries
+    its own affine, and the reader shows it world-ordered like any opened file.
+    """
+    import numpy as numpy_host  # module ``np`` may be a CuPy proxy via ``setup(globals())``
+
+    from nvitk.gui.io.napari_io import _prepare_layer_tuple
+    from nvitk.io import imread
+
+    img = imread(path, backend="numpy")
+    img = img[0] if isinstance(img, list) else img
+    data, meta, _ = _prepare_layer_tuple(img, Path(path))
+    kwargs: dict[str, Any] = {"name": name, "metadata": meta["metadata"]}
+    for key in ("affine", "scale", "axis_labels"):
+        if key in meta:
+            kwargs[key] = meta[key]
+    if labels:
+        labels_arr = numpy_host.rint(to_numpy(data)).astype(numpy_host.int32)
+        return viewer.add_labels(labels_arr, opacity=0.7, **kwargs)
+    return viewer.add_image(coerce_tool_output(data), **kwargs)
+
+
+def _also_warp(
+    viewer: Any,
+    params: dict[str, Any],
+    ref_layer: Any,
+    apply: Any,
+    *,
+    tag: str,
+) -> list[str]:
+    """Map every layer named in ``reg_also_warp`` with *apply*; returns the new layer names.
+
+    *apply(moving_path, out_path, is_label)* reslices one file into the reference
+    space. Masks keep their ids: they go through the label interpolator.
+    """
+    from nvitk.gui.labels.visibility import is_label_like_layer
+
+    raw = str(params.get("reg_also_warp") or "").strip()
+    added: list[str] = []
+    for name in [n.strip() for n in raw.split(",") if n.strip()]:
+        try:
+            other = _resolve_layer(viewer, name)
+        except ValueError as exc:
+            notify(str(exc), error=True)
+            continue
+        is_label = type(other).__name__ == "Labels" or is_label_like_layer(other)
+        src = _export_layer_nifti(other, prefix=f"{tag}_also")
+        out = src.parent / "warped.nii.gz"
+        apply(src, out, is_label)
+        new_name = f"{other.name}_{tag}_warped"
+        _add_volume_file(viewer, out, new_name, labels=is_label)
+        added.append(new_name)
+    return added
+
+
+def _run_registration_tool(tool_id: str, viewer: Any, layer: Any, params: dict[str, Any]) -> None:
+    """FLIRT / ANTsPy / FireANTs registration and transform application."""
+    ref_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
+
+    if tool_id == "reg_flirt_rigid":
+        from nvitk.registration.fsl.flirt import flirt_apply_rigid, flirt_register_rigid
+
         moving_path = _ensure_nifti_path(layer, prefix="flirt_moving")
         fixed_path = _ensure_nifti_path(ref_layer, prefix="flirt_fixed")
-        out_dir = Path(
-            str(params.get("output_dir") or "").strip()
-            or tempfile.mkdtemp(prefix="nvitk_flirt_reg_")
-        )
+        out_dir = _output_dir(params, "flirt_reg")
         dof = int(params.get("dof") or 6)
         cost = str(params.get("cost") or "corratio").strip() or "corratio"
-        searchr = float(params.get("searchr_x") or 0)
-        searchr_x = searchr if searchr > 0 else None
-        warped_name = str(params.get("warped_name") or "moving_warped.nii.gz").strip()
-        matrix_name = str(params.get("matrix_name") or "affine.mat").strip()
-        notify(f"FLIRT rigid: moving→fixed, output {out_dir}")
+        searchr = float(params.get("flirt_searchr") or 0.0)
+        legacy_x = float(params.get("searchr_x") or 0.0)
+        interp = str(params.get("flirt_interp") or "trilinear")
+        notify(f"FLIRT ({dof} DOF, {cost}): moving→fixed, output {out_dir}")
         res = flirt_register_rigid(
             moving_path,
             fixed_path,
             out_dir,
             dof=dof,
             cost=cost,
-            warped_name=warped_name,
-            matrix_name=matrix_name,
-            searchr_x=searchr_x,
+            warped_name=str(params.get("warped_name") or "moving_warped.nii.gz").strip(),
+            matrix_name=str(params.get("matrix_name") or "affine.mat").strip(),
+            searchr=searchr if searchr > 0 else None,
+            searchr_x=legacy_x if legacy_x > 0 else None,
+            no_search=bool(params.get("flirt_no_search")),
+            interp=interp,
+            bins=int(params.get("flirt_bins") or 0) or None,
         )
         notify(f"FLIRT matrix: {res.matrix_path}")
         if res.warped_path is not None:
-            notify(f"FLIRT warped: {res.warped_path}")
-            from nvitk.io import imread
+            _add_volume_file(viewer, res.warped_path, f"{layer.name}_flirt_warped")
 
-            warped = imread(res.warped_path)
-            viewer.add_image(
-                coerce_tool_output(warped),
-                **_layer_kwargs_from(ref_layer, "flirt_warped"),
+        def _apply(src: Path, out: Path, is_label: bool) -> None:
+            flirt_apply_rigid(
+                src, fixed_path, res.matrix_path, out,
+                interp="nearestneighbour" if is_label else interp,
             )
+
+        _also_warp(viewer, params, ref_layer, _apply, tag="flirt")
         return None
 
     if tool_id == "reg_flirt_apply":
         from nvitk.registration.fsl.flirt import flirt_apply_rigid
 
-        ref_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
         mat_path = Path(str(params.get("mat_path") or "").strip())
         if not mat_path.is_file():
             raise ValueError("Set a valid FLIRT matrix path (.mat).")
-        out_s = str(params.get("out_path") or "").strip()
-        if out_s:
-            out_path = Path(out_s)
-        else:
-            out_path = Path(tempfile.mkdtemp(prefix="nvitk_flirt_apply_")) / "resampled.nii.gz"
+        out_path = _output_path(params, "flirt_apply")
         in_path = _ensure_nifti_path(layer, prefix="flirt_in")
         ref_path = _ensure_nifti_path(ref_layer, prefix="flirt_ref")
         interp = str(params.get("interp") or "trilinear").strip() or "trilinear"
-        notify(f"FLIRT apply: {in_path.name} → {out_path}")
-        flirt_apply_rigid(in_path, ref_path, mat_path, out_path, interp=interp)
-        from nvitk.io import imread
-
-        out_img = imread(out_path)
-        viewer.add_image(
-            coerce_tool_output(out_img),
-            **_layer_kwargs_from(ref_layer, "flirt_applied"),
-        )
-        notify(f"FLIRT output layer from {out_path}")
+        notify(f"FLIRT apply ({interp}): {in_path.name} → {out_path}")
+        written = flirt_apply_rigid(in_path, ref_path, mat_path, out_path, interp=interp)
+        _add_volume_file(viewer, written, f"{layer.name}_flirt_applied", labels=interp == "nearestneighbour" and type(layer).__name__ == "Labels")
         return None
 
     if tool_id == "reg_ants_register":
-        from nvitk.registration.ants import ants_register
+        from nvitk.registration.ants import ants_apply, ants_register
 
-        ref_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
         moving_path = _ensure_nifti_path(layer, prefix="ants_moving")
         fixed_path = _ensure_nifti_path(ref_layer, prefix="ants_fixed")
-        out_dir = Path(str(params.get("output_dir") or "").strip() or tempfile.mkdtemp(prefix="nvitk_ants_reg_"))
-        out_dir.mkdir(parents=True, exist_ok=True)
+        out_dir = _output_dir(params, "ants_reg")
         tot = str(params.get("type_of_transform") or "SyN").strip() or "SyN"
-        write_comp = bool(params.get("write_composite_transform") or False)
-        verbose = bool(params.get("verbose") or False)
-        notify(f"ANTsPy register: moving→fixed ({tot}), output {out_dir}")
+        seed = int(params.get("ants_random_seed") or 0)
+        options = {
+            "aff_metric": params.get("ants_aff_metric") or None,
+            "syn_metric": params.get("ants_syn_metric") or None,
+            "aff_iterations": params.get("ants_aff_iterations") or None,
+            "reg_iterations": params.get("ants_reg_iterations") or None,
+            "aff_sampling": params.get("ants_aff_sampling") or None,
+            "syn_sampling": params.get("ants_syn_sampling") or None,
+            "grad_step": params.get("ants_grad_step") or None,
+            "flow_sigma": params.get("ants_flow_sigma"),
+            "total_sigma": params.get("ants_total_sigma"),
+            "random_seed": seed if seed > 0 else None,
+        }
+        notify(f"ANTsPy register ({tot}): moving→fixed, output {out_dir}")
         res = ants_register(
             fixed_path=fixed_path,
             moving_path=moving_path,
             out_dir=out_dir,
             type_of_transform=tot,
-            write_composite_transform=write_comp,
-            verbose=verbose,
+            write_composite_transform=bool(params.get("write_composite_transform")),
+            verbose=bool(params.get("verbose")),
+            initial_transform=str(params.get("ants_initial_transform") or "").strip() or None,
+            fixed_mask_path=_optional_layer_nifti(viewer, params, "ants_fixed_mask", "ants_fmask"),
+            moving_mask_path=_optional_layer_nifti(viewer, params, "ants_moving_mask", "ants_mmask"),
+            **options,
         )
-        notify(f"ANTs warped: {res.warped_moving_path}")
-        try:
-            from nvitk.io import imread
+        _add_volume_file(viewer, res.warped_moving_path, f"{layer.name}_ants_warped")
+        fwd = ", ".join(str(p) for p in res.fwd_transforms)
+        notify(f"ANTs ({tot}) done. Forward transforms: {fwd}")
+        gui_log(f"ANTs inverse transforms: {', '.join(str(p) for p in res.inv_transforms)}")
 
-            warped = imread(res.warped_moving_path)
-            viewer.add_image(
-                coerce_tool_output(warped),
-                **_layer_kwargs_from(ref_layer, "ants_warped"),
+        def _apply(src: Path, out: Path, is_label: bool) -> None:
+            ants_apply(
+                fixed_path=fixed_path,
+                moving_path=src,
+                out_path=out,
+                transforms=list(res.fwd_transforms),
+                interpolator="genericLabel" if is_label else "linear",
             )
-        except Exception:
-            pass
+
+        _also_warp(viewer, params, ref_layer, _apply, tag="ants")
         return None
 
     if tool_id == "reg_ants_apply":
         from nvitk.registration.ants import ants_apply
 
-        ref_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
         fixed_path = _ensure_nifti_path(ref_layer, prefix="ants_fixed")
         moving_path = _ensure_nifti_path(layer, prefix="ants_moving")
-        tr = str(params.get("transform_paths") or "").strip()
-        if not tr:
-            raise ValueError("Set transform_paths (comma-separated).")
-        transform_paths = [Path(p.strip()) for p in tr.split(",") if p.strip()]
-        for p in transform_paths:
-            if not p.is_file():
-                raise ValueError(f"Transform not found: {p}")
-        out_s = str(params.get("out_path") or "").strip()
-        out_path = Path(out_s) if out_s else (Path(tempfile.mkdtemp(prefix="nvitk_ants_apply_")) / "resampled.nii.gz")
+        transform_paths = _transform_list(params)
+        flags_raw = str(params.get("ants_invert") or "").strip()
+        invert = None
+        if flags_raw:
+            invert = [v.strip().lower() in ("1", "true", "yes", "y") for v in flags_raw.split(",")]
+            if len(invert) != len(transform_paths):
+                raise ValueError(
+                    f"Give one invert flag per transform ({len(transform_paths)} transforms, "
+                    f"{len(invert)} flags)."
+                )
+        out_path = _output_path(params, "ants_apply")
         interpolator = str(params.get("interpolator") or "linear").strip() or "linear"
-        verbose = bool(params.get("verbose") or False)
-        notify(f"ANTs apply: {moving_path.name} → {out_path}")
+        notify(f"ANTs apply ({interpolator}): {moving_path.name} → {out_path}")
         ants_apply(
             fixed_path=fixed_path,
             moving_path=moving_path,
             out_path=out_path,
             transforms=transform_paths,
             interpolator=interpolator,
-            verbose=verbose,
+            whichtoinvert=invert,
+            verbose=bool(params.get("verbose")),
         )
-        from nvitk.io import imread
-
-        out_img = imread(out_path)
-        viewer.add_image(
-            coerce_tool_output(out_img),
-            **_layer_kwargs_from(ref_layer, "ants_applied"),
+        _add_volume_file(
+            viewer, out_path, f"{layer.name}_ants_applied",
+            labels=interpolator in ("genericLabel", "nearestNeighbor", "multiLabel"),
         )
-        notify(f"ANTs output layer from {out_path}")
         return None
 
     if tool_id == "reg_fireants_register":
-        from nvitk.registration.fireants import fireants_register
+        from nvitk.registration.fireants import fireants_apply, fireants_register
 
-        ref_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
         moving_path = _ensure_nifti_path(layer, prefix="fireants_moving")
         fixed_path = _ensure_nifti_path(ref_layer, prefix="fireants_fixed")
-        out_dir = Path(str(params.get("output_dir") or "").strip() or tempfile.mkdtemp(prefix="nvitk_fireants_reg_"))
-        out_dir.mkdir(parents=True, exist_ok=True)
+        out_dir = _output_dir(params, "fireants_reg")
+        transform = str(params.get("fireants_transform") or "rigid+affine+syn")
         device = str(params.get("device") or "cuda:0").strip() or "cuda:0"
-        verbose = bool(params.get("verbose") or False)
-        notify(f"FireANTs register: moving→fixed (device={device}), output {out_dir}")
+        lr = float(params.get("fireants_lr") or 0.0)
+        notify(f"FireANTs ({transform}) on {device}: moving→fixed, output {out_dir}")
         res = fireants_register(
             fixed_path=fixed_path,
             moving_path=moving_path,
             out_dir=out_dir,
+            transform=transform,
+            loss=str(params.get("fireants_loss") or "cc"),
+            scales=str(params.get("fireants_scales") or "4,2,1"),
+            iterations=str(params.get("fireants_iterations") or "200,100,50"),
+            deformable_iterations=str(params.get("fireants_def_iterations") or "").strip() or None,
+            learning_rate=lr if lr > 0 else None,
+            cc_kernel_size=int(params.get("fireants_cc_kernel") or 5),
+            smooth_warp_sigma=float(params.get("fireants_smooth_warp") if params.get("fireants_smooth_warp") is not None else 0.5),
+            smooth_grad_sigma=float(params.get("fireants_smooth_grad") if params.get("fireants_smooth_grad") is not None else 1.0),
             device=device,
-            verbose=verbose,
+            verbose=bool(params.get("verbose")),
         )
-        notify(f"FireANTs warped: {res.warped_moving_path}")
-        try:
-            from nvitk.io import imread
+        _add_volume_file(viewer, res.warped_moving_path, f"{layer.name}_fireants_warped")
+        notify(
+            f"FireANTs {'+'.join(res.stages)} done. Transforms: "
+            + ", ".join(str(p) for p in res.transforms)
+        )
 
-            warped = imread(res.warped_moving_path)
-            viewer.add_image(
-                coerce_tool_output(warped),
-                **_layer_kwargs_from(ref_layer, "fireants_warped"),
+        def _apply(src: Path, out: Path, is_label: bool) -> None:
+            fireants_apply(
+                fixed_path=fixed_path,
+                moving_path=src,
+                out_path=out,
+                transforms=list(res.transforms),
+                interpolator="genericLabel" if is_label else "linear",
             )
-        except Exception:
-            pass
+
+        _also_warp(viewer, params, ref_layer, _apply, tag="fireants")
         return None
 
     if tool_id == "reg_fireants_apply":
         from nvitk.registration.fireants import fireants_apply
 
-        ref_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
         fixed_path = _ensure_nifti_path(ref_layer, prefix="fireants_fixed")
         moving_path = _ensure_nifti_path(layer, prefix="fireants_moving")
-        tr = str(params.get("transform_paths") or "").strip()
-        if not tr:
-            raise ValueError("Set transform_paths (comma-separated).")
-        transform_paths = [Path(p.strip()) for p in tr.split(",") if p.strip()]
-        for p in transform_paths:
-            if not p.is_file():
-                raise ValueError(f"Transform not found: {p}")
-        out_s = str(params.get("out_path") or "").strip()
-        out_path = Path(out_s) if out_s else (Path(tempfile.mkdtemp(prefix="nvitk_fireants_apply_")) / "resampled.nii.gz")
-        notify(f"FireANTs apply: {moving_path.name} → {out_path}")
-        fireants_apply(
+        transform_paths = _transform_list(params)
+        out_path = _output_path(params, "fireants_apply")
+        interpolator = str(params.get("interpolator") or "linear").strip() or "linear"
+        notify(f"FireANTs apply ({interpolator}): {moving_path.name} → {out_path}")
+        written = fireants_apply(
             fixed_path=fixed_path,
             moving_path=moving_path,
             out_path=out_path,
             transforms=transform_paths,
+            interpolator=interpolator,
         )
-        from nvitk.io import imread
-
-        out_img = imread(out_path)
-        viewer.add_image(
-            coerce_tool_output(out_img),
-            **_layer_kwargs_from(ref_layer, "fireants_applied"),
+        _add_volume_file(
+            viewer, written, f"{layer.name}_fireants_applied",
+            labels=interpolator in ("genericLabel", "nearestNeighbor", "multiLabel"),
         )
-        notify(f"FireANTs output layer from {out_path}")
         return None
 
-    raise NotImplementedError(f"Tool '{tool_id}' is not implemented in the GUI runner.")
+    raise NotImplementedError(f"Registration tool '{tool_id}' is not implemented.")
 
 
 def _image_to_mock_layer(img: Image, name: str) -> Any:

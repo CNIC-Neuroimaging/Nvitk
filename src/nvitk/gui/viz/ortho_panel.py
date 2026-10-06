@@ -2056,6 +2056,31 @@ def clear_clip(layer: Any) -> None:
         pass
 
 
+#: Preference key holding the 3D card's toggles (``resample``, ``orientation_marker``).
+_ORTHO_PREFS_KEY = "ortho_view"
+
+
+def _ortho_prefs() -> dict[str, Any]:
+    """The 3D card's stored toggles (empty when nothing is stored)."""
+    try:
+        from nvitk.gui.core.prefs import load_prefs
+
+        stored = load_prefs().get(_ORTHO_PREFS_KEY)
+    except Exception:  # noqa: BLE001 — a preference must never break the panel
+        return {}
+    return dict(stored) if isinstance(stored, dict) else {}
+
+
+def _save_ortho_pref(key: str, value: Any) -> None:
+    """Remember one 3D-card toggle for the next session."""
+    try:
+        from nvitk.gui.core.prefs import save_prefs
+
+        save_prefs({_ORTHO_PREFS_KEY: {**_ortho_prefs(), key: value}})
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class OrthoViewerPanel(QWidget):
     """Axial / coronal / sagittal views of the active layer, plus 3D plane controls."""
 
@@ -2105,6 +2130,13 @@ class OrthoViewerPanel(QWidget):
         #: Source names whose 3D slice planes are on the canvas.
         self._planed: set[str] = set()
         self._table_guard = False
+        #: Whether layers on another grid are resampled onto the bound one (else
+        #: they are left out), and the names left out on the last rebuild.
+        stored = _ortho_prefs()
+        self._resample_offgrid = bool(stored.get("resample", True))
+        self._offgrid_skipped: list[str] = []
+        #: The person + R/L A/P H/F marker on the 3D canvas, created on first use.
+        self._marker: Any | None = None
 
         # Pushing planes and clipping planes to the canvas re-uploads volumes, which
         # is far too heavy to do on every step of a scroll. Coalesce them.
@@ -2230,6 +2262,25 @@ class OrthoViewerPanel(QWidget):
 
         card = Card("3D view")
         card.add(self._composite_label)
+
+        self._resample_box = QCheckBox("Resample layers on other grids")
+        self._resample_box.setToolTip(
+            "On: a visible layer on another grid (another series, a registration "
+            "output) is resampled onto the active layer's grid and drawn. Off: only "
+            "layers already on that grid are drawn — no resampling cost, no "
+            "interpolated pixels."
+        )
+        self._resample_box.setChecked(self._resample_offgrid)
+        self._resample_box.toggled.connect(self._on_resample_toggled)
+        card.add(self._resample_box)
+
+        self._marker_box = QCheckBox("Orientation figure on the 3D canvas")
+        self._marker_box.setToolTip(
+            "A person and R/L, A/P, H/F arrows in the corner of the 3D view, turning "
+            "with the camera — the marker of the QC reports' 3D renders."
+        )
+        self._marker_box.toggled.connect(self._on_marker_toggled)
+        card.add(self._marker_box)
 
         # One row per drawn layer: whether it gets a slice image in 3D, and
         # whether the see-inside cut opens it. A mask can stay whole while the
@@ -2433,6 +2484,9 @@ class OrthoViewerPanel(QWidget):
         """
         if self._layer is None or _same_grid(layer, self._layer):
             return data, False
+        if not self._resample_offgrid:
+            self._offgrid_skipped.append(str(getattr(layer, "name", "?")))
+            return None, False
         t_key = self._time if layer_time_axis(layer) is not None else None
         # Nearest stays nearest; anything smoother resamples linearly (a cubic
         # whole-volume resample would cost far more than it shows).
@@ -2544,6 +2598,7 @@ class OrthoViewerPanel(QWidget):
         keep = self._source_cache if self._source_ref == reference else {}
         cache: dict[int, RenderSource] = {}
         sources: list[RenderSource] = []
+        self._offgrid_skipped = []
         for layer in self._candidate_layers():
             if not bool(getattr(layer, "visible", True)):
                 continue
@@ -2587,11 +2642,24 @@ class OrthoViewerPanel(QWidget):
             )
             return
         names = [str(getattr(s.layer, "name", "?")) for s in self._sources]
-        extra = sum(1 for s in self._sources if s.resampled)
-        text = f"{len(names)} layer(s): " + " + ".join(names)
-        if extra:
-            text += f"  ·  {extra} resampled onto “{getattr(self._layer, 'name', '?')}”"
+        resampled = [str(getattr(s.layer, "name", "?")) for s in self._sources if s.resampled]
+        reference = str(getattr(self._layer, "name", "?"))
+        n = len(names)
+        text = f"{n} layer{'s' if n != 1 else ''} drawn"
+        if resampled:
+            text += f"  ·  {len(resampled)} resampled onto “{reference}”"
+        if self._offgrid_skipped:
+            k = len(self._offgrid_skipped)
+            text += f"  ·  {k} on another grid not drawn"
         self._composite_label.setText(text)
+        # The names live in the tooltip: a list of them grew the card by a line
+        # per layer and pushed the 3D controls out of the quadrant.
+        lines = [f"Drawn on the grid of “{reference}”, bottom to top:"]
+        lines += [f"  • {name}" + ("  (resampled)" if name in resampled else "") for name in names]
+        if self._offgrid_skipped:
+            lines.append("On another grid, not drawn (resampling is off):")
+            lines += [f"  • {name}" for name in self._offgrid_skipped]
+        self._composite_label.setToolTip("\n".join(lines))
 
     # ── event subscriptions ──────────────────────────────────────────────────
 
@@ -2965,6 +3033,52 @@ class OrthoViewerPanel(QWidget):
         self._position = [int(s) // 2 for s in self._data.shape]
         self._redraw()
         self._canvas_timer.start()
+
+    def _on_resample_toggled(self, enabled: bool) -> None:
+        """Draw off-grid layers resampled, or leave them out."""
+        self._resample_offgrid = bool(enabled)
+        _save_ortho_pref("resample", self._resample_offgrid)
+        if not enabled:
+            # Nothing will read them until resampling is back on.
+            self._resample_cache.clear()
+        # Sources built either way are stale: drop them all and rebuild.
+        for source in self._source_cache.values():
+            if source.cache is not None:
+                source.cache.release()
+        self._source_cache = {}
+        self._source_ref = ()
+        self._rebuild_sources()
+
+    def _marker_reference_layer(self) -> Any | None:
+        """The layer the orientation marker reads anatomy from: the bound one."""
+        if self._layer is not None:
+            return self._layer
+        layers = getattr(self._viewer, "layers", None)
+        return layers.selection.active if layers else None
+
+    def _on_marker_toggled(self, enabled: bool) -> None:
+        """Show the person + R/L A/P H/F marker on the 3D canvas, or hide it."""
+        _save_ortho_pref("orientation_marker", bool(enabled))
+        if self._marker is None and enabled:
+            from nvitk.gui.viz.orientation_overlay import orientation_marker_for
+
+            self._marker = orientation_marker_for(self._viewer, self._marker_reference_layer)
+            if self._marker is None:
+                self._status.setText("The orientation figure needs the Napari 3D canvas (vispy + pyvista).")
+                self._marker_box.blockSignals(True)
+                self._marker_box.setChecked(False)
+                self._marker_box.blockSignals(False)
+                return
+        if self._marker is None:
+            return
+        self._marker.set_enabled(bool(enabled))
+        if enabled and int(getattr(self._viewer.dims, "ndisplay", 2)) != 3:
+            self._show_3d()
+
+    def restore_marker_preference(self) -> None:
+        """Turn the orientation figure back on if it was on last session."""
+        if bool(_ortho_prefs().get("orientation_marker", False)) and not self._marker_box.isChecked():
+            self._marker_box.setChecked(True)
 
     def _show_3d(self) -> None:
         """Switch the Napari canvas to its 3D view."""
@@ -3343,6 +3457,8 @@ def open_ortho_views(viewer: Any, layer: Any | None = None) -> OrthoViewerPanel:
             viewer._nvitk_ortho_panel = panel
         except Exception:
             pass
+        # Next turn: the canvas has to exist before the marker can be put on it.
+        QTimer.singleShot(0, panel.restore_marker_preference)
     dock = getattr(panel, "_nvitk_dock", None)
     if dock is not None:
         dock.show()

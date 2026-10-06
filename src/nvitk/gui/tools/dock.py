@@ -1,4 +1,9 @@
-"""Tools dock: magicgui panel + label picker + pipeline CLI form + TotalSeg ROIs."""
+"""Imaging (tools) dock: magicgui panel + pipeline CLI form + TotalSeg ROIs.
+
+Label-layer tools run on the labels currently *shown* — the live filter set in
+the Labels tab or from a label layer's ▾ in the layer list — so the dock no
+longer carries a picker of its own.
+"""
 
 from __future__ import annotations
 
@@ -24,16 +29,15 @@ from nvitk.gui.core.design import COLOR_MUTED, SPACE, SPACE_TIGHT
 
 from nvitk.gui.tools.gpu_toggle import build_gpu_toggle_button
 from nvitk.gui.tools.orient_quick import build_orientation_quick_button
-from nvitk.gui.labels.catalog import layer_schema_key, schema_for_totalsegmentator_task
-from nvitk.gui.labels.selector import LabelSelectorWidget, apply_selection_to_layer
+from nvitk.gui.labels.catalog import layer_schema_key
 from nvitk.gui.labels.visibility import (
     is_label_like_layer,
+    stored_visible_ids,
 )
 from nvitk.gui.pipeline.form import PipelineCliForm
 from nvitk.gui.tools.presets import cursor_voxel_indices
 from nvitk.gui.tools.panel import build_tool_panel
 from nvitk.gui.tools.registry import (
-    TOOL_IDS_USING_LABEL_PICKER,
     tool_by_id,
     tool_id_from_label,
 )
@@ -49,11 +53,11 @@ _TOOL_LABEL_MAX_WIDTH = 150
 #: Height cap for the tool description caption.
 _TOOL_HELP_MAX_HEIGHT = 90
 
-#: Floor for the tool form's scroll area. Its ceiling is a share of the dock's
-#: own height rather than a constant, so maximising the window actually gives the
-#: form more room instead of leaving it pinned at a fixed size.
+#: Floor for the tool form's scroll area. While a pipeline form or the ROI list
+#: shares the dock, the form's ceiling is a share of the dock's own height, so the
+#: other panel keeps the rest; on its own the form takes the whole dock.
 _TOOL_SCROLL_MIN_HEIGHT = 140
-_TOOL_SCROLL_HEIGHT_SHARE = 0.55
+_TOOL_SCROLL_HEIGHT_SHARE = 0.4
 
 
 def _compact_magicgui_panel(native: QWidget) -> None:
@@ -102,11 +106,18 @@ def _cap_form_labels(native: QWidget) -> None:
     # _fit_tool_scroll never fired.
     policy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
     policy.setHeightForWidth(True)
-    for label in native.findChildren(QLabel):
+    labels = native.findChildren(QLabel)
+    # The dock stylesheet's font reaches the labels that existed when the dock was
+    # first polished; a parameter widget inserted (or re-inserted) later comes in
+    # at the default weight and reads as a different kind of field. Match them.
+    reference = next((lb.font() for lb in labels if lb.font().bold()), None)
+    for label in labels:
         label.setWordWrap(True)
         label.setMinimumWidth(0)
         label.setMaximumWidth(_TOOL_LABEL_MAX_WIDTH)
         label.setSizePolicy(policy)
+        if reference is not None and not label.font().bold() and not label.styleSheet():
+            label.setFont(reference)
 
 
 def _style_operation_help(panel: Any) -> None:
@@ -146,25 +157,29 @@ def _style_operation_help(panel: Any) -> None:
             label.hide()
 
 
-def _show_label_picker(category: str, tool_id: str, layer: Any | None) -> bool:
-    """True if the label-selector widget should be shown for *tool_id* given the active *layer* and
-    its category (label-picker tools always; certain categories when the layer is label-like)."""
-    if not is_label_like_layer(layer):
-        return False
+#: Categories whose tools act on the selected labels of a label layer.
+_LABEL_CATEGORIES = frozenset({
+    "Morphology",
+    "Segmentation",
+    "Centerline",
+    "Measure",
+    "Filters",
+    "Restoration",
+    "Transform",
+    "Interpolation",
+    "Visualization",
+})
+
+
+def _tool_uses_labels(category: str, tool_id: str) -> bool:
+    """True when *tool_id* runs on a label layer's selected labels."""
+    from nvitk.gui.tools.registry import TOOL_IDS_USING_LABEL_PICKER
+
     if tool_id in TOOL_IDS_USING_LABEL_PICKER:
         return True
     if tool_id == "viz_vessel_cross_sections":
         return False
-    return category in (
-        "Morphology",
-        "Segmentation",
-        "Centerline",
-        "Measure",
-        "Filters",
-        "Restoration",
-        "Transform",
-        "Visualization",
-    )
+    return category in _LABEL_CATEGORIES
 
 
 def build_tools_dock(
@@ -182,22 +197,15 @@ def build_tools_dock(
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(SPACE)
 
-    label_selector = LabelSelectorWidget()
-    label_selector.set_viewer(viewer)
     pipeline_form = PipelineCliForm()
     pipeline_form.set_viewer(viewer)
     totalseg_roi = TotalSegRoiWidget()
     pipeline_form.setVisible(False)
     totalseg_roi.setVisible(False)
-    _last_active_layer_id = None
 
     # Parented to the dock: an ownerless QTimer outlives the widgets its
     # callback touches, and a single-shot still pending when the window closes
     # then fires against deleted C++ objects on the way out.
-    _visibility_timer = QTimer(container)
-    _visibility_timer.setSingleShot(True)
-    _visibility_timer.setInterval(120)
-
     _active_sync_timer = QTimer(container)
     _active_sync_timer.setSingleShot(True)
     _active_sync_timer.setInterval(0)
@@ -208,60 +216,38 @@ def build_tools_dock(
             return None
         return viewer.layers.selection.active or viewer.layers[-1]
 
-    def _apply_label_visibility() -> None:
-        """Filter the picker's bound layer to the checked label ids."""
-        if not label_selector.isVisible():
-            return
-        apply_selection_to_layer(label_selector, viewer)
-
-    def _schedule_label_visibility() -> None:
-        """Debounce a call to :func:`_apply_label_visibility` via the visibility timer."""
-        _visibility_timer.start()
-
-    def _sync_label_picker_for_layer(layer: Any | None) -> None:
-        """Lightweight update when the active layer changes (no full tool resync)."""
-        nonlocal _last_active_layer_id
-        layer_id = id(layer) if layer is not None else None
-        if layer_id == _last_active_layer_id:
-            return
-        _last_active_layer_id = layer_id
-
-        cat = tool_panel.category.value
-        op = tool_panel.operation.value
-        tid = tool_id_from_label(cat, op) or ""
-        show_labels = _show_label_picker(cat, tid, layer)
-
-        label_selector.setVisible(show_labels)
-        if show_labels and layer is not None:
-            if tid == "seg_totalsegmentator":
-                task = getattr(tool_panel, "task", None)
-                task_val = str(task.value if task is not None else "total")
-                label_selector.set_schema_key(schema_for_totalsegmentator_task(task_val))
-            else:
-                # The layer's own vocabulary, not whatever the last layer used.
-                label_selector.set_schema_key(layer_schema_key(layer) or "generic", refresh=False)
-            label_selector.refresh_from_layer(layer)
-            # refresh may promote Image → Labels; track the live layer.
-            layer = label_selector.current_layer() or _active_layer()
-            _last_active_layer_id = id(layer) if layer is not None else None
-            _apply_label_visibility()
-
-        tool_panel.label_ids.visible = (not show_labels) and is_label_like_layer(layer)
-        _update_aux_panel_layout(show_labels)
+    def _sync_label_ids_field(layer: Any | None) -> None:
+        """Offer the id field on label layers, for tools that act per label."""
+        tid = tool_id_from_label(tool_panel.category.value, tool_panel.operation.value) or ""
+        tool_panel.label_ids.visible = _tool_uses_labels(
+            tool_panel.category.value, tid
+        ) and is_label_like_layer(layer)
 
     def _get_label_ids() -> list[int]:
-        """Selected label ids from the picker if visible and non-empty, else every label present in
-        the active layer."""
-        layer = _active_layer()
-        if label_selector.isVisible():
-            picked = label_selector.selected_ids()
-            if picked:
-                return picked
-        if layer is not None:
-            from nvitk.gui.labels.visibility import layer_label_ids
+        """Label ids a tool runs on: the ids typed in the field, else the labels shown.
 
-            return layer_label_ids(layer)
-        return []
+        "Shown" is the layer's live filter — set in the Labels tab or from the
+        layer's ▾ in the layer list — so what a tool touches is what is on screen;
+        with no filter, every label present.
+        """
+        from nvitk.gui.tools.runner import parse_label_ids
+
+        layer = _active_layer()
+        typed = parse_label_ids(str(tool_panel.label_ids.value or ""))
+        if typed:
+            return typed
+        if layer is None:
+            return []
+        shown = stored_visible_ids(layer)
+        if shown is not None:
+            return sorted(int(i) for i in shown)
+        from nvitk.gui.labels.visibility import layer_label_ids
+
+        return layer_label_ids(layer)
+
+    def _get_label_schema() -> str:
+        """The active layer's label vocabulary, for naming label ids in results."""
+        return layer_schema_key(_active_layer()) or "generic"
 
     def _get_totalseg_roi() -> list[str] | None:
         """Selected TotalSegmentator ROI names if the ROI widget is visible, else ``None``."""
@@ -276,16 +262,14 @@ def build_tools_dock(
         on_layers_changed=on_layers_changed,
         record_step=record_step,
         get_label_ids=_get_label_ids,
-        get_label_schema=lambda: label_selector.schema_key(),
+        get_label_schema=_get_label_schema,
         get_pipeline_argv_builder=lambda: pipeline_form,
         get_totalseg_roi=_get_totalseg_roi,
-        label_selector=label_selector,
     )
 
     def _sync_aux_panels() -> None:
-        """Full resync of every auxiliary panel (label picker, pipeline form, TotalSeg ROI widget,
+        """Full resync of every auxiliary panel (pipeline form, TotalSeg ROI widget,
         cursor/CoW rows, SGE button) for the currently selected category/operation."""
-        nonlocal _last_active_layer_id
         cat = tool_panel.category.value
         op = tool_panel.operation.value
         tid = tool_id_from_label(cat, op) or ""
@@ -293,23 +277,6 @@ def build_tools_dock(
         layer = _active_layer()
 
         is_ts = tid == "seg_totalsegmentator"
-        show_labels = _show_label_picker(cat, tid, layer)
-        label_selector.setVisible(show_labels)
-        if show_labels and layer is not None:
-            if is_ts:
-                task = getattr(tool_panel, "task", None)
-                task_val = str(task.value if task is not None else "total")
-                label_selector.set_schema_key(schema_for_totalsegmentator_task(task_val))
-            else:
-                # The layer's own vocabulary, not whatever the last layer used.
-                label_selector.set_schema_key(layer_schema_key(layer) or "generic", refresh=False)
-            label_selector.refresh_from_layer(layer)
-            layer = label_selector.current_layer() or _active_layer()
-            _apply_label_visibility()
-            _last_active_layer_id = id(layer) if layer is not None else None
-        else:
-            _last_active_layer_id = id(layer) if layer is not None else None
-
         is_pipeline = spec is not None and spec.run_mode == "pipeline"
         pipeline_form.setVisible(is_pipeline)
         if is_pipeline and spec:
@@ -317,22 +284,21 @@ def build_tools_dock(
             pipeline_form.refresh_layer_combos()
 
         # Visibility first: _update_aux_panel_layout decides who gets the dock's
-        # spare height from isVisible(), so setting it afterwards left the ROI
-        # list reading the *previous* tool's state and never winning the stretch.
+        # spare height from isVisible().
         totalseg_roi.setVisible(is_ts)
         if is_ts:
             task = getattr(tool_panel, "task", None)
             task_val = str(task.value if task is not None else "total")
             totalseg_roi.set_task(task_val)
 
-        _update_aux_panel_layout(show_labels)
+        _update_aux_panel_layout()
 
         _sync_sge_button()
         _fit_timer.start()
 
-        tool_panel.label_ids.visible = (not show_labels) and is_label_like_layer(layer)
+        _sync_label_ids_field(layer)
         if hasattr(tool_panel, "correction_ids"):
-            tool_panel.correction_ids.visible = (tid == "siphon_correct") and (not show_labels)
+            tool_panel.correction_ids.visible = tid == "siphon_correct"
         if hasattr(tool_panel, "pipeline_preset"):
             tool_panel.pipeline_preset.visible = tid == "seg_region_grow"
         if hasattr(tool_panel, "seed_from_label"):
@@ -479,12 +445,14 @@ def build_tools_dock(
     _fit_timer.setInterval(0)
 
     def _fit_tool_scroll() -> None:
-        """Give the tool form exactly the height it needs, up to the cap.
+        """Give the tool form the height it needs.
 
-        A ``QScrollArea`` reports a size hint of its own that can fall short of
-        the form inside it, which left the Run button below the fold while the
-        label picker underneath sat half empty. Each tool has a different set of
-        parameters, so this is recomputed whenever the form changes.
+        On its own the form fills the dock (the scroll area takes the stretch and
+        any spare height sits below the Run button, inside the form). Beside a
+        pipeline form or the ROI list it is held to what it needs, up to a share
+        of the dock, so that panel gets the rest instead of a strip at the bottom.
+        A ``QScrollArea``'s own size hint can fall short of the form inside it,
+        which left the Run button below the fold, so the height is measured here.
         """
         _cap_form_labels(tool_panel.native)
         # A wrapped label's height depends on the width it ends up with, which is
@@ -496,27 +464,44 @@ def build_tools_dock(
         form_layout = tool_panel.native.layout()
         if width > 0 and form_layout is not None and form_layout.hasHeightForWidth():
             needed = max(needed, form_layout.heightForWidth(width))
-        # The ceiling tracks the dock, so a taller window shows more of the form
-        # rather than handing every new pixel to the panel underneath.
+        # The form is top-aligned, so where the Run button ends is where its
+        # content ends — the layout's own hint overshoots that by the spacing of
+        # every hidden parameter row, which showed as a band of empty form.
+        button = getattr(getattr(tool_panel, "_call_button", None), "native", None)
+        if button is not None and button.isVisible() and button.height() > 0:
+            from qtpy.QtCore import QPoint
+
+            bottom = button.mapTo(tool_panel.native, QPoint(0, button.height())).y()
+            margin = form_layout.contentsMargins().bottom() if form_layout is not None else 0
+            if bottom > 0:
+                needed = bottom + margin + SPACE_TIGHT
+        needed += 2 * tool_scroll.frameWidth()
+        if not (pipeline_form.isVisible() or totalseg_roi.isVisible()):
+            tool_scroll.setMinimumHeight(min(needed, _TOOL_SCROLL_MIN_HEIGHT))
+            tool_scroll.setMaximumHeight(16777215)
+            return
         available = container.height() or tool_scroll.height()
         ceiling = max(_TOOL_SCROLL_MIN_HEIGHT, int(available * _TOOL_SCROLL_HEIGHT_SHARE))
-        tool_scroll.setMaximumHeight(ceiling)
-        tool_scroll.setMinimumHeight(max(_TOOL_SCROLL_MIN_HEIGHT, min(needed, ceiling)))
+        height = max(_TOOL_SCROLL_MIN_HEIGHT, min(needed, ceiling))
+        tool_scroll.setMinimumHeight(height)
+        tool_scroll.setMaximumHeight(height)
 
     # Widget visibility settles during the current event-loop pass, so measure
     # the form on the next one.
     _fit_timer.timeout.connect(_fit_tool_scroll)
 
-    top_row = QWidget()
-    top_row_layout = QHBoxLayout()
-    top_row_layout.setContentsMargins(0, 0, 0, 0)
-    top_row_layout.setSpacing(6)
-    top_row_layout.addWidget(build_gpu_toggle_button(), 1)
+    # Wraps rather than widening the dock: three side-by-side buttons set a floor
+    # under the whole dock's width, and a narrower dock then scrolled sideways.
+    from nvitk.gui.core.flow_layout import FlowRow
     from nvitk.gui.core.performance import build_performance_button
 
-    top_row_layout.addWidget(build_performance_button(), 1)
-    top_row_layout.addWidget(build_orientation_quick_button(viewer), 1)
-    top_row.setLayout(top_row_layout)
+    top_row = FlowRow()
+    for button in (
+        build_gpu_toggle_button(),
+        build_performance_button(),
+        build_orientation_quick_button(viewer),
+    ):
+        top_row.add(button)
     layout.addWidget(top_row, 0)
 
     btn_ortho = QPushButton("Orthogonal views")
@@ -603,80 +588,56 @@ def build_tools_dock(
     layout.addWidget(tool_scroll, 0)
     layout.addWidget(cursor_row, 0)
     layout.addWidget(cow_row, 0)
-    layout.addWidget(label_selector, 0)
     layout.addWidget(totalseg_roi, 0)
     layout.addWidget(pipeline_form, 0)
     layout.addStretch(1)
     container.setLayout(layout)
 
-    _row_label = layout.indexOf(label_selector)
+    _row_tools = layout.indexOf(tool_scroll)
     _row_pipeline = layout.indexOf(pipeline_form)
     _row_totalseg = layout.indexOf(totalseg_roi)
     _row_spacer = layout.count() - 1
 
-    def _update_aux_panel_layout(show_labels: bool) -> None:
-        """Give the currently relevant auxiliary panel (label picker, pipeline form, or TotalSeg ROI
-        widget) the stretch factor in the dock layout, collapsing the others."""
+    def _update_aux_panel_layout() -> None:
+        """Give the dock's spare height to the panel that can use it: the pipeline
+        form or the TotalSeg ROI list when one is showing, else the tool form."""
         is_pipeline = pipeline_form.isVisible()
         is_ts = totalseg_roi.isVisible()
-        expand_row = None
-        if show_labels:
-            expand_row = _row_label
-        elif is_pipeline:
+        if is_pipeline:
             expand_row = _row_pipeline
         elif is_ts:
             expand_row = _row_totalseg
+        else:
+            expand_row = _row_tools
 
         # Only the panel that actually gets the stretch is allowed to grow; two
         # panels both expanding would fight over the same spare height.
-        label_selector.set_expanded(show_labels)
         pipeline_form.set_expanded(is_pipeline)
         totalseg_roi.set_expanded(expand_row == _row_totalseg)
+        tool_scroll.setSizePolicy(
+            QSizePolicy.Preferred,
+            QSizePolicy.Expanding if expand_row == _row_tools else QSizePolicy.Fixed,
+        )
 
         for i in range(layout.count()):
             layout.setStretch(i, 1 if i == expand_row else 0)
+        layout.setStretch(_row_spacer, 0)
 
-        if expand_row is None:
-            layout.setStretch(_row_spacer, 1)
-        else:
-            layout.setStretch(_row_spacer, 0)
-
-    def _signal_value(event: Any) -> Any:
-        """Extract the new value from a magicgui change *event* (or pass through a raw value)."""
-        return event.value if hasattr(event, "value") else event
-
-    _visibility_timer.timeout.connect(_apply_label_visibility)
     _active_sync_timer.timeout.connect(
         lambda: (
-            _sync_label_picker_for_layer(_active_layer()),
+            _sync_label_ids_field(_active_layer()),
             pipeline_form.refresh_layer_combos(),
         )
     )
 
     def _schedule_active_layer_sync() -> None:
-        """Debounce a call to resync the label picker and pipeline form for the active layer."""
+        """Debounce a call to resync the id field and pipeline form for the active layer."""
         _active_sync_timer.start()
 
-    def _layer_from_removing_event(event: Any) -> Any | None:
-        """Layer instance about to be removed, from a Napari ``removing`` event's index."""
-        idx = getattr(event, "index", None)
-        if idx is None:
-            return None
-        try:
-            return viewer.layers[int(idx)]
-        except (IndexError, TypeError, ValueError):
-            return None
-
     @viewer.layers.events.removing.connect
-    def _on_layer_removing(event: Any) -> None:
-        """Avoid restoring/modifying a layer while Napari removes it from the list."""
-        nonlocal _last_active_layer_id
-        _visibility_timer.stop()
+    def _on_layer_removing(_event: Any) -> None:
+        """Avoid touching a layer while Napari removes it from the list."""
         _active_sync_timer.stop()
-        layer = _layer_from_removing_event(event)
-        if layer is not None and label_selector._layer_ref is layer:
-            label_selector._layer_ref = None
-            _last_active_layer_id = None
 
     @viewer.layers.events.removed.connect
     def _on_layer_removed_refresh_pipeline(_event: Any) -> None:
@@ -714,21 +675,8 @@ def build_tools_dock(
 
     @viewer.layers.selection.events.active.connect
     def _on_active_layer_for_labels(_event) -> None:
-        """Debounce a resync of the label picker/pipeline form when the active layer changes."""
+        """Debounce a resync of the id field / pipeline form when the active layer changes."""
         _schedule_active_layer_sync()
 
-    label_selector.selection_changed.connect(_schedule_label_visibility)
-
-    def _refresh_label_selector() -> None:
-        """Manually re-guess the schema (if still generic) and refresh the label picker for the
-        active layer."""
-        layer = _active_layer()
-        if label_selector.schema_key() == "generic":
-            guessed = layer_schema_key(layer)
-            if guessed:
-                label_selector.set_schema_key(guessed)
-        label_selector.refresh_from_layer(layer)
-
-    label_selector._btn_refresh.clicked.connect(_refresh_label_selector)
     _sync_aux_panels()
     return container, tool_panel

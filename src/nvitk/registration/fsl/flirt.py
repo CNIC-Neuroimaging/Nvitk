@@ -33,6 +33,15 @@ def _resolve_nifti_path(path: Path) -> Path | None:
     return None
 
 
+#: FLIRT degrees of freedom: 6 rigid, 7 rigid + global scale, 9 traditional
+#: (rigid + per-axis scale), 12 full affine.
+FLIRT_DOF: tuple[int, ...] = (6, 7, 9, 12)
+#: FLIRT cost functions (``bbr`` needs a white-matter segmentation and is not offered).
+FLIRT_COSTS: tuple[str, ...] = ("corratio", "mutualinfo", "normmi", "normcorr", "leastsq", "labeldiff")
+#: Interpolation of the resliced output.
+FLIRT_INTERPS: tuple[str, ...] = ("trilinear", "nearestneighbour", "sinc", "spline")
+
+
 @dataclass(frozen=True)
 class FlirtRigidResult:
     """Paths and NiPype runtime from a FLIRT rigid run."""
@@ -59,10 +68,18 @@ def flirt_register_rigid(
     warped_name: str = "moving_warped.nii.gz",
     matrix_name: str = "affine.mat",
     searchr_x: float | None = None,
+    searchr: float | None = None,
+    no_search: bool = False,
+    interp: str | None = None,
+    bins: int | None = None,
 ) -> FlirtRigidResult:
-    """Run FLIRT rigid alignment of *moving* towards *fixed* reference image.
+    """Run FLIRT alignment of *moving* towards *fixed* (rigid at ``dof=6``, affine at 12).
 
     Writes ``matrix_name`` under *out_dir* and optionally a warped moving image.
+    *searchr* sets the angular search range (±degrees) on all three axes —
+    *searchr_x* on X only, kept for older callers — and *no_search* skips the
+    search entirely (images already roughly aligned). *interp* is the output's
+    interpolation, *bins* the cost-function histogram size.
     Requires FSL on ``PATH`` and ``FSLDIR`` set (NiPype delegates to ``flirt``).
     """
     from nipype.interfaces.fsl import FLIRT
@@ -89,8 +106,19 @@ def flirt_register_rigid(
         setattr(fl.inputs, "cost_fun", cost)
     elif hasattr(fl.inputs, "cost_func"):
         setattr(fl.inputs, "cost_func", cost)
-    if searchr_x is not None and hasattr(fl.inputs, "searchr_x"):
-        fl.inputs.searchr_x = [float(searchr_x), float(searchr_x)]
+    if searchr is not None and float(searchr) > 0:
+        rng = [-int(round(float(searchr))), int(round(float(searchr)))]
+        fl.inputs.searchr_x = rng
+        fl.inputs.searchr_y = rng
+        fl.inputs.searchr_z = rng
+    elif searchr_x is not None and hasattr(fl.inputs, "searchr_x"):
+        fl.inputs.searchr_x = [-int(round(abs(float(searchr_x)))), int(round(abs(float(searchr_x))))]
+    if no_search:
+        fl.inputs.no_search = True
+    if interp:
+        fl.inputs.interp = str(interp)
+    if bins:
+        fl.inputs.bins = int(bins)
 
     log.info(f"FLIRT rigid: moving={moving_p} reference={fixed_p} dof={dof}, cost={cost}")
     try:

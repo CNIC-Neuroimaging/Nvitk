@@ -13,7 +13,7 @@ pyhelp --flat             # legacy flat listing
 `nvitk.cli.catalog` (`CatalogNode`, `ToolEntry`, `build_catalog_tree`,
 `parse_pyproject_scripts`) parses `pyproject.toml` directly and builds the tree that both
 `pyhelp` (`nvitk.util.list_cli_commands`, `nvitk.util.pyhelp_tree`) and
-{doc}`nvitk-gui's Tools dock <../gui/index>` render from — the GUI's tool catalog is a
+{doc}`nvitk-gui's Imaging dock <../gui/index>` render from — the GUI's tool catalog is a
 superset that adds parameter forms on top of the same underlying command list.
 
 `nvitk.cli` also hosts the module-level CLI implementations themselves (`ants`, `fireants`,

@@ -1,6 +1,6 @@
-"""Label selection outside the Tools tab: a dock of its own and per-layer popups.
+"""Label selection outside the Imaging tab: a dock of its own and per-layer popups.
 
-The Tools tab only shows its picker for tools that consume label ids. These views
+The Imaging tab only shows its picker for tools that consume label ids. These views
 are always reachable: the **Labels** dock follows the active label layer (or one
 picked from its list), and each label layer's row in the layer list unfolds into
 its labels (:mod:`nvitk.gui.labels.layer_list`). Every picker shares the layer's

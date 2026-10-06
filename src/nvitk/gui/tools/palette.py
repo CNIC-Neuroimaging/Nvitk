@@ -2,8 +2,9 @@
 
 The tool registry has grown past a hundred entries across a dozen categories, and
 finding one means remembering which category it lives under. This indexes every
-tool — plus the quick image operations and the dock actions that are not tools at
-all — behind one fuzzy search, the way an editor's command palette works.
+tool — plus the quick image operations, the Meshlab panel's operations (MeshLab's
+filters among them) and the dock actions that are not tools at all — behind one
+fuzzy search, the way an editor's command palette works.
 
 Matching is subsequence-based, so ``total`` finds *TotalSegmentator*, ``orthog``
 finds *Orthogonal views*, and ``gauss`` finds *Gaussian blur*, without anyone
@@ -324,7 +325,38 @@ def build_commands(viewer: Any, run_tool: Callable[[str], None]) -> list[Command
             )
         )
 
+    commands.extend(mesh_commands(viewer))
     return commands
+
+
+def mesh_commands(viewer: Any) -> list[Command]:
+    """The Meshlab panel's operations — native and MeshLab filters — as palette entries.
+
+    Choosing one brings the Meshlab dock to the front with that operation selected;
+    like the tools, it does not run until Run is pressed.
+    """
+    panel = getattr(viewer, "_nvitk_mesh_panel", None)
+    if panel is None:
+        return []
+    try:
+        from nvitk.gui.mesh.operations import MESHLAB_PREFIX, all_operations
+    except Exception:  # noqa: BLE001
+        return []
+    out: list[Command] = []
+    for op in all_operations():
+        meshlab = op.id.startswith(MESHLAB_PREFIX)
+        words = op.id[len(MESHLAB_PREFIX):] if meshlab else op.id
+        keywords = (*words.split("_"), "mesh", *(("meshlab",) if meshlab else ()))
+        out.append(
+            Command(
+                key=f"mesh:{op.id}",
+                title=f"Meshlab: {op.label}",
+                group=op.category,
+                keywords=keywords,
+                run=(lambda oid=op.id: panel.show_operation(oid)),
+            )
+        )
+    return out
 
 
 #: Opens the palette from anywhere in the Napari window.
@@ -339,7 +371,7 @@ PALETTE_SHORTCUT_LABEL = "Alt+F"
 class CommandSearchBar(QLineEdit):
     """Inline tool search, ranked the same way the palette ranks.
 
-    A completer rather than a second popup list: this sits in the Tools tab and
+    A completer rather than a second popup list: this sits in the Imaging tab and
     should behave like the search field it looks like. Qt filters a completer's
     model by prefix, which would miss “thresh” finding *Binarize*, so the model is
     re-ranked on every keystroke through :func:`rank_commands` and the completer
@@ -358,7 +390,8 @@ class CommandSearchBar(QLineEdit):
         self.setPlaceholderText(f"Search tools…   {PALETTE_SHORTCUT_LABEL}")
         self.setClearButtonEnabled(True)
         self.setToolTip(
-            "Find any tool or quick image operation by typing part of its name. "
+            "Find any tool, quick image operation or mesh operation (MeshLab filters included) by "
+            "typing part of its name. "
             f"{PALETTE_SHORTCUT_LABEL} opens the same search as a popup."
         )
 
@@ -479,7 +512,7 @@ def install_command_palette(
 
         gui_log(
             f"Command palette: {shortcut!r} is not a key sequence Qt understands "
-            "(the Windows key is spelled 'Meta'). Use the Tools tab search bar "
+            "(the Windows key is spelled 'Meta'). Use the Imaging tab search bar "
             "instead.",
             error=True,
         )
@@ -505,6 +538,7 @@ __all__ = [
     "PALETTE_SHORTCUT_LABEL",
     "build_commands",
     "install_command_palette",
+    "mesh_commands",
     "Command",
     "CommandPalette",
     "rank_commands",
