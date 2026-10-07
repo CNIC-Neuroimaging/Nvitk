@@ -23,6 +23,38 @@ imsave("out/pet_copy.nii.gz", img)
 Per-format implementations live in `nvitk.io.readers` (`b2nd`, `dicom`, `mha`, `nd2`,
 `nifti`, `pil`, `pkl`, `tiff`) and `nvitk.io.writers` (which cover `nifti`, `mha`, `tiff`, `pil`).
 
+## Browsing, editing and exporting DICOM
+
+`nvitk.io.dicom_index.scan_dicom` indexes a DICOM folder from the headers alone — studies,
+series (split by `ImageType` as the loader splits them), files, and what each file is (an
+image, a waveform, a report, a Philips spectral base image) — and `load_dicom_series` takes
+an explicit list of files, so any series or subset of it can then be loaded.
+`nvitk.io.dicom_edit` keeps header changes as pending operations over sets of files and
+writes them only when exporting:
+
+```{code-block} python
+from nvitk.io.dicom_index import scan_dicom
+from nvitk.io.dicom_edit import DicomEditor, export_dicom
+from nvitk.io.conversors._dicom_conversion import load_dicom_series
+
+study = scan_dicom("/data/patient01")[0]
+series = next(s for s in study.series if s.number == "401")
+data, meta = load_dicom_series(series.paths[100:140])          # just those slices
+
+ed = DicomEditor()
+ed.anonymize(series.paths, patient_name="SUBJ-001", patient_id="SUBJ-001", dates="shift", shift_days=-100)
+ed.set(series.paths, "SeriesDescription", "CT 78%")
+ed.delete(series.paths, (0x0020, 0x4000))                     # ImageComments
+export_dicom(series.paths, "/data/out", editor=ed, layout="patient / study / series")
+```
+
+| Name | Purpose |
+|---|---|
+| `scan_dicom` | Studies → series → files of a folder or file list, headers only, in parallel; `read_header` for one file. |
+| `DicomEditor` | Pending `set` / `delete` / `anonymize` operations, each over a set of files; `header(path)` shows a file as it will be exported. |
+| `Anonymize` | De-identification (PS3.15 basic profile, subset): names and IDs replaced, identifying attributes removed, dates kept / shifted / blanked, private tags dropped, consistent new UIDs. Pixels are not inspected. |
+| `export_dicom` | Writes chosen files with the edits applied (series folders, patient / study / series, or flat; original or numbered names); pixel data and transfer syntax unchanged. |
+
 ## Preprocessed cases (`.b2nd` / `.pkl`)
 
 nnU-Net and nnssl store preprocessed volumes as a Blosc2 array shaped `(C, Z, Y, X)` beside a

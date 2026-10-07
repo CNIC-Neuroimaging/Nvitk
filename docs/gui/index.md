@@ -25,6 +25,7 @@ panels, each its own dock, tabbed together:
 | **Meshlab** | Meshes and point clouds, MeshLab/ParaView style (below): surfaces from labels, click-to-edit, clean/repair, smoothing, remeshing, alignment, measurements, vessel centerlines, image ↔ mesh ↔ points conversion, colouring, mesh time series. |
 | **Image properties** | Spacing, affine, orientation, and other metadata for the active layer. |
 | **DICOM tags** | DICOM header inspection. |
+| **DICOM browser** | Look inside a DICOM folder before loading: studies, series and files from the headers alone; load or export only what you tick, with header edits and anonymization (below). |
 | **Data** | Dataset/subject browser over a `DataRepo` ({doc}`../api/db`). |
 | **QC** | Quality-control review panels for pipeline outputs. |
 | **Statmodels** | Launches {doc}`the Stats GUI <../stats-gui/index>` as a floating window. |
@@ -32,30 +33,55 @@ panels, each its own dock, tabbed together:
 | **Layers** | Layer management, a "record pipeline steps" toggle, and the CT display window picker (below). |
 | **Pipeline** | Writes the recorded step sequence (open/mesh/export/...) as JSON. |
 
+*File ▸ Open Folders… (several)* opens several folders at once (Ctrl / Shift-click in the
+dialog) — DICOM series folders, for instance, each loaded through nvitk's reader; dropping
+several folders on the viewer does the same.
+
+**The mouse wheel scrolls panels; it does not change settings**
+(`nvitk.gui.core.wheel_guard`): scrolling over a dropdown never changes its choice, and a
+spin box or slider only takes the wheel once clicked into — otherwise the panel underneath
+scrolls. Choose from a dropdown with a click or the arrow keys.
+
 Keybindings: <kbd>Ctrl</kbd>+<kbd>T</kbd> transpose axes, <kbd>Ctrl</kbd>+<kbd>O</kbd> open,
 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> save the active layer,
 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> show the Labels panel with the cursor in its
 filter. A bottom dock streams the shared nvitk logger's output.
 
-### Panels and the workspace window
+### Panels and panel windows
 
-Every panel, nvitk's and napari's own (layer list, layer controls, console, plugin
-docks), is a dock (`nvitk.gui.core.workspace`):
+Every panel — nvitk's tabs, napari's own docks (layer list, layer controls, console, plugin
+docks) and the orthogonal views — is a dock (`nvitk.gui.core.workspace`), and can live in
+the main window or in a **panel window**: a window of its own, on any screen, holding any
+mix of panels, tabbed or side by side.
 
-- **Pop out / dock back**: the ⧉ button on an nvitk panel's title bar, or a double-click
-  on it; napari's docks keep their own float button. ⛶ fills the screen with a panel.
-- **Panels menu** (in the menu bar of both windows): show or hide any panel, pop it out,
-  or move it between the main window and the **workspace**. The workspace is a second
-  window with no fixed content, where panels are split and tabbed freely by dragging
-  their title bars. Qt cannot drag a dock from one window to another, so moving between
-  the two windows goes through this menu.
-- Closing the workspace gives its panels back to the main window.
+- **Pop out one panel**: double-click its **tab**, or use the ⧉ button / a double-click on
+  its title bar, or right-click the tab or title bar ▸ *Pop out … into its own window*. It
+  opens in a panel window (half the screen; move it to another monitor); the panels it was
+  tabbed with stay where they are. ⧉ again (⧈) puts it back in the main window at the tab it
+  came from. ⛶ fills the screen with a panel.
+- **Put panels together on another screen**: right-click a panel's tab or title bar ▸
+  *Move to window* ▸ one of the open windows, *as a tab* or *beside* the panels there (or *A
+  new window*). Or drag a panel by its title bar and drop it on that window — it joins as a
+  tab of the panel under the pointer; dropped on another popped-out (floating) panel, the two
+  get a window of their own. Inside a panel window, drag title bars and tabs to rearrange,
+  as in the main window. Example: pop out the DICOM browser to a second screen, then *Move to
+  window ▸ DICOM browser — beside* on the layer list and on the orthogonal views.
+  (napari's floating docks use the system title bar, whose drags Qt cannot see: move those
+  with the menu.)
+- **napari's layer list and layer controls with the nvitk tabs**: right-click their title
+  bar (or the Panels menu) ▸ *Tab with the nvitk panels*, or drag the title bar onto the tabs;
+  *Back to napari's left side* puts them back (controls above the list).
+- **Panels menu** (in every window's menu bar): show or hide any panel and do any of the
+  above for it; *New empty window*, *Move all panels to a new window*, *Return all panels to
+  the main window*, *Dock all floating panels*.
+- Closing a panel window gives its panels back to the main window; a window whose last
+  panel leaves closes itself. Dragging a title bar moves that panel only, not its tab group.
 
-The layout is remembered in `gui.json`: the main window's dock state, plus the
-workspace's panels, dock state, geometry and whether it was open (`workspace_layout`).
-A layout saved before panels became separate docks (`dock_layout_version` < 2) keeps
-napari's docks and the orthogonal views where they were and regroups the nvitk panels
-as tabs once.
+The layout is remembered in `gui.json`: the main window's dock state, plus every panel
+window's panels, dock state, geometry and whether it was open (`panel_windows`; the single
+`workspace_layout` of earlier versions is read once as one window). A layout saved before
+panels became separate docks (`dock_layout_version` < 2) keeps napari's docks and the
+orthogonal views where they were and regroups the nvitk panels as tabs once.
 
 ### Layer folders
 
@@ -369,6 +395,37 @@ napari's time slider when a 3D+t image is open, or the panel's own frame slider 
 button otherwise. *Open…* reads STL, OBJ, OFF, PLY, VTK/VTP, GIfTI, XYZ and PCD (a ParaView
 `.pvd` as a series); *Save…* writes them (a series as one file per frame plus a `.pvd`).
 The same files open with <kbd>Ctrl</kbd>+<kbd>O</kbd> or by dropping them on the viewer.
+
+## DICOM browser
+
+The **DICOM browser** tab (after **DICOM tags**) indexes DICOM folders — one or several
+(*Folders…* takes several at once, *Add…* adds more to what is listed, and folders can be
+dropped on the tab; a study or series spread over several folders is shown once, merged) —
+or chosen files, without loading any pixels (`nvitk.io.dicom_index`): every study, its series, and each series'
+files, read from the headers in parallel (the 4,737 files of a cardiac CT study take about 5
+s). Series are split as nvitk's loader splits them into volumes — by `ImageType` when a series
+mixes magnitude / phase or water / fat — and anything that is not a volume (ECG waveforms,
+dose reports, Philips spectral base images) is listed greyed out. Expand a series to see its
+files, with instance number, matrix and acquisition time.
+
+- **Header.** Click a series or a file to show its header (sequences unfold). The header is
+  shown as it will be exported: edited tags in amber (the tooltip has the original value),
+  removed tags struck through.
+- **Load ticked into the viewer.** Tick series, or single files of a series, and they are
+  loaded through nvitk's DICOM stack exactly as opening the folder would — one volume per
+  ticked series (or from just its ticked files). Double-click a series to load it at once.
+- **Export ticked…** copies the ticked files as DICOM into a folder (series folders, patient /
+  study / series, or flat), with the pending edits applied; the originals are never changed.
+- **Editing.** Double-click a value to change it; *Add / set tag…* takes a keyword
+  (`PatientName`) or a number (`0010,0010`); *Delete tag* removes the selected one. *Edits apply
+  to* the file shown, its series, the ticked files, or every scanned file. Edits are pending
+  until export; *Undo edit* and *Clear edits* take them back.
+- **Anonymize…** replaces the patient's name and ID, removes the other identifying attributes
+  (DICOM PS3.15 basic profile, subset: addresses, physicians, institution, station, device
+  serial, other IDs…), keeps or shifts or blanks the dates, drops private tags, gives new
+  study / series / instance UIDs that stay consistent across the files, and can blank the
+  descriptions. Anonymized exports are numbered (`IM00001.dcm`), since original file names
+  often hold UIDs. Text burned into the pixels (screen captures, dose screens) is not touched.
 
 ## GPU toggle
 

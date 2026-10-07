@@ -109,33 +109,10 @@ def _top_aligned(widget: Any) -> Any:
 
 
 def _move_tab_after(window: Any, anchor: Any, dock: Any) -> bool:
-    """Put *dock*'s tab right after *anchor*'s, when both are tabbed together.
+    """Put *dock*'s tab right after *anchor*'s (see :func:`nvitk.gui.core.workspace.move_tab_after`)."""
+    from nvitk.gui.core.workspace import move_tab_after
 
-    ``tabifyDockWidget`` only ever appends, so *dock* and every tab that followed
-    *anchor* are re-appended in order. The tab that was showing stays showing.
-    """
-    from qtpy.QtWidgets import QTabBar
-
-    if anchor.isFloating() or dock.isFloating() or dock not in window.tabifiedDockWidgets(anchor):
-        return False
-    group = {d.windowTitle(): d for d in (anchor, *window.tabifiedDockWidgets(anchor))}
-    bar = next(
-        (tb for tb in window.findChildren(QTabBar)
-         if {anchor.windowTitle(), dock.windowTitle()} <= {tb.tabText(i) for i in range(tb.count())}),
-        None,
-    )
-    if bar is None:
-        return False
-    titles = [bar.tabText(i) for i in range(bar.count())]
-    current = group.get(bar.tabText(bar.currentIndex()))
-    order = [group[t] for t in titles if t in group]
-    trailing = [d for d in order[order.index(anchor) + 1:] if d is not dock]
-    window.tabifyDockWidget(anchor, dock)
-    for other in trailing:
-        window.tabifyDockWidget(anchor, other)
-    if current is not None:
-        current.raise_()
-    return True
+    return move_tab_after(window, anchor, dock)
 
 
 def _scrollable_tab(widget: Any) -> Any:
@@ -198,6 +175,10 @@ def run_app() -> None:
     except Exception:
         pass
     install_nvitk_io(viewer)
+    # The wheel scrolls panels; it never flips a dropdown or nudges an unfocused field.
+    from nvitk.gui.core.wheel_guard import install_wheel_guard
+
+    install_wheel_guard()
     install_nvitk_layer_hooks(viewer)
 
     app_state: dict[str, Any] = {
@@ -510,8 +491,10 @@ def run_app() -> None:
     export_tab.setLayout(export_layout)
 
     from nvitk.gui.mesh.panel import build_mesh_panel
+    from nvitk.gui.panels.dicom_browser import build_dicom_browser
 
     mesh_panel = build_mesh_panel(viewer)
+    dicom_browser = build_dicom_browser(viewer)
 
     # One dock per panel rather than tabs in a single dock, so each can be popped
     # out, moved to the workspace window, or split beside another. Tabbed
@@ -536,6 +519,7 @@ def run_app() -> None:
     labels_dock = build_labels_dock(viewer)
     image_props_dock = _panel_dock(image_props_panel, "image_properties", "Image properties")
     dicom_dock = _panel_dock(dicom_tags_panel, "dicom_tags", "DICOM tags")
+    dicom_browser_dock = _panel_dock(dicom_browser, "dicom_browser", "DICOM browser")
     mesh_dock = _panel_dock(mesh_panel, "mesh", "Meshlab")
     panel_docks = [
         tools_dock,
@@ -543,6 +527,7 @@ def run_app() -> None:
         mesh_dock,
         image_props_dock,
         dicom_dock,
+        dicom_browser_dock,
         _panel_dock(xnat_panel, "data", data_tab_label),
         _panel_dock(qc_panel, "qc", "QC"),
         _panel_dock(statmodels_panel, "statmodels", "Statmodels"),
@@ -597,7 +582,6 @@ def run_app() -> None:
     # whose objectName it cannot find — hence a second, explicit restore here.
     try:
         from nvitk.gui.core.prefs import (
-            DOCK_LAYOUT_VERSION,
             ensure_prefs_file,
             restore_dock_state,
             stored_dock_layout_version,
@@ -623,10 +607,14 @@ def run_app() -> None:
                 if not panel_dock.isFloating() and qt_main.dockWidgetArea(panel_dock) != Qt.NoDockWidgetArea:
                     qt_main.tabifyDockWidget(tools_dock, panel_dock)
             tools_dock.raise_()
-        elif stored_version < DOCK_LAYOUT_VERSION:
-            # Version 3 moved the Meshlab tab next to Labels; a saved layout keeps its
-            # own tab order, so move it there once.
-            _move_tab_after(qt_main, labels_dock, mesh_dock)
+        else:
+            # A saved layout keeps its own tab order: tabs added or moved since it
+            # was saved are put in place once. Version 3 moved the Meshlab tab next
+            # to Labels; version 4 added the DICOM browser after DICOM tags.
+            if stored_version < 3:
+                _move_tab_after(qt_main, labels_dock, mesh_dock)
+            if stored_version < 4:
+                _move_tab_after(qt_main, dicom_dock, dicom_browser_dock)
     except Exception:  # noqa: BLE001 — a stored layout must not block a launch
         pass
     if panel_manager is not None:

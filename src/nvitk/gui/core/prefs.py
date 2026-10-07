@@ -33,7 +33,7 @@ DOCK_STATE_KEY = "dock_state"
 #: stacks docks a restored state does not mention, so a v1 layout needs them
 #: regrouped once after it is restored.
 DOCK_LAYOUT_VERSION_KEY = "dock_layout_version"
-DOCK_LAYOUT_VERSION = 3
+DOCK_LAYOUT_VERSION = 4
 
 
 def prefs_path() -> Path:

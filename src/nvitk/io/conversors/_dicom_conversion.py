@@ -13,7 +13,7 @@ import re
 import tempfile
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 
@@ -259,8 +259,18 @@ def _normalize_series_uid(uid: Any) -> str:
     return _normalize_dicom_text(uid)
 
 
-def _iter_candidate_file_paths(path: str) -> list[str]:
-    """List every file under *path* (recursively, if a directory) as candidate DICOM files."""
+def _iter_candidate_file_paths(path: str | Sequence[str]) -> list[str]:
+    """List every file under *path* (recursively, if a directory) as candidate DICOM files.
+
+    *path* may also be a list of files and / or directories (e.g. the files of one
+    series picked in a DICOM browser).
+    """
+    if isinstance(path, (list, tuple)):
+        out: list[str] = []
+        for item in path:
+            out.extend(_iter_candidate_file_paths(str(item)))
+        return out
+    path = str(path)
     if os.path.isdir(path):
         fpaths: list[str] = []
         for dp, _, fns in os.walk(path):
@@ -2133,7 +2143,7 @@ def _load_one_series_arrays(
 
 
 def load_dicom_series(
-    input_path: str,
+    input_path: str | Sequence[str],
     *,
     axes: str | None = None,
     series_number: str | None = None,
@@ -2147,6 +2157,8 @@ def load_dicom_series(
     tmp_dir: Path | None = None,
 ):
     """Load DICOM series from *input_path* as ``(array, metadata)`` pairs — the public array-level entry point.
+
+    *input_path* is a file, a folder, or a list of files / folders (only those are read).
 
     Reads and groups all series (:func:`_read_dicom_conversion`), narrows to a
     specific series by uid/number/index when requested, then loads each via

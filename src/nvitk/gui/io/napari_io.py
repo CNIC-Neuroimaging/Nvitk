@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -473,6 +474,32 @@ def open_paths_with_nvitk(
     return layers
 
 
+def open_dicom_files_with_nvitk(viewer: Any, files: Sequence[str | Path], *, source: str | Path | None = None) -> list[Any]:
+    """Load exactly *files* (DICOM, e.g. one series picked in the DICOM browser) through
+    nvitk's DICOM stack and add their volumes as layers; *source* names the folder they
+    came from in the layers' metadata."""
+    from nvitk.io.conversors._dicom_conversion import load_dicom_series
+    from nvitk.types import Image
+
+    paths = [str(f) for f in files]
+    if not paths:
+        return []
+    origin = Path(source) if source is not None else Path(os.path.commonpath(paths) if len(paths) > 1 else paths[0])
+    try:
+        result = load_dicom_series(paths, return_all_series=True)
+    except Exception as exc:
+        _notify_error(f"Could not load the selected DICOM files:\n{exc}")
+        return []
+    layers = []
+    for i, (data, metadata) in enumerate(result):
+        md = dict(metadata)
+        img = Image(data=np.asarray(data), metadata=md, axes=md.get("axes"), name=md.get("name") or origin.stem,
+                    orientation=md.get("orientation"))
+        _name_image(img, origin if origin.is_dir() else origin.parent, f"_{i}" if len(result) > 1 else "")
+        layers.append(_add_image_to_viewer(viewer, img, origin))
+    return layers
+
+
 def _notify_error(message: str) -> None:
     """Show *message* via Napari's error notification, falling back to printing it if Napari's UI
     isn't available."""
@@ -654,6 +681,56 @@ def install_nvitk_io(viewer: Any) -> None:
             **kwargs,
         )
 
+    def _open_folder_dialog(choose_plugin: bool = False) -> None:
+        """File ▸ Open Folder… takes several folders at once (Ctrl / Shift-click):
+        several DICOM series folders, say, loaded in one go."""
+        from nvitk.gui.core.dialogs import choose_directories
+
+        try:
+            from napari.utils.history import get_open_history, update_open_history
+
+            start = (get_open_history() or [""])[0]
+        except Exception:  # noqa: BLE001
+            update_open_history = None
+            start = ""
+        folders = choose_directories(qt, "Select folder(s)… (Ctrl / Shift-click for several)", start)
+        if not folders:
+            return
+        qt._qt_open(folders, stack=False, choose_plugin=choose_plugin)
+        if update_open_history is not None:
+            try:
+                update_open_history(folders[0])
+            except Exception:  # noqa: BLE001
+                pass
+
     qt._qt_open = _qt_open
+    qt._open_folder_dialog = _open_folder_dialog
     qt._nvitk_io_patched = True
     install_nvitk_layer_hooks(viewer)
+    _add_open_folders_action(viewer, _open_folder_dialog)
+
+
+def _add_open_folders_action(viewer: Any, opener: Callable[[], None]) -> None:
+    """*File ▸ Open Folders… (several)*, right after Napari's single-folder entry.
+
+    Napari's own *Open Folder…* is an app-model command bound to the class method, so
+    it keeps its one-folder dialog; this sits beside it.
+    """
+    try:
+        from qtpy.QtWidgets import QAction
+    except ImportError:  # Qt 6 moved it
+        from qtpy.QtGui import QAction
+    try:
+        menu = viewer.window.file_menu
+    except Exception:  # noqa: BLE001
+        return
+    action = QAction("Open Folders… (several)", menu)
+    action.setToolTip("Choose several folders at once (Ctrl / Shift-click) — e.g. DICOM series folders.")
+    action.triggered.connect(lambda _checked=False: opener())
+    actions = menu.actions()
+    anchor = next((i for i, a in enumerate(actions) if a.text().replace("&", "").startswith("Open Folder")), None)
+    if anchor is not None and anchor + 1 < len(actions):
+        menu.insertAction(actions[anchor + 1], action)
+    else:
+        menu.addAction(action)
+    viewer.window._nvitk_open_folders_action = action

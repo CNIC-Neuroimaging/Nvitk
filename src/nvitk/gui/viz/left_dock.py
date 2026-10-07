@@ -211,12 +211,14 @@ def install_expand_button(dock: Any, title: str, *, extras: list[Any] | None = N
 
     def _sync() -> None:
         """Keep both buttons showing what they will do next."""
-        floating = bool(dock.isFloating())
+        # Popped out: floating, or in a panel window of its own (nvitk.gui.core.workspace).
+        floating = bool(dock.isFloating()) or type(dock.window()).__name__ == "PanelWindow"
         full = getattr(dock, "_nvitk_fullscreen_from", None) is not None
         pop.setText("⧈" if floating else "⧉")
         pop.setToolTip(
-            "Dock this panel back into the window." if floating
-            else "Pop this panel out into its own window."
+            "Put this panel back in the main window, at its tab." if floating
+            else "Pop this panel out into a window of its own (the other tabs stay docked); "
+                 "other panels can then join it there."
         )
         button.setText("⤡" if full else "⛶")
         button.setToolTip(
@@ -224,7 +226,7 @@ def install_expand_button(dock: Any, title: str, *, extras: list[Any] | None = N
             else "Fill the screen with this panel."
         )
         # Fullscreen only means anything once the panel is its own window.
-        button.setEnabled(floating or not full)
+        button.setEnabled(bool(dock.isFloating()) or not full)
 
     def _toggle_float() -> None:
         """Pop the panel out into its own window, or put it back."""
@@ -276,17 +278,23 @@ def install_expand_button(dock: Any, title: str, *, extras: list[Any] | None = N
         dock.raise_()
         _sync()
 
-    pop.clicked.connect(_toggle_float)
+    def _float_clicked() -> None:
+        """Through the panel manager when there is one (it remembers the tab to return to)."""
+        managed = getattr(dock, "_nvitk_managed_toggle", None)
+        (managed or _toggle_float)()
+
+    pop.clicked.connect(_float_clicked)
     button.clicked.connect(_toggle_fullscreen)
     # Double-clicking a title bar normally floats it; keep that gesture, since it
     # is the one people already reach for.
-    bar.mouseDoubleClickEvent = lambda _event: _toggle_float()
+    bar.mouseDoubleClickEvent = lambda _event: _float_clicked()
     dock.setTitleBarWidget(bar)
     dock.topLevelChanged.connect(lambda _floating: _sync())
     dock._nvitk_expand_button = button
     dock._nvitk_float_button = pop
     dock._nvitk_expand_toggle = _toggle_fullscreen
     dock._nvitk_float_toggle = _toggle_float
+    dock._nvitk_sync_buttons = _sync
     dock._nvitk_fullscreen_from = None
     _sync()
     return button
