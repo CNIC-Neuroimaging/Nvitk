@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 
-from nvitk.core.array import as_backend_array, to_numpy
+from nvitk.core.array import as_backend_array
 from nvitk.core.backend import setup
 from nvitk.core.logger import Logger
 from nvitk.morphology.centerline import skeletonize_binary
@@ -418,7 +418,7 @@ def _acomm_junction_voxel(eicab_qvtpy: np.ndarray) -> tuple[int, int, int] | Non
     coords = np.argwhere(eq == int(QVTPY_ACOMM))
     if coords.size == 0:
         return None
-    coords_np = as_backend_array(to_numpy(coords)).astype(np.float64)
+    coords_np = coords.astype(np.float64)
     com = coords_np.mean(axis=0)
     d2 = np.sum((coords_np - com) ** 2, axis=1)
     best = coords_np[int(np.argmin(d2))]
@@ -435,13 +435,14 @@ def _infer_aca_junction(
         j = _acomm_junction_voxel(eicab_qvtpy)
         if j is not None:
             return j, "eicab_acomm"
-    lc = as_backend_array(to_numpy(np.argwhere(laca_seeds))).astype(np.float64)
-    rc = as_backend_array(to_numpy(np.argwhere(raca_seeds))).astype(np.float64)
+    lc = np.argwhere(as_backend_array(laca_seeds)).astype(np.float64)
+    rc = np.argwhere(as_backend_array(raca_seeds)).astype(np.float64)
     if lc.size == 0 or rc.size == 0:
         return None, None
     d2 = np.sum((lc[:, None, :] - rc[None, :, :]) ** 2, axis=2)
     flat_idx = int(np.argmin(d2))
-    li, ri = np.unravel_index(flat_idx, d2.shape)
+    # Plain index arithmetic (cupy.unravel_index rejects a Python int index).
+    li, ri = divmod(flat_idx, int(d2.shape[1]))
     mid = 0.5 * (lc[int(li)] + rc[int(ri)])
     nx, ny, nz = laca_seeds.shape
     return (

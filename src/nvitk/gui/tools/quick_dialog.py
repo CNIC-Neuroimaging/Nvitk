@@ -225,6 +225,8 @@ class QuickOpDialog(QDialog):
         self._preview_timer.setInterval(_PREVIEW_MS)
         self._preview_timer.timeout.connect(self._update_preview)
 
+        if op_name == "ct_window":
+            self._link_ct_window()
         if op_name in PREVIEWABLE:
             for widget in self._widgets.values():
                 _connect_change(widget, self._preview_timer.start)
@@ -232,6 +234,41 @@ class QuickOpDialog(QDialog):
 
         apply_theme(self)
         self.setMinimumWidth(360)
+
+    def _link_ct_window(self) -> None:
+        """Keep the CT window's preset and its lower / upper HU in step: a preset
+        shows its bounds, and typing a bound makes the window Custom."""
+        combo = self._widgets.get("preset")
+        lower, upper = self._widgets.get("lower"), self._widgets.get("upper")
+        if not isinstance(combo, QComboBox) or lower is None or upper is None:
+            return
+        busy = {"on": False}
+
+        def preset_chosen(_index: int) -> None:
+            key = str(combo.currentData())
+            if busy["on"] or key == quick_ops.CT_WINDOW_CUSTOM:
+                return
+            try:
+                lo, hi = quick_ops.ct_window_limits(key)
+            except Exception:  # noqa: BLE001
+                return
+            busy["on"] = True
+            lower.set_value(lo)
+            upper.set_value(hi)
+            busy["on"] = False
+
+        def bound_typed() -> None:
+            if busy["on"]:
+                return
+            index = combo.findData(quick_ops.CT_WINDOW_CUSTOM)
+            if index >= 0 and combo.currentIndex() != index:
+                busy["on"] = True
+                combo.setCurrentIndex(index)
+                busy["on"] = False
+
+        combo.currentIndexChanged.connect(preset_chosen)
+        _connect_change(lower, bound_typed)
+        _connect_change(upper, bound_typed)
 
     def _build_widget(self, param: quick_ops.OpParam) -> Any:
         """The control for one parameter."""
@@ -314,7 +351,8 @@ class QuickOpDialog(QDialog):
         """Apply the chosen window to the source layer itself, live."""
         try:
             if self._op_name == "ct_window":
-                lo, hi = quick_ops.ct_window_limits(str(self.values()["preset"]))
+                values = self.values()
+                lo, hi = quick_ops.ct_window_limits(str(values["preset"]), values.get("lower"), values.get("upper"))
             else:
                 # Absolute intensities, straight from the sliders.
                 lo, hi = sorted((float(self.values()["low"]), float(self.values()["high"])))

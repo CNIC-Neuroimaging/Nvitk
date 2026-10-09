@@ -64,6 +64,7 @@ the active backend via :func:`as_backend_array`.
 
 from __future__ import annotations
 
+import functools
 import json
 import time
 from dataclasses import asdict, dataclass, field
@@ -109,6 +110,38 @@ MIN_SIPHON_CYCLE_LEN = 20
 GEODESIC_CL_MARGIN = 1
 LUMEN_GAP_CLOSE_ITERS = 1
 SMALL_HOLE_AREA = 64
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Host-only steps
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _host_step(fn):
+    """Run a host-only siphon step under ``using("cpu")``; return its mask(s) on the caller's backend.
+
+    These steps mix SciPy ``ndimage`` (``ndi_cpu``), graph walks and NumPy indexing,
+    so they only work on host arrays: called directly on the GPU backend they would
+    hand host arrays to CuPy. Inside :func:`correct_siphon_centerlines` (already a
+    CPU context) the wrapper is a no-op. Only the mask output is converted back
+    (the first item of a tuple result; each value when it is a ``{label: mask}`` dict).
+    """
+
+    def _back(x: Any) -> Any:
+        if isinstance(x, dict):
+            return {k: as_backend_array(v) for k, v in x.items()}
+        return as_backend_array(x)
+
+    @functools.wraps(fn)
+    def run(*args: Any, **kwargs: Any) -> Any:
+        with using("cpu"):
+            out = fn(*args, **kwargs)
+        # Outside the block the caller's backend is current again.
+        if isinstance(out, tuple):
+            return (_back(out[0]),) + out[1:]
+        return _back(out)
+
+    return run
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -514,6 +547,7 @@ def _bridge_cut_anchor(
     return tuple(int(v) for v in coords[idx])
 
 
+@_host_step
 def repair_ica_donut_3d(
     mask_bool: Any,
     seed_bool: Any,
@@ -1119,7 +1153,7 @@ def _rasterize_path_seeds(
 ) -> np.ndarray:
     """Bool volume with True at rounded centerline path voxels."""
     seeds = np.zeros(shape).astype(bool)
-    p = to_numpy(path)
+    p = as_backend_array(path)
     if p.size == 0:
         return seeds
     ii = np.rint(p[:, 0]).astype(np.int32)
@@ -1134,6 +1168,7 @@ def _rasterize_path_seeds(
     return seeds
 
 
+@_host_step
 def clean_mask_geodesic_cl(
     roi: Any,
     centerline_path: Any,
@@ -1300,6 +1335,7 @@ def _apply_thickness_micro_steps(
     return current
 
 
+@_host_step
 def recover_lumen_thickness(
     mask: Any,
     ceiling_mask: Any,
@@ -1361,6 +1397,7 @@ def recover_lumen_thickness(
     }
 
 
+@_host_step
 def recover_lumen_thickness_symmetric(
     items: Sequence[dict[str, Any]],
 ) -> tuple[dict[int, Any], dict[str, Any]]:
@@ -1425,6 +1462,7 @@ def recover_lumen_thickness_symmetric(
     }
 
 
+@_host_step
 def refine_mask_lumen_gaps(
     mask: Any,
     ceiling: Any,
@@ -1476,6 +1514,7 @@ def refine_mask_lumen_gaps(
     return as_backend_array(refined)
 
 
+@_host_step
 def clean_ica_mask_after_centerline(
     repaired_mask: Any,
     prep_info: dict,
@@ -1641,7 +1680,7 @@ def correct_siphon_centerlines(
         # Load and verify input images; check dimensions before proceeding.
         tof_img = _to_image(tof, name="tof")
         mask_img = _to_image(vessel_mask, name="vessel_mask")
-        wvi = as_backend_array(to_numpy(tof_img.data).astype(np.float32))
+        wvi = as_backend_array(tof_img.data).astype(np.float32)
         mask_data = as_backend_array(mask_img.data)
         shape = tuple(int(s) for s in mask_data.shape[:3])
         if tuple(int(s) for s in wvi.shape[:3]) != shape:
@@ -2059,10 +2098,10 @@ def _merge_ica_into_vessel_mask(
 def _rasterize_centerlines_mask(
     shape: tuple[int, int, int], centerlines: dict[int, Any]
 ) -> Any:
-    """Per-label voxel mask with vessel id on each centerline point (CPU NumPy)."""
+    """Per-label voxel mask with vessel id on each centerline point (backend array)."""
     mask = np.zeros(shape).astype(np.int32)
     for vid, pts in sorted(centerlines.items()):
-        p = to_numpy(pts)
+        p = as_backend_array(pts)
         if p.size == 0:
             continue
         ii = np.rint(p[:, 0]).astype(np.int32)
@@ -2081,14 +2120,17 @@ def _rasterize_bridges_mask(
     shape: tuple[int, int, int],
     bridges_by_label: dict[int, list[tuple[int, int, int]]],
 ) -> Any:
-    """Per-label voxel mask of removed-bridge voxels (CPU NumPy)."""
+    """Per-label voxel mask of removed-bridge voxels (backend array)."""
     mask = np.zeros(shape).astype(np.int32)
     for vid, voxels in bridges_by_label.items():
-        for v in voxels:
-            i, j, k = int(v[0]), int(v[1]), int(v[2])
-            if 0 <= i < shape[0] and 0 <= j < shape[1] and 0 <= k < shape[2]:
-                mask[i, j, k] = int(vid)
-    return as_backend_array(mask)
+        if not voxels:
+            continue
+        # One vectorised write per label rather than a device write per voxel.
+        v = as_backend_array(voxels).reshape(-1, 3).astype(np.int64)
+        keep = np.all((v >= 0) & (v < as_backend_array(shape)), axis=1)
+        v = v[keep]
+        mask[v[:, 0], v[:, 1], v[:, 2]] = int(vid)
+    return mask
 
 
 def _rasterize_cleared_masks(
@@ -2164,7 +2206,14 @@ def _print_ica_summary_table(
     return text
 
 
-def _save_ica_overview_figure(
+def _save_ica_overview_figure(out_path: Path, **kwargs: Any) -> None:
+    """Axial montage: Otsu → eroded → repaired mask + centerline per ICA (host / NumPy)."""
+    # Matplotlib needs host arrays, and np.ma has no CuPy counterpart.
+    with using("cpu"):
+        _save_ica_overview_figure_host(out_path, **kwargs)
+
+
+def _save_ica_overview_figure_host(
     out_path: Path,
     *,
     wvi: Any,
@@ -2237,7 +2286,13 @@ def _save_ica_overview_figure(
     plt.close(fig)
 
 
-def _save_qc_figure(
+def _save_qc_figure(out_path: Path, **kwargs: Any) -> None:
+    """Render the 3D matplotlib QC figure (host / NumPy; headless-safe)."""
+    with using("cpu"):
+        _save_qc_figure_host(out_path, **kwargs)
+
+
+def _save_qc_figure_host(
     out_path: Path,
     *,
     mask_by_label: dict[int, Any],

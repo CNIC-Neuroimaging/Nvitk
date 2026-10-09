@@ -145,6 +145,19 @@ class DicomStudy:
     def files(self) -> list[DicomFile]:
         return [f for s in self.series for f in s.files]
 
+    @property
+    def subject(self) -> str:
+        """Who the study is of: the patient ID, else the patient's name, else ``""``."""
+        return (self.patient_id or self.patient_name or "").strip().lower()
+
+
+def shares_subject(listed: Sequence[DicomStudy], scanned: Sequence[DicomStudy]) -> bool:
+    """Whether *scanned* holds a study of a patient already in *listed* (or a study
+    already there)."""
+    subjects = {st.subject for st in listed if st.subject}
+    uids = {st.uid for st in listed}
+    return any((st.subject and st.subject in subjects) or st.uid in uids for st in scanned)
+
 
 def _text(ds: Any, keyword: str) -> str:
     try:
@@ -374,6 +387,48 @@ def merge_studies(*scans: Sequence[DicomStudy]) -> list[DicomStudy]:
     return _sorted_studies(studies.values())
 
 
+#: Extensions that are not DICOM, skipped when sniffing a folder.
+_NOT_DICOM = (".nii", ".nii.gz", ".gz", ".json", ".txt", ".csv", ".xml", ".png", ".jpg", ".jpeg", ".tif",
+              ".tiff", ".mha", ".mhd", ".nrrd", ".npy", ".npz", ".pkl", ".b2nd", ".zip", ".pdf", ".md", ".py")
+
+
+def is_dicom_file(path: str | Path) -> bool:
+    """A DICOM file: the ``DICM`` marker after the 128-byte preamble (or a ``.dcm`` / ``.ima`` name)."""
+    path = str(path)
+    low = path.lower()
+    if low.endswith(_NOT_DICOM):
+        return False
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(128)
+            if fh.read(4) == b"DICM":
+                return True
+    except OSError:
+        return False
+    return low.endswith((".dcm", ".ima", ".dicom"))
+
+
+def contains_dicom(path: str | Path, *, limit: int = 64) -> bool:
+    """Whether *path* is a DICOM file, or a folder with DICOM files in it (looking at
+    no more than *limit* files, so it stays instant on a big study)."""
+    path = str(path)
+    if os.path.isfile(path):
+        return is_dicom_file(path)
+    if not os.path.isdir(path):
+        return False
+    seen = 0
+    for root, _dirs, names in os.walk(path):
+        for name in names:
+            if name.startswith("."):
+                continue
+            if name.upper() == "DICOMDIR" or is_dicom_file(os.path.join(root, name)):
+                return True
+            seen += 1
+            if seen >= limit:
+                return False
+    return False
+
+
 def read_header(path: str | Path) -> Any:
     """The header of one DICOM file (a pydicom ``Dataset`` without the pixels)."""
     import pydicom
@@ -381,4 +436,15 @@ def read_header(path: str | Path) -> Any:
     return pydicom.dcmread(str(path), stop_before_pixels=True, force=True)
 
 
-__all__ = ["DicomFile", "DicomSeries", "DicomStudy", "LOADABLE_KINDS", "merge_studies", "read_header", "scan_dicom"]
+__all__ = [
+    "DicomFile",
+    "DicomSeries",
+    "DicomStudy",
+    "LOADABLE_KINDS",
+    "contains_dicom",
+    "is_dicom_file",
+    "merge_studies",
+    "read_header",
+    "scan_dicom",
+    "shares_subject",
+]

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nvitk.core.array import as_backend_array, to_numpy
+from nvitk.core.array import as_backend_array
 from nvitk.core.backend import setup
 from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread, imsave
@@ -56,7 +56,7 @@ def _resolve_totalseg_output(path: Path) -> Path:
 
 def extract_brain_binary(multilabel: np.ndarray) -> np.ndarray:
     """Binary brain mask from a ``total_mr`` multilabel volume."""
-    arr = to_numpy(as_backend_array(multilabel)).astype(np.int32, copy=False)
+    arr = as_backend_array(multilabel).astype(np.int32, copy=False)
     brain_id = int(get_class_id("brain", TOTAL_MR_TASK))
     mask = arr == brain_id
     if not bool(mask.any()):
@@ -73,10 +73,10 @@ def align_brain_mask_to_target(brain_mask: np.ndarray, *, source_img: Image, tar
         src_aff = getattr(source_img, "affine", None)
         tgt_aff = getattr(target_img, "affine", None)
         if src_aff is not None and tgt_aff is not None:
-            if np.allclose(np.asarray(src_aff), np.asarray(tgt_aff), atol=1e-3):
+            if bool(np.allclose(as_backend_array(src_aff), as_backend_array(tgt_aff), atol=1e-3)):
                 return as_backend_array(brain_mask.astype(bool, copy=False))
     resampled = resample_to(src, target_img, order=0, prefilter=False)
-    return as_backend_array(to_numpy(resampled.data) > 0)
+    return as_backend_array(resampled.data) > 0
 
 
 def segment_brain_mask_from_angio(
@@ -99,7 +99,7 @@ def segment_brain_mask_from_angio(
     if not overwrite and mask_path.is_file():
         log.info(f"brain mask: reuse cached {mask_path}")
         cached = imread(mask_path)
-        mask = as_backend_array(to_numpy(cached.data) > 0)
+        mask = as_backend_array(cached.data) > 0
         return mask, angio_img
 
     log.step(f"TotalSegmentator {TOTAL_MR_TASK} (roi=brain) on {angio_path.name}")

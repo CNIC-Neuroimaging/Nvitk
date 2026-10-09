@@ -41,10 +41,10 @@ def _qualitative_color_pool() -> list[tuple[float, float, float]]:
     """Build a pool of perceptually distinct RGB colors (0–1)."""
     pool: list[tuple[float, float, float]] = []
     try:
-        import matplotlib.cm as cm
+        import matplotlib
 
         for name in ("tab20", "tab20b", "Set1", "Set2", "Dark2", "Paired"):
-            cmap = cm.get_cmap(name)
+            cmap = matplotlib.colormaps[name]
             n = int(getattr(cmap, "N", 20))
             for j in range(n):
                 rgba = cmap(j / max(n - 1, 1))

@@ -211,8 +211,15 @@ def _unique_labels(data: np.ndarray) -> list[int]:
     flat = as_backend_array(data).ravel()
     if flat.size == 0:
         return []
-    labels = np.unique(flat)
+    # Unique on the backend; the short list of ids comes to the host for the Python loop.
+    labels = to_numpy(np.unique(flat))
     return [int(x) for x in labels if int(x) != 0]
+
+
+def _n_labels(data: Any) -> int:
+    """How many distinct non-zero labels *data* holds (counted on the backend)."""
+    arr = as_backend_array(data)
+    return int(np.unique(arr[arr > 0]).size)
 
 
 def _label_ids_array(label_ids: list[int]) -> np.ndarray:
@@ -255,9 +262,9 @@ def _multilabel_input_and_labels(
         if not label_ids:
             raise ValueError(f"Select at least one label for {what}.")
         labels = [int(x) for x in label_ids]
-        src_np = to_numpy(src)
-        work = np.where(np.isin(src_np, _label_ids_array(labels)), src_np, 0)
-        return as_backend_array(work), labels
+        # On the backend throughout: CuPy's isin / where reject a host array.
+        work = np.where(np.isin(src, _label_ids_array(labels)), src, 0)
+        return work, labels
 
     return src, all_labels
 
@@ -323,7 +330,8 @@ def _run_multilabel(
     """
     from nvitk.gui.labels.visibility import label_source_data
 
-    source = to_numpy(as_backend_array(label_source_data(layer)))
+    # All on the backend: out / claimed are backend arrays, so each per-label result is too.
+    source = as_backend_array(label_source_data(layer))
     out = np.zeros(source.shape, dtype=_multilabel_dtype(source, label_ids))
     claimed = np.zeros(source.shape, dtype=bool)
 
@@ -333,7 +341,7 @@ def _run_multilabel(
         )
         if result is None:
             continue
-        kept = to_numpy(result) != 0
+        kept = as_backend_array(result) != 0
         if kept.shape != source.shape:
             raise ValueError(
                 f"{tool_id} returned shape {tuple(kept.shape)} for label {label}, but the layer is "
@@ -453,11 +461,20 @@ def run_gui_tool(
     (pipeline CLI subprocess, a dedicated viz/measure handler, or a generic array-in/array-out tool
     call on *layer*'s prepared data). Returns the new layer data, or ``None`` for tools that manage
     their own output (pipelines, viewer overlays, notifications)."""
+    from nvitk.gui.tools.registry import TOOL_ID_ALIASES
+
+    params = dict(params or {})
+    alias = TOOL_ID_ALIASES.get(tool_id)
+    if alias is not None:
+        # A tool since folded into another: its id *is* some of the new one's options
+        # (the old "keep outside" is the mode), so those win over anything passed.
+        tool_id, implied = alias
+        params = {**params, **implied}
+        if not _layer_param(params, "mask_layer"):
+            params["mask_layer"] = params.get("reference_layer", "")
     spec = tool_by_id(tool_id)
     if spec is None:
         raise ValueError(f"Unknown tool id: {tool_id}")
-
-    params = dict(params or {})
 
     if spec.run_mode == "pipeline":
         _run_pipeline_cli(spec, params)
@@ -681,7 +698,9 @@ def run_gui_tool(
         new_aff = out.affine
         if new_aff is None:
             raise ValueError("Reorient produced no affine.")
-        new_aff = as_backend_array(to_numpy(new_aff)).astype(float)
+        # The affine only feeds host consumers (nibabel axis codes, the napari
+        # layer affine and its metadata): keep it on the host.
+        new_aff = to_numpy(new_aff).astype(float)
         codes = orientation_codes_from_affine(new_aff) or (
             out.orientation or str(params.get("target_orientation") or "")
         )
@@ -691,8 +710,9 @@ def run_gui_tool(
         nv = dict(nvitk_metadata_from_layer(layer))
         nv["affine"] = new_aff
         nv["orientation"] = codes
-        for i, key in enumerate(("x_res", "y_res", "z_res")):
-            nv[key] = float(np.linalg.norm(new_aff[:3, i]))
+        with using("cpu"):
+            for i, key in enumerate(("x_res", "y_res", "z_res")):
+                nv[key] = float(np.linalg.norm(new_aff[:3, i]))
         nv["spacing"] = (nv["x_res"], nv["y_res"], nv["z_res"])
         nv["shape"] = tuple(int(s) for s in arr.shape)
         meta["nvitk_metadata"] = nv
@@ -719,6 +739,12 @@ def run_gui_tool(
 
     bk = get_global_backend()
     data = layer_data_for_tool(layer.data)
+
+    if tool_id == "seg_mask_image":
+        # Manages its own output: the result is the *image*'s layer, whichever of the
+        # image and the mask was the active one.
+        _run_mask_image(viewer, layer, params, label_ids=label_ids, backend=bk)
+        return None
     if not gpu_enabled():
         data = as_backend_array(to_numpy(data))
 
@@ -940,40 +966,6 @@ def run_gui_tool(
                 gaussian_sigma=_f("snakes_sigma", 1.0),
                 n_points=_i("snakes_n_points", 400),
                 axis=_i("snakes_axis", 0),
-            )
-            return coerce_tool_output(out.data if hasattr(out, "data") else out)
-
-    if tool_id in ("img_mask_keep_inside", "img_mask_keep_outside"):
-        from nvitk.gui.labels.visibility import is_label_like_layer, label_source_data
-        from nvitk.segmentation.mask_ops import apply_mask_to_image
-
-        mask_name = _layer_param(params, "reference_layer")
-        if not mask_name:
-            raise ValueError("Select a mask / segmentation layer in the reference dropdown.")
-        mask_layer = _resolve_layer(viewer, mask_name)
-        # Prefer unfiltered label source so hidden labels still contribute if listed.
-        mask_src = label_source_data(mask_layer) if is_label_like_layer(mask_layer) else None
-        _, mask_img, resampled = align_mask_to_reference_layer(
-            mask_layer, layer, mask_src, order=0
-        )
-        if resampled:
-            gui_log(
-                f"Resampled mask '{mask_layer.name}' onto image '{layer.name}' "
-                f"grid {tuple(img.data.shape)}."
-            )
-        lids = parse_label_ids(str(params.get("mask_label_ids") or ""))
-        mode = "keep_inside" if tool_id == "img_mask_keep_inside" else "keep_outside"
-        with using(bk):
-            out = apply_mask_to_image(
-                img,
-                mask_img,
-                mode=mode,
-                fill_value=float(params.get("fill_value") or 0.0),
-                label_ids=lids or None,
-            )
-            gui_log(
-                f"Mask apply ({mode}): fill={params.get('fill_value') or 0.0}"
-                + (f", labels={lids}" if lids else ", labels=all nonzero")
             )
             return coerce_tool_output(out.data if hasattr(out, "data") else out)
 
@@ -1380,7 +1372,7 @@ def run_gui_tool(
                 bar_layer, intensity_layer, order=0
             )
             bar_vol = as_backend_array(bar_img.data)
-            if len(np.unique(to_numpy(bar_vol))) > 2:
+            if int(np.unique(bar_vol).size) > 2:
                 forb = forbidden_other_labels(bar_vol, exclude, radius_vox=mask_rad)
             else:
                 forb = forbidden_from_label_mask(
@@ -1395,7 +1387,7 @@ def run_gui_tool(
                 cl_layer, intensity_layer, order=0
             )
             cl_vol = as_backend_array(cl_img.data)
-            if len(np.unique(to_numpy(cl_vol))) > 2:
+            if int(np.unique(cl_vol).size) > 2:
                 cl_forb = forbidden_other_labels(cl_vol, exclude, radius_vox=cl_rad)
             else:
                 cl_forb = forbidden_from_label_mask(
@@ -1410,7 +1402,7 @@ def run_gui_tool(
             label_vol = as_backend_array(label_img.data)
             if not exclude:
                 growing = as_backend_array(mask).astype(bool)
-                for lid in np.unique(to_numpy(label_vol)):
+                for lid in to_numpy(np.unique(label_vol)):
                     lid = int(lid)
                     if lid != 0 and np.any(label_vol[growing] == lid):
                         exclude.append(lid)
@@ -1482,9 +1474,9 @@ def run_gui_tool(
                 )
                 gui_log(
                     f"Blood flood (from_scratch): vesselness={result.vesselness_mode}, "
-                    f"tree_voxels={int(np.count_nonzero(result.tree))}, "
+                    f"tree_voxels={int(np.count_nonzero(as_backend_array(result.tree)))}, "
                     f"components={result.info.get('n_components')}, "
-                    f"labeled={int(np.count_nonzero(result.labels))}"
+                    f"labeled={int(np.count_nonzero(as_backend_array(result.labels)))}"
                 )
                 return coerce_tool_output(result.labels)
 
@@ -1502,7 +1494,9 @@ def run_gui_tool(
 
         from nvitk.gui.labels.visibility import label_source_data, unique_layer_labels
 
-        src_markers = to_numpy(label_source_data(layer))
+        # Markers on the backend, like the selected ids: np.isin / np.where under CuPy
+        # reject a host array (the "Unsupported type <class 'numpy.ndarray'>" failure).
+        src_markers = as_backend_array(label_source_data(layer))
         sel_ids = [int(x) for x in (label_ids or [])]
         if not sel_ids:
             sel_ids = unique_layer_labels(src_markers)
@@ -1542,13 +1536,12 @@ def run_gui_tool(
                 barrier=barrier_arr,
                 **common_kw,
             )
-            n_lab = int(len(np.unique(to_numpy(result.labels))) - (
-                1 if np.any(to_numpy(result.labels) == 0) else 0
-            ))
+            out_labels = as_backend_array(result.labels)
+            n_lab = int(np.unique(out_labels).size) - (1 if bool(np.any(out_labels == 0)) else 0)
             gui_log(
                 f"Blood flood (expand): vesselness={result.vesselness_mode}, "
-                f"seeds={sel_ids}, tree_voxels={int(np.count_nonzero(result.tree))}, "
-                f"output_labels={n_lab}, labeled={int(np.count_nonzero(result.labels))}"
+                f"seeds={sel_ids}, tree_voxels={int(np.count_nonzero(as_backend_array(result.tree)))}, "
+                f"output_labels={n_lab}, labeled={int(np.count_nonzero(out_labels))}"
             )
             return coerce_tool_output(result.labels)
 
@@ -2273,7 +2266,7 @@ def _run_centerline_to_polyline(
 
     labs = [int(x) for x in (label_ids or []) if int(x) != 0]
     if not labs:
-        labs = sorted(int(v) for v in np.unique(arr) if int(v) != 0)
+        labs = sorted(int(v) for v in to_numpy(np.unique(as_backend_array(arr))) if int(v) != 0)
     if not labs:
         raise ValueError("No non-zero labels in the centerline mask.")
 
@@ -4031,7 +4024,7 @@ def _run_viz_flow_streamlines_napari(
         return
 
     notify(
-        f"Precomputing streamlines for {int(np.unique(mask_arr[mask_arr > 0]).size)} "
+        f"Precomputing streamlines for {_n_labels(mask_arr)} "
         f"label(s) across cardiac phases…"
     )
     cache = build_flow_streamline_cache(
@@ -4093,16 +4086,163 @@ def _layer_kwargs_from(layer: Any, name: str) -> dict[str, Any]:
     return {"name": f"{layer.name}_{name}", **layer_spatial_kwargs(layer)}
 
 
-def _label_display(viewer: Any, layer: Any, label_id: int) -> str:
-    """``"3 — Left ICA"`` when a schema names the label, ``"3"`` when none does."""
-    try:
-        from nvitk.gui.labels.catalog import get_schema, layer_schema_key
+def _run_mask_image(
+    viewer: Any, active: Any, params: dict[str, Any], *, label_ids: list[int] | None, backend: str
+) -> Any:
+    """Keep or remove an image's voxels by a mask's labels (tool ``seg_mask_image``).
 
-        key = layer_schema_key(layer)
-        if key:
-            name = get_schema(key).name_for(int(label_id))
-            if name:
-                return f"{int(label_id)} — {name}"
+    The image and the mask are the two layer parameters, either left on “none”
+    for the active layer. The labels: the ids typed, else — with the mask active —
+    the picker's, else the ones the mask shows (its live filter), else every one.
+    The result is a new image layer placed like the image (or replaces its data),
+    optionally cropped to the kept region. Returns the layer written.
+    """
+    from nvitk.gui.core.spatial import _time_axis_index, layer_spacing, layer_spatial_kwargs
+    from nvitk.gui.labels.visibility import (
+        copy_layer_metadata_for_output,
+        is_label_like_layer,
+        label_source_data,
+        stored_visible_ids,
+    )
+    from nvitk.segmentation.mask_ops import (
+        FILL_MIN,
+        FILL_NAN,
+        apply_mask_to_image,
+        mask_region,
+        region_bounds,
+    )
+
+    # ── which layer is which ──
+    image_name = _layer_param(params, "image_layer")
+    mask_name = _layer_param(params, "mask_layer")
+    image_layer = _resolve_layer(viewer, image_name) if image_name else None
+    mask_layer = _resolve_layer(viewer, mask_name) if mask_name else None
+    if image_layer is None and mask_layer is None:
+        raise ValueError(
+            "Pick the mask (with the image active) or the image (with the mask active)."
+        )
+    image_layer = active if image_layer is None else image_layer
+    mask_layer = active if mask_layer is None else mask_layer
+    if image_layer is mask_layer:
+        raise ValueError("The image and the mask must be two different layers.")
+    if type(image_layer).__name__ not in ("Image", "Labels") or getattr(image_layer, "rgb", False):
+        raise ValueError(f"“{image_layer.name}” is not an image volume.")
+
+    # ── which labels make the region ──
+    typed = parse_label_ids(str(params.get("mask_label_ids") or ""))
+    if typed:
+        ids: list[int] | None = typed
+    elif mask_layer is active and label_ids:
+        ids = list(label_ids)
+    else:
+        shown = stored_visible_ids(mask_layer)
+        ids = sorted(int(i) for i in shown) if shown is not None else None
+    if ids is not None and not ids:
+        raise ValueError(f"No label of “{mask_layer.name}” is selected or shown.")
+
+    # ── the mask on the image's grid ──
+    image_data = layer_data_for_tool(image_layer.data)
+    mask_src = label_source_data(mask_layer) if is_label_like_layer(mask_layer) else None
+    mask_full = mask_src if mask_src is not None else layer_data_for_tool(mask_layer.data)
+    if tuple(getattr(mask_full, "shape", ())) == tuple(image_data.shape) and len(image_data.shape) == 4:
+        # A 3D+t segmentation of a 3D+t image: frame by frame, as it is.
+        mask_data, resampled = mask_full, False
+    else:
+        _, mask_img, resampled = align_mask_to_reference_layer(mask_layer, image_layer, mask_src, order=0)
+        mask_data = mask_img.data
+    if resampled:
+        gui_log(f"Resampled mask “{mask_layer.name}” onto “{image_layer.name}”'s grid.")
+
+    keep = str(params.get("mask_mode") or "keep inside the labels").lower().startswith("keep")
+    fill_with = str(params.get("fill_with") or "image minimum").lower()
+    fill: float | str = (
+        FILL_MIN if fill_with.startswith("image") else FILL_NAN if fill_with == "nan"
+        else float(params.get("fill_value") or 0.0)
+    )
+    spacing = layer_spacing(image_layer)
+    time_axis = _time_axis_index(image_layer) if len(image_data.shape) == 4 else None
+    margin = float(params.get("margin_mm") or 0.0)
+
+    with using(backend):
+        out = apply_mask_to_image(
+            as_backend_array(image_data), as_backend_array(mask_data),
+            mode="keep_inside" if keep else "keep_outside",
+            fill_value=fill, label_ids=ids, margin_mm=margin, spacing=spacing,
+            time_axis=time_axis,
+        )
+        region = mask_region(as_backend_array(mask_data), label_ids=ids, margin_mm=margin, spacing=spacing)
+        n_region = int(np.count_nonzero(region))
+        bounds = region_bounds(region) if (keep and bool(params.get("crop"))) else None
+    # Napari holds layers on the host.
+    out = to_numpy(out)
+
+    # ── crop to the kept region (spatial axes; time kept whole) ──
+    spatial_kwargs = dict(layer_spatial_kwargs(image_layer))
+    out_metadata = copy_layer_metadata_for_output(dict(image_layer.metadata or {}))
+    if bounds is not None:
+        from nvitk.gui.core.spatial import crop_placement
+
+        lo_sp, hi_sp = bounds
+        nd = out.ndim
+        spatial_dims = [d for d in range(nd) if d != time_axis][-len(lo_sp):]
+        index = [slice(None)] * nd
+        lo = [0] * nd
+        for k, d in enumerate(spatial_dims):
+            index[d] = slice(lo_sp[k], hi_sp[k])
+            lo[d] = lo_sp[k]
+        out = out[tuple(index)].copy()  # host array: a contiguous copy of the crop
+        # The crop moves the origin: the affine (and the file's affine) shift by it,
+        # so it shows — and is saved — where it came from.
+        spatial_kwargs, cropped_meta = crop_placement(image_layer, lo)
+        out_metadata = copy_layer_metadata_for_output(cropped_meta)
+    elif keep is False and bool(params.get("crop")):
+        gui_log("Crop applies when keeping the region; the whole image is kept here.")
+
+    # ── output ──
+    what = (", ".join(str(i) for i in ids)) if ids else "all"
+    action = "kept" if keep else "removed"
+    filled = {FILL_MIN: "the image minimum", FILL_NAN: "NaN"}[fill] if isinstance(fill, str) else f"{fill:g}"
+    display = {
+        "colormap": getattr(image_layer, "colormap", None),
+        "contrast_limits": tuple(float(v) for v in getattr(image_layer, "contrast_limits", ()) or ()) or None,
+        "blending": getattr(image_layer, "blending", "translucent"),
+    }
+    if bool(params.get("replace")):
+        image_layer.data = out
+        if bounds is not None:
+            image_layer.affine = spatial_kwargs["affine"]
+            image_layer.metadata = out_metadata
+        target = image_layer
+    else:
+        suffix = f"in_{mask_layer.name}" if keep else f"without_{mask_layer.name}"
+        kwargs = {k: v for k, v in display.items() if v is not None}
+        if type(image_layer).__name__ == "Labels":
+            target = viewer.add_labels(
+                out, name=f"{image_layer.name}_{suffix}", metadata=out_metadata, **spatial_kwargs,
+            )
+        else:
+            target = viewer.add_image(
+                out, name=f"{image_layer.name}_{suffix}", metadata=out_metadata, **spatial_kwargs, **kwargs,
+            )
+    notify(
+        f"“{image_layer.name}”: voxels in label(s) {what} of “{mask_layer.name}” {action} "
+        f"({n_region:,} voxels in the region"
+        + (f", margin {margin:+g} mm" if margin else "")
+        + f"); the others set to {filled}"
+        + (f"; cropped to {tuple(int(v) for v in out.shape)}" if bounds is not None else "")
+        + "."
+    )
+    return target
+
+
+def _label_display(viewer: Any, layer: Any, label_id: int) -> str:
+    """``"3 — Left ICA"`` when the label has a name (given by hand, or the schema's), ``"3"`` when not."""
+    try:
+        from nvitk.gui.labels.catalog import label_name
+
+        name = label_name(layer, int(label_id))
+        if name:
+            return f"{int(label_id)} — {name}"
     except Exception:  # noqa: BLE001 — an unnamed label is still a usable row
         pass
     return str(int(label_id))

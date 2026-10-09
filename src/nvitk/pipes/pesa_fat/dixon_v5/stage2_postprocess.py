@@ -27,6 +27,7 @@ from pathlib import Path
 import click
 
 from nvitk.core.click_backend import backend_click_option, set_default_backend
+from nvitk.core.array import as_backend_array
 from nvitk.core.backend import setup
 from nvitk.core.logger import Logger
 from nvitk.io import imread, imsave
@@ -131,7 +132,7 @@ def _kidney_remove_pelvis(kidney: Image, *, dilate_iters: int = 1) -> Image:
 
     hull = convex_hull_3d(kidney.with_data(binary))
     hull_arr = hull.data if hasattr(hull, "data") else hull
-    pelvis = ((np.asarray(hull_arr) > 0) & (binary == 0)).astype(np.uint8)
+    pelvis = ((as_backend_array(hull_arr) > 0) & (binary == 0)).astype(np.uint8)
     if not bool(pelvis.any()):
         return kidney.with_data(binary)
 

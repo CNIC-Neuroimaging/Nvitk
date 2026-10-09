@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nvitk.core.array import as_backend_array, to_numpy
+from nvitk.core.array import as_backend_array
 from nvitk.core.backend import setup
 
 setup(globals())
@@ -69,7 +69,7 @@ def binary_mask_sliding_threshold_3d(
 
     opt_thresh = max_val * opt_frac
     segment = cdcrop > opt_thresh
-    return as_backend_array(to_numpy(segment).astype(bool, copy=False)), float(opt_thresh)
+    return as_backend_array(segment).astype(bool, copy=False), float(opt_thresh)
 
 
 def binary_mask_sliding_threshold_2d(
@@ -125,7 +125,7 @@ def binary_mask_sliding_threshold_2d(
 
     thresh = max_val * opt_frac
     segment = img > thresh
-    return as_backend_array(to_numpy(segment).astype(bool, copy=False))
+    return as_backend_array(segment).astype(bool, copy=False)
 
 
 __all__ = [

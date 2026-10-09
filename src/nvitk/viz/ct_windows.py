@@ -78,6 +78,10 @@ CT_WINDOWS: dict[str, CTWindow] = {
                  "Cortical detail and fractures; soft tissue is deliberately flat."),
         CTWindow("angio", "CT angiography", 300, 600,
                  "Contrast-filled lumen against vessel wall and surrounding tissue."),
+        CTWindow("heart", "Heart", 700, 600,
+                 "400 … 1000 HU: the contrast-filled chambers and coronaries, calcium on top."),
+        CTWindow("vessel", "Vessels", 525, 1150,
+                 "-50 … 1100 HU: vessels from the wall and soft tissue up to calcified plaque."),
         CTWindow("soft_tissue", "Soft tissue", 50, 400, "General abdominal/soft-tissue review."),
         CTWindow("mediastinum", "Mediastinum", 50, 350, "Mediastinal structures and vessels."),
         CTWindow("lung", "Lung", -600, 1500, "Parenchyma and airways."),
@@ -94,7 +98,7 @@ DEFAULT_WINDOW_KEY: str = "brain"
 #: Windows most relevant to the vascular work this toolkit is built around, listed first in
 #: pickers so the common choice is not buried among abdominal presets.
 PREFERRED_ORDER: tuple[str, ...] = (
-    "brain", "angio", "stroke", "subdural", "bone", "soft_tissue",
+    "brain", "angio", "vessel", "heart", "stroke", "subdural", "bone", "soft_tissue",
     "mediastinum", "lung", "liver", "full",
 )
 

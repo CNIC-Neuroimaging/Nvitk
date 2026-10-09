@@ -90,10 +90,11 @@ def _global_speed_limits(velocity: np.ndarray, mask: np.ndarray) -> tuple[float,
 
 def _scalar_to_rgba(value: float, lo: float, hi: float, cmap_name: str) -> np.ndarray:
     """Map a scalar *value* in ``[lo, hi]`` to an RGBA color via the named Matplotlib colormap."""
-    import matplotlib.cm as cm
+    import matplotlib
     import matplotlib.colors as mcolors
 
-    cmap = cm.get_cmap(str(cmap_name or "turbo"))
+    # matplotlib >= 3.9 removed cm.get_cmap; the colormap registry is the stable API.
+    cmap = matplotlib.colormaps[str(cmap_name or "turbo")]
     norm = mcolors.Normalize(vmin=float(lo), vmax=float(hi))
     return np.asarray(cmap(norm(float(value))), dtype=np.float32)
 

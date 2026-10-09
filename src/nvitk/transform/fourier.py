@@ -218,7 +218,8 @@ def kspace(
     """
     axes_str = _axes_string(image)
     axes = kspace_axes(image, mode=mode, slice_axis=slice_axis)
-    data = _as_float_or_complex(as_backend_array(image.data))
+    src = as_backend_array(image.data)
+    data = _as_float_or_complex(src)
     kdata = _forward(data, axes, bool(centered), str(norm))
 
     spacing = _spatial_spacing(image, axes, axes_str)
@@ -231,7 +232,7 @@ def kspace(
         "centered": bool(centered),
         "norm": str(norm),
         "source_dtype": str(image.dtype),
-        "source_is_complex": bool(np.iscomplexobj(image.data)),
+        "source_is_complex": bool(np.iscomplexobj(src)),
         "spacing_mm": [float(s) for s in spacing],
         "frequency_spacing": [float(f) for f in freq],
         "frequency_units": "cycles/mm",

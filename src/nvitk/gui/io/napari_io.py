@@ -663,6 +663,13 @@ def install_nvitk_io(viewer: Any) -> None:
         else:
             paths = [Path(f) for f in filenames]
 
+        if getattr(qt, "_nvitk_dropping", False):
+            # Dropped on the viewer: DICOM can go to the DICOM browser first.
+            paths = _route_dropped_dicom(viewer, qt, paths)
+            if not paths:
+                return None
+            filenames = [str(p) for p in paths]
+
         nvitk_paths = [p for p in paths if _nvitk_can_open(p)]
         if nvitk_paths:
             try:
@@ -703,11 +710,48 @@ def install_nvitk_io(viewer: Any) -> None:
             except Exception:  # noqa: BLE001
                 pass
 
+    original_from_urls = qt._open_from_list_of_urls_data
+
+    def _open_from_list_of_urls_data(urls_list, stack: bool, choose_plugin: bool):
+        """Napari's drop handler: marks the open as a drop (see ``_route_dropped_dicom``)."""
+        qt._nvitk_dropping = not choose_plugin
+        try:
+            return original_from_urls(urls_list, stack=stack, choose_plugin=choose_plugin)
+        finally:
+            qt._nvitk_dropping = False
+
     qt._qt_open = _qt_open
+    qt._open_from_list_of_urls_data = _open_from_list_of_urls_data
     qt._open_folder_dialog = _open_folder_dialog
     qt._nvitk_io_patched = True
     install_nvitk_layer_hooks(viewer)
     _add_open_folders_action(viewer, _open_folder_dialog)
+
+
+def _route_dropped_dicom(viewer: Any, parent: Any, paths: list[Path]) -> list[Path]:
+    """DICOM among dropped *paths*: loaded, or opened in the DICOM browser — as the user
+    answers the small prompt (or as remembered). Returns what is left to load."""
+    try:
+        from nvitk.gui.panels.dicom_browser import ask_dicom_drop, drop_action, open_in_dicom_browser
+        from nvitk.io.dicom_index import contains_dicom
+    except Exception:  # noqa: BLE001 — without the browser, everything just loads
+        return paths
+    if getattr(viewer, "_nvitk_dicom_browser", None) is None:
+        return paths
+    dicom = [p for p in paths if contains_dicom(p)]
+    if not dicom:
+        return paths
+    action = drop_action()
+    if action == "ask":
+        action = ask_dicom_drop(parent, [str(p) for p in dicom])
+        viewer._nvitk_dicom_browser.sync_drop_pref()  # "Remember my choice" may have changed it
+    rest = [p for p in paths if p not in dicom]
+    if action == "browser":
+        open_in_dicom_browser(viewer, [str(p) for p in dicom])
+        return rest
+    if action is None:
+        return rest  # cancelled: the DICOM is left out, anything else still loads
+    return paths
 
 
 def _add_open_folders_action(viewer: Any, opener: Callable[[], None]) -> None:

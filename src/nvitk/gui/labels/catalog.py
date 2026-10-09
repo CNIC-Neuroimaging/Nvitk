@@ -378,14 +378,86 @@ def remember_layer_schema(layer: Any | None, key: str | None) -> None:
         pass
 
 
+# ── Names given by hand ──────────────────────────────────────────────────────
+
+#: Metadata key of the names given to a layer's labels by hand, ``{id: name}``.
+#: They win over the vocabulary's. In the metadata, unlike the vocabulary choice:
+#: they are the user's annotation, so they travel with the layer and with the
+#: layers derived from it.
+LABEL_NAMES_KEY = "nvitk_label_names"
+
+
+def custom_label_names(layer: Any | None) -> dict[int, str]:
+    """The names given to *layer*'s labels by hand (``{}`` when none)."""
+    meta = getattr(layer, "metadata", None)
+    raw = meta.get(LABEL_NAMES_KEY) if isinstance(meta, dict) else None
+    if not isinstance(raw, Mapping):
+        return {}
+    out: dict[int, str] = {}
+    for key, value in raw.items():
+        try:
+            # A saved session may have turned the ids into strings.
+            out[int(key)] = str(value)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def label_name(layer: Any | None, label_id: int) -> str | None:
+    """*label_id*'s name on *layer*: the one given by hand, else the vocabulary's."""
+    name = custom_label_names(layer).get(int(label_id))
+    if name:
+        return name
+    try:
+        key = layer_schema_key(layer)
+    except Exception:  # noqa: BLE001 — naming is cosmetic
+        key = None
+    schema = get_schema(key) if key else None
+    return schema.name_for(label_id) if schema else None
+
+
+def label_display(layer: Any | None, label_id: int) -> str:
+    """``"<name> (<id>)"`` when *label_id* has a name on *layer*, else ``"Label <id>"``."""
+    name = label_name(layer, label_id)
+    return f"{name} ({int(label_id)})" if name else f"Label {int(label_id)}"
+
+
+def set_label_name(layer: Any | None, label_id: int, name: str | None) -> bool:
+    """Name *label_id* on *layer*; an empty *name* drops the hand-given one, so the
+    vocabulary's shows again. True when something changed."""
+    if layer is None:
+        return False
+    names = custom_label_names(layer)
+    lid = int(label_id)
+    text = str(name or "").strip()
+    if (names.get(lid) or "") == text:
+        return False
+    if text:
+        names[lid] = text
+    else:
+        names.pop(lid, None)
+    meta = dict(getattr(layer, "metadata", None) or {})
+    if names:
+        meta[LABEL_NAMES_KEY] = dict(sorted(names.items()))
+    else:
+        meta.pop(LABEL_NAMES_KEY, None)
+    layer.metadata = meta
+    return True
+
+
 __all__ = [
+    "LABEL_NAMES_KEY",
     "LabelSchema",
     "TOPBRAIN_SCHEMA_KEYS",
     "all_schemas",
+    "custom_label_names",
     "get_schema",
     "guess_schema_from_layer",
+    "label_display",
+    "label_name",
     "layer_schema_key",
     "remember_layer_schema",
     "schema_for_totalsegmentator_task",
     "schema_keys",
+    "set_label_name",
 ]

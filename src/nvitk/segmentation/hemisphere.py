@@ -83,7 +83,8 @@ def split_lr_by_cc(mask: Image, *, n: int = 2, structure: Any = None) -> tuple[I
     if affine is None:
         raise ValueError("split_lr_by_cc requires mask.affine to be set.")
 
-    data = mask.data
+    # Image.data may be host (napari layer, imread backend="numpy"): work on the backend.
+    data = as_backend_array(mask.data)
     labeled, num = ndi.label(data, structure=structure)
     if num == 0:
         empty = np.zeros_like(data, dtype=np.uint8)
@@ -92,7 +93,7 @@ def split_lr_by_cc(mask: Image, *, n: int = 2, structure: Any = None) -> tuple[I
     sizes = np.bincount(labeled.ravel())
     sizes[0] = 0
 
-    # Tiny array (N+1 ints); host hop is cheap and makes Python sort easy.
+    # Tiny array (N+1 ints): rank on the backend, Python ints for the loop below.
     sizes_h = as_backend_array(sizes)
     top_ids = np.argsort(sizes_h)[-n:][::-1]
     top_ids = [int(i) for i in top_ids if int(sizes_h[int(i)]) > 0]
@@ -150,7 +151,7 @@ def split_lr_by_midline(mask: Image, *, plane_x: int | None = None) -> tuple[Ima
     if mask.ndim != 3:
         raise ValueError("split_lr_by_midline expects a 3D mask.")
 
-    data = mask.data
+    data = as_backend_array(mask.data)
     if plane_x is None:
         affine = mask.affine
         nx = data.shape[0]

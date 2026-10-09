@@ -104,11 +104,11 @@ def _load_maps(subject_nifti_dir: Path, region: str) -> dict[str, Image | None]:
 
 def _mean_under_mask(values: Any, mask: Any) -> float:
     """Mean of *values* where *mask* is non-zero, or NaN if the mask is empty."""
-    vals_np = to_numpy(values)
-    mask_np = to_numpy(mask) > 0
-    if not mask_np.any():
+    vals = as_backend_array(values)
+    sel_mask = as_backend_array(mask) > 0
+    if not bool(sel_mask.any()):
         return float("nan")
-    sel = vals_np[mask_np]
+    sel = vals[sel_mask]
     if sel.size == 0:
         return float("nan")
     return float(np.mean(sel))

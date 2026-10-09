@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 
+from nvitk.core.array import to_numpy
 from nvitk.core.exceptions import UnsupportedFormatError, ValidationError
 
 
@@ -195,7 +196,7 @@ def itk_geometry_from_affine(
         On a degenerate affine -- a zero-length column has no direction to recover, and silently
         substituting one would put the volume somewhere arbitrary.
     """
-    matrix = np.asarray(affine, dtype=float)
+    matrix = to_numpy(affine).astype(float)
     if matrix.shape != (4, 4):
         raise ValidationError(f"Expected a 4x4 affine, got {matrix.shape}.")
     if str(world).lower() == "ras":
@@ -226,7 +227,7 @@ def orientation_codes_from_affine(affine: Any) -> str | None:
         import nibabel as nib
     except Exception:
         return None
-    aff = np.asarray(affine, dtype=float)
+    aff = to_numpy(affine).astype(float)
     if aff.shape != (4, 4):
         return None
     try:

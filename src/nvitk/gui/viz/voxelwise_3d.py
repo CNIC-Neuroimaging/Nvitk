@@ -245,12 +245,13 @@ def build_scene(viewer: Any, spec: SceneSpec) -> tuple[list[Any], str]:
 
     result = load_voxelwise_result(spec.out_dir)
     kind = str(spec.kind or result.primary_kind())
-    names = list(spec.contrasts) or list(result.contrast_names)
+    available = result.names_for(kind)
+    names = list(spec.contrasts) or list(available)
     if not names:
         raise ValueError(f"{result.out_root.name} has no contrasts to draw.")
-    unknown = [n for n in names if n not in result.contrast_names]
+    unknown = [n for n in names if n not in available]
     if unknown:
-        raise ValueError(f"No contrast named {unknown!r}. Available: {result.contrast_names}")
+        raise ValueError(f"No contrast named {unknown!r} for {kind}. Available: {available}")
 
     clear_voxelwise_layers(viewer)
     added: list[Any] = []
@@ -387,7 +388,7 @@ def map_data(out_dir: str | Path, kind: str = "", contrast: str = "") -> tuple[n
 
     result = load_voxelwise_result(out_dir)
     kind = str(kind or result.primary_kind())
-    names = list(result.contrast_names)
+    names = list(result.names_for(kind))
     name = contrast if contrast in names else (names[0] if names else "")
     data = np.asarray(nib.load(str(result.map_path(kind, name))).dataobj, dtype=float)
     return data, kind, names

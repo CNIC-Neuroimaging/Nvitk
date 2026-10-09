@@ -292,6 +292,39 @@ def _set_param_visibility(widget: Any, tool_id: str) -> None:
         sub = getattr(widget, name, None)
         if sub is not None:
             sub.visible = name in visible
+    _sync_param_specs(widget, tool_id)
+
+
+def _sync_param_specs(widget: Any, tool_id: str) -> None:
+    """Give the shared parameter widgets *tool_id*'s own caption and numeric range.
+
+    A widget is built once, with the caption and bounds of whichever tool (or
+    hand-written option) declared it first, and shared by every tool that uses the
+    name. Without this a tool showed another's caption for its field — the mask
+    picker read "Brain mask layer" everywhere — and could not take a value outside
+    another tool's range (a fill of −1024 against a 0…999 spin box).
+    """
+    for spec in params_for_tool(tool_id):
+        sub = getattr(widget, spec.name, None)
+        if sub is None:
+            continue
+        if spec.label and getattr(sub, "label", None) != spec.label:
+            try:
+                sub.label = spec.label
+            except Exception:  # noqa: BLE001 — a widget without a settable caption
+                pass
+        if spec.kind in ("float", "int"):
+            # Min, max, then min again: a new minimum above the old maximum only
+            # fits once the maximum has moved.
+            for bound in ("min", "max", "min"):
+                value = getattr(spec, bound)
+                if value is None or not hasattr(sub, bound):
+                    continue
+                try:
+                    if getattr(sub, bound) != value:
+                        setattr(sub, bound, value)
+                except Exception:  # noqa: BLE001
+                    pass
 
 
 _LAYER_NONE = "(none)"

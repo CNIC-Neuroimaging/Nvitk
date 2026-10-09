@@ -82,7 +82,7 @@ class HotspotPointsState:
     """Tracks SUV hotspot layer and Napari 0.7 style-sync callbacks."""
 
     layer: Any
-    disconnect_style_sync = None
+    disconnect_style_sync: Callable[[], None] | None = None
 
 
 def stop_hotspot_points_sync(viewer: Any) -> None:

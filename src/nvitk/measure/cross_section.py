@@ -650,7 +650,7 @@ def masked_plane_velocity_series(
         )
 
     vals = map_in_thread_pool(_frame_task, range(nt), max_workers=workers)
-    return np.asarray(vals, dtype=np.float64)
+    return as_backend_array(vals).astype(np.float64)
 
 
 def flow_series_ml_s(velocity_ts: np.ndarray, area_mm2: float) -> np.ndarray:

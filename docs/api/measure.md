@@ -76,10 +76,11 @@ print(result.summary())
 | `cohort_subjects()` / `available_cohorts()` | The `--cohort` filter: subjects with measurements under a given `pipeline_id`. Distinct from `DataRepo`'s `cohort_id` membership filter. |
 | `validate_common_space()` | Refuse a stack whose volumes are not on one grid, naming the first offender. |
 | `VoxelwiseDesign` | EVs, contrasts, demeaning, rank checks, and FSL VEST writers (`design.mat` / `design.con`) written directly — no `Text2Vest` needed. |
-| `merge_4d()` / `run_randomise()` | `fslmerge -t` and `randomise` (or `randomise_parallel`). |
+| `merge_4d()` / `run_randomise()` | `fslmerge -t` and `randomise` (or `randomise_parallel`, run locally — see below). |
 | `PreFilter` / `apply_prefilters()` | Subject inclusion rules on measurement values (`flow_mean__LICA>=15`), applied before the design is validated. |
 | `run_voxelwise()` | The one-call path: resolve → validate → design → merge → randomise. |
-| `load_voxelwise_result()` | Read a finished results folder with no FSL, no database and no re-run — what both viewers use. |
+| `validate_randomise_inputs()` / `run_randomise_direct()` | The other path: a 4D stack and `design.mat` / `.con` / `.fts` built elsewhere, checked against each other from their headers, then `randomise`. |
+| `load_voxelwise_result()` | Read a finished results folder with no FSL, no database and no re-run — what both viewers use. t-contrast and F-test maps are numbered separately; `names_for(kind)` gives the names a map kind is addressed by. |
 
 ### The ordering contract
 
@@ -147,6 +148,69 @@ measurement in the tested column is excluded rather than silently kept.
 Rules are recorded in `manifest.json` alongside the pre-filter subject count, so a result says what
 cohort produced it.
 
+### Prepared 4D stack and design files
+
+When the stack and the design already exist — built in FSL's Glm GUI, in another tool, or with
+`nvitk-voxelwise design` and `merge` — `randomise` runs on them directly, with no database and no
+cohort resolution:
+
+```{code-block} bash
+nvitk-voxelwise randomise -i stack_4d.nii.gz -d design.mat -t design.con -f design.fts \
+  -m brain_mask.nii.gz -o results/vw_glm --n-perm 5000 --parallel
+```
+
+Before anything runs (or uploads), the files are checked against each other from their headers and
+every mismatch is reported at once: design rows against stack volumes, contrast weights against
+design columns, `.fts` columns against t-contrasts (0/1 only, no empty F-test), the mask's grid
+against the stack's, and each VEST header against the rows that actually follow `/Matrix`. A design
+built for a *different* stack of the same length cannot be detected, so the volume count is echoed
+for a person to recognise.
+
+There is **no default mask** here, unlike `run`: a prepared stack need not be in MNI space. The
+design files are copied into the results folder as `design.mat` / `.con` / `.fts`, and
+`manifest.json` records `"mode": "prepared"`, the input paths and the contrast and F-test names
+(from `/ContrastName<i>`, else `c1…` / `f1…`). Its subject list is empty — a prepared stack carries
+no record of which volume is which subject.
+
+F-tests produce `…fstat<N>` maps alongside the `…tstat<N>` ones. The two are numbered separately, so
+every viewer lists F-test names for an F map and contrast names for a t map.
+
+### `randomise_parallel` on one machine
+
+`randomise_parallel` splits the permutations into fragments and hands them to `fsl_sub` — a cluster
+submitter. Run locally, FSL's `fsl_sub` either follows site configuration and queues the fragments
+(returning before any map exists) or starts **one per core**. Every fragment holds the whole 4D
+stack in memory (about twice its float32 size: ~1 GB for 120 subjects at 2 mm, ~4.4 GB for 500), so
+32 cores means 32 copies, which is what took workstations down.
+
+`--parallel` therefore runs `randomise_parallel` against a throwaway `FSLDIR` overlay in which
+`fsl_sub` is nvitk's own runner (`nvitk/measure/fsl_sub_local.sh`, derived from FSL 6.0's bash
+`fsl_sub`). The FSL installation is never modified. The runner:
+
+- runs fragments on this machine only — never `qsub`, whatever is configured;
+- caps how many run at once, and pins each to one thread;
+- stops the merge step if any fragment failed. `randomise_parallel` ignores the fragment step's
+  exit code, so otherwise an incomplete set of permutations would be merged into plausible
+  p-values.
+
+How many fragments run at once, first match wins:
+
+| Source | Notes |
+|---|---|
+| `--jobs N` (GUI: *jobs*) | Explicit. Warns if the estimated memory exceeds what is free. |
+| `FSLSUB_PARALLEL=N` | The variable FSL's own `fsl_sub` reads, so one setting caps both. `0` or unset means "choose". |
+| automatic | The cores available (`NSLOTS` inside an SGE job, else the affinity mask), lowered until the fragments' estimated memory fits in 80 % of what is free. |
+
+`--seed` is not passed on: `randomise_parallel` seeds fragment *k* with *k*, so a parallel run is
+reproducible regardless. `--n-perm 0` (exhaustive) needs plain `randomise`. Paths containing spaces
+are refused, since `randomise_parallel` re-expands its arguments unquoted. As FSL itself warns, a
+design with fewer unique permutations than requested (a small one-sample test, say) should run
+without `--parallel`.
+
+A re-run into the same output root first removes what the previous run with that root left: the
+merge step appends to the permutation-distribution files, and a stale map from a design with more
+contrasts would otherwise be read as part of the new result.
+
 ### Reading the maps
 
 `randomise` writes corrected p-values as **1 − p**, so a value above 0.95 means p < 0.05. Bright is
@@ -188,7 +252,9 @@ only writes `mask.nii.gz` into the results folder when it *derived* the mask its
 nvitk-voxelwise cohorts          # which pipeline ids --cohort accepts, with subject counts
 nvitk-voxelwise status           # is FSL usable here, and which binary is missing if not
 nvitk-voxelwise design  …        # write design.mat / design.con and report the intersection
+nvitk-voxelwise merge   …        # write the 4D stack, in subject order
 nvitk-voxelwise run     …        # the whole analysis; --submit local|sge
+nvitk-voxelwise randomise …      # randomise on a prepared stack + design.mat/.con/.fts; --submit local|sge
 nvitk-voxelwise report <dir>     # summarise a finished results folder
 nvitk-voxelwise fetch <dir> --to # pull a finished cluster result back over SFTP
 ```
@@ -208,6 +274,17 @@ SFTP, run it over SSH, and report the job ids.
 
 `-o` is always a cluster-visible root under `--submit sge`, so it is used verbatim; the uploaded
 inputs live inside it and one analysis is one self-contained directory.
+
+`randomise --submit sge` follows the same path. With `--from-source local` the stack and design are
+checked here first, then the stack is uploaded under its own name (skipped when the cluster copy
+has the same size) and the design files and mask under fixed names (always re-sent — two designs
+over the same subjects differ in values, not in size). With `--from-source sge` the paths must be
+absolute; each input's folder is mounted at its own path.
+
+`--parallel` on the cluster requests `-pe smp N` slots for the one job — `--jobs`, else
+`sge_pe_smp` in `pipelines.voxelwise`, else 4 — and the fragments run inside it on exactly those
+slots, through `NSLOTS`. They are never submitted as separate jobs: the compute node runs the
+container, which has no `qsub`. On most SGE setups `sge_h_vmem` applies **per slot**.
 
 Credentials come from `NVITK_SGE_SSH_HOST` / `_USER` / `_PASSWORD`, then `--remote-host` /
 `--remote-user`, then a prompt. The env vars alone are sufficient, which is what lets the napari
@@ -229,10 +306,10 @@ submitting; `--emit-script PATH --no-remote` writes the script for you to run yo
 several GB that nothing local reads (`--all` takes everything).
 
 ```{warning}
-`randomise` is **not** in the nvitk Singularity image, which installs `fsl-base`, `fsl-flirt`,
-`fsl-avwutils` and `fsl-warpfns`. `fslmerge` is present; `randomise` needs `fsl-randomise` added
-and the SIF rebuilt before `--submit sge` can work. Local runs are unaffected, and
-`fsl_backend_status()` reports the gap by name.
+nvitk Singularity images before `v2026.10.08` install `fsl-base`, `fsl-flirt`, `fsl-avwutils` and
+`fsl-warpfns` but **not** `fsl-randomise`: `fslmerge` is present, `randomise` is not, and
+`--submit sge` fails on the queue at the randomise step. From `v2026.10.08` the image template adds
+`fsl-randomise`. Local runs are unaffected, and `fsl_backend_status()` reports the gap by name.
 ```
 
 ```{seealso}

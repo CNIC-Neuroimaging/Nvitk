@@ -376,6 +376,7 @@ class PlotPanel(QGroupBox):
         """Remove the current plot widget and release its figure."""
         if self._plotly is not None:
             self._plotly.clear()
+            self._plotly.hide()  # before unparenting, or a queued layout show pops it up as a window
             self._plotly.setParent(None)
         self._interactive = False
         clear_layout(self._host_layout)

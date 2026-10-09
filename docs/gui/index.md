@@ -27,6 +27,7 @@ panels, each its own dock, tabbed together:
 | **DICOM tags** | DICOM header inspection. |
 | **DICOM browser** | Look inside a DICOM folder before loading: studies, series and files from the headers alone; load or export only what you tick, with header edits and anonymization (below). |
 | **Data** | Dataset/subject browser over a `DataRepo` ({doc}`../api/db`). |
+| **Labeling** | Manual segmentation and re-segmentation of a label layer: Napari's brush, bucket and polygon plus a magic wand, an editable area, grow / shrink / smooth, slice interpolation, merge / split / renumber (below). |
 | **QC** | Quality-control review panels for pipeline outputs. |
 | **Statmodels** | Launches {doc}`the Stats GUI <../stats-gui/index>` as a floating window. |
 | **Export** | Layer export to disk. |
@@ -115,12 +116,140 @@ show/hide box, the label's colour as drawn on the canvas, and its name. Click a 
 show or hide that label; <kbd>Alt</kbd>+click shows only that label (and again brings the
 others back). Click the colour dot to recolour a label. **All** and **None** act on the
 whole layer, and **Panel** opens the full Labels panel on it. A list longer than twelve
-labels scrolls with the mouse wheel.
+labels scrolls with the mouse wheel. The layer's own eye (visibility box) keeps working
+while its labels are unfolded.
+
+- **Double-click** a label line to rename it in place: <kbd>Enter</kbd> keeps the name,
+  <kbd>Esc</kbd> cancels, and an empty name brings the vocabulary's back. Names given by hand
+  are kept in the layer's metadata (`nvitk_label_names`), win over the vocabulary's
+  everywhere a label is named (pickers, Labeling, Meshlab), and travel with the layers
+  derived from it.
+- **Right-click** a label line for its menu: *Rename…*, *Change colour…*, *Show only this*,
+  *Show all*, *Go to label* (its centre's slice, the camera on it), *Edit in the Labeling
+  tab*, and *Delete label N* — which clears its voxels; on a Labels layer
+  <kbd>Ctrl</kbd>+<kbd>Z</kbd> brings them back, an Image mask (no undo) asks first.
 
 Names come from the layer's own vocabulary: the one picked for it in a picker, otherwise
 the one guessed from its name, path and contents. Each layer keeps its own, so moving
 between two segmentations never names one with the other's labels. Every picker (this
 panel and the layer list) edits the same per-layer filter, so they always agree.
+
+## Labeling
+
+The **Labeling** tab (just before **QC**) is for drawing a segmentation by hand or
+correcting one (`nvitk.gui.labels.labeling`; the operations are in
+`nvitk.gui.labels.editing`). It follows the active label layer. Its Draw tools work in the
+**orthogonal views** as well as on the canvas (see *Labeling in the views* under
+[Orthogonal views](#orthogonal-views)). Every edit — a brush
+stroke or any tool here — goes through Napari's history, so <kbd>Ctrl</kbd>+<kbd>Z</kbd>
+(or *Undo*) takes back one at a time, and the layer list, the Labels panel and the
+orthogonal views follow undo and redo too.
+
+- **Layer.** The label layer drawn on, and the *Reference* image the intensity tools read
+  (one on the same grid). *New…* makes an empty Labels layer on the reference's (or the
+  active image's) grid, with its placement and metadata, and starts painting label 1. An
+  Image mask is offered *Convert to Labels* (brush and undo need a Labels layer).
+- **Layer display (Napari controls).** Napari's own layer controls — the very ones of its
+  layer-controls dock — for the label layer (opacity, blending, colour mode, contour, show
+  selected, the editing modes, brush…) and for the reference image (opacity, blending,
+  contrast limits, auto-contrast, gamma, colormap, interpolation…), each folded under its
+  header; they follow the layer and the reference picked.
+- **Label.** The active label: its colour (click to change), id, and name — typing shows the
+  names of the layer's vocabulary, and picking one makes its id the active label; any other
+  text, with <kbd>Enter</kbd>, names the label. *New id* takes the next unused id. The list
+  shows every label with its voxel count (click: draw with it; double-click: rename;
+  right-click: show only, go to, merge into the active label, delete), and below it the
+  active label's size in voxels, mm³ and mL, and *Go to*.
+- **Draw.** Napari's tools — *Pan*, *Paint*, *Erase*, *Fill* (bucket), *Pick* — and the
+  tab's own, which work in the orthogonal views as well. A **right-drag erases** with the
+  brush whatever the tool (on the canvas and in the views; one stroke, one undo) and the tool
+  comes back on release.
+  - **Polygon**: click the corners (on the canvas in a 2D view, or in an orthogonal view),
+    then double-click — or click the first corner — to fill it with the active label in that
+    plane; a yellow path shows it while drawn, *Cancel* (or <kbd>Esc</kbd> in the views)
+    drops it. The corners are placed in the layer's own voxels whatever the view's axis
+    order or the layer's spacing (Napari's own polygon mode, picked from its controls,
+    switches to this one).
+  - **Magic wand**: click a voxel and the region grown from it through similar reference
+    intensities joins the active label (in the slice, or through the volume with *3D*).
+    **Drag** to add a region at every voxel the cursor reaches (one undo step for the
+    drag); <kbd>Shift</kbd> takes out instead; **<kbd>Alt</kbd>+drag** tunes the tolerance
+    live from one seed (right: wider) — the region shows as it changes and the value stays
+    in the box. On the **3D canvas** a click grows from the voxel the image shows there (the
+    brightest along the ray for MIP, the first at the iso threshold for iso, the plane's for
+    a plane, else the first structure in the display window), through the volume; a drag
+    still turns the view. The growth is configurable — these settings are shared by the
+    three region tools: *Tolerance ±* (the wand's) in % of the reference's display window
+    (default 10 %) — or of the box's intensity range, see *Box* — or in absolute units;
+    *Smoothing* (a Gaussian of σ voxels first, so noise no longer breaks the region into
+    single voxels); *Seed average* (the seed value is the mean around the click);
+    *Connectivity* (faces, or all neighbours); *Max distance* from the click in mm (stops
+    leaks); *Close gaps*; *Fill holes*; *3D*.
+  - **Flood** (adaptive): the region within *k* standard deviations of its own mean, both
+    learned again from what it took in for a few *Rounds* — it settles on the structure's
+    spread instead of a guessed tolerance. Click, drag, <kbd>Alt</kbd>+drag (tunes *k*), in
+    2D or 3D, like the wand.
+  - **Vessel** (vessel flood): grows through Frangi's vesselness at the vessel *Radius*
+    range (bright or dark vessels), from the seed's vesselness down to the *Vesselness ≥*
+    fraction of it, and no darker than the seed by more than *Intensity within* — so it
+    runs along a vessel and stops where a blob or the background touches it, then takes in
+    the vessel's wall. 3D by default; <kbd>Alt</kbd>+drag tunes the fraction.
+  - **Tracer** (vessel tracer): click points along a vessel — on the canvas (2D or 3D), in
+    any orthogonal view, on any slice. The cheapest path between them follows the lumen
+    (vesselness and intensity); it shows as yellow dots on the canvas and a yellow line in
+    the views. Double-click or *Fill tube* labels a tube around it, its radius measured from
+    the lumen point by point (or a fixed *Tube radius*); *Undo point*, *Cancel*.
+  - **Smart brush**: a brush (its size, 3D with *3D brush*) that paints only the voxels under
+    it that go with the intensity at its centre — the brush's voxels split in two by Otsu, or
+    within *Tolerance ±* % of the window.
+
+  With the drag tools (the region tools in 2D, the smart brush) a drag draws, so
+  <kbd>Ctrl</kbd>+drag pans the canvas; the wheel zooms as always. Brush size, *Preserve
+  other labels* (write only over background and the active label — the region tools also
+  stop growing at other labels), *3D brush / fill*, *Fill contiguous only*, *Outlines*
+  (drawn in the orthogonal views even when the canvas is in 3D, where Napari cannot draw
+  them), opacity, *Undo* / *Redo*. Napari's own brush paints on the **3D canvas** too: on the
+  first label the ray meets (Napari's rule) or, where there is none, on the voxel the image
+  shows (the reference, else the top visible image on the grid). Every region tool runs on
+  the GPU when the GPU toggle is on ({mod}`nvitk.segmentation.interactive`).
+- **Editable area.** Restrict where anything paints: *Only where the reference is between*
+  two values (*From view* takes the reference's display window — *From box* the box's
+  intensity range) and/or *Only inside* another mask — all its labels, or the ones ticked in
+  its list (*All* / *None*; the choice is kept per mask). A brush stroke over the edge keeps
+  only the part inside — the rest is put back as it was, and Undo takes back exactly what
+  stayed. Erasing is never restricted.
+- **Box.** A box on the volume (`nvitk.gui.labels.roi_box`). *Draw box*, then drag a
+  rectangle on the canvas (2D) or in an orthogonal view: it sets the box on those two axes,
+  and a drag in another view sets the third (the tool in use comes back afterwards;
+  <kbd>Esc</kbd> in the views cancels). *Around label* fits it to the active label (5 voxels
+  more each way); the first and last voxel of each axis can be typed; *Depth* sets the axis
+  across a 2D view to the slice on screen ± *n*, or *Full*. It is drawn on the canvas (a
+  rectangle on the slice — faint outside its depth — or the twelve edges in 3D) and in each
+  orthogonal view. Then:
+  - **Crop** the reference, the labels, or every image and label layer on its grid: new
+    layers placed where they came from — their affine moves by the box's corner, and so does
+    the file affine they are saved with, so the crop also opens in place in other software
+    (3D+t layers keep every frame; axis-reordered layers are saved in their file's order).
+    The search bar's *Crop to box* does the same for the active layer.
+  - **Intensity range from the box**: the relative settings — the wand's and the smart
+    brush's % of the window, the vessel flood's intensity bound, the *From…* buttons — read
+    the 1–99 % intensity range inside the box instead of the display window.
+  - **Keep edits inside the box**: every tool and the brush write only inside it, and the
+    region tools grow only there (faster on a large volume).
+- **Refine the active label**, on the *Slice on screen* or the *Whole volume* (the frame on
+  screen, for 3D+t): *Grow* / *Shrink* by a radius (a ball), *Smooth* (an opening then a
+  closing: removes spurs, fills dents), *Fill holes*, *Keep largest* piece, *Remove islands*
+  smaller than a size, and *Threshold fill* (every voxel whose reference intensity is in the
+  range). Preserve and the editable area apply to all of them. These run on the GPU when the
+  GPU toggle is on.
+- **Between slices.** *Interpolate* fills the slices between the ones drawn for the active
+  label — across the view, or along its sparsest axis — by morphing one outline into the
+  next (*Shape*) or copying the nearest (*Nearest*). *Copy slice to ◀ Previous / Next ▶*
+  copies the active label's outline to the neighbouring slice and moves there: draw, correct,
+  copy on.
+- **Manage labels.** *Merge in* (another label's voxels become the active one, its name too
+  when the active one has none), *Split pieces* (each connected piece gets its own id; the
+  largest keeps it), *Renumber 1…N* (names follow their labels), *Delete label*.
 
 ## CT display windows
 
@@ -137,6 +266,8 @@ The **Layers** tab therefore carries a window picker backed by
 |---|---|---|
 | Brain | 40 / 80 | Grey-white differentiation; the head-CT default |
 | CT angiography | 300 / 600 | Contrast-filled lumen against wall and tissue |
+| Vessels | 525 / 1150 (−50 … 1100 HU) | Vessels from the wall and soft tissue up to calcified plaque |
+| Heart | 700 / 600 (400 … 1000 HU) | Contrast-filled chambers and coronaries, calcium on top |
 | Stroke / posterior fossa | 35 / 30 | Narrow window for early infarct |
 | Subdural | 70 / 200 | Extra-axial collection against adjacent bone |
 | Bone | 500 / 2000 | Cortical detail and fractures |
@@ -146,6 +277,11 @@ Choosing a preset applies it immediately to the selected Image layer. Level and 
 be typed directly, in which case the picker switches to *Custom* — unless the values happen to
 match a registered window, when it snaps back to that name. **Apply to all image layers** windows
 the whole viewer at once, and **Auto** restores napari's per-layer min/max.
+
+The same windows are in the Imaging tab's search bar (*CT display window…*). Its dialog also
+takes the window as **lower / upper HU**: picking a preset shows its bounds, and typing a
+bound switches to *Custom (lower / upper HU)*; the window previews live on the layer. The
+dialog opens on the window the layer shows (its preset, or Custom with its bounds).
 
 ```{note}
 Only CT is offered a window. MR intensities are arbitrary units with no fixed zero, so an HU
@@ -208,9 +344,33 @@ to a one-voxel grid.
   oblique plane is resliced with the matching spline order (0 / 1 / 3), and an off-grid layer set to
   `nearest` is resampled nearest. The 3D slice planes copy the interpolation too.
 - **Zoom**: Ctrl+wheel, 10 % per wheel notch in proportion to the wheel's travel (touchpads and
-  high-resolution wheels no longer race through the range); double-click resets. The plain wheel
-  steps one slice per notch the same way.
+  high-resolution wheels no longer race through the range), **about the cursor**: the point
+  under the mouse stays under it, as in any image viewer (it used to jump to the middle of the
+  view); double-click resets. The plain wheel steps one slice per notch the same way.
+- **Outlines**: a Labels layer set to contours (*Outlines* in the Labeling tab, *contour* in its
+  controls) is drawn as outlines in the views too — also while the canvas is in 3D, where
+  Napari cannot draw them.
 
+- **Labeling in the views** (`nvitk.gui.labels.ortho_edit`): the views draw with the same tool
+  as the canvas — the label layer being edited (the Labeling tab's, else the active Labels layer)
+  and its mode. *Paint* / *Erase* lay Napari's brush (its size, round in the layer's scale,
+  *preserve labels*; a disc in the plane, or a ball through slices with *3D brush*), a white
+  outline following the cursor; a drag is one stroke and one <kbd>Ctrl</kbd>+<kbd>Z</kbd>.
+  *Fill* buckets the region clicked in that plane (the volume with 3D fill), *Pick* takes the
+  label clicked. The Labeling tab's region tools — *Wand*, *Flood*, *Vessel* — grow from the
+  voxel clicked, add a region at every voxel a drag reaches (one undo step) and tune their
+  setting with <kbd>Alt</kbd>+drag (<kbd>Shift</kbd>+click removes); the *Tracer* takes points in
+  any view and slice (double-click fills the tube); the *Smart brush* paints like the brush; its
+  *Polygon* takes corners in a view (double-click or the first corner fills, <kbd>Esc</kbd>
+  cancels). A right-drag erases whatever the tool. With *Draw box*, a drag sets the box on the
+  view's two axes; the box and a traced vessel are drawn in every view. The editable area
+  applies, and the canvas, the views and
+  every label list follow each stroke. With a drawing tool, <kbd>Ctrl</kbd>+click moves the
+  crosshair (with *Pan* or *Polygon*, a click does, as before); <kbd>Shift</kbd>+drag still
+  pans and the wheel still scrolls. <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>
+  undo and redo from the panel too. A line above the views says what a click does — or why it
+  cannot draw: the label layer is on another grid than the views (it is drawn resampled; select
+  it so the views take its grid) or the planes are turned (reset the orientation).
 - **3D+t**: a 4D layer binds like a 3D one; a *Time* slider appears above the views and stays in
   step with napari's time slider both ways, so playing the cine drives the views and the 3D
   planes too. **▶ Play / ⏸ Pause** beside it runs the cine from the panel itself (looping, rate in
@@ -220,9 +380,14 @@ to a one-voxel grid.
   image* draws them with the **same window, colormap and gamma** as the layer (labels keep
   their colours) and follows later edits — they used to appear in napari's default grey range.
 - **Per-layer control**: a table lists every drawn layer with two checkboxes — *3D slice*
-  (which layers get a slice image on the planes; default the bound one) and *Cut* (which layers
-  the *See inside* cut opens; default all). Keep a mask whole while the CT around it is cut away,
-  or the other way round.
+  (which layers get a slice image on the planes; default the layer bound when it was first
+  drawn, and it stays so when another layer is clicked) and *Cut* (which layers the *See
+  inside* cut opens; default all). Keep a mask whole while the CT around it is cut away, or
+  the other way round. Several layers' slices on one plane are stacked: each one above draws a
+  slightly thicker slab that wraps the one below, so it shows in front instead of fighting
+  it for the same depth; an edited layer's slices are refilled. The cut goes through the
+  crosshair in each layer's own grid, so a layer on another grid (a PET under a CT) is cut at
+  the same place in space, not at the same voxel index.
 
 The 3D card of the orthogonal views reports how many layers are drawn and how many were
 resampled onto the active layer's grid (the names are in its tooltip). *Resample layers on
@@ -269,16 +434,16 @@ window expressed in intensity units, and the live preview is reverted if the dia
 
 `nvitk.gui.tools.registry` defines every tool as a `GuiToolSpec` (id, category, parameter
 spec, whether it needs a reference layer or 3D data, and its run mode), merged with the
-pipeline shortcuts from `nvitk.gui.pipeline.catalog`. **117 tools across 12 categories**,
+pipeline shortcuts from `nvitk.gui.pipeline.catalog`. **121 tools across 13 categories**,
 each backed by the same functions documented in the {doc}`Main API Reference <../api/index>`:
 
 | Category | Count | Examples |
 |---|---|---|
 | Restoration | 3 | Bilateral filter, N4 bias correction, MRI super-resolution |
-| Filters | 19 | Sliding threshold, Hessian, Jerman vesselness, snakes, mask keep-inside/outside |
+| Filters | 17 | Sliding threshold, Hessian, Jerman vesselness, snakes, skimage thresholds and filters |
 | Morphology | 11 | Dilate/erode/open/close, fill holes, connected components, ICA siphon correction, mask genus |
 | Centerline | 3 | Detect/cut junctions, convert to polyline |
-| Segmentation | 25 | Label ops, mask boolean algebra, region growing, blood flood, ANTsPyNet brain/vessel/DKT, TotalSegmentator, eICAB |
+| Segmentation | 26 | Label ops, mask boolean algebra, mask image (keep / remove regions), region growing, blood flood, ANTsPyNet brain/vessel/DKT, TotalSegmentator, eICAB |
 | Registration | 6 | FLIRT register (6/7/9/12 DOF, cost, search range) / apply; ANTsPy register (every `type_of_transform`, stage metrics, iteration schedules, masks) / apply; FireANTs register (moments → rigid → affine → greedy / SyN chains on the GPU) / apply. Each can also warp further layers with the new transform. |
 | Visualization | 12 | PET/SUV hotspots, 4D-flow vectors/streamlines, vessel cross-sections, hemodynamics, TOF morphometrics |
 | Transform | 8 | Volume projection, reorient, rotate, swap axes, isotropy, resample, oblique slice |
@@ -297,7 +462,36 @@ button, and a "Run SGE" button (enabled per-tool via `is_sge_capable`).
 
 Every parameter a tool declares in the registry gets a widget, whether or not the form
 declares one by hand (`nvitk.gui.tools.panel._add_registry_widgets`), laid out in the
-order the tool lists them.
+order the tool lists them. Widgets are shared between tools by parameter name; selecting a
+tool gives each of its fields that tool's own caption, choices and numeric range.
+
+### Mask image: keep / remove regions
+
+*Segmentation ▸ Mask image: keep / remove regions* (`seg_mask_image`, backed by
+`nvitk.segmentation.mask_ops.apply_mask_to_image`) keeps the voxels of an image that lie in a
+mask's labels — or removes them — with a binary or a multilabel segmentation:
+
+- **Which layer is which.** *Image* and *Mask / segmentation* are layer fields; leave either
+  on *(none)* and it is the active layer. So: select the image and pick the mask, or select
+  the mask and pick the image.
+- **Which labels.** The ids typed in *Mask label id(s)*; else the labels the mask
+  **shows** — its filter from the layer list's ▾ or the Labels tab (with the mask active, the
+  form's own *Label id(s)* too); else every label.
+- **Mode**: *keep inside the labels* (the rest is removed) or *remove inside the labels*.
+- **Removed voxels become** the *image minimum* (air on a CT, the background of an MR), a
+  *value*, or *NaN* (the result turns floating point). The image's dtype is kept when the
+  value fits in it.
+- **Margin mm** grows (+) or shrinks (−) the region first, as a Euclidean distance in
+  millimetres with the image's spacing — keep an organ plus a 5 mm rim, or its core.
+- **Crop to the kept region** cuts the result to the region's bounding box, placed exactly
+  where it was (its translate moves by the crop's origin).
+- **Output**: a new image layer named after both (`ct_in_seg`, `ct_without_seg`), with the
+  image's colormap, window and placement — or *Replace the image*.
+
+A mask on another grid is resampled onto the image's (nearest); a 3D mask applies to every
+frame of a 3D+t image, and a 3D+t mask of the same shape frame by frame. It runs on the GPU
+when the GPU toggle is on. The former *Filters ▸ Mask: keep inside / keep outside* tools are
+this one; their ids still run (`TOOL_ID_ALIASES`).
 
 ## Meshlab panel
 
@@ -342,7 +536,8 @@ in mm); a drag that starts off the surface still turns the camera; *Done selecti
 *Box*: drag a rectangle over the view — only what faces you, or straight through — adding,
 removing or replacing; the camera waits until Done (the wheel still zooms). *Piece under a
 click* takes a whole connected piece. The selection can be grown or shrunk by rings,
-inverted or cleared (the layer's previous colouring comes back), and the selected part
+inverted or cleared (the layer's previous colouring comes back; every brush stroke or box
+starts from the selection as it is then, so a cleared one stays cleared), and the selected part
 deleted, kept alone or copied into a new layer. MeshLab's selection-based filters (delete
 selected, dilate / erode, geodesic distance from the selection…) start from it and say so
 when nothing is selected.
@@ -351,18 +546,29 @@ when nothing is selected.
 without the chosen field keeps its colouring). *Colour by* a solid colour (colour picker) or any per-vertex field an
 operation attached (curvature, distance, diameter, thickness, sampled image values,
 labels, displacement) or the x / y / z coordinates, with a colormap and an automatic
-(2nd–98th percentile) or manual range. Opacity, shading, wireframe and face normals for
-surfaces; size, symbol and 3D shading for points. Fields of a time series follow its frames.
+(2nd–98th percentile) or manual range. Opacity, shading and face normals for surfaces, and
+**Show**: *Faces*, *Wireframe* and *Points* (the vertices, as dots of a set size), each on its
+own — the edges over the faces (dark), the edges alone (in the surface's colour), the
+vertices alone, or any mix; they follow the layer's colouring, moves and frames. Size,
+symbol and 3D shading for points layers. Fields of a time series follow its frames.
 
 **Move by hand.** Translate, rotate and scale with a live preview — every selected layer
 together, about their common centre; *Apply* bakes the move into the vertices (one undo
-step), *Reset* drops it. Works on surfaces, points and whole time series. Operations
-themselves run on one layer: with several selected, select the one to work on alone.
+step), *Reset* drops it. Works on surfaces, points and whole time series.
+
+**Several meshes at once.** With several surfaces (or point clouds, or images) selected,
+*Run on N layers* runs the operation on each of them, as if each were a label of one
+multilabel mesh: one results table — a row per layer, or a block of rows per layer named
+`"aorta · branch 2"` — every layer's curves on one plot, a row click highlighting in the
+layer it came from, and **one** undo step for every layer an edit changed. The layers stay
+selected. A layer an operation's own layer field names (the reference of a comparison) is
+an input, not one of the runs. Operations that wait for a click on the surface run on one
+layer: select it alone.
 
 **Results tables.** Where a table row stands for something in the viewer, clicking it shows
-it: a centerline branch or bifurcation is highlighted on the surface (amber over grey) and
-on the centerline (red), and the camera centres on it; a frame of *Measure over time* jumps
-the series to that frame. *Clear highlight*, another result or closing the window puts the
+it: a centerline branch or bifurcation is highlighted on the surface and on the centerline
+points (amber over grey) and on the centerline lines (red) — the camera stays where it is; a
+frame of *Measure over time* jumps the series to that frame. *Clear highlight*, another result or closing the window puts the
 colouring back.
 
 **MeshLab filters.** With [PyMeshLab](https://pymeshlab.readthedocs.io) installed (a
@@ -400,7 +606,9 @@ The same files open with <kbd>Ctrl</kbd>+<kbd>O</kbd> or by dropping them on the
 
 The **DICOM browser** tab (after **DICOM tags**) indexes DICOM folders — one or several
 (*Folders…* takes several at once, *Add…* adds more to what is listed, and folders can be
-dropped on the tab; a study or series spread over several folders is shown once, merged) —
+dropped on the tab; a study or series spread over several folders is shown once, merged; a
+folder of a patient already listed — opened with *Folders…* too — joins that patient: its
+series are added, nothing listed before is replaced; a different patient starts a new list) —
 or chosen files, without loading any pixels (`nvitk.io.dicom_index`): every study, its series, and each series'
 files, read from the headers in parallel (the 4,737 files of a cardiac CT study take about 5
 s). Series are split as nvitk's loader splits them into volumes — by `ImageType` when a series
@@ -411,6 +619,14 @@ files, with instance number, matrix and acquisition time.
 - **Header.** Click a series or a file to show its header (sequences unfold). The header is
   shown as it will be exported: edited tags in amber (the tooltip has the original value),
   removed tags struck through.
+- **Getting DICOM here.** Besides *Folders…* / *Add…* / *Files…* and dropping on the tab:
+  dropping a DICOM folder or file on the **viewer** asks whether to load it straight away or
+  open it here first (*Remember my choice* keeps the answer; *DICOM dropped on the viewer* in
+  the browser's source card changes it — ask / load / open here, `dicom_drop_action` in
+  `gui.json`). Other files dropped alongside load as usual. On the **Data** tab, *Open DICOM
+  in the DICOM browser first* (under *Raw scan reader* when it is DICOM, and under the local
+  pipeline's *DICOM series*) sends downloaded or local DICOM scans here instead of loading
+  them; NIfTI and pipeline results still load directly.
 - **Load ticked into the viewer.** Tick series, or single files of a series, and they are
   loaded through nvitk's DICOM stack exactly as opening the folder would — one volume per
   ticked series (or from just its ticked files). Double-click a series to load it at once.

@@ -66,6 +66,17 @@ class GuiToolSpec:
     multilabel: bool = False
 
 
+#: Ids of tools since folded into another: ``old id → (new id, params the old id fixes)``.
+#: Recorded steps and scripts written against the old id keep running.
+TOOL_ID_ALIASES: dict[str, tuple[str, dict[str, Any]]] = {
+    "img_mask_keep_inside": (
+        "seg_mask_image", {"mask_mode": "keep inside the labels", "fill_with": "value"},
+    ),
+    "img_mask_keep_outside": (
+        "seg_mask_image", {"mask_mode": "remove inside the labels", "fill_with": "value"},
+    ),
+}
+
 TOOL_IDS_USING_LABEL_PICKER: frozenset[str] = frozenset({
     "siphon_correct",
     "label_cc",
@@ -454,37 +465,6 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "plane."
         ),
     ),
-    GuiToolSpec(
-        "img_mask_keep_inside",
-        "Filters",
-        "Mask: keep inside",
-
-        (
-            ParamSpec("reference_layer", "Mask / segmentation layer", "layer", ""),
-            ParamSpec("fill_value", "Fill value (outside mask)", "float", 0.0),
-            ParamSpec(
-                "mask_label_ids",
-                "Mask label id(s) (empty = all nonzero)",
-                "str",
-                "",
-            ),
-        ),
-    ),
-    GuiToolSpec(
-        "img_mask_keep_outside",
-        "Filters",
-        "Mask: keep outside",
-        (
-            ParamSpec("reference_layer", "Mask / segmentation layer", "layer", ""),
-            ParamSpec("fill_value", "Fill value (inside mask)", "float", 0.0),
-            ParamSpec(
-                "mask_label_ids",
-                "Mask label id(s) (empty = all nonzero)",
-                "str",
-                "",
-            ),
-        ),
-    ),
     GuiToolSpec("dilate", "Morphology", "Dilate", _MORPH_PARAMS, multilabel=True),
     GuiToolSpec("erode", "Morphology", "Erode", _MORPH_PARAMS, multilabel=True),
     GuiToolSpec("open", "Morphology", "Open", _MORPH_PARAMS, multilabel=True),
@@ -633,6 +613,36 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         "Segmentation",
         "Remove label ids",
         (_LABEL_IDS,),
+    ),
+    GuiToolSpec(
+        "seg_mask_image",
+        "Segmentation",
+        "Mask image: keep / remove regions",
+        (
+            ParamSpec(
+                "mask_mode", "Mode", "choice", "keep inside the labels",
+                choices=("keep inside the labels", "remove inside the labels"),
+            ),
+            ParamSpec("image_layer", "Image (none = the active layer)", "layer", ""),
+            ParamSpec("mask_layer", "Mask / segmentation (none = the active layer)", "layer", ""),
+            ParamSpec("mask_label_ids", "Mask label id(s) (empty = the labels shown)", "str", ""),
+            ParamSpec(
+                "fill_with", "Removed voxels become", "choice", "image minimum",
+                choices=("image minimum", "value", "NaN"),
+            ),
+            ParamSpec("fill_value", "Value (with “value”)", "float", 0.0, min=-1e9, max=1e9),
+            ParamSpec("margin_mm", "Margin mm (+ grows, − shrinks)", "float", 0.0, min=-200.0, max=200.0),
+            ParamSpec("crop", "Crop to the kept region", "bool", False),
+            ParamSpec("replace", "Replace the image (else a new layer)", "bool", False),
+        ),
+        description=(
+            "Keep the voxels of an image that lie in a mask's labels — or remove them — "
+            "using a binary or multilabel segmentation. The image and the mask can be "
+            "either way round: leave one on “none” and it is the active layer. Labels: the "
+            "ids typed, else the ones shown on the mask (its filter in the layer list or the "
+            "Labels tab), else all. A mask on another grid is resampled; a 3D mask applies "
+            "to every frame of a 3D+t image."
+        ),
     ),
     GuiToolSpec(
         "seg_pet_ureter",
@@ -2116,9 +2126,10 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         requires_layer=False,
         description=(
             "Cohort voxelwise GLM with permutation FWE correction. Opens its own window to "
-            "configure the image directory, cohort, EVs and contrasts, and run locally or on the "
-            "cluster — or to load a finished results folder. Corrected maps land as layers over "
-            "the MNI template; the 3-D scene is under Visualization."
+            "configure the image directory, cohort, EVs and contrasts — or to point at a prepared "
+            "4D stack and design.mat/.con/.fts — and run locally or on the cluster, or to load a "
+            "finished results folder. Corrected maps land as layers over the MNI template; the "
+            "3-D scene is under Visualization."
         ),
     ),
     GuiToolSpec(

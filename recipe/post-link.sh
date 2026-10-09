@@ -95,5 +95,9 @@ log "installing pydicom (no-build-isolation, matching pixi's handling)..."
 log "installing pyvista deps (no-build-isolation, matching pixi's handling)..."
 "$PIP" install --no-cache-dir --no-build-isolation 'pyvista[notebook]' \
   >>"$LOG" 2>&1
+  
+log "installing mesh processing deps (no-build-isolation, matching pixi's handling)..."
+"$PIP" install --no-cache-dir --no-build-isolation 'pymeshlab>=2025.7.post1' \
+  >>"$LOG" 2>&1
 
 log "done."

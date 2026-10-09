@@ -14,6 +14,10 @@ That is the single most common thing to get wrong, it is cheap to compute before
 merged, and once ``randomise`` has run for an hour a wrong count is indistinguishable from a right
 one. Nothing here re-implements the analysis: the buttons build a ``nvitk-voxelwise`` command line
 and stream it, so the GUI path and the CLI path cannot drift apart.
+
+The second input mode, **prepared 4D stack + design files**, runs ``nvitk-voxelwise randomise`` on a
+stack and ``design.mat`` / ``.con`` / ``.fts`` built elsewhere. Its readout is the header check
+instead — volumes against design rows, EVs against contrast weights — for the same reason.
 """
 
 from __future__ import annotations
@@ -52,6 +56,10 @@ from nvitk.gui.core.log_panel import gui_log, run_subprocess_logged
 log = Logger()
 
 DIALOG_OBJECT_NAME = "nvitk_voxelwise_dialog"
+
+#: The two ways to supply an analysis: built here from images + database, or prepared elsewhere.
+MODE_COHORT = "cohort"
+MODE_PREPARED = "prepared"
 
 #: Measurement families the design frame can be built from, and a sensible feature for each.
 PIPELINE_KINDS: tuple[tuple[str, str, str], ...] = (
@@ -195,11 +203,29 @@ class VoxelwisePanel(QDialog):
         self._out_dir: Path | None = None
 
         outer = QVBoxLayout(self)
-        outer.addWidget(self._build_source_group())
-        outer.addWidget(self._build_design_group())
+        mode_row = QHBoxLayout()
+        self._mode = QComboBox()
+        self._mode.addItem("Build from cohort — images + database measurements", MODE_COHORT)
+        self._mode.addItem("Prepared 4D stack + design.mat / .con / .fts", MODE_PREPARED)
+        self._mode.setToolTip(
+            "Build from cohort: resolve images to subjects, build the design from measurements, "
+            "merge and run.\nPrepared: run randomise on a 4D stack and design files built "
+            "elsewhere (FSL Glm, another tool, or nvitk-voxelwise design + merge)."
+        )
+        self._mode.currentIndexChanged.connect(self._on_mode_changed)
+        mode_row.addWidget(QLabel("Input"))
+        mode_row.addWidget(self._mode, 1)
+        outer.addLayout(mode_row)
+
+        self._source_group = self._build_source_group()
+        self._design_group = self._build_design_group()
+        self._prepared_group = self._build_prepared_group()
+        outer.addWidget(self._source_group)
+        outer.addWidget(self._design_group)
+        outer.addWidget(self._prepared_group)
         outer.addWidget(self._build_analysis_group())
 
-        self._intersection = QLabel("Press “Check cohort” to see how many subjects survive.")
+        self._intersection = QLabel()
         self._intersection.setWordWrap(True)
         self._intersection.setTextFormat(Qt.PlainText)
         outer.addWidget(self._intersection)
@@ -210,6 +236,7 @@ class VoxelwisePanel(QDialog):
 
         outer.addLayout(self._build_buttons())
         self._populate_cohorts()
+        self._on_mode_changed()
 
     # -- construction ---------------------------------------------------------
     def _build_source_group(self) -> QGroupBox:
@@ -229,19 +256,6 @@ class VoxelwisePanel(QDialog):
         self._exclude_csv.setPlaceholderText("Optional: one id-glob per line (BMRI12345*)")
         form.addRow("Exclusion list", self._with_browse(self._exclude_csv, file_filter="*.csv *.txt"))
 
-        self._from_source = QComboBox()
-        for label, key in (
-            ("local — upload the selected images", "local"),
-            ("cluster — already there, upload nothing", "sge"),
-        ):
-            self._from_source.addItem(label, key)
-        self._from_source.setToolTip(
-            "Where the image directory and mask live, for a cluster submission.\n\n"
-            "'local' resolves the cohort here and uploads only the volumes the design keeps — a "
-            "few hundred out of however many are in the folder — into <output>/inputs/.\n"
-            "'cluster' treats the paths as already visible to the nodes and sends nothing."
-        )
-
         self._on_duplicate = QComboBox()
         for label, key in (
             ("error — list the conflicts", "error"),
@@ -258,7 +272,6 @@ class VoxelwisePanel(QDialog):
             "instead of choosing for you."
         )
         form.addRow("Duplicate subjects", self._on_duplicate)
-        form.addRow("Input location (SGE)", self._from_source)
 
         self._cohort = QComboBox()
         self._cohort.setToolTip(
@@ -339,13 +352,34 @@ class VoxelwisePanel(QDialog):
         layout.addWidget(self._contrasts)
         return box
 
+    def _build_prepared_group(self) -> QGroupBox:
+        """The 4D stack and the design files of a prepared analysis."""
+        box = QGroupBox("Prepared inputs")
+        form = QFormLayout(box)
+
+        self._stack = QLineEdit()
+        self._stack.setPlaceholderText("4D NIfTI, one subject per volume")
+        form.addRow("4D stack", self._with_browse(self._stack, file_filter="*.nii *.nii.gz"))
+
+        self._design_mat = QLineEdit()
+        self._design_mat.setPlaceholderText("design.mat — row i is volume i of the stack")
+        form.addRow("Design matrix", self._with_browse(self._design_mat, file_filter="*.mat"))
+
+        self._design_con = QLineEdit()
+        self._design_con.setPlaceholderText("design.con — t-contrasts")
+        form.addRow("Contrasts", self._with_browse(self._design_con, file_filter="*.con"))
+
+        self._design_fts = QLineEdit()
+        self._design_fts.setPlaceholderText("Optional: design.fts — F-tests over the t-contrasts")
+        form.addRow("F-tests", self._with_browse(self._design_fts, file_filter="*.fts"))
+        return box
+
     def _build_analysis_group(self) -> QGroupBox:
-        """Mask, permutations, TFCE and output folder."""
+        """Mask, permutations, TFCE, parallelism, output folder and input location."""
         box = QGroupBox("Analysis")
         form = QFormLayout(box)
 
         self._mask = QLineEdit()
-        self._mask.setPlaceholderText("Optional — defaults to the MNI152 brain mask")
         form.addRow("Mask", self._with_browse(self._mask, file_filter="*.nii *.nii.gz"))
 
         self._out_dir_edit = QLineEdit()
@@ -361,12 +395,43 @@ class VoxelwisePanel(QDialog):
         self._tfce = QCheckBox("TFCE")
         self._tfce.setChecked(True)
         self._parallel = QCheckBox("randomise_parallel")
+        self._parallel.setToolTip(
+            "Split the permutations into fragments run side by side — on this machine for a "
+            "local run, on the job's slots for a cluster one. Never queued as separate jobs."
+        )
+        self._jobs = QSpinBox()
+        self._jobs.setRange(0, 512)
+        self._jobs.setSpecialValueText("auto")
+        self._jobs.setToolTip(
+            "Fragments run at once. Each holds the whole 4D stack in memory, so 'auto' takes as "
+            "many as the cores and the free memory allow ($FSLSUB_PARALLEL if set).\n"
+            "On the cluster this is the number of slots requested (-pe smp); auto asks for "
+            "sge.json's sge_pe_smp, else 4."
+        )
+        self._jobs.setEnabled(False)
+        self._parallel.toggled.connect(self._jobs.setEnabled)
         row.addWidget(QLabel("permutations"))
         row.addWidget(self._n_perm)
         row.addWidget(self._tfce)
         row.addWidget(self._parallel)
+        row.addWidget(QLabel("jobs"))
+        row.addWidget(self._jobs)
         row.addStretch(1)
         form.addRow("", row)
+
+        self._from_source = QComboBox()
+        for label, key in (
+            ("local — upload what the run needs", "local"),
+            ("cluster — already there, upload nothing", "sge"),
+        ):
+            self._from_source.addItem(label, key)
+        self._from_source.setToolTip(
+            "Where the inputs live, for a cluster submission.\n\n"
+            "'local' uploads them into <output>/inputs/: for a cohort, only the volumes the "
+            "design keeps; for prepared inputs, the stack and the design files.\n"
+            "'cluster' treats the paths as already visible to the nodes and sends nothing."
+        )
+        form.addRow("Input location (SGE)", self._from_source)
         return box
 
     def _build_buttons(self) -> QHBoxLayout:
@@ -428,6 +493,27 @@ class VoxelwisePanel(QDialog):
         if status.available:
             return f"FSL: {status.summary()}"
         return f"FSL unavailable — {status.reason}. Local runs will fail; SGE may still work."
+
+    def mode(self) -> str:
+        """:data:`MODE_COHORT` or :data:`MODE_PREPARED`."""
+        return str(self._mode.currentData() or MODE_COHORT)
+
+    def _on_mode_changed(self) -> None:
+        """Show the inputs the chosen mode uses, and say what its check button checks."""
+        prepared = self.mode() == MODE_PREPARED
+        self._source_group.setVisible(not prepared)
+        self._design_group.setVisible(not prepared)
+        self._prepared_group.setVisible(prepared)
+        self._check_btn.setText("Check inputs" if prepared else "Check cohort")
+        self._mask.setPlaceholderText(
+            "Optional — none: randomise tests every voxel that is non-zero in the data"
+            if prepared else "Optional — defaults to the MNI152 brain mask"
+        )
+        self._intersection.setText(
+            "Press “Check inputs” to compare the stack with the design files."
+            if prepared else "Press “Check cohort” to see how many subjects survive."
+        )
+        self.adjustSize()
 
     def _populate_cohorts(self) -> None:
         """Fill the cohort combo with the selectable pipeline ids and their subject counts."""
@@ -515,8 +601,42 @@ class VoxelwisePanel(QDialog):
             self._contrasts.takeItem(self._contrasts.row(item))
 
     # -- intersection ---------------------------------------------------------
+    def _check_prepared(self) -> None:
+        """Compare the stack with the design files, from headers — quick enough for this thread."""
+        try:
+            from nvitk.measure.voxelwise import validate_randomise_inputs
+
+            stack, mat, con = self._required_prepared_paths()
+            inputs = validate_randomise_inputs(
+                stack, mat, con,
+                fts=self._design_fts.text().strip() or None,
+                mask=self._mask.text().strip() or None,
+            )
+        except (ValueError, FileNotFoundError) as exc:
+            self._intersection.setText(str(exc))
+            return
+        self._intersection.setText(
+            inputs.describe()
+            + f"\nContrasts: {', '.join(inputs.contrast_names())}"
+            + (f" · F-tests: {', '.join(inputs.ftest_names())}" if inputs.ftests is not None else "")
+        )
+
+    def _required_prepared_paths(self) -> tuple[str, str, str]:
+        """``(stack, design.mat, design.con)``, raising ``ValueError`` naming the first one unset."""
+        values = []
+        for edit, label in ((self._stack, "4D stack"), (self._design_mat, "design matrix"),
+                            (self._design_con, "contrasts file")):
+            text = edit.text().strip()
+            if not text:
+                raise ValueError(f"Choose the {label}.")
+            values.append(text)
+        return values[0], values[1], values[2]
+
     def _check_intersection(self) -> None:
         """Recompute the images ∩ cohort ∩ complete-cases counts in the background."""
+        if self.mode() == MODE_PREPARED:
+            self._check_prepared()
+            return
         image_dir = self._image_dir.text().strip()
         if not image_dir:
             QMessageBox.warning(self, "Voxelwise", "Choose an image directory first.")
@@ -576,6 +696,8 @@ class VoxelwisePanel(QDialog):
         Built rather than calling the library directly so that what the GUI runs is exactly what a
         user could paste into a terminal — and so the log shows them that command.
         """
+        if self.mode() == MODE_PREPARED:
+            return self._build_prepared_argv(submit)
         image_dir = self._image_dir.text().strip()
         out_dir = self._out_dir_edit.text().strip()
         evs = self.selected_evs()
@@ -614,10 +736,39 @@ class VoxelwisePanel(QDialog):
             argv += ["--contrast", contrast]
         for rule in self.prefilters():
             argv += ["--prefilter", rule]
-        argv.append("--tfce" if self._tfce.isChecked() else "--no-tfce")
+        return argv + self._run_flags()
+
+    def _build_prepared_argv(self, submit: str) -> list[str]:
+        """``nvitk-voxelwise randomise`` for a prepared stack and design files."""
+        stack, mat, con = self._required_prepared_paths()
+        out_dir = self._out_dir_edit.text().strip()
+        if not out_dir:
+            raise ValueError("Choose an output folder.")
+        argv = [
+            "nvitk-voxelwise", "randomise",
+            "-i", stack,
+            "-d", mat,
+            "-t", con,
+            "-o", out_dir,
+            "--n-perm", str(int(self._n_perm.value())),
+            "--submit", submit,
+        ]
+        if self._design_fts.text().strip():
+            argv += ["-f", self._design_fts.text().strip()]
+        if self._mask.text().strip():
+            argv += ["-m", self._mask.text().strip()]
+        if submit == "sge":
+            argv += ["--from-source", str(self._from_source.currentData() or "local")]
+        return argv + self._run_flags()
+
+    def _run_flags(self) -> list[str]:
+        """TFCE and parallelism flags, common to both modes."""
+        flags = ["--tfce" if self._tfce.isChecked() else "--no-tfce"]
         if self._parallel.isChecked():
-            argv.append("--parallel")
-        return argv
+            flags.append("--parallel")
+            if self._jobs.value() > 0:
+                flags += ["--jobs", str(int(self._jobs.value()))]
+        return flags
 
     def _launch(self, submit: str) -> None:
         """Start the analysis (or the submission) and stream it into the log dock."""
@@ -779,7 +930,8 @@ def add_result_layers(
             log.debug("MNI template unavailable as a base layer: %s", exc)
 
     cut = alpha_to_map_threshold(alpha)
-    for name in result.contrast_names:
+    names = result.names_for(kind)
+    for name in names:
         try:
             path = result.map_path(kind, name)
         except KeyError:
@@ -793,7 +945,7 @@ def add_result_layers(
             added.append(layer)
 
     gui_log(
-        f"Voxelwise: {len(result.contrast_names)} contrast(s) from {Path(out_dir).name} "
+        f"Voxelwise: {len(names)} contrast(s) from {Path(out_dir).name} "
         f"as {kind} map(s), thresholded at p < {alpha:g}."
     )
     return added

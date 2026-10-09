@@ -66,11 +66,11 @@ def mask_voxel_averaged_hemodynamics(
 
     No cross-sectional area; not interchangeable with catheter-style flow.
     """
-    m = to_numpy(mask)
+    m = as_backend_array(mask)
     roi = m == int(label_id)
-    if not np.any(roi):
+    if not bool(np.any(roi)):
         raise ValueError(f"Label {label_id} not found in mask.")
-    vx, vy, vz = velocity_mm_s_from_phases(ap, rl, fh)
+    vx, vy, vz = (as_backend_array(v) for v in velocity_mm_s_from_phases(ap, rl, fh))
     coords = np.argwhere(roi)
     axis = _pca_flow_axis(coords)
     nt = int(vx.shape[3])
@@ -137,7 +137,7 @@ def mask_pseudo_loc_hemodynamics(
         vx, vy, vz, xs, plane_interp_order=int(plane_interp_order)
     )
     area_mm2 = float(xs.area_mm2)
-    vel_ts = np.abs(np.asarray(vel_ts, dtype=np.float64).reshape(-1))
+    vel_ts = np.abs(as_backend_array(vel_ts).astype(np.float64).reshape(-1))
     flow_ts = np.abs(flow_series_ml_s(vel_ts, area_mm2))
     flow_2d = flow_ts.reshape(1, -1)
     return MaskHemodynamicsResult(

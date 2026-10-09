@@ -56,10 +56,72 @@ from nvitk.gui.core.design import (
     Card,
 )
 from nvitk.io.dicom_edit import DATE_MODES, EXPORT_LAYOUTS, EXPORT_NAMES, DicomEditor, parse_tag, tag_vr
-from nvitk.io.dicom_index import DicomSeries, DicomStudy, merge_studies, read_header, scan_dicom
+from nvitk.io.dicom_index import DicomSeries, DicomStudy, merge_studies, read_header, scan_dicom, shares_subject
 
 #: Where edits go: the file shown, its series, the ticked files, or every file scanned.
 SCOPES = ("this file", "this series", "ticked files", "all scanned files")
+#: What a DICOM folder dropped on the viewer does (preferences key ``dicom_drop_action``).
+DROP_ACTIONS = {"ask": "Ask each time", "load": "Load into the viewer", "browser": "Open in the DICOM browser"}
+DROP_PREF_KEY = "dicom_drop_action"
+
+
+def drop_action() -> str:
+    """``ask``, ``load`` or ``browser``: what dropping DICOM on the viewer does."""
+    try:
+        from nvitk.gui.core.prefs import load_prefs
+
+        value = str(load_prefs().get(DROP_PREF_KEY) or "ask")
+    except Exception:  # noqa: BLE001
+        value = "ask"
+    return value if value in DROP_ACTIONS else "ask"
+
+
+def set_drop_action(value: str) -> None:
+    from nvitk.gui.core.prefs import save_prefs
+
+    if value in DROP_ACTIONS:
+        save_prefs({DROP_PREF_KEY: value})
+
+
+def ask_dicom_drop(parent: Any, paths: list[str]) -> str | None:
+    """The small "how to open this DICOM?" window: ``load``, ``browser`` or ``None`` (cancelled).
+
+    *Remember my choice* stores the answer; the DICOM browser's *Dropped DICOM* setting
+    brings the question back.
+    """
+    names = [os.path.basename(os.path.normpath(p)) or p for p in paths]
+    shown = ", ".join(names[:3]) + (f" and {len(names) - 3} more" if len(names) > 3 else "")
+    box = QMessageBox(parent)
+    box.setWindowTitle("Open DICOM")
+    box.setIcon(QMessageBox.Icon.Question)
+    box.setText(f"DICOM {'folder' if len(paths) == 1 and os.path.isdir(paths[0]) else 'data'}: {shown}")
+    box.setInformativeText("Load it straight into the viewer, or open it in the DICOM browser first — to see "
+                           "its series and files, pick what to load or export, edit or anonymize headers?")
+    load_btn = box.addButton("Load into the viewer", QMessageBox.ButtonRole.AcceptRole)
+    browse_btn = box.addButton("Open in the DICOM browser", QMessageBox.ButtonRole.ActionRole)
+    box.addButton(QMessageBox.StandardButton.Cancel)
+    box.setDefaultButton(load_btn)
+    remember = QCheckBox("Remember my choice (change it in the DICOM browser)")
+    box.setCheckBox(remember)
+    box.exec()
+    clicked = box.clickedButton()
+    choice = "load" if clicked is load_btn else "browser" if clicked is browse_btn else None
+    if choice is not None and remember.isChecked():
+        set_drop_action(choice)
+    return choice
+
+
+def open_in_dicom_browser(viewer: Any, paths: list[str] | str) -> bool:
+    """Scan *paths* in the viewer's DICOM browser (added to what it lists) and bring its tab
+    to the front; ``False`` when there is no browser."""
+    panel = getattr(viewer, "_nvitk_dicom_browser", None)
+    if panel is None:
+        return False
+    if isinstance(paths, str):
+        paths = [paths]
+    panel.show_in_viewer()
+    panel.request_scan(list(paths), add=True)
+    return True
 #: Values not shown or edited as text.
 _BINARY_VRS = {"OB", "OW", "OF", "OD", "OL", "OV", "UN"}
 _ROLE = Qt.UserRole
@@ -273,6 +335,7 @@ class DicomBrowserPanel(QWidget):
         self._file_series: dict[str, str] = {}
         self._source: list[str] = []
         self._adding = False
+        self._pending: list[tuple[list[str], bool]] = []
         self.setAcceptDrops(True)
         self.editor = DicomEditor()
         self._worker: Any = None
@@ -312,6 +375,17 @@ class DicomBrowserPanel(QWidget):
         src.add(self._progress)
         self._status = _muted("Choose a folder: nothing is loaded until you ask for it.")
         src.add(self._status)
+        drop_row = QHBoxLayout()
+        drop_row.addWidget(_muted("DICOM dropped on the viewer:"))
+        self._drop_pref = QComboBox()
+        for key, text in DROP_ACTIONS.items():
+            self._drop_pref.addItem(text, key)
+        self._drop_pref.setCurrentIndex(max(self._drop_pref.findData(drop_action()), 0))
+        self._drop_pref.setToolTip("What dragging a DICOM folder or file onto the viewer does.")
+        self._drop_pref.currentIndexChanged.connect(
+            lambda _i: set_drop_action(str(self._drop_pref.currentData())))
+        drop_row.addWidget(self._drop_pref, 1)
+        src.add_layout(drop_row)
         root.addWidget(src)
 
         split = QSplitter(Qt.Vertical)
@@ -504,6 +578,9 @@ class DicomBrowserPanel(QWidget):
             self._status.setText("Still busy — wait for the current scan or export.")
             return
         new = [p for p in paths if not add or p not in self._source]
+        # Kept for a scan that turns out to be more of a subject already listed:
+        # then it is merged in, and the folders listed are the old ones plus these.
+        self._previous_source = list(self._source)
         self._source = (self._source + new) if add else list(paths)
         self._adding = add
         self._path.setText(" ; ".join(self._source))
@@ -540,15 +617,68 @@ class DicomBrowserPanel(QWidget):
             worker.relay.deleteLater()
         self._b_scan.setText("Scan")
         self._progress.setVisible(False)
+        if self._pending:
+            paths, add = self._pending.pop(0)
+            self.scan(paths, add=add and bool(self._studies))
+
+    def sync_drop_pref(self) -> None:
+        """Show the stored *DICOM dropped on the viewer* choice (it may change from the prompt)."""
+        self._drop_pref.blockSignals(True)
+        self._drop_pref.setCurrentIndex(max(self._drop_pref.findData(drop_action()), 0))
+        self._drop_pref.blockSignals(False)
+
+    def showEvent(self, event: Any) -> None:  # noqa: N802 — Qt naming
+        self.sync_drop_pref()
+        super().showEvent(event)
+
+    def request_scan(self, paths: list[str], *, add: bool = True) -> None:
+        """Scan *paths* — now, or after the scan or export still running."""
+        if self._worker is not None:
+            self._pending.append((list(paths), add))
+            self._status.setText(f"Queued: {', '.join(os.path.basename(os.path.normpath(p)) for p in paths)}")
+            return
+        self.scan(paths, add=add and bool(self._studies))
+
+    def show_in_viewer(self) -> None:
+        """Bring the DICOM browser's tab (or window) to the front."""
+        from qtpy.QtWidgets import QDockWidget
+
+        dock: Any = self
+        while dock is not None and not isinstance(dock, QDockWidget):
+            dock = dock.parentWidget()
+        if dock is None:
+            return
+        manager = getattr(self._viewer, "_nvitk_panel_manager", None)
+        if manager is not None:
+            manager.show_dock(dock)
+        else:
+            dock.show()
+            dock.raise_()
 
     def _on_scanned(self, studies: list[DicomStudy]) -> None:
-        if getattr(self, "_adding", False) and self._studies:
+        adding = bool(getattr(self, "_adding", False) and self._studies)
+        # A new scan of a patient already listed (their other folders, their other
+        # series) joins them instead of replacing the list: replacing it dropped
+        # the series read from the first folder. A different patient starts afresh.
+        same_subject = not adding and bool(self._studies) and shares_subject(self._studies, studies)
+        if adding or same_subject:
+            if same_subject:
+                previous = list(getattr(self, "_previous_source", []))
+                self._source = previous + [p for p in self._source if p not in previous]
+                self._path.setText(" ; ".join(self._source))
             ticked = self.ticked()
             full = {k for k, paths in ticked.items() if len(paths) == len(self._series[k].files)}
+            before = set(self._series)
             self.set_studies(merge_studies(self._studies, studies), keep_edits=True)
             for key, paths in ticked.items():
                 if key in self._series:
                     self.tick(key, None if key in full else paths)
+            if same_subject:
+                added = len(set(self._series) - before)
+                self._status.setText(
+                    f"{self._status.text()} {added} new series added to the patient already listed "
+                    "(a new folder of a patient joins them; a different patient starts a new list)."
+                )
         else:
             self.set_studies(studies)
 
@@ -1028,4 +1158,16 @@ def build_dicom_browser(viewer: Any) -> DicomBrowserPanel:
     return panel
 
 
-__all__ = ["AnonymizeDialog", "DicomBrowserPanel", "ExportDialog", "SCOPES", "build_dicom_browser", "value_text"]
+__all__ = [
+    "AnonymizeDialog",
+    "DROP_ACTIONS",
+    "DicomBrowserPanel",
+    "ExportDialog",
+    "SCOPES",
+    "ask_dicom_drop",
+    "build_dicom_browser",
+    "drop_action",
+    "open_in_dicom_browser",
+    "set_drop_action",
+    "value_text",
+]

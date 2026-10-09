@@ -139,6 +139,67 @@ def layer_spatial_kwargs(layer: Any, ndim: int | None = None) -> dict[str, Any]:
     return kwargs
 
 
+def _lo_in_file_order(layer: Any, lo: list[int]) -> list[int] | None:
+    """The spatial part of a voxel offset *lo* (in *layer*'s axis order) in the
+    order of the file's axes — what the file's affine (``affine_source``) indexes."""
+    from nvitk.gui.core.orientation import _axes_string_from_layer, layer_is_reordered
+
+    nd = len(lo)
+    display = (_axes_string_from_layer(layer) or "").upper()
+    if not layer_is_reordered(layer):
+        if len(display) == nd:
+            return [int(lo[i]) for i, ch in enumerate(display) if ch not in ("T", "C")]
+        return [int(v) for v in lo[:3]]
+    source = (layer_source_axes(layer) or "").upper()
+    if len(display) != nd or not source:
+        return None
+    return [int(lo[display.index(ch)]) if ch in display else 0 for ch in source if ch not in ("T", "C")]
+
+
+def crop_placement(layer: Any, lo: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+    """``(add_* kwargs, metadata)`` for a crop of *layer* whose first voxel is *lo*
+    (one entry per data axis; 0 on the axes kept whole).
+
+    The crop is put back where it came from by shifting the layer's affine by
+    ``scale × lo`` (physical units) rather than its translate: the affine is what
+    export reads (:func:`layer_affine`), so the cropped file opens in place too.
+    The file's own affine (``affine_source``, which export prefers) moves by *lo*
+    taken in the file's axis order; the rest of the metadata is copied.
+    """
+    import copy
+
+    nd = int(layer.data.ndim)
+    lo = [int(v) for v in list(lo)[:nd]] + [0] * max(nd - len(list(lo)), 0)
+    kwargs = dict(layer_spatial_kwargs(layer))
+    scale = [float(v) for v in getattr(layer, "scale", [1.0] * nd)]
+    matrix = np.asarray(layer.affine.affine_matrix, dtype=float)
+    shift = np.eye(nd + 1)
+    shift[:nd, nd] = [s * o for s, o in zip(scale, lo)]
+    kwargs["affine"] = matrix @ shift
+    # The axis names carry the axis order nvitk exports in (a reordered layer
+    # goes back to the file's order by them).
+    labels = getattr(layer, "axis_labels", None)
+    if labels is not None and len(labels) == nd:
+        kwargs["axis_labels"] = tuple(str(v) for v in labels)
+    meta = copy.deepcopy(dict(getattr(layer, "metadata", None) or {}))
+    lo_file = _lo_in_file_order(layer, lo)
+    nested = meta.get("nvitk_metadata")
+    for holder in (meta, nested if isinstance(nested, dict) else None):
+        if holder is None:
+            continue
+        src = holder.get("affine_source")
+        if src is not None:
+            src = to_numpy(src).astype(float)
+            if src.shape == (4, 4) and lo_file is not None:
+                move = np.eye(4)
+                move[: min(3, len(lo_file)), 3] = lo_file[:3]
+                holder["affine_source"] = src @ move
+            else:
+                holder.pop("affine_source", None)
+        holder.pop("shape", None)
+    return kwargs, meta
+
+
 def _output_dims(layer: Any, ndim: int) -> list[int]:
     """Which of *layer*'s dims an *ndim*-dimensional output corresponds to.
 

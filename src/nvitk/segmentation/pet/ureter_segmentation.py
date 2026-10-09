@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Tuple
 
-from nvitk.core import setup
+from nvitk.core import setup, using
 from nvitk.core import as_backend_array, to_numpy
 from nvitk.morphology import keep_largest_components
 from nvitk.types import Image
@@ -328,17 +328,17 @@ def spline_resample_zyx(
     Points are clipped to ``[bounds_lo, bounds_hi]`` so the smoothed curve cannot
     leave the volume. Short paths (<4 points) are padded before the fit.
     """
-    p = to_numpy(path_zyx, copy=True)
-    if p.shape[0] < 4:
-        rep = 4 - p.shape[0]
-        p   = np.vstack([p, np.repeat(p[-1:], rep, axis=0)])
-    pts     = p.T
-    tck, _u = splprep(pts, s=float(s_smooth), k=3)
-    u_new   = np.linspace(0, 1, int(n_points), dtype=np.float64)
-    z, y, x = splev(to_numpy(u_new), tck)
+    # SciPy's splprep / splev have no CuPy counterpart: fit on the host, then back.
+    with using("cpu"):
+        p = to_numpy(path_zyx, copy=True)
+        if p.shape[0] < 4:
+            rep = 4 - p.shape[0]
+            p   = np.vstack([p, np.repeat(p[-1:], rep, axis=0)])
+        tck, _u = splprep(p.T, s=float(s_smooth), k=3)
+        z, y, x = splev(np.linspace(0, 1, int(n_points), dtype=np.float64), tck)
     x, y, z = as_backend_array(x), as_backend_array(y), as_backend_array(z)
     out     = np.stack([z, y, x], axis=1)
-    out     = np.clip(out, bounds_lo, bounds_hi)
+    out     = np.clip(out, as_backend_array(bounds_lo), as_backend_array(bounds_hi))
     return as_backend_array(out)
 
 

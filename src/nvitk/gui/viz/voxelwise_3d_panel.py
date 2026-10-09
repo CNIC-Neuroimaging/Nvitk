@@ -255,15 +255,25 @@ class Voxelwise3DPanel(QDialog):
         self._kind.setCurrentIndex(index if index >= 0 else 0)
         self._kind.blockSignals(False)
 
+        self._fill_contrasts(result.names_for(str(self._kind.currentData() or "")))
+        self._on_kind_changed()
+
+    def _fill_contrasts(self, names: list[str]) -> None:
+        """List *names*, keeping the selection; a no-op when they are already the ones listed.
+
+        Called again on every kind change, because t-contrast and F-test maps are numbered
+        separately and switching between them changes what can be drawn.
+        """
+        if [self._contrasts.item(i).text() for i in range(self._contrasts.count())] == names:
+            return
         chosen = {i.text() for i in self._contrasts.selectedItems()}
         self._contrasts.clear()
-        for name in result.contrast_names:
+        for name in names:
             self._contrasts.addItem(name)
+        keep = chosen & set(names)
         for i in range(self._contrasts.count()):
             item = self._contrasts.item(i)
-            item.setSelected(item.text() in chosen or not chosen)
-
-        self._on_kind_changed()
+            item.setSelected(item.text() in keep or not keep)
 
     def _on_kind_changed(self) -> None:
         """Re-read the map and reset the window to something meaningful for this kind."""
@@ -272,11 +282,12 @@ class Voxelwise3DPanel(QDialog):
         if not directory or not kind:
             return
         try:
-            self._data, _kind, _names = map_data(directory, kind=kind)
+            self._data, _kind, names = map_data(directory, kind=kind)
         except Exception as exc:  # noqa: BLE001
             self._status.setText(f"Could not read the {kind} map: {exc}")
             self._data = None
             return
+        self._fill_contrasts(names)
 
         low, high = value_range(self._data, kind)
         for spin in (self._lo, self._hi):

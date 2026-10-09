@@ -26,6 +26,7 @@ from qtpy.QtWidgets import (
 from nvitk.gui.core.design import COLOR_BORDER_STRONG, COLOR_FAINT, clear_layout
 from nvitk.gui.labels.catalog import (
     all_schemas,
+    custom_label_names,
     get_schema,
     guess_schema_from_layer,
     remember_layer_schema,
@@ -53,9 +54,15 @@ LABEL_SELECTOR_SCROLL_MIN = 80
 
 class _LabelFilterHub(QObject):
     """Announces that a layer's live label filter changed, so every picker bound to
-    that layer — the Labels panel, the Tools picker, a layer-list popup — shows it."""
+    that layer — the Labels panel, the Tools picker, a layer-list popup — shows it.
+
+    ``names_changed``: a label of the layer was named by hand. ``labels_changed``:
+    an edit added or removed labels (deleted, merged, painted a new id).
+    """
 
     changed = Signal(object)
+    names_changed = Signal(object)
+    labels_changed = Signal(object)
 
 
 _HUB: _LabelFilterHub | None = None
@@ -248,7 +255,10 @@ class LabelSelectorWidget(QGroupBox):
 
         self._layer_ref: Any | None = None
         self._viewer: Any | None = None
-        label_filter_hub().changed.connect(self._on_layer_filter_changed)
+        hub = label_filter_hub()
+        hub.changed.connect(self._on_layer_filter_changed)
+        hub.names_changed.connect(self._on_layer_names_changed)
+        hub.labels_changed.connect(self._on_layer_labels_changed)
 
     def _on_layer_filter_changed(self, layer: Any) -> None:
         """Another picker filtered *layer*: show its selection here too."""
@@ -257,6 +267,33 @@ class LabelSelectorWidget(QGroupBox):
                 self.sync_checks_from_layer()
         except RuntimeError:  # this widget's C++ side is already gone
             pass
+
+    def _on_layer_names_changed(self, layer: Any) -> None:
+        """A label of *layer* was renamed: relabel the boxes, keeping their state."""
+        try:
+            if layer is None or layer is not self._layer_ref:
+                return
+            schema = get_schema(self._schema_key)
+            for cb in self._checks:
+                cb.setText(self._display(int(cb.property("label_id")), schema))
+            self._apply_filter()
+        except RuntimeError:
+            pass
+
+    def _on_layer_labels_changed(self, layer: Any) -> None:
+        """An edit added or removed labels of *layer*: list them again."""
+        try:
+            if layer is not None and layer is self._layer_ref:
+                self._refresh_current_layer()
+        except RuntimeError:
+            pass
+
+    def _display(self, lid: int, schema: Any) -> str:
+        """*lid* as listed: its hand-given name, else the mapping's, else ``Label <id>``."""
+        name = custom_label_names(self._layer_ref).get(int(lid))
+        if name:
+            return f"{name} ({lid})"
+        return schema.display(lid) if schema else f"Label {lid}"
 
     def sync_checks_from_layer(self) -> None:
         """Tick exactly the ids the bound layer's live filter keeps, without rebuilding."""
@@ -489,7 +526,8 @@ class LabelSelectorWidget(QGroupBox):
             self._hint.setText(f"No labels to show in “{layer.name}”.")
             return
 
-        mapped = sum(1 for lid in ids if schema and schema.name_for(lid))
+        custom = custom_label_names(layer)
+        mapped = sum(1 for lid in ids if lid in custom or (schema and schema.name_for(lid)))
         schema_title = schema.title if schema else "Generic"
         color_hint = (
             " — click a colour dot to change it"
@@ -498,7 +536,7 @@ class LabelSelectorWidget(QGroupBox):
         )
         self._base_hint = (
             f"{len(ids)} label(s) in “{layer.name}” — {schema_title}"
-            + (f" ({mapped} named)" if schema and schema.id_to_name else "")
+            + (f" ({mapped} named)" if (schema and schema.id_to_name) or custom else "")
             + color_hint
         )
         self._hint.setText(self._base_hint)
@@ -512,7 +550,7 @@ class LabelSelectorWidget(QGroupBox):
         # already showing for it, so switching layers does not reset the picker.
         remembered = stored_visible_ids(layer)
         for lid in ids:
-            text = schema.display(lid) if schema else f"Label {lid}"
+            text = self._display(lid, schema)
             in_layer = lid in layer_ids
             checked = in_layer if remembered is None else lid in remembered
             row = QWidget()
@@ -613,9 +651,12 @@ class LabelSelectorWidget(QGroupBox):
     def selected_names(self) -> list[str]:
         """Human names for checked ids (falls back to ``Label_<id>``)."""
         schema = get_schema(self._schema_key)
+        custom = custom_label_names(self._layer_ref)
         names = []
         for lid in self.selected_ids():
-            if schema and schema.name_for(lid):
+            if custom.get(lid):
+                names.append(custom[lid])
+            elif schema and schema.name_for(lid):
                 names.append(schema.name_for(lid))
             else:
                 names.append(f"Label_{lid}")

@@ -306,7 +306,7 @@ def lateral_axis_from_affine(affine: Any, ndim: int = 3) -> int | None:
     """
     if affine is None:
         return None
-    matrix = to_numpy(affine)[:3, :3]
+    matrix = as_backend_array(affine)[:3, :3]
     # Row 0 of the affine maps array axes onto world x (the left-right world direction); the
     # array axis contributing most to it is the lateral one.
     return int(np.argmax(np.abs(matrix[0, :ndim])))

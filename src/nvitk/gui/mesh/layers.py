@@ -183,6 +183,12 @@ class Display:
     color: tuple[float, float, float, float] = SURFACE_COLOUR
     auto_range: bool = True
     limits: tuple[float, float] = (0.0, 1.0)
+    #: What a surface draws, each on its own (:func:`apply_parts`): its faces,
+    #: its edges, its vertices (as dots of ``point_size`` screen pixels).
+    faces: bool = True
+    wireframe: bool = False
+    points: bool = False
+    point_size: float = 4.0
 
 
 @dataclass
@@ -310,6 +316,15 @@ def remove_field(layer: Any, name: str) -> bool:
         return False
     del entry.fields[name]
     entry.categories.pop(name, None)
+    if type(layer).__name__ == "Points":
+        # add_field mirrors a Points field into the layer's features, and
+        # fields_of reads features back: left there, the field would return.
+        try:
+            feats = layer.features
+            if name in feats.columns:
+                layer.features = feats.drop(columns=[name])
+        except Exception:  # noqa: BLE001
+            pass
     if entry.display.mode == "field" and entry.display.field == name:
         entry.display.mode, entry.display.field = "solid", ""
     apply_display(layer)
@@ -388,6 +403,7 @@ def apply_display(layer: Any) -> None:
         ctrl = series_controller(layer)
         if ctrl is not None:
             ctrl.refresh()
+            apply_parts(layer)
             return
         verts = np.asarray(layer.data[0])
         faces = np.asarray(layer.data[1])
@@ -399,9 +415,145 @@ def apply_display(layer: Any) -> None:
         layer.colormap = cmap
         if limits is not None:
             layer.contrast_limits = limits
+        apply_parts(layer)
         return
     if kind == "Points":
         _apply_points_display(layer)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Faces, wireframe and vertices, each on its own
+# ──────────────────────────────────────────────────────────────────────────────
+
+#: Wireframe colour over visible faces (Napari's default).
+_WIRE_ON_FACES = (0.0, 0.0, 0.0, 1.0)
+#: The vertex dots drawn for each surface, kept off the layer list.
+_MARKERS: "weakref.WeakKeyDictionary[Any, Any]" = weakref.WeakKeyDictionary()
+_PARTS_HOOKED: "weakref.WeakSet[Any]" = weakref.WeakSet()
+
+
+def _vispy_layer(layer: Any) -> Any | None:
+    """The vispy layer drawing *layer* in the current viewer (``None`` headless)."""
+    try:
+        import napari
+
+        viewer = napari.current_viewer()
+        return viewer.window._qt_viewer.canvas.layer_to_visual.get(layer)
+    except Exception:  # noqa: BLE001 — no window, no canvas
+        return None
+
+
+def set_parts(layer: Any, **changes: Any) -> Display:
+    """Show or hide a surface's ``faces``, ``wireframe`` and ``points`` (and set
+    ``point_size``), each independently."""
+    disp = _data(layer).display
+    for key, val in changes.items():
+        setattr(disp, key, val)
+    apply_parts(layer)
+    return disp
+
+
+def apply_parts(layer: Any) -> None:
+    """Draw a surface's faces, wireframe and vertices as its display says.
+
+    Faces and edges come from one mesh visual: its wireframe filter draws the
+    edges over the faces, or — faces off — only the edges (``wireframe_only``,
+    which discards the rest and keeps the depth right), in the surface's colour
+    so they show on the dark background. Vertices are a markers visual parented to
+    the surface's own node, so it follows every move and frame without a layer of
+    its own.
+    """
+    if type(layer).__name__ != "Surface":
+        return
+    disp = _data(layer).display
+    try:
+        if disp.wireframe or not disp.faces:
+            colour = _WIRE_ON_FACES if disp.faces else tuple(disp.color)
+            if tuple(np.asarray(layer.wireframe.color, dtype=float).ravel()[:4]) != tuple(colour):
+                layer.wireframe.color = colour
+            layer.wireframe.visible = True
+        else:
+            layer.wireframe.visible = False
+    except Exception:  # noqa: BLE001 — a Napari without a wireframe model
+        pass
+    vispy_layer = _vispy_layer(layer)
+    if vispy_layer is None:
+        return
+    node = vispy_layer.node
+    wire = getattr(node, "wireframe_filter", None)
+    if wire is not None:
+        wire.wireframe_only = not disp.faces
+        # Neither faces nor edges: a zero-width wireframe-only pass draws nothing
+        # of the mesh (the vertex dots, its child, still draw).
+        width = float(getattr(layer.wireframe, "width", 1.0))
+        wire.width = width if (disp.faces or disp.wireframe) else 0.0
+    _sync_markers(layer, node)
+    if layer not in _PARTS_HOOKED:
+        _PARTS_HOOKED.add(layer)
+        ref = weakref.ref(layer)
+
+        def _follow(_event: Any = None) -> None:
+            # After Napari has re-fed the visual (the event comes first).
+            from qtpy.QtCore import QTimer
+
+            QTimer.singleShot(0, lambda: _resync(ref))
+
+        layer.events.set_data.connect(_follow)
+
+
+def _resync(ref: Any) -> None:
+    layer = ref()
+    if layer is None:
+        return
+    if _data(layer).display.points:
+        vispy_layer = _vispy_layer(layer)
+        if vispy_layer is not None:
+            _sync_markers(layer, vispy_layer.node)
+
+
+def _sync_markers(layer: Any, node: Any) -> None:
+    """The vertex dots: on the node's own vertices, coloured like the surface."""
+    disp = _data(layer).display
+    markers = _MARKERS.get(layer)
+    if not disp.points:
+        if markers is not None:
+            markers.visible = False
+        return
+    try:
+        verts = np.asarray(node.mesh_data.get_vertices(), dtype=np.float32)
+    except Exception:  # noqa: BLE001
+        return
+    if markers is None:
+        from vispy.scene.visuals import Markers
+
+        markers = Markers(parent=node)
+        # Drawn after the faces at the same depth: points on the near side show,
+        # those behind the surface do not.
+        markers.set_gl_state("translucent", depth_test=True, depth_func="lequal")
+        _MARKERS[layer] = markers
+    markers.visible = True
+    if not len(verts):
+        markers.visible = False
+        return
+    markers.set_data(verts, size=float(disp.point_size), face_color=_vertex_colours(layer, len(verts)),
+                     edge_width=0)
+
+
+def _vertex_colours(layer: Any, n: int) -> np.ndarray:
+    """The surface's colour per vertex: its field through its colormap, or its solid colour."""
+    disp = _data(layer).display
+    ctrl = series_controller(layer)
+    vals, cmap, limits = frame_values(layer, ctrl.frame if ctrl is not None else None)
+    if vals is None or len(vals) != n:
+        return np.tile(np.asarray(disp.color, dtype=np.float32), (n, 1))
+    try:
+        from napari.utils.colormaps import ensure_colormap
+
+        lo, hi = (float(limits[0]), float(limits[1])) if limits is not None else (0.0, 1.0)
+        t = np.clip((np.asarray(vals, dtype=float) - lo) / ((hi - lo) or 1.0), 0.0, 1.0)
+        return np.asarray(ensure_colormap(cmap).map(t), dtype=np.float32)
+    except Exception:  # noqa: BLE001
+        return np.tile(np.asarray(disp.color, dtype=np.float32), (n, 1))
 
 
 def _apply_points_display(layer: Any) -> None:
@@ -770,6 +922,7 @@ __all__ = [
     "MESH_META_KEY",
     "Display",
     "MeshSeriesController",
+    "set_parts",
     "add_field",
     "add_mesh_layer",
     "add_mesh_series_layer",
@@ -777,6 +930,7 @@ __all__ = [
     "add_point_cloud_layer",
     "add_polylines_layer",
     "apply_display",
+    "apply_parts",
     "go_to_frame",
     "remove_field",
     "display_of",

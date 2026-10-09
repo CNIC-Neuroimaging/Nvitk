@@ -135,6 +135,37 @@ def _payload_path_format(payload: Any) -> tuple[Path, str]:
     return Path(payload), "auto"
 
 
+#: Preferences key of the Data tab's "Open DICOM in the DICOM browser first".
+DICOM_TO_BROWSER_PREF = "data_dicom_to_browser"
+
+
+def _load_dicom_to_browser_pref() -> bool:
+    try:
+        from nvitk.gui.core.prefs import load_prefs
+
+        return bool(load_prefs().get(DICOM_TO_BROWSER_PREF, False))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _save_dicom_to_browser_pref(on: bool) -> None:
+    try:
+        from nvitk.gui.core.prefs import save_prefs
+
+        save_prefs({DICOM_TO_BROWSER_PREF: bool(on)})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _looks_like_dicom(path: Path) -> bool:
+    from nvitk.io.dicom_index import contains_dicom
+
+    try:
+        return contains_dicom(path)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _resolve_repo() -> tuple[DataRepo, Path]:
     """Open the dataset repo from settings, falling back to an auto-scaffolded default repo on
     failure; returns ``(repo, root)``."""
@@ -332,6 +363,7 @@ class DataBrowserPanel(QWidget):
         self._action_btn = QPushButton("Download selected scans")
         self._action_btn.clicked.connect(self._on_action)
 
+
         self._status = QLabel("Select a data source.")
         self._status.setWordWrap(True)
 
@@ -352,10 +384,55 @@ class DataBrowserPanel(QWidget):
         self.setLayout(layout)
 
         self._source_combo.currentIndexChanged.connect(self._on_source_changed)
+        self._source_combo.currentIndexChanged.connect(lambda _i: self._sync_dicom_to_browser())
+        self._scan_format.currentIndexChanged.connect(lambda _i: self._sync_dicom_to_browser())
+        self._include_dicom.toggled.connect(lambda _c: self._sync_dicom_to_browser())
         self._subject_search.textChanged.connect(self._filter_subjects)
         self._subject_list.currentItemChanged.connect(self._on_subject_selected)
 
         self._on_source_changed()
+        self._sync_dicom_to_browser()
+
+    def _make_dicom_to_browser_box(self) -> QCheckBox:
+        """"Open DICOM in the DICOM browser first" — one on each source page, one setting."""
+        box = QCheckBox("Open DICOM in the DICOM browser first")
+        box.setToolTip(
+            "DICOM scans go to the DICOM browser tab, where their series and files are listed — "
+            "load, export or anonymize only what you pick. NIfTI and pipeline results still load "
+            "directly."
+        )
+        box.setChecked(_load_dicom_to_browser_pref())
+        box.toggled.connect(self._on_dicom_to_browser)
+        return box
+
+    def _on_dicom_to_browser(self, on: bool) -> None:
+        for box in (getattr(self, "_dicom_to_browser", None), getattr(self, "_dicom_to_browser_local", None)):
+            if box is not None and box.isChecked() != on:
+                box.blockSignals(True)
+                box.setChecked(on)
+                box.blockSignals(False)
+        _save_dicom_to_browser_pref(on)
+
+    def _sync_dicom_to_browser(self) -> None:
+        """The DICOM-browser option shows when DICOM is what would be opened: XNAT with
+        the DICOM raw-scan reader, or local DICOM series."""
+        self._dicom_to_browser.setVisible(self._scan_reader_is_dicom())
+        self._dicom_to_browser_local.setVisible(self._include_dicom.isChecked())
+
+    def _browse_dicom_first(self) -> bool:
+        # isHidden, not isVisible: a download may finish while another tab is on show.
+        box = self._dicom_to_browser if self._is_xnat() else self._dicom_to_browser_local
+        return not box.isHidden() and box.isChecked() \
+            and getattr(self._viewer, "_nvitk_dicom_browser", None) is not None
+
+    def _send_to_dicom_browser(self, paths: list[Path]) -> int:
+        """Open *paths* in the DICOM browser (added to what it lists); returns how many."""
+        from nvitk.gui.panels.dicom_browser import open_in_dicom_browser
+
+        if not paths:
+            return 0
+        open_in_dicom_browser(self._viewer, [str(p) for p in paths])
+        return len(paths)
 
     def _build_xnat_page(self) -> QWidget:
         """Build the XNAT-source page: project picker, config path, download folder/temp-cache
@@ -419,6 +496,8 @@ class DataBrowserPanel(QWidget):
         lay.addWidget(self._temp_only)
         lay.addLayout(download_row)
         lay.addLayout(scan_format_row)
+        self._dicom_to_browser = self._make_dicom_to_browser_box()
+        lay.addWidget(self._dicom_to_browser)
         lay.addWidget(scan_format_hint)
         page.setLayout(lay)
 
@@ -499,6 +578,8 @@ class DataBrowserPanel(QWidget):
         types_row.addWidget(self._include_nifti)
         types_row.addWidget(self._include_results)
         lay.addLayout(types_row)
+        self._dicom_to_browser_local = self._make_dicom_to_browser_box()
+        lay.addWidget(self._dicom_to_browser_local)
         lay.addWidget(refresh_btn)
         page.setLayout(lay)
 
@@ -1013,10 +1094,15 @@ class DataBrowserPanel(QWidget):
             return
         opened = 0
         paths = []
+        browse = self._browse_dicom_first()
+        to_browser: list[Path] = []
         for asset in assets:
             path = asset.path
             if not path.exists():
                 notify(f"Missing: {path}", error=True)
+                continue
+            if browse and asset.kind == "dicom":
+                to_browser.append(path)
                 continue
             try:
                 open_paths_with_nvitk(self._viewer, path)
@@ -1026,7 +1112,9 @@ class DataBrowserPanel(QWidget):
                 log.warning(f"Could not open {path}: {exc}")
         self._uncheck_selected_resources()
         self._record_opened(paths)
-        notify(f"Opened {opened} asset(s) in Napari.")
+        browsed = self._send_to_dicom_browser(to_browser)
+        note = f" {browsed} DICOM series sent to the DICOM browser." if browsed else ""
+        notify(f"Opened {opened} asset(s) in Napari.{note}")
 
     def _on_xnat_download(self) -> None:
         """Validate the XNAT config/selection, prompt for the password, and start an
@@ -1114,9 +1202,14 @@ class DataBrowserPanel(QWidget):
         record the opened paths."""
         paths: list[str] = []
         opened_layers = 0
+        browse = self._browse_dicom_first()
+        to_browser: list[Path] = []
         for payload in payloads:
             path, fmt = _payload_path_format(payload)
             if not path.exists():
+                continue
+            if browse and (fmt == "dicom" or (fmt == "auto" and _looks_like_dicom(path))):
+                to_browser.append(path)
                 continue
             try:
                 if fmt == "nifti" or (
@@ -1146,9 +1239,11 @@ class DataBrowserPanel(QWidget):
                 log.warning(f"Could not open {path}: {exc}")
         self._uncheck_selected_resources()
         self._record_opened(paths)
+        browsed = self._send_to_dicom_browser(to_browser)
+        note = f" {browsed} DICOM scan(s) sent to the DICOM browser." if browsed else ""
         notify(
             f"Downloaded and opened {opened_layers} layer(s) "
-            f"from {len(payloads)} resource(s) in Napari."
+            f"from {len(payloads)} resource(s) in Napari.{note}"
         )
 
     def _on_download_failed(self, message: str) -> None:

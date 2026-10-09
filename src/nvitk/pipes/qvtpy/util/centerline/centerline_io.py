@@ -17,8 +17,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from nvitk.core.array import as_backend_array
-from nvitk.core.backend import setup
+from nvitk.core.array import as_backend_array, to_numpy
+from nvitk.core.backend import setup, using
 from nvitk.io.imageio import imread, imsave
 from nvitk.morphology.centerline import compute_centerline_branches, compute_centerlines
 from nvitk.pipes.qvtpy.labels import (
@@ -288,11 +288,16 @@ def smooth_centerline_polyline(
         try:
             from scipy.interpolate import splprep, splev
 
-            # Mild smoothing factor proportional to polyline length.
-            s = float(smoothed.shape[0]) * 0.35
-            tck, _ = splprep(smoothed.T, s=s, k=min(3, smoothed.shape[0] - 1))
-            u = np.linspace(0.0, 1.0, smoothed.shape[0])
-            smoothed = np.stack(splev(u, tck), axis=1)
+            # splprep / splev have no CuPy counterpart: fit on the host (on the GPU
+            # backend a device array made splprep raise and the spline was skipped).
+            with using("cpu"):
+                host_pts = to_numpy(smoothed)
+                # Mild smoothing factor proportional to polyline length.
+                s = float(host_pts.shape[0]) * 0.35
+                tck, _ = splprep(host_pts.T, s=s, k=min(3, host_pts.shape[0] - 1))
+                u = np.linspace(0.0, 1.0, host_pts.shape[0])
+                fitted = np.stack(splev(u, tck), axis=1)
+            smoothed = as_backend_array(fitted)
         except Exception:
             pass
     return as_backend_array(smoothed.astype(np.float32, copy=False))
@@ -542,10 +547,8 @@ def load_arterial_branches(
         doc = json.loads(branches_path.read_text(encoding="utf-8"))
         out: dict[int, list[tuple[str, Any]]] = {}
         for rec in doc.get("branches", []):
-            pts = as_backend_array(
-                np.asarray(rec.get("points", []), dtype=np.float32)
-            )
-            if int(np.asarray(pts).shape[0]) < int(min_points):
+            pts = as_backend_array(rec.get("points", [])).astype(np.float32)
+            if len(pts) < int(min_points):
                 continue
             lid = int(rec.get("parent_label"))
             out.setdefault(lid, []).append((str(rec.get("branch_name")), pts))
@@ -645,14 +648,14 @@ def load_centerlines(
         for lid, pts3 in s3_arterial.items():
             if pts3 is None:
                 continue
-            n3 = int(np.asarray(pts3).shape[0])
+            n3 = len(pts3)
             if n3 < int(min_points):
                 continue
             pts4 = arterial.get(int(lid))
             if pts4 is None:
                 arterial[int(lid)] = pts3
                 continue
-            n4 = int(np.asarray(pts4).shape[0])
+            n4 = len(pts4)
             if n4 < int(min_points) or (ratio > 0.0 and n4 < ratio * n3):
                 arterial[int(lid)] = pts3
         return arterial, venous, meta_cl
@@ -693,7 +696,7 @@ def load_centerlines_branches(
             pts3 = main_path_of(branches3)
             if pts3 is None:
                 continue
-            n3 = int(np.asarray(pts3).shape[0])
+            n3 = len(pts3)
             if n3 < int(min_points):
                 continue
             branches4 = arterial.get(int(lid))
@@ -701,7 +704,7 @@ def load_centerlines_branches(
             if pts4 is None:
                 arterial[int(lid)] = branches3
                 continue
-            n4 = int(np.asarray(pts4).shape[0])
+            n4 = len(pts4)
             if n4 < int(min_points) or (ratio > 0.0 and n4 < ratio * n3):
                 arterial[int(lid)] = branches3
         return arterial, venous, meta_cl

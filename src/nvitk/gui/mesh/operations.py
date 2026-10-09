@@ -336,7 +336,7 @@ def _finish(mesh: Mesh, params: dict[str, Any]) -> Mesh:
 
 def label_info(layer: Any, ids: list[int]) -> dict[int, tuple[str, tuple[float, float, float, float]]]:
     """``{id: (name, rgba)}``: names from the layer's label vocabulary, colours as drawn."""
-    from nvitk.gui.labels.catalog import get_schema, layer_schema_key
+    from nvitk.gui.labels.catalog import custom_label_names, get_schema, layer_schema_key
     from nvitk.gui.labels.visibility import get_label_color, supports_per_label_color
 
     key = None
@@ -347,7 +347,7 @@ def label_info(layer: Any, ids: list[int]) -> dict[int, tuple[str, tuple[float, 
     schema = get_schema(key) if key else None
     out = {}
     for lid in ids:
-        name = (schema.name_for(lid) if schema else None) or f"label {lid}"
+        name = custom_label_names(layer).get(int(lid)) or (schema.name_for(lid) if schema else None) or f"label {lid}"
         rgba = (0.85, 0.75, 0.65, 1.0)
         try:
             if supports_per_label_color(layer):
@@ -1144,7 +1144,8 @@ def _run_centerlines(ctx: OpContext) -> OpResult:
     return OpResult(
         f"{len(branches)} branch(es), {len(bifs)} bifurcation(s); longest {branches[0].length:.1f} mm.",
         table=table, title=f"Centerlines: {ctx.name}", plot=plot, row_header="Branch",
-        on_row=CenterlineHighlighter(ctx.viewer, ctx.layer, new_layers[0], branches, bifs, owner),
+        on_row=CenterlineHighlighter(ctx.viewer, ctx.layer, new_layers[0], branches, bifs, owner,
+                                     points=new_layers[1]),
     )
 
 
@@ -1154,25 +1155,29 @@ _HIGHLIGHT_FIELD = "highlight"
 
 
 class CenterlineHighlighter:
-    """Shows the branch or bifurcation of a clicked results row on the surface and
-    its centerline, and centres the camera on it; ``None`` puts things back."""
+    """Shows the branch or bifurcation of a clicked results row: on the surface, the
+    centerline lines and the centerline points, in the highlight colour, the rest
+    greyed. The camera stays where it is. ``None`` puts every layer's own colours back.
+    """
 
     def __init__(self, viewer: Any, surface: Any, lines: Any, branches: list[Any], bifs: list[dict[str, Any]],
-                 owner: np.ndarray) -> None:
+                 owner: np.ndarray, *, points: Any = None) -> None:
         import weakref
 
         self.viewer = viewer
         self.surface = weakref.ref(surface)
         self.lines = weakref.ref(lines) if lines is not None else (lambda: None)
+        self.points = weakref.ref(points) if points is not None else (lambda: None)
         self.branches = {b.id: b for b in branches}
         self.order = [b.id for b in branches]
         self.bifs = bifs
         self.owner = np.asarray(owner)
-        self._saved: Any = None
+        #: Each highlighted layer's display before the first highlight, by ``id``.
+        self._saved: dict[int, Any] = {}
         self._line_colour: Any = None
 
     def _segments(self) -> dict[int, slice]:
-        """Which rows of the centerline Vectors layer belong to which branch."""
+        """Which rows of the centerline lines layer belong to which branch."""
         out, start = {}, 0
         for bid in self.order:
             n = max(len(self.branches[bid].points) - 1, 0)
@@ -1180,28 +1185,38 @@ class CenterlineHighlighter:
             start += n
         return out
 
-    def __call__(self, key: str | None) -> None:
+    def _alive(self, layer: Any) -> bool:
+        return layer is not None and layer in self.viewer.layers
+
+    def _highlight_field(self, layer: Any, mask: np.ndarray) -> None:
+        """Colour *layer* by a two-colour field: *mask* in the highlight colour."""
         import copy
 
         from nvitk.gui.mesh.layers import display_of
 
+        disp = display_of(layer)
+        if id(layer) not in self._saved and not (disp.mode == "field" and disp.field == _HIGHLIGHT_FIELD):
+            self._saved[id(layer)] = copy.copy(disp)
+        add_field(layer, _HIGHLIGHT_FIELD, mask.astype(np.float32), categories=_HIGHLIGHT_COLOURS, show=True)
+
+    def __call__(self, key: str | None) -> None:
         surface = self.surface()
-        if surface is None or surface not in self.viewer.layers:
+        if not self._alive(surface):
             return
         if key is None:
-            self._restore(surface)
+            self._restore()
             return
         text = str(key)
         mesh_v = layer_to_mesh(surface).vertices
         if len(mesh_v) != len(self.owner):
             return  # the surface has been edited since: the map no longer fits
+        centre: np.ndarray | None = None
+        reach = np.inf
         if text.startswith("branch "):
             bids = [int(text.split()[1])]
-            b = self.branches.get(bids[0])
-            if b is None:
+            if bids[0] not in self.branches:
                 return
             mask = self.owner == bids[0]
-            centre = np.asarray(b.points[len(b.points) // 2], dtype=float)
         elif text.startswith("bifurcation "):
             k = int(text.split()[1]) - 1
             if not 0 <= k < len(self.bifs):
@@ -1209,51 +1224,71 @@ class CenterlineHighlighter:
             bf = self.bifs[k]
             bids = [int(i) for i in bf["branches"]]
             centre = np.asarray(bf["point"], dtype=float)
-            # The junction itself: vertices of the meeting branches near the point.
+            # The junction itself: the meeting branches near the point.
             reach = 2.5 * float(np.nanmedian([np.nanmedian(self.branches[i].profile.get("diameter", [np.nan]))
                                               for i in bids if i in self.branches]) or 5.0)
             mask = np.isin(self.owner, bids) & (np.linalg.norm(mesh_v - centre, axis=1) <= reach)
         else:
             return
-        disp = display_of(surface)
-        if self._saved is None and not (disp.mode == "field" and disp.field == _HIGHLIGHT_FIELD):
-            self._saved = copy.copy(disp)
-        add_field(surface, _HIGHLIGHT_FIELD, mask.astype(np.float32), categories=_HIGHLIGHT_COLOURS, show=True)
-        lines = self.lines()
-        if lines is not None and lines in self.viewer.layers:
-            try:
-                if self._line_colour is None:
-                    self._line_colour = np.asarray(lines.edge_color).copy()
-                colours = np.tile(np.array([[0.45, 0.45, 0.45, 1.0]]), (len(lines.data), 1))
-                segs = self._segments()
-                for bid in bids:
-                    if bid in segs:
-                        colours[segs[bid]] = (1.0, 0.25, 0.1, 1.0)
-                lines.edge_color = colours
-            except Exception:  # noqa: BLE001 — the line colours are a bonus
-                pass
+        self._highlight_field(surface, mask)
+        self._highlight_points(bids, centre, reach)
+        self._highlight_lines(bids)
+
+    def _highlight_points(self, bids: list[int], centre: np.ndarray | None, reach: float) -> None:
+        """The centerline points of the branches (near the junction, for a bifurcation)."""
+        from nvitk.gui.mesh.layers import fields_of
+
+        points = self.points()
+        if not self._alive(points):
+            return
         try:
-            if int(self.viewer.dims.ndisplay) == 3:
-                self.viewer.camera.center = tuple(float(c) for c in centre)
-        except Exception:  # noqa: BLE001
+            branch = np.asarray(fields_of(points).get("branch"))
+            if branch.ndim != 1 or branch.size == 0:
+                return
+            mask = np.isin(np.rint(branch).astype(int), bids)
+            if centre is not None and np.isfinite(reach):
+                xyz = layer_to_point_cloud(points).points
+                if len(xyz) == len(mask):
+                    mask &= np.linalg.norm(xyz - centre, axis=1) <= reach
+            self._highlight_field(points, mask)
+        except Exception:  # noqa: BLE001 — the points' colours are a bonus
             pass
 
-    def _restore(self, surface: Any) -> None:
+    def _highlight_lines(self, bids: list[int]) -> None:
+        lines = self.lines()
+        if not self._alive(lines):
+            return
+        try:
+            if self._line_colour is None:
+                self._line_colour = np.asarray(lines.edge_color).copy()
+            colours = np.tile(np.array([[0.45, 0.45, 0.45, 1.0]]), (len(lines.data), 1))
+            segs = self._segments()
+            for bid in bids:
+                if bid in segs:
+                    colours[segs[bid]] = (1.0, 0.25, 0.1, 1.0)
+            lines.edge_color = colours
+        except Exception:  # noqa: BLE001 — the line colours are a bonus
+            pass
+
+    def _restore(self) -> None:
         from nvitk.gui.mesh.layers import fields_of, remove_field, set_display
 
-        remove_field(surface, _HIGHLIGHT_FIELD)
-        prev, self._saved = self._saved, None
-        if prev is not None and (prev.mode != "field" or prev.field in fields_of(surface)):
-            set_display(surface, mode=prev.mode, field=prev.field, colormap=prev.colormap, color=prev.color,
-                        auto_range=prev.auto_range, limits=prev.limits)
+        for layer in (self.surface(), self.points()):
+            if not self._alive(layer):
+                continue
+            remove_field(layer, _HIGHLIGHT_FIELD)
+            prev = self._saved.pop(id(layer), None)
+            if prev is not None and (prev.mode != "field" or prev.field in fields_of(layer)):
+                set_display(layer, mode=prev.mode, field=prev.field, colormap=prev.colormap, color=prev.color,
+                            auto_range=prev.auto_range, limits=prev.limits)
+        self._saved.clear()
         lines = self.lines()
-        if lines is not None and lines in self.viewer.layers and self._line_colour is not None:
+        if self._alive(lines) and self._line_colour is not None:
             try:
                 lines.edge_color = self._line_colour
             except Exception:  # noqa: BLE001
                 pass
-            self._line_colour = None
-
+        self._line_colour = None
 
 
 def _run_vessel_section(ctx: OpContext) -> OpResult:
@@ -2044,6 +2079,94 @@ def operation(op_id: str) -> MeshOp | None:
     return next((op for op in all_operations() if op.id == op_id), None)
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Several meshes at once
+# ──────────────────────────────────────────────────────────────────────────────
+
+#: Most curves one combined plot draws (a legend past that reads as noise).
+_MAX_COMBINED_LINES = 12
+
+
+def combine_results(title: str, results: list[tuple[str, OpResult]]) -> OpResult:
+    """One result for an operation run on several meshes, each like a label of one
+    multilabel mesh.
+
+    Tables: a per-row table gains the mesh's name in front of each row
+    (``"aorta · branch 2"``); a flat one becomes the mesh's row. Plots: every mesh's
+    curves on one plot, named after their mesh. A clicked row is handed to the
+    run that made it (its highlight), the others cleared.
+    """
+    if len(results) == 1:
+        return results[0][1]
+    table: dict[str, Any] = {}
+    route: dict[str, tuple[int, str]] = {}
+    headers = {r.row_header for _n, r in results if r.table and r.row_header}
+    per_row = any(_is_row_table(r.table) for _n, r in results if r.table)
+    for k, (name, result) in enumerate(results):
+        if not result.table:
+            continue
+        if _is_row_table(result.table):
+            for key, row in result.table.items():
+                joined = f"{name} · {key}"
+                table[joined] = row
+                route[joined] = (k, str(key))
+        else:
+            table[name] = dict(result.table)
+    plot = _combine_plots([(name, r.plot) for name, r in results if r.plot])
+    callbacks = [r.on_row for _n, r in results]
+
+    def on_row(key: str | None) -> None:
+        for cb in callbacks:
+            if cb is not None:
+                try:
+                    cb(None)
+                except Exception:  # noqa: BLE001 — one stale run must not stop the others
+                    pass
+        hit = route.get(str(key)) if key is not None else None
+        if hit is not None and callbacks[hit[0]] is not None:
+            callbacks[hit[0]](hit[1])
+
+    header = next(iter(headers)) if len(headers) == 1 else ""
+    return OpResult(
+        f"{title} on {len(results)} meshes — " + "; ".join(f"{n}: {r.message}" for n, r in results),
+        table=table or None,
+        title=f"{title}: {len(results)} meshes",
+        plot=plot,
+        row_header=(f"Mesh · {header}" if header else "Mesh · row") if per_row else "Mesh",
+        on_row=on_row if any(callbacks) and route else None,
+    )
+
+
+def _is_row_table(table: dict[str, Any] | None) -> bool:
+    """A table with one dict per row (rather than one value per key)."""
+    return bool(table) and all(isinstance(v, dict) for v in table.values())
+
+
+def _combine_plots(plots: list[tuple[str, dict[str, Any]]]) -> dict[str, Any] | None:
+    """Every mesh's curves on one plot (line plots; a time plot keeps its first series)."""
+    if not plots:
+        return None
+    if len(plots) == 1:
+        name, plot = plots[0]
+        return plot
+    lines: list[dict[str, Any]] = []
+    xlabel = ylabel = ""
+    for name, plot in plots:
+        xlabel = xlabel or str(plot.get("xlabel", ""))
+        if "lines" in plot:
+            ylabel = ylabel or str(plot.get("ylabel", ""))
+            for line in plot["lines"]:
+                label = str(line.get("label", "")).strip()
+                lines.append({**line, "label": f"{name} · {label}" if label else name})
+        elif plot.get("series"):
+            series_name, values = next(iter(plot["series"].items()))
+            ylabel = ylabel or str(series_name)
+            lines.append({"x": plot.get("x", []), "y": values, "label": name})
+    if not lines:
+        return plots[0][1]
+    return {"lines": lines[:_MAX_COMBINED_LINES], "xlabel": xlabel, "ylabel": ylabel}
+
+
 def accepts(op: MeshOp, layer: Any) -> bool:
     """True when *op* can run on *layer* (generators run with any or no layer)."""
     if not op.inputs:
@@ -2060,5 +2183,5 @@ def input_hint(op: MeshOp) -> str:
 
 
 __all__ = ["ACTIVE_LAYER", "CATEGORIES", "MESHLAB_PREFIX", "MeshOp", "OPERATIONS", "OpContext", "OpResult",
-           "SURFACE_OUTPUTS", "accepts", "all_operations", "categories", "input_hint", "label_info",
+           "SURFACE_OUTPUTS", "accepts", "all_operations", "categories", "combine_results", "input_hint", "label_info",
            "meshlab_operations", "operation", "operations_for", "parse_groups", "present_label_ids", "set_points"]

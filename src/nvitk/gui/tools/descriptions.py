@@ -56,13 +56,10 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "siphon_correct": "Correct ICA siphon centerlines using a TOF/MRA reference.",
     "mask_genus": "Report topological genus of a mask (handles / tunnels).",
     "seg_get_label": "Extract one label id into a binary mask layer.",
-    "img_mask_keep_inside": (
-        "Active layer = intensity image; reference = mask/segmentation. "
-        "Keep voxels inside the mask (or listed mask label ids); fill the rest."
-    ),
-    "img_mask_keep_outside": (
-        "Active layer = intensity image; reference = mask/segmentation. "
-        "Keep voxels outside the mask (or listed mask label ids); fill the rest."
+    "seg_mask_image": (
+        "Keep an image's voxels inside a mask's labels, or remove them (binary or "
+        "multilabel mask). Either layer can be the active one; margin grows or shrinks "
+        "the region in mm."
     ),
     "seg_combine_labels": "Merge selected labels into one output label.",
     "seg_remove_labels": "Zero out selected label ids in a label map.",
@@ -140,8 +137,10 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Mass-univariate voxelwise GLM over a cohort (FSL randomise), with permutation-based "
         "family-wise-error correction. Needs no active layer: the images come from a flat "
         "directory of MNI-normalised volumes and the design matrix from database measurements, "
-        "so the two can be different modalities. Opens its own window; also loads a finished "
-        "results folder without re-running. Corrected maps are 1-p, so 0.95 means p < 0.05. The 3-D scene is a separate tool under Visualization."
+        "so the two can be different modalities. Or runs randomise on a prepared 4D stack and "
+        "design.mat/.con/.fts built elsewhere. randomise_parallel runs its fragments on this "
+        "machine, capped by 'jobs' (or $FSLSUB_PARALLEL). Opens its own window; also loads a "
+        "finished results folder without re-running. Corrected maps are 1-p, so 0.95 means p < 0.05. The 3-D scene is a separate tool under Visualization."
     ),
     "viz_flowshow": (
         "4D flow velocity vectors in Napari: all phases precomputed, arrow length and "

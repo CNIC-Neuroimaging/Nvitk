@@ -184,7 +184,7 @@ def is_corrp_kind(kind: str) -> bool:
     """True when *kind* names a 1−p map rather than a statistic."""
     from nvitk.measure.voxelwise import CORRP_KINDS
 
-    return str(kind) in CORRP_KINDS or str(kind).endswith("p_tstat")
+    return str(kind) in CORRP_KINDS or str(kind).endswith(("p_tstat", "p_fstat"))
 
 
 def load_map(path: str | Path) -> Any:

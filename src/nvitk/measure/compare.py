@@ -21,8 +21,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from nvitk.core.array import as_backend_array
-from nvitk.core.backend import setup
+from nvitk.core.array import as_backend_array, to_numpy
+from nvitk.core.backend import setup, using
 from nvitk.types import Image
 
 from ._common import resolve_array
@@ -40,21 +40,25 @@ def _float(x: Any) -> float:
     arr = as_backend_array(x)
     return float(arr) if arr.ndim == 0 else float(arr.item())
 
+def _host_stats(name: str, a: Any, b: Any) -> tuple[float, float]:
+    """``scipy.stats.<name>(a, b)`` as ``(statistic, p)``.
+
+    CuPy has no ``pearsonr`` / ``spearmanr`` (``cupyx.scipy.stats`` lacks them), so
+    this is the single host hop: NumPy inputs and real SciPy under ``using("cpu")``.
+    """
+    with using("cpu"):
+        r, p = getattr(scipy.stats, name)(to_numpy(a), to_numpy(b))
+    return float(r), float(p)
+
+
 def pearson(a: Any, b: Any) -> tuple[float, float]:
     """Return ``(pearson_r, pearson_p)`` for two 1-D arrays."""
-    # scipy.stats.pearsonr requires NumPy; materialize here only.
-    ah = as_backend_array(resolve_array(a)).ravel()
-    bh = as_backend_array(resolve_array(b)).ravel()
-    r, p = scipy.stats().pearsonr(ah, bh)
-    return float(r), float(p)
+    return _host_stats("pearsonr", _ravel(a), _ravel(b))
 
 
 def spearman(a: Any, b: Any) -> tuple[float, float]:
     """Return ``(spearman_r, spearman_p)`` for two 1-D arrays."""
-    ah = as_backend_array(resolve_array(a)).ravel()
-    bh = as_backend_array(resolve_array(b)).ravel()
-    r, p = scipy.stats().spearmanr(ah, bh)
-    return float(r), float(p)
+    return _host_stats("spearmanr", _ravel(a), _ravel(b))
 
 
 def rmse(a: Any, b: Any) -> float:
@@ -83,11 +87,8 @@ def correlation_stats(a: Any, b: Any) -> dict[str, float]:
     if ah.shape != bh.shape:
         raise ValueError(f"Shape mismatch: {ah.shape} vs {bh.shape}")
 
-    ah_np = as_backend_array(ah)
-    bh_np = as_backend_array(bh)
-    _stats = scipy.stats
-    pr, pp = _stats.pearsonr(ah_np, bh_np)
-    sr, sp = _stats.spearmanr(ah_np, bh_np)
+    pr, pp = _host_stats("pearsonr", ah, bh)
+    sr, sp = _host_stats("spearmanr", ah, bh)
 
     diff = bh - ah
     eps = 1e-10

@@ -558,19 +558,20 @@ def _coords_from_centerline_volume(
     reskeletonize: bool = False,
 ) -> np.ndarray:
     """Voxel coordinates (N, 3) from a 3D centerline mask."""
-    arr = to_numpy(centerline)
+    arr = as_backend_array(centerline)
     if arr.ndim != 3:
         raise ValueError("Centerline volume must be 3D.")
     if label_id is not None and int(label_id) > 0:
         mask = arr == int(label_id)
     else:
         mask = arr > 0
+    # The points feed the (host) graph walk: located on the backend, returned on the host.
     if not bool(mask.any()):
-        return np.zeros((0, 3), dtype=np.float32)
+        return to_numpy(np.zeros((0, 3), dtype=np.float32))
     if reskeletonize:
-        sk = to_numpy(skeletonize_binary(mask))
-        return np.argwhere(sk > 0).astype(np.float32)
-    return np.argwhere(mask > 0).astype(np.float32)
+        sk = as_backend_array(skeletonize_binary(mask))
+        return to_numpy(np.argwhere(sk > 0).astype(np.float32))
+    return to_numpy(np.argwhere(mask).astype(np.float32))
 
 
 def extract_polylines_from_centerline(

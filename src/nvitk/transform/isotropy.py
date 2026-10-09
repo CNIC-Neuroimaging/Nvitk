@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from nvitk.core.array import to_numpy
+from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup
 from nvitk.types import Image
 
@@ -80,7 +80,7 @@ def isotropy(
     zoom_factors[axis] = float(factor)
 
     data = ndi.zoom(
-        image.data, tuple(zoom_factors), order=order, mode=mode, prefilter=prefilter
+        as_backend_array(image.data), tuple(zoom_factors), order=order, mode=mode, prefilter=prefilter
     )
 
     out = image.with_data(data)

@@ -25,6 +25,22 @@ Backend
 ``fslmerge`` and ``randomise`` ship in *different* conda packages (``fsl-avwutils`` and
 ``fsl-randomise``), so :func:`fsl_backend_status` probes them separately: an image that has one and
 not the other fails halfway through, and the status has to be able to say which half.
+
+Prepared inputs
+---------------
+:func:`run_randomise_direct` skips everything above the ``randomise`` call: it takes a 4D stack and
+``design.mat`` / ``design.con`` (and optionally ``design.fts``) that someone already built — in FSL's
+Glm GUI, in another tool, or with ``nvitk-voxelwise design`` and ``merge`` — and checks their
+dimensions against each other from the headers before spending hours on permutations.
+
+Running ``randomise_parallel`` locally
+--------------------------------------
+``randomise_parallel`` splits the permutations into fragments and hands them to ``fsl_sub``, which
+FSL designed as a cluster submitter: depending on site configuration it queues them and returns at
+once, and run locally it starts one fragment per core, each holding the whole 4D stack in memory.
+:func:`run_randomise` therefore runs it against a throwaway ``FSLDIR`` overlay whose ``fsl_sub`` is
+``fsl_sub_local.sh`` — a local-only runner that caps concurrency (:data:`PARALLEL_ENV`) and stops the
+merge step if any fragment failed. The FSL installation itself is never modified.
 """
 
 from __future__ import annotations
@@ -38,7 +54,8 @@ import os
 import re
 import shutil
 import subprocess
-from collections import Counter
+import tempfile
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -113,6 +130,8 @@ class FslBackendStatus:
     versions: dict[str, str] = field(default_factory=dict)
     missing: tuple[str, ...] = ()
     reason: str = ""
+    #: The installation the binaries belong to — ``$FSLDIR``, or inferred from where they live.
+    fsldir: str = ""
 
     def summary(self) -> str:
         """One-line description for a status bar."""
@@ -150,6 +169,28 @@ def _fsl_version(fsldir: str | None) -> str:
     return ""
 
 
+def resolve_fsldir() -> Path | None:
+    """The FSL installation: ``$FSLDIR`` when set, else inferred from where ``randomise`` lives.
+
+    ``randomise_parallel`` calls ``$FSLDIR/bin/randomise`` and ``$FSLDIR/bin/fsl_sub`` by absolute
+    path, so a GUI started without sourcing ``fsl.sh`` — FSL on ``PATH`` but ``FSLDIR`` unset — fails
+    at its first line. The binaries' location is enough to recover it: conda installs put wrappers in
+    ``$FSLDIR/share/fsl/bin`` and the real files in ``$FSLDIR/bin``, and either way an ancestor holds
+    ``etc/fslversion``.
+    """
+    env = os.environ.get("FSLDIR", "").strip()
+    if env and Path(env).is_dir():
+        return Path(env)
+    for name in ("randomise", "fslmerge"):
+        exe = shutil.which(name)
+        if not exe:
+            continue
+        for parent in Path(exe).resolve().parents:
+            if (parent / "etc" / "fslversion").is_file():
+                return parent
+    return None
+
+
 def fsl_backend_status() -> FslBackendStatus:
     """Probe FSL. Never raises, and never runs anything as an import side effect.
 
@@ -158,7 +199,8 @@ def fsl_backend_status() -> FslBackendStatus:
     ``fslmerge`` resolves and ``randomise`` does not. A single "FSL missing" would send someone
     looking for the wrong problem.
     """
-    fsldir = os.environ.get("FSLDIR", "").strip() or None
+    resolved_dir = resolve_fsldir()
+    fsldir = str(resolved_dir) if resolved_dir else None
     found: dict[str, str] = {}
     for name in FSL_BINARIES:
         exe = shutil.which(name)
@@ -183,8 +225,9 @@ def fsl_backend_status() -> FslBackendStatus:
                 f"{', '.join(missing)} not on PATH ({where}); "
                 f"ships in {', '.join(packages)}"
             ),
+            fsldir=fsldir or "",
         )
-    return FslBackendStatus(available=True, binaries=found, versions=versions)
+    return FslBackendStatus(available=True, binaries=found, versions=versions, fsldir=fsldir or "")
 
 
 def require_fsl() -> FslBackendStatus:
@@ -1324,26 +1367,278 @@ def default_mni_mask(reference: str | Path, out_path: str | Path) -> Path:
     return out
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# randomise_parallel, run locally
+# ──────────────────────────────────────────────────────────────────────────────
+#: Caps how many ``randomise_parallel`` fragments run at once. The name is the one FSL's own
+#: ``fsl_sub`` reads, so one setting governs both; ``0`` or unset lets :func:`resolve_parallel_jobs`
+#: choose from the cores and the free memory.
+PARALLEL_ENV = "FSLSUB_PARALLEL"
+
+#: Peak memory of one ``randomise`` process as a multiple of its 4D input held as float32. Measured
+#: with TFCE on the 2 mm MNI grid: 518 MB at 60 volumes and 980 MB at 120 — the volume itself plus
+#: randomise's double-precision copy of the in-mask voxels.
+FRAGMENT_MEMORY_FACTOR = 2.0
+FRAGMENT_MEMORY_OVERHEAD = 64 * 2**20
+
+#: Share of the currently available memory the fragments may take between them; the rest stays
+#: with the GUI, the page cache and whatever else the machine is doing.
+MEMORY_HEADROOM = 0.8
+
+#: The local ``fsl_sub`` that replaces FSL's own inside the overlay.
+FSL_SUB_LOCAL = Path(__file__).with_name("fsl_sub_local.sh")
+
+
+def available_cores() -> int:
+    """CPUs this process may use: SGE's ``NSLOTS`` inside a job, else the affinity mask.
+
+    ``NSLOTS`` first because a cluster node's affinity mask is usually the whole node — 64 cores of
+    which the job was granted four.
+    """
+    slots = os.environ.get("NSLOTS", "").strip()
+    if slots.isdigit() and int(slots) > 0:
+        return int(slots)
+    try:
+        return max(1, len(os.sched_getaffinity(0)))
+    except AttributeError:  # macOS
+        return max(1, os.cpu_count() or 1)
+
+
+def _memory_available() -> int | None:
+    """``MemAvailable`` in bytes, or ``None`` where ``/proc/meminfo`` cannot be read."""
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="ascii").splitlines():
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def fragment_memory(stack: str | Path) -> int:
+    """Estimated peak bytes of one ``randomise`` process reading *stack*, from its header alone."""
+    import nibabel as nib
+
+    shape = nib.load(str(Path(stack).expanduser())).shape
+    return int(np.prod(shape) * 4 * FRAGMENT_MEMORY_FACTOR) + FRAGMENT_MEMORY_OVERHEAD
+
+
+def _gb(n_bytes: float) -> str:
+    """``4.4 GB`` — memory sizes for a log line."""
+    return f"{n_bytes / 2**30:.1f} GB"
+
+
+def resolve_parallel_jobs(
+    requested: int | None = None,
+    *,
+    stack: str | Path | None = None,
+) -> tuple[int, str]:
+    """How many ``randomise_parallel`` fragments to run at once, and why.
+
+    An explicit *requested* count wins, then :data:`PARALLEL_ENV`, then the automatic choice:
+    the cores available (:func:`available_cores`), lowered until the fragments' estimated memory
+    fits in :data:`MEMORY_HEADROOM` of what is free. Cores alone are what took workstations down —
+    every fragment holds the whole 4D stack, so 32 cores and a 500-subject stack ask for 140 GB.
+    """
+    cores = available_cores()
+    per_fragment = fragment_memory(stack) if stack is not None else None
+    free = _memory_available()
+    memory_cap = (
+        max(1, int(free * MEMORY_HEADROOM // per_fragment))
+        if per_fragment and free
+        else None
+    )
+
+    if requested is not None and int(requested) > 0:
+        jobs = int(requested)
+        if memory_cap is not None and jobs > memory_cap:
+            log.warning(
+                f"{jobs} fragment(s) at ~{_gb(per_fragment)} each exceed the {_gb(free)} free; "
+                f"{memory_cap} would fit."
+            )
+        return jobs, "requested"
+
+    env = os.environ.get(PARALLEL_ENV, "").strip()
+    if env.isdigit() and int(env) > 0:
+        return int(env), PARALLEL_ENV
+
+    jobs = cores if memory_cap is None else max(1, min(cores, memory_cap))
+    why = f"auto: {cores} core(s)"
+    if per_fragment and free:
+        why += f", ~{_gb(per_fragment)} per fragment, {_gb(free)} free"
+    return jobs, why
+
+
+def _local_fsldir(fsldir: Path, dest: Path) -> Path:
+    """Mirror *fsldir* under *dest*, symlink for symlink, with ``bin/fsl_sub`` the local runner.
+
+    An overlay rather than an edit to the installation: it is per-run, needs no write access (the
+    cluster's FSL lives in a read-only image), and every other FSL tool keeps its own ``fsl_sub``.
+    Everything is mirrored, not just what ``randomise_parallel`` happens to call today, so a future
+    version reaching for another ``$FSLDIR`` binary still finds it.
+    """
+    dest.mkdir(parents=True)
+    for entry in fsldir.iterdir():
+        if entry.name != "bin":
+            (dest / entry.name).symlink_to(entry)
+    bin_dir = dest / "bin"
+    bin_dir.mkdir()
+    for entry in (fsldir / "bin").iterdir():
+        if entry.name != "fsl_sub":
+            (bin_dir / entry.name).symlink_to(entry)
+    runner = bin_dir / "fsl_sub"
+    shutil.copyfile(FSL_SUB_LOCAL, runner)
+    runner.chmod(0o755)
+    return dest
+
+
+def _run_streamed(argv: Sequence[str], *, what: str, env: Mapping[str, str] | None = None) -> None:
+    """Run *argv*, logging each output line as it arrives, and raise naming *what* on failure.
+
+    For runs measured in hours: :func:`_run_checked` would show nothing until the end, which in the
+    GUI's log dock is indistinguishable from a hang.
+    """
+    cmd = [str(a) for a in argv]
+    log.info(f"Running {what}: {_abbreviate(cmd)}")
+    tail: deque[str] = deque(maxlen=40)
+    with subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        env=dict(env) if env is not None else None,
+    ) as proc:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            text = line.rstrip()
+            if text:
+                tail.append(text)
+                log.info(f"  {text}")
+        rc = proc.wait()
+    if rc != 0:
+        log.error("%s failed rc=%s", what, rc)
+        raise RuntimeError(f"{what} failed (rc={rc}):\n" + "\n".join(tail)[-2000:])
+
+
+def _previous_outputs(root: Path) -> list[Path]:
+    """What an earlier ``randomise`` run with output root *root* left beside it.
+
+    ``randomise_parallel``'s merge step appends to the permutation-distribution text files rather
+    than rewriting them, and globs for every ``_SEED`` fragment it finds, so a re-run into the same
+    root silently folds the old run into the new one. Plain ``randomise`` would leave a stale
+    ``tstat3`` behind after the design dropped to two contrasts. Only names ``randomise`` itself
+    writes are listed.
+    """
+    stale: list[Path] = []
+    prefix = f"{root.name}_"
+    for path in root.parent.iterdir() if root.parent.is_dir() else ():
+        name = path.name
+        if name in (f"{root.name}.generate", f"{root.name}.defragment", f"{root.name}_logs"):
+            stale.append(path)
+            continue
+        if not name.startswith(prefix):
+            continue
+        rest = _strip_nifti_suffix(name[len(prefix):])
+        if rest.startswith("SEED") or _MAP_RX.match(rest) or (
+            name.endswith(".txt") and _DIST_TXT_RX.search(rest)
+        ):
+            stale.append(path)
+    return sorted(stale)
+
+
+#: The permutation-distribution text files randomise writes (``-P``, ``--corrp`` …) and
+#: randomise_parallel's merge appends to: ``<root>_perm_tstat1.txt``, ``<root>_vox_corrp_tstat1.txt``.
+_DIST_TXT_RX = re.compile(r"(^|_)(perm|p|corrp)_")
+
+
+def _clear_previous_outputs(root: Path) -> None:
+    """Remove :func:`_previous_outputs` so a re-run starts from an empty root."""
+    stale = _previous_outputs(root)
+    if not stale:
+        return
+    log.info(f"Removing {len(stale)} output(s) of an earlier run with root {root.name!r}")
+    for path in stale:
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+
+
+def _run_randomise_parallel(args: Sequence[str], root: Path, *, n_jobs: int) -> None:
+    """``randomise_parallel`` with *args*, its fragments run here, *n_jobs* at a time.
+
+    The overlay lives only as long as the run. The ``.generate`` file left in the results folder
+    therefore names paths that no longer exist — it is a record of what ran, not a script to re-run.
+    """
+    fsldir = resolve_fsldir()
+    if fsldir is None or not (fsldir / "bin" / "randomise_parallel").is_file():
+        raise RuntimeError(
+            "randomise_parallel needs an FSL installation with bin/randomise_parallel; "
+            f"FSLDIR resolves to {fsldir or 'nothing'}. Set FSLDIR, or run without --parallel."
+        )
+    spaced = [a for a in args if any(ch.isspace() for ch in str(a))]
+    if spaced:
+        # randomise_parallel re-expands its arguments unquoted ($*) into each fragment's command.
+        raise ValueError(
+            f"randomise_parallel cannot handle paths containing spaces: {spaced}. "
+            "Move the inputs or the output folder, or run without --parallel."
+        )
+
+    with tempfile.TemporaryDirectory(prefix="nvitk-fslsub-") as tmp:
+        overlay = _local_fsldir(fsldir, Path(tmp) / "fsl")
+        env = dict(os.environ)
+        env.update(
+            {
+                "FSLDIR": str(overlay),
+                # randomise_parallel calls $FSLDIR/bin/fsl_sub for the fragments but a bare
+                # `fsl_sub` for the merge, so the overlay has to come first on PATH as well.
+                "PATH": f"{overlay / 'bin'}{os.pathsep}{env.get('PATH', '')}",
+                PARALLEL_ENV: str(int(n_jobs)),
+                "FSLPARALLEL": str(int(n_jobs)),
+                "FSL_SUB_LOCAL_STATE": str(Path(tmp) / "jobs"),
+                "FSLOUTPUTTYPE": "NIFTI_GZ",
+            }
+        )
+        _run_streamed(
+            [str(overlay / "bin" / "randomise_parallel"), *[str(a) for a in args]],
+            what="randomise_parallel",
+            env=env,
+        )
+
+    leftovers = sorted(p.name for p in root.parent.glob(f"{root.name}_SEED*"))
+    if leftovers:
+        raise RuntimeError(
+            f"randomise_parallel left {len(leftovers)} unmerged fragment(s) "
+            f"({', '.join(leftovers[:3])}…); the merge step did not finish. "
+            f"See {root.parent / (root.name + '_logs')}."
+        )
+
+
 def run_randomise(
     stack: str | Path,
     mat_path: str | Path,
     con_path: str | Path,
     out_root: str | Path,
     *,
+    fts_path: str | Path | None = None,
     mask: str | Path | None = None,
     n_perm: int = 5000,
     tfce: bool = True,
     voxelwise_corrp: bool = True,
     uncorrected_p: bool = False,
     parallel: bool = False,
+    n_jobs: int | None = None,
     seed: int | None = None,
     demean_data: bool = False,
     extra_args: Sequence[str] = (),
 ) -> Path:
     """Run ``randomise`` on *stack* and return its output root path prefix.
 
-    ``randomise_parallel`` takes the same argv with a different binary — it splits the permutations
-    across jobs and recombines them — so it is a flag rather than a separate function.
+    ``randomise_parallel`` takes the same arguments — it splits the permutations into fragments and
+    merges them — so it is a flag rather than a separate function. Its fragments run on this
+    machine, *n_jobs* at a time (see :func:`resolve_parallel_jobs`), never on a queue: on the
+    cluster the whole call already runs inside one job.
     """
     status = require_fsl()
     _ensure_fsl_env()
@@ -1351,55 +1646,95 @@ def run_randomise(
         raise RuntimeError(
             "randomise_parallel is not on PATH; run without --parallel or install fsl-randomise."
         )
+    if parallel and int(n_perm) <= 0:
+        # randomise -Q refuses -n 0, and randomise_parallel replaces its message with a generic one.
+        raise ValueError(
+            "randomise_parallel splits a fixed number of permutations; --n-perm 0 (exhaustive) "
+            "needs plain randomise."
+        )
 
     root = Path(out_root).expanduser().resolve()
     root.parent.mkdir(parents=True, exist_ok=True)
-    argv: list[str] = [
-        "randomise_parallel" if parallel else "randomise",
+    _clear_previous_outputs(root)
+
+    args: list[str] = [
         "-i", str(Path(stack).expanduser().resolve()),
         "-o", str(root),
         "-d", str(Path(mat_path).expanduser().resolve()),
         "-t", str(Path(con_path).expanduser().resolve()),
-        "-n", str(int(n_perm)),
     ]
+    if fts_path is not None:
+        args += ["-f", str(Path(fts_path).expanduser().resolve())]
+    args += ["-n", str(int(n_perm))]
     if mask is not None:
-        argv += ["-m", str(Path(mask).expanduser().resolve())]
+        args += ["-m", str(Path(mask).expanduser().resolve())]
     if tfce:
-        argv.append("-T")
+        args.append("-T")
     if voxelwise_corrp:
-        argv.append("-x")
+        args.append("-x")
     if uncorrected_p:
-        argv.append("--uncorrp")
+        args.append("--uncorrp")
     if demean_data:
-        argv.append("-D")
+        args.append("-D")
     if seed is not None:
-        argv.append(f"--seed={int(seed)}")
-    argv += [str(a) for a in extra_args]
+        if parallel:
+            # Each fragment gets --seed=1..K appended after ours, so ours would be silently
+            # overridden; the fixed seeds already make a parallel run reproducible.
+            log.info("--seed is not used by randomise_parallel: it seeds fragment k with k.")
+        else:
+            args.append(f"--seed={int(seed)}")
+    args += [str(a) for a in extra_args]
 
     log.info(f"randomise: {n_perm} permutation(s), TFCE={'on' if tfce else 'off'}")
-    _run_checked(argv, what="randomise_parallel" if parallel else "randomise")
+    if parallel:
+        jobs, why = resolve_parallel_jobs(n_jobs, stack=stack)
+        log.info(f"randomise_parallel: {jobs} fragment(s) at a time ({why})")
+        _run_randomise_parallel(args, root, n_jobs=jobs)
+    else:
+        _run_checked(["randomise", *args], what="randomise")
     return root
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Results
 # ──────────────────────────────────────────────────────────────────────────────
-#: ``randomise`` output kinds, keyed by the infix it puts before ``_tstat<N>``.
+#: What ``randomise`` puts between the output root and ``tstat<N>`` / ``fstat<N>``, and what it
+#: means. ``p_`` is not a name randomise writes (uncorrected maps are ``vox_p_``) and is kept only
+#: so folders described with it still label.
+_STAT_INFIXES: dict[str, str] = {
+    "": "statistic (unpermuted)",
+    "tfce_": "TFCE-enhanced statistic",
+    "clustere_": "cluster-extent statistic",
+    "clusterm_": "cluster-mass statistic",
+    "tfce_corrp_": "TFCE, FWE-corrected 1−p",
+    "vox_corrp_": "voxelwise FWE-corrected 1−p",
+    "clustere_corrp_": "cluster-extent FWE-corrected 1−p",
+    "clusterm_corrp_": "cluster-mass FWE-corrected 1−p",
+    "tfce_p_": "TFCE, uncorrected 1−p",
+    "vox_p_": "voxelwise uncorrected 1−p",
+    "clustere_p_": "cluster-extent uncorrected 1−p",
+    "clusterm_p_": "cluster-mass uncorrected 1−p",
+    "p_": "uncorrected 1−p",
+}
+
+#: ``randomise`` output kinds — t-contrast maps (``…tstat``) and F-test maps (``…fstat``).
 STAT_KINDS: dict[str, str] = {
-    "tstat": "t-statistic (unpermuted)",
-    "tfce_corrp_tstat": "TFCE, FWE-corrected 1−p",
-    "vox_corrp_tstat": "voxelwise FWE-corrected 1−p",
-    "tfce_p_tstat": "TFCE, uncorrected 1−p",
-    "p_tstat": "uncorrected 1−p",
-    "tfce_tstat": "TFCE-enhanced statistic",
-    "clustere_corrp_tstat": "cluster-extent FWE-corrected 1−p",
-    "clusterm_corrp_tstat": "cluster-mass FWE-corrected 1−p",
+    **{f"{infix}tstat": (f"t-{text}" if not infix else text) for infix, text in _STAT_INFIXES.items()},
+    **{f"{infix}fstat": (f"F-{text}" if not infix else f"F-test, {text}")
+       for infix, text in _STAT_INFIXES.items()},
 }
 
 #: Kinds whose values are 1−p, so a map value above :data:`CORRP_THRESHOLD` means p < 0.05.
 CORRP_KINDS: frozenset[str] = frozenset(
-    {"tfce_corrp_tstat", "vox_corrp_tstat", "clustere_corrp_tstat", "clusterm_corrp_tstat"}
+    f"{infix}{stat}"
+    for infix in ("tfce_corrp_", "vox_corrp_", "clustere_corrp_", "clusterm_corrp_")
+    for stat in ("tstat", "fstat")
 )
+
+
+def is_ftest_kind(kind: str) -> bool:
+    """True for an F-test map, whose index counts F-tests rather than t-contrasts."""
+    return str(kind).endswith("fstat")
 
 
 @dataclass(frozen=True)
@@ -1411,25 +1746,55 @@ class VoxelwiseResult:
     maps: dict[str, dict[int, Path]] = field(default_factory=dict)
     manifest: dict[str, Any] = field(default_factory=dict)
 
+    def _indices(self, ftest: bool) -> list[int]:
+        """Map indices present for t-contrast kinds, or for F-test kinds."""
+        return sorted(
+            {i for kind, by_index in self.maps.items() if is_ftest_kind(kind) == ftest
+             for i in by_index}
+        )
+
     @property
     def contrast_names(self) -> list[str]:
-        """Contrast names in contrast order, from the manifest (``c1``… if it is absent)."""
+        """t-contrast names in contrast order, from the manifest (``c1``… if it is absent)."""
         names = [str(c.get("name")) for c in self.manifest.get("contrasts", []) if c.get("name")]
         if names:
             return names
-        indices = sorted({i for by_index in self.maps.values() for i in by_index})
-        return [f"c{i}" for i in indices]
+        return [f"c{i}" for i in self._indices(ftest=False)]
+
+    @property
+    def ftest_names(self) -> list[str]:
+        """F-test names in ``design.fts`` order (``f1``… if the manifest has none); often empty."""
+        names = [str(f.get("name")) for f in self.manifest.get("ftests", []) if f.get("name")]
+        if names:
+            return names
+        return [f"f{i}" for i in self._indices(ftest=True)]
+
+    def names_for(self, kind: str) -> list[str]:
+        """The names a *kind*'s maps are addressed by: F-tests for ``…fstat``, else t-contrasts.
+
+        ``randomise`` numbers the two separately — ``tstat1`` and ``fstat1`` are different tests —
+        so a picker listing contrasts must follow the selected kind, or it would offer a t-contrast
+        name for an F map.
+        """
+        return self.ftest_names if is_ftest_kind(kind) else self.contrast_names
 
     def contrast_index(self, name: str) -> int:
-        """1-based ``randomise`` index of the contrast called *name*."""
+        """1-based ``randomise`` index of the t-contrast called *name*."""
         names = self.contrast_names
         if name in names:
             return names.index(name) + 1
         raise KeyError(f"No contrast named {name!r}. Available: {names}")
 
     def map_path(self, kind: str, contrast: str | int) -> Path:
-        """Path to one statistical map, addressed by contrast name or 1-based index."""
-        index = contrast if isinstance(contrast, int) else self.contrast_index(str(contrast))
+        """Path to one statistical map, addressed by name (see :meth:`names_for`) or 1-based index."""
+        if isinstance(contrast, int):
+            index = contrast
+        else:
+            names = self.names_for(kind)
+            if str(contrast) not in names:
+                what = "F-test" if is_ftest_kind(kind) else "contrast"
+                raise KeyError(f"No {what} named {contrast!r} for {kind!r}. Available: {names}")
+            index = names.index(str(contrast)) + 1
         by_index = self.maps.get(kind) or {}
         if index not in by_index:
             available = sorted(self.maps)
@@ -1439,10 +1804,11 @@ class VoxelwiseResult:
         return by_index[index]
 
     def primary_kind(self) -> str:
-        """The corrected map a viewer should show by default, preferring TFCE."""
-        for kind in ("tfce_corrp_tstat", "vox_corrp_tstat", "clustere_corrp_tstat", "tstat"):
-            if self.maps.get(kind):
-                return kind
+        """The corrected map a viewer should show by default: TFCE, t-contrasts before F-tests."""
+        for stat in ("tstat", "fstat"):
+            for infix in ("tfce_corrp_", "vox_corrp_", "clustere_corrp_", ""):
+                if self.maps.get(f"{infix}{stat}"):
+                    return f"{infix}{stat}"
         return next(iter(self.maps), "")
 
     def summary(self) -> str:
@@ -1451,12 +1817,17 @@ class VoxelwiseResult:
         if not kind:
             return f"{self.out_root.name}: no maps found"
         lines = [f"{self.out_root.name} — {STAT_KINDS.get(kind, kind)}"]
-        for name in self.contrast_names:
-            try:
-                path = self.map_path(kind, name)
-            except KeyError:
-                continue
-            lines.append(f"  {name}: {path.name} · {count_significant(path)} voxel(s) p<0.05")
+        # F-tests are summarised under their own corrected kind, after the t-contrasts.
+        f_kind = next((k for k in ("tfce_corrp_fstat", "vox_corrp_fstat") if self.maps.get(k)), "")
+        for k in (kind, f_kind) if f_kind and f_kind != kind else (kind,):
+            if k != kind:
+                lines.append(f"  F-tests — {STAT_KINDS.get(k, k)}")
+            for name in self.names_for(k):
+                try:
+                    path = self.map_path(k, name)
+                except KeyError:
+                    continue
+                lines.append(f"  {name}: {path.name} · {count_significant(path)} voxel(s) p<0.05")
         return "\n".join(lines)
 
 
@@ -1468,22 +1839,33 @@ def count_significant(path: str | Path, *, threshold: float = CORRP_THRESHOLD) -
     return int(np.count_nonzero(data > float(threshold)))
 
 
-_STAT_RX = re.compile(r"^(?P<root>.+?)_(?P<kind>[a-z0-9_]*tstat)(?P<index>\d+)$")
+#: One map's name once its ``<root>_`` prefix is removed: ``tfce_corrp_tstat2``, ``vox_p_fstat1``.
+_MAP_RX = re.compile(r"^(?P<kind>[a-z0-9_]*[tf]stat)(?P<index>\d+)$")
+
+#: A whole map name with the root unknown, for folders with no manifest. The kind is restricted to
+#: names randomise writes and the root is matched lazily, so the split falls at the first point the
+#: rest is a real kind — ``vw_rmca_tfce_corrp_tstat1`` is root ``vw_rmca``, not ``vw`` with a kind
+#: ``rmca_tfce_corrp_tstat``.
+_STAT_RX = re.compile(
+    r"^(?P<root>.+?)_(?P<kind>"
+    + "|".join(re.escape(k) for k in sorted(STAT_KINDS, key=len, reverse=True))
+    + r")(?P<index>\d+)$"
+)
 
 
 def _discover_maps(out_root: Path) -> dict[str, dict[int, Path]]:
-    """Glob ``<root>_*tstat<N>`` next to *out_root* and bucket them by kind and contrast index."""
+    """Glob ``<root>_*[tf]stat<N>`` next to *out_root* and bucket them by kind and index.
+
+    The known root is stripped as a prefix rather than recovered by a pattern, so a root that itself
+    contains underscores (``--out-name vw_rmca``) cannot be split in the wrong place.
+    """
     maps: dict[str, dict[int, Path]] = {}
+    prefix = f"{out_root.name}_"
     for path in sorted(out_root.parent.glob(f"{out_root.name}_*")):
         if not (path.name.endswith(".nii") or path.name.endswith(".nii.gz")):
             continue
-        stem = path.name
-        for suffix in (".nii.gz", ".nii"):
-            if stem.endswith(suffix):
-                stem = stem[: -len(suffix)]
-                break
-        match = _STAT_RX.match(stem)
-        if match is None or match.group("root") != out_root.name:
+        match = _MAP_RX.match(_strip_nifti_suffix(path.name)[len(prefix):])
+        if match is None:
             continue
         maps.setdefault(match.group("kind"), {})[int(match.group("index"))] = path
     return maps
@@ -1568,14 +1950,10 @@ def load_voxelwise_result(out_dir: str | Path) -> VoxelwiseResult:
         # No manifest: recover the root from the file names themselves. Every randomise output is
         # ``<root>_<kind>tstat<N>``, so the roots are whatever survives stripping that suffix.
         roots: set[str] = set()
-        for path in directory.glob("*tstat*"):
-            stem = path.name
-            for suffix in (".nii.gz", ".nii"):
-                if stem.endswith(suffix):
-                    stem = stem[: -len(suffix)]
-                    break
-            match = _STAT_RX.match(stem)
-            if match:
+        for path in directory.glob("*stat*"):
+            match = _STAT_RX.match(_strip_nifti_suffix(path.name))
+            # A fragment root (`randomise_SEED3`) is an unfinished parallel run, not a result.
+            if match and "_SEED" not in match.group("root"):
                 roots.add(match.group("root"))
         candidates = [directory / r for r in sorted(roots)]
 
@@ -1589,9 +1967,376 @@ def load_voxelwise_result(out_dir: str | Path) -> VoxelwiseResult:
             return VoxelwiseResult(out_dir=directory, out_root=root, maps=maps, manifest=manifest)
 
     raise FileNotFoundError(
-        f"No randomise outputs (<root>_*tstat<N>.nii.gz) in {directory}. "
+        f"No randomise outputs (<root>_*tstat<N>.nii.gz or *fstat<N>) in {directory}. "
         "Point at the folder that holds the maps, not its parent."
     )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Prepared inputs: a 4D stack and design files built elsewhere
+# ──────────────────────────────────────────────────────────────────────────────
+@dataclass(frozen=True)
+class VestMatrix:
+    """One FSL VEST file — ``design.mat``, ``.con`` or ``.fts`` — as declared and as written."""
+
+    path: Path
+    matrix: np.ndarray
+    #: ``/NumWaves`` as declared in the header, ``None`` when absent.
+    num_waves: int | None = None
+    #: ``/NumPoints`` (``.mat``) or ``/NumContrasts`` (``.con`` / ``.fts``), ``None`` when absent.
+    num_rows: int | None = None
+    #: ``/ContrastName<i>`` values in index order; empty for a ``.mat``.
+    names: tuple[str, ...] = ()
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        """``(rows, columns)`` of the matrix actually present."""
+        return int(self.matrix.shape[0]), int(self.matrix.shape[1])
+
+
+def read_vest(path: str | Path) -> VestMatrix:
+    """Read a VEST matrix file without FSL (``Vest2Text`` would need it on the workstation too).
+
+    Rows are everything after ``/Matrix``; a file with no ``/Matrix`` line is read as a bare
+    whitespace-separated matrix, which is what ``Text2Vest`` takes as input — ``randomise`` will
+    reject that, but the dimensions are still worth checking first.
+    """
+    source = Path(path).expanduser().resolve()
+    if not source.is_file():
+        raise FileNotFoundError(f"Design file not found: {source}")
+
+    header: dict[str, str] = {}
+    names: dict[int, str] = {}
+    rows: list[list[float]] = []
+    lines = source.read_text(encoding="utf-8", errors="replace").splitlines()
+    in_matrix = not any(line.strip().split(" ")[0] == "/Matrix" for line in lines)
+    for number, raw in enumerate(lines, start=1):
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("/"):
+            tag, _, value = line[1:].partition(" ")
+            if tag == "Matrix":
+                in_matrix = True
+            elif tag.startswith("ContrastName") and tag[len("ContrastName"):].isdigit():
+                names[int(tag[len("ContrastName"):])] = value.strip()
+            else:
+                header[tag] = value.strip()
+            continue
+        if not in_matrix:
+            continue
+        try:
+            rows.append([float(v) for v in line.split()])
+        except ValueError:
+            raise ValueError(f"{source.name}, line {number}: not a row of numbers: {line[:60]!r}") from None
+
+    if not rows:
+        raise ValueError(f"{source.name} has no matrix rows.")
+    widths = {len(r) for r in rows}
+    if len(widths) != 1:
+        raise ValueError(f"{source.name} has rows of different lengths: {sorted(widths)}.")
+
+    def declared(tag: str) -> int | None:
+        """An integer header value, or ``None`` when missing or malformed."""
+        try:
+            return int(float(header[tag]))
+        except (KeyError, ValueError):
+            return None
+
+    return VestMatrix(
+        path=source,
+        matrix=np.asarray(rows, dtype=float),
+        num_waves=declared("NumWaves"),
+        num_rows=declared("NumPoints") if "NumPoints" in header else declared("NumContrasts"),
+        names=tuple(names[k] for k in sorted(names)),
+    )
+
+
+@dataclass(frozen=True)
+class RandomiseInputs:
+    """A 4D stack and its design files, checked against each other."""
+
+    stack: Path
+    design: VestMatrix
+    contrasts: VestMatrix
+    ftests: VestMatrix | None
+    mask: Path | None
+    n_volumes: int
+    space: SpaceInfo
+
+    def contrast_names(self) -> list[str]:
+        """t-contrast names from ``/ContrastName<i>``, ``c1``… where the file has none."""
+        n = self.contrasts.shape[0]
+        names = list(self.contrasts.names[:n])
+        return names + [f"c{i + 1}" for i in range(len(names), n)]
+
+    def ftest_names(self) -> list[str]:
+        """F-test names from the ``.fts``, ``f1``… where it has none; empty with no ``.fts``."""
+        if self.ftests is None:
+            return []
+        n = self.ftests.shape[0]
+        names = list(self.ftests.names[:n])
+        return names + [f"f{i + 1}" for i in range(len(names), n)]
+
+    def describe(self) -> str:
+        """``120 volume(s) · 91x109x91 @ 2×2×2 mm · 3 EV(s) · 2 t-contrast(s) · 1 F-test(s)``."""
+        text = (
+            f"{self.n_volumes} volume(s) · {self.space.describe()} · "
+            f"{self.design.shape[1]} EV(s) · {self.contrasts.shape[0]} t-contrast(s)"
+        )
+        if self.ftests is not None:
+            text += f" · {self.ftests.shape[0]} F-test(s)"
+        return text + (" · mask" if self.mask else " · no mask")
+
+
+def validate_randomise_inputs(
+    stack: str | Path,
+    mat: str | Path,
+    con: str | Path,
+    *,
+    fts: str | Path | None = None,
+    mask: str | Path | None = None,
+    tol: float = AFFINE_TOL,
+) -> RandomiseInputs:
+    """Check a stack and its design files fit together — from headers only, with no FSL.
+
+    ``randomise`` would find most of these, but after loading the whole stack, and on the cluster
+    after the upload and the queue. A design with one row too many is the cheap case: the expensive
+    one is a design built for a *different* stack of the same length, which nothing can detect —
+    so the volume count is reported back for a person to recognise.
+
+    Raises
+    ------
+    ValueError
+        Listing **every** mismatch at once, since each is a separate file to fix.
+    """
+    import nibabel as nib
+
+    stack_path = Path(stack).expanduser().resolve()
+    if not stack_path.is_file():
+        raise FileNotFoundError(f"4D stack not found: {stack_path}")
+    try:
+        img = nib.load(str(stack_path))
+    except Exception as exc:  # noqa: BLE001 — nibabel's ImageFileError is not a ValueError
+        raise ValueError(f"Cannot read {stack_path.name} as NIfTI: {exc}") from None
+    if img.ndim != 4:
+        raise ValueError(
+            f"{stack_path.name} is {img.ndim}D {img.shape}; randomise needs one 4D volume with a "
+            "subject per volume (nvitk-voxelwise merge, or fslmerge -t, builds it)."
+        )
+    n_volumes = int(img.shape[3])
+    space = _space_of(stack_path)
+
+    design = read_vest(mat)
+    contrasts = read_vest(con)
+    ftests = read_vest(fts) if fts is not None else None
+    problems: list[str] = []
+
+    def check_header(vest: VestMatrix, rows_tag: str) -> None:
+        """Flag a header that disagrees with the rows actually in the file."""
+        rows, cols = vest.shape
+        if vest.num_waves is not None and vest.num_waves != cols:
+            problems.append(f"{vest.path.name}: /NumWaves {vest.num_waves} but rows have {cols} column(s).")
+        if vest.num_rows is not None and vest.num_rows != rows:
+            problems.append(f"{vest.path.name}: /{rows_tag} {vest.num_rows} but {rows} row(s) follow /Matrix.")
+
+    check_header(design, "NumPoints")
+    check_header(contrasts, "NumContrasts")
+    if design.shape[0] != n_volumes:
+        problems.append(
+            f"{design.path.name} has {design.shape[0]} row(s) but {stack_path.name} has {n_volumes} "
+            "volume(s) — row i of the design must be volume i of the stack."
+        )
+    if contrasts.shape[1] != design.shape[1]:
+        problems.append(
+            f"{contrasts.path.name} weighs {contrasts.shape[1]} EV(s) but {design.path.name} has "
+            f"{design.shape[1]}."
+        )
+    zero = [i + 1 for i, row in enumerate(contrasts.matrix) if not np.any(row)]
+    if zero:
+        problems.append(f"{contrasts.path.name}: contrast(s) {zero} are all zeros.")
+
+    if ftests is not None:
+        check_header(ftests, "NumContrasts")
+        if ftests.shape[1] != contrasts.shape[0]:
+            problems.append(
+                f"{ftests.path.name} has {ftests.shape[1]} column(s) but {contrasts.path.name} has "
+                f"{contrasts.shape[0]} t-contrast(s); each column selects one."
+            )
+        if not np.isin(ftests.matrix, (0.0, 1.0)).all():
+            problems.append(f"{ftests.path.name}: entries must be 0 or 1 (which t-contrasts to test).")
+        empty = [i + 1 for i, row in enumerate(ftests.matrix) if not np.any(row)]
+        if empty:
+            problems.append(f"{ftests.path.name}: F-test(s) {empty} select no t-contrast.")
+
+    mask_path: Path | None = None
+    if mask is not None:
+        mask_path = Path(mask).expanduser().resolve()
+        try:
+            mask_space = _space_of(mask_path) if mask_path.is_file() else None
+        except Exception as exc:  # noqa: BLE001 — nibabel's ImageFileError is not a ValueError
+            problems.append(f"Cannot read mask {mask_path.name} as NIfTI: {exc}")
+            mask_space = None
+        if not mask_path.is_file():
+            problems.append(f"Mask not found: {mask_path}")
+        elif mask_space is not None:
+            if mask_space.shape != space.shape or not np.allclose(
+                mask_space.affine, space.affine, atol=tol, rtol=0.0
+            ):
+                problems.append(
+                    f"Mask {mask_path.name} is {mask_space.describe()} but {stack_path.name} is "
+                    f"{space.describe()} (or their affines differ). Resample the mask onto the stack."
+                )
+
+    if problems:
+        raise ValueError("Inputs do not fit together:\n" + "\n".join(f"  · {p}" for p in problems))
+
+    rank = int(np.linalg.matrix_rank(design.matrix))
+    if rank < design.shape[1]:
+        log.warning(
+            f"{design.path.name} is rank-deficient (rank {rank} < {design.shape[1]} EVs); contrasts "
+            "on the collinear EVs are not estimable."
+        )
+
+    inputs = RandomiseInputs(
+        stack=stack_path,
+        design=design,
+        contrasts=contrasts,
+        ftests=ftests,
+        mask=mask_path,
+        n_volumes=n_volumes,
+        space=space,
+    )
+    log.info(f"Inputs fit together: {inputs.describe()}")
+    return inputs
+
+
+def _copy_beside(source: Path, dest: Path) -> Path:
+    """Copy *source* to *dest* unless they are the same file; return *dest*."""
+    if not (dest.exists() and dest.samefile(source)):
+        shutil.copyfile(source, dest)
+    return dest
+
+
+def write_direct_manifest(
+    out_dir: str | Path,
+    *,
+    out_root: str | Path,
+    inputs: RandomiseInputs,
+    n_perm: int,
+    extra: Mapping[str, Any] | None = None,
+) -> Path:
+    """``manifest.json`` for a run on prepared inputs.
+
+    Same schema as :func:`write_manifest`, so the viewers read both, but the subject list is empty:
+    a prepared stack carries no record of which volume is which subject, and inventing one would be
+    worse than admitting it. ``inputs`` records where the stack and design came from instead.
+    """
+    out = Path(out_dir).expanduser().resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    status = fsl_backend_status()
+    payload: dict[str, Any] = {
+        "schema": "nvitk.voxelwise.v1",
+        "mode": "prepared",
+        "out_root": Path(out_root).name,
+        "n_subjects": inputs.n_volumes,
+        "subjects": [],
+        "evs": [],
+        "columns": [f"EV{i + 1}" for i in range(inputs.design.shape[1])],
+        "contrasts": [
+            {"index": i + 1, "name": name, "weights": inputs.contrasts.matrix[i].tolist()}
+            for i, name in enumerate(inputs.contrast_names())
+        ],
+        "ftests": [
+            {
+                "index": i + 1,
+                "name": name,
+                "contrasts": [int(j) + 1 for j in np.flatnonzero(inputs.ftests.matrix[i])],
+            }
+            for i, name in enumerate(inputs.ftest_names())
+        ] if inputs.ftests is not None else [],
+        "n_perm": int(n_perm),
+        "mask": str(inputs.mask) if inputs.mask else None,
+        "inputs": {
+            "stack": str(inputs.stack),
+            "design_mat": str(inputs.design.path),
+            "design_con": str(inputs.contrasts.path),
+            "design_fts": str(inputs.ftests.path) if inputs.ftests is not None else None,
+        },
+        "fsl_version": status.versions.get("fsl", ""),
+    }
+    if extra:
+        payload.update(dict(extra))
+    path = out / "manifest.json"
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
+def run_randomise_direct(
+    stack: str | Path,
+    mat: str | Path,
+    con: str | Path,
+    out_dir: str | Path,
+    *,
+    fts: str | Path | None = None,
+    mask: str | Path | None = None,
+    n_perm: int = 5000,
+    tfce: bool = True,
+    voxelwise_corrp: bool = True,
+    uncorrected_p: bool = False,
+    parallel: bool = False,
+    n_jobs: int | None = None,
+    seed: int | None = None,
+    demean_data: bool = False,
+    out_name: str = "randomise",
+) -> VoxelwiseResult:
+    """``randomise`` on a 4D stack and design files built elsewhere — no database, no cohort.
+
+    The design files are copied into *out_dir* as ``design.mat`` / ``.con`` / ``.fts`` and run from
+    there, so the results folder records exactly what was fitted. The stack is not copied; it can be
+    gigabytes and the manifest names it.
+
+    There is no default mask, unlike :func:`run_voxelwise`: a prepared stack need not be in MNI
+    space, and an MNI mask on a study template would silently cut the analysis to the wrong shape.
+    Without one ``randomise`` tests every voxel that is non-zero in the data.
+    """
+    require_fsl()
+    inputs = validate_randomise_inputs(stack, mat, con, fts=fts, mask=mask)
+
+    out = Path(out_dir).expanduser().resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    mat_path = _copy_beside(inputs.design.path, out / "design.mat")
+    con_path = _copy_beside(inputs.contrasts.path, out / "design.con")
+    fts_path = (
+        _copy_beside(inputs.ftests.path, out / "design.fts") if inputs.ftests is not None else None
+    )
+
+    out_root = run_randomise(
+        inputs.stack,
+        mat_path,
+        con_path,
+        out / out_name,
+        fts_path=fts_path,
+        mask=inputs.mask,
+        n_perm=n_perm,
+        tfce=tfce,
+        voxelwise_corrp=voxelwise_corrp,
+        uncorrected_p=uncorrected_p,
+        parallel=parallel,
+        n_jobs=n_jobs,
+        seed=seed,
+        demean_data=demean_data,
+    )
+    write_direct_manifest(
+        out,
+        out_root=out_root,
+        inputs=inputs,
+        n_perm=n_perm,
+        extra={"tfce": bool(tfce), "parallel": bool(parallel), "demean_data": bool(demean_data)},
+    )
+    result = load_voxelwise_result(out)
+    log.info(result.summary())
+    return result
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1684,6 +2429,7 @@ def run_voxelwise(
     voxelwise_corrp: bool = True,
     uncorrected_p: bool = False,
     parallel: bool = False,
+    n_jobs: int | None = None,
     seed: int | None = None,
     add_intercept: bool = True,
     demean: bool = True,
@@ -1811,6 +2557,7 @@ def run_voxelwise(
         voxelwise_corrp=voxelwise_corrp,
         uncorrected_p=uncorrected_p,
         parallel=parallel,
+        n_jobs=n_jobs,
         seed=seed,
     )
 
@@ -1833,6 +2580,7 @@ def run_voxelwise(
             "grouping": grouping,
             "pipeline_kind": pipeline_kind,
             "tfce": bool(tfce),
+            "parallel": bool(parallel),
         },
     )
     if not keep_stack:
@@ -1857,32 +2605,45 @@ __all__ = [
     "PREFILTER_OPERATORS",
     "DERIVED_COVARIATES",
     "FSL_BINARIES",
+    "FSL_SUB_LOCAL",
+    "PARALLEL_ENV",
     "STAT_KINDS",
     "CohortImage",
     "CohortOption",
     "Contrast",
     "PreFilter",
     "FslBackendStatus",
+    "RandomiseInputs",
     "SpaceInfo",
+    "VestMatrix",
     "VoxelwiseDesign",
     "VoxelwiseResult",
     "align_design_to_images",
     "apply_prefilters",
     "available_cohorts",
+    "available_cores",
     "build_design_frame",
     "cohort_id_subjects",
     "cohort_subjects",
     "count_significant",
     "default_mni_mask",
+    "fragment_memory",
     "fsl_backend_status",
+    "is_ftest_kind",
     "load_voxelwise_result",
     "merge_4d",
     "parse_contrasts",
     "parse_prefilters",
+    "read_vest",
     "require_fsl",
     "resolve_cohort_images",
+    "resolve_fsldir",
+    "resolve_parallel_jobs",
     "run_randomise",
+    "run_randomise_direct",
     "run_voxelwise",
     "validate_common_space",
+    "validate_randomise_inputs",
+    "write_direct_manifest",
     "write_manifest",
 ]

@@ -1343,7 +1343,7 @@ class StatmodelsWindow(QMainWindow):
             "unpermuted t-statistic is there to check the direction and size of an effect the "
             "corrected map only says exists."
         )
-        self._vox_kind.currentIndexChanged.connect(lambda *_: self._on_plot())
+        self._vox_kind.currentIndexChanged.connect(lambda *_: self._on_voxelwise_kind_changed())
         self._vox_kind_label = QLabel("map")
 
         # ---- Brain-map-only controls ---------------------------------------------
@@ -5333,20 +5333,7 @@ class StatmodelsWindow(QMainWindow):
         another.
         """
         result = self._load_voxelwise_result()
-        names = list(result.contrast_names) if result is not None else []
         kinds = sorted(result.maps) if result is not None else []
-
-        for widget in (self._vasc_contrast, self._vasc_contrast_label):
-            widget.setVisible(bool(names))
-        if names:
-            previous = str(self._vasc_contrast.currentData() or "")
-            self._vasc_contrast.blockSignals(True)
-            self._vasc_contrast.clear()
-            for name in names:
-                self._vasc_contrast.addItem(name, name)
-            index = self._vasc_contrast.findData(previous)
-            self._vasc_contrast.setCurrentIndex(index if index >= 0 else 0)
-            self._vasc_contrast.blockSignals(False)
 
         if kinds:
             from nvitk.measure.voxelwise import STAT_KINDS
@@ -5361,6 +5348,35 @@ class StatmodelsWindow(QMainWindow):
             index = self._vox_kind.findData(previous)
             self._vox_kind.setCurrentIndex(index if index >= 0 else 0)
             self._vox_kind.blockSignals(False)
+        self._sync_voxelwise_contrast_names(result)
+
+    def _sync_voxelwise_contrast_names(self, result: Any) -> None:
+        """List the names the selected map kind is addressed by.
+
+        After the kind, not before: ``randomise`` numbers t-contrasts and F-tests separately, so an
+        F map offered the t-contrast names would draw ``fstat1`` under the label of contrast one.
+        """
+        kind = str(self._vox_kind.currentData() or "") or (
+            result.primary_kind() if result is not None else ""
+        )
+        names = list(result.names_for(kind)) if result is not None else []
+        for widget in (self._vasc_contrast, self._vasc_contrast_label):
+            widget.setVisible(bool(names))
+        if names:
+            previous = str(self._vasc_contrast.currentData() or "")
+            self._vasc_contrast.blockSignals(True)
+            self._vasc_contrast.clear()
+            for name in names:
+                self._vasc_contrast.addItem(name, name)
+            index = self._vasc_contrast.findData(previous)
+            self._vasc_contrast.setCurrentIndex(index if index >= 0 else 0)
+            self._vasc_contrast.blockSignals(False)
+
+    def _on_voxelwise_kind_changed(self) -> None:
+        """A new map kind may be numbered by F-tests rather than contrasts: re-list, then redraw."""
+        if self._map_display() == _DISPLAY_VOXELWISE:
+            self._sync_voxelwise_contrast_names(self._load_voxelwise_result())
+        self._on_plot()
 
     def _plot_voxelwise(self) -> None:
         """Draw one contrast of a loaded randomise result.
@@ -5383,15 +5399,15 @@ class StatmodelsWindow(QMainWindow):
                 )
                 return
 
+            kind = str(self._vox_kind.currentData() or "") or result.primary_kind()
+            names = result.names_for(kind)
             contrast = str(self._vasc_contrast.currentData() or "")
-            if not contrast:
-                names = result.contrast_names
+            if contrast not in names:
                 if not names:
                     self._plot.show_error(f"{result.out_root.name} has no contrasts to draw.")
                     return
                 contrast = names[0]
 
-            kind = str(self._vox_kind.currentData() or "") or result.primary_kind()
             view = self._voxelwise_view()
             mode = str(self._vox_display_mode.currentData() or "ortho")
 

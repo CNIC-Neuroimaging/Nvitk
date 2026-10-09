@@ -82,7 +82,7 @@ def measure_loc_row(
         plane_interp_order=int(cross_section_plane_interp),
     )
     # Magnitude reporting: tangent polarity must not flip flow / PI signs.
-    vel_ts = np.abs(np.asarray(vel_ts, dtype=np.float64).reshape(-1))
+    vel_ts = np.abs(as_backend_array(vel_ts).astype(np.float64).reshape(-1))
     flow_ts = np.abs(flow_series_ml_s(vel_ts, area_mm2))
     flow_2d = flow_ts.reshape(1, -1)
     nt = int(vx.shape[3])

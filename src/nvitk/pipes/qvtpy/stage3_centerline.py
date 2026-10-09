@@ -95,7 +95,7 @@ def _load_wb_arterial_labels_for_venous_exclusion(
             "venous arterial exclusion: WB eICAB not available "
             f"({wb_res.fallback_reason or 'fallback'}); using CW labels"
         )
-        return np.asarray(cw_labels_fallback, dtype=np.int32), "cw_fallback"
+        return as_backend_array(cw_labels_fallback).astype(np.int32), "cw_fallback"
 
     warped_wb = out_dir / "eicab_wb_in_4dflow_venous_excl.nii.gz"
     log.step(f"warp eICAB WB ({wb_res.path.name}) for venous arterial exclusion")
@@ -115,7 +115,7 @@ def _load_wb_arterial_labels_for_venous_exclusion(
         f"venous arterial exclusion: WB in 4D-flow arterial voxels={n_art} "
         f"(pp={bool(wb_res.postprocessed)})"
     )
-    return np.asarray(wb_lab, dtype=np.int32), "wb"
+    return as_backend_array(wb_lab).astype(np.int32), "wb"
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +287,7 @@ def run_subject(
         min_fraction_for_label={int(lid): 0.0 for lid in QVTPY_SMALL_ARTERIAL_IDS},
     )
     # Keep CW labels as fallback; prefer WB for venous arterial exclusion.
-    arterial_labels_full = np.asarray(labels_np, dtype=np.int32).copy()
+    arterial_labels_full = as_backend_array(labels_np).astype(np.int32, copy=True)
 
     arterial_vol = np.where(venous_region, 0, labels_np).astype(np.int32, copy=False)
     imsave(warped_labels, arterial_vol, metadata=dict(lab_img.metadata or {}))

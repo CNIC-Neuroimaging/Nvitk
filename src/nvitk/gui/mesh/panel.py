@@ -26,6 +26,7 @@ import numpy as np
 from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import QColor, QIcon, QPixmap
 from qtpy.QtWidgets import (
+    QApplication,
     QCheckBox,
     QColorDialog,
     QComboBox,
@@ -76,6 +77,7 @@ from nvitk.gui.mesh.layers import (
     replace_mesh_layer,
     series_controller,
     set_display,
+    set_parts,
     viewer_time_dim,
 )
 from nvitk.gui.mesh.operations import (
@@ -448,15 +450,35 @@ class MeshPanel(QWidget):
         self._shading.addItems(["smooth", "flat", "none"])
         self._shading_label = QLabel("Shading")
         grid.addRow(self._shading_label, self._shading)
+        # What a surface draws, each on its own: faces, edges, vertices.
+        surf_box = QVBoxLayout()
+        surf_box.setContentsMargins(0, 0, 0, 0)
+        surf_box.setSpacing(2)
         surf_row = QHBoxLayout()
+        self._faces = QCheckBox("Faces")
+        self._faces.setToolTip("Draw the surface's faces. Off: only what else is ticked (edges, vertices).")
         self._wire = QCheckBox("Wireframe")
+        self._wire.setToolTip("Draw the edges: dark over the faces, in the surface's colour without them.")
+        self._vertices = QCheckBox("Points")
+        self._vertices.setToolTip("Draw the vertices as dots, coloured like the surface.")
         self._normals = QCheckBox("Normals")
-        surf_row.addWidget(self._wire)
-        surf_row.addWidget(self._normals)
+        for box in (self._faces, self._wire, self._vertices, self._normals):
+            surf_row.addWidget(box)
         surf_row.addStretch(1)
+        surf_box.addLayout(surf_row)
+        point_row = QHBoxLayout()
+        self._vertex_size = QDoubleSpinBox()
+        self._vertex_size.setRange(1.0, 30.0)
+        self._vertex_size.setDecimals(1)
+        self._vertex_size.setSuffix(" px")
+        self._vertex_size.setToolTip("Size of the vertex dots on screen.")
+        self._vertex_size_label = QLabel("Point size")
+        point_row.addWidget(self._vertex_size_label)
+        point_row.addWidget(self._vertex_size, 1)
+        surf_box.addLayout(point_row)
         self._surf_opts = QWidget()
-        self._surf_opts.setLayout(surf_row)
-        grid.addRow(self._surf_opts)
+        self._surf_opts.setLayout(surf_box)
+        grid.addRow("Show", self._surf_opts)
         pts_row = QHBoxLayout()
         pts_row.setSpacing(4)
         self._size = QDoubleSpinBox()
@@ -485,7 +507,10 @@ class MeshPanel(QWidget):
         self._colour_btn.clicked.connect(self._pick_colour)
         self._opacity.valueChanged.connect(lambda v: self._set_layer_attr("opacity", v / 100.0))
         self._shading.currentTextChanged.connect(lambda t: self._set_layer_attr("shading", t, kind="Surface"))
-        self._wire.toggled.connect(self._on_wireframe)
+        self._faces.toggled.connect(lambda on: self._on_parts(faces=bool(on)))
+        self._wire.toggled.connect(lambda on: self._on_parts(wireframe=bool(on)))
+        self._vertices.toggled.connect(lambda on: self._on_parts(points=bool(on)))
+        self._vertex_size.valueChanged.connect(lambda v: self._on_parts(point_size=float(v)))
         self._normals.toggled.connect(self._on_normals)
         self._size.valueChanged.connect(lambda v: self._set_layer_attr("size", float(v), kind="Points"))
         self._symbol.currentTextChanged.connect(lambda t: self._set_layer_attr("symbol", t, kind="Points"))
@@ -876,9 +901,32 @@ class MeshPanel(QWidget):
         selection = self._viewer.layers.selection
         if selection.active is None and len(selection) > 1:
             self._summary.setText(f"<b>{len(selection)} layers selected</b><br>Display and Move apply to all of "
-                                  "them; operations run on one layer — select it alone.")
+                                  "them; an operation runs on each, as the labels of one multilabel mesh "
+                                  "(one table, one undo).")
         self._sync_targets()
         self._update_run_state()
+
+    def _run_targets(self, op: Any) -> list[Any]:
+        """The selected layers *op* runs on, the leading one first.
+
+        Several selected surfaces (or clouds, or images) are run one by one, each
+        like a label of one multilabel mesh. A layer an operation's own layer
+        parameter names (a reference to compare against) is an input, not a target.
+        """
+        if op is None or not op.inputs:
+            return []
+        selection = self._viewer.layers.selection
+        lead = self._lead_layer()
+        picked = [ly for ly in self._viewer.layers if ly in selection and ly.name != _MARKER_NAME and accepts(op, ly)]
+        if not picked and lead is not None and accepts(op, lead):
+            picked = [lead]
+        referenced = {str(v) for k, v in self.params().items()
+                      if any(spec.name == k and spec.kind == "layer" for spec in op.params)}
+        targets = [ly for ly in picked if ly.name not in referenced] or picked
+        if lead is not None and lead in targets:
+            targets.remove(lead)
+            targets.insert(0, lead)
+        return targets
 
     def _sync_targets(self) -> None:
         """Refresh Display and Move for the current multi-selection."""
@@ -897,14 +945,16 @@ class MeshPanel(QWidget):
         if self._picking is not None:
             return
         op = self._current_op()
-        layer = self._viewer.layers.selection.active
-        ok = op is not None and (layer is not None or not op.inputs) and accepts(op, layer)
+        targets = self._run_targets(op)
+        many = len(targets) > 1
+        ok = op is not None and (not op.inputs or bool(targets)) and not (many and op.pick)
         self._run.setEnabled(ok)
-        if op is not None and not ok and len(self._viewer.layers.selection) > 1:
-            self._status.setText("Select a single layer to run this (several are selected).")
+        self._run.setText(self._run_label(op) if not (ok and many) else f"Run on {len(targets)} layers")
+        if op is not None and many and op.pick:
+            self._status.setText("Picking works on one layer: select it alone (several are selected).")
         elif op is not None and not ok:
             self._status.setText(f"Select {input_hint(op)} to run this.")
-        elif ok and self._status.text().startswith(("Select ", "Select a single")):
+        elif ok and self._status.text().startswith(("Select ", "Picking works")):
             self._status.setText("")
 
     def _describe(self, layer: Any) -> str:
@@ -973,17 +1023,19 @@ class MeshPanel(QWidget):
         from nvitk.gui.core.log_panel import gui_log
 
         op = self._current_op()
+        if layer is None and op is not None and point is None:
+            targets = self._run_targets(op)
+            if len(targets) > 1 and not op.pick:
+                return self._run_many(op, targets)
+            if targets:
+                layer = targets[0]
         layer = layer if layer is not None else self._viewer.layers.selection.active
         if op is None or (layer is None and op.inputs):
             return None
         if not accepts(op, layer):
             _notify(f"{op.label} needs {input_hint(op)}.", error=True)
             return None
-        params = self.params()
-        if op.id.startswith(MESHLAB_PREFIX):
-            # Only what the user changed: MeshLab computes the rest for this mesh.
-            kinds = {spec.name: spec.kind for spec in op.params}
-            params = {k: v for k, v in params.items() if kinds.get(k) == "layer" or v != self._form_defaults.get(k)}
+        params = self._run_params(op)
         ctx = OpContext(self._viewer, layer, params, replace=self._replace.isChecked() and op.replaceable,
                         point=point, view_direction=view_direction, remember=self._push_undo)
         self._status.setText("Running…")
@@ -1016,6 +1068,82 @@ class MeshPanel(QWidget):
         self._on_active()
         # A new layer passing through the selection may have swapped the status for a hint.
         self._status.setText(result.message)
+        return result
+
+    def _run_params(self, op: Any) -> dict[str, Any]:
+        """The form's parameters for *op* (for a MeshLab filter, only those changed)."""
+        params = self.params()
+        if op.id.startswith(MESHLAB_PREFIX):
+            # Only what the user changed: MeshLab computes the rest for each mesh.
+            kinds = {spec.name: spec.kind for spec in op.params}
+            params = {k: v for k, v in params.items() if kinds.get(k) == "layer" or v != self._form_defaults.get(k)}
+        return params
+
+    def _run_many(self, op: Any, targets: list[Any]) -> Any:
+        """Run *op* on each of *targets*, as the labels of one multilabel mesh.
+
+        One combined result (a table with a row — or a block of rows — per layer,
+        every layer's curves on one plot, row clicks highlighting in the right
+        layer), one undo step for every layer it changed, and the selection left
+        as it was.
+        """
+        from nvitk.gui.core.log_panel import gui_log
+        from nvitk.gui.mesh.operations import combine_results
+        from nvitk.gui.tools.runner import log_tool_failure
+
+        params = self._run_params(op)
+        changed: list[tuple[Any, Any]] = []
+        results: list[tuple[str, Any]] = []
+        failures: list[str] = []
+        self._status.setText(f"Running on {len(targets)} layers…")
+        self.repaint()
+        for k, layer in enumerate(targets, 1):
+            if layer not in self._viewer.layers:
+                continue
+            self._status.setText(f"Running on {layer.name} ({k}/{len(targets)})…")
+            QApplication.processEvents()
+            ctx = OpContext(self._viewer, layer, dict(params), replace=self._replace.isChecked() and op.replaceable,
+                            remember=lambda ly, prev: changed.append((weakref.ref(ly), prev)))
+            try:
+                result = op.run(ctx)
+            except Exception as exc:  # noqa: BLE001 — one layer failing must not stop the rest
+                log_tool_failure(exc)
+                failures.append(f"{layer.name}: {exc}")
+                continue
+            results.append((layer.name, result))
+            gui_log(f"{op.label} · {layer.name}: {result.message}")
+        if changed:
+            # One Undo puts every layer this run changed back.
+            self._push_undo_step(changed)
+        if not results:
+            message = f"{op.label} failed on every layer: " + "; ".join(failures)
+            self._status.setText(message)
+            _notify(message, error=True)
+            return None
+        result = combine_results(op.label, results)
+        summary = f"{op.label}: ran on {len(results)} of {len(targets)} layers."
+        if failures:
+            summary += " Failed: " + "; ".join(failures)
+        _notify(summary, error=bool(failures))
+        if result.table:
+            try:
+                from nvitk.gui.viz.results_window import show_results
+
+                gui_log(show_results(self._viewer, result.title or op.label, result.table,
+                                     row_header=result.row_header, on_select=result.on_row))
+            except Exception:  # noqa: BLE001
+                gui_log(str(result.table))
+        if result.plot:
+            self._show_plot(result.plot, result.title or op.label)
+        # The layers worked on stay selected, as they were, whatever the run added.
+        selection = self._viewer.layers.selection
+        alive = [ly for ly in targets if ly in self._viewer.layers]
+        if alive:
+            selection.clear()
+            selection.update(alive)
+        self._sync_targets()
+        self._update_run_state()
+        self._status.setText(summary)
         return result
 
     # ── picking a point ──────────────────────────────────────────────────────
@@ -1095,14 +1223,18 @@ class MeshPanel(QWidget):
 
     # ── selecting with the brush and the box ─────────────────────────────────
 
-    def _stroke_cache(self) -> dict[str, Any]:
-        """The picked layer's geometry and selection, kept for the length of the tool."""
+    def _stroke_cache(self, *, fresh_selection: bool = False) -> dict[str, Any]:
+        """The picked layer's geometry, kept for the length of the tool, and its
+        selection — read again from the layer at the start of every stroke or box
+        (*fresh_selection*): Clear, Invert, an undo or any other operation may have
+        changed it while the tool stayed armed."""
         from scipy.spatial import cKDTree
 
         from nvitk.gui.mesh.selection import selection_of
 
         layer = self._pick_layer
-        if self._stroke is None or self._stroke["layer"] is not layer:
+        n = len(layer.vertices if type(layer).__name__ == "Surface" else layer.data) if layer is not None else 0
+        if self._stroke is None or self._stroke["layer"] is not layer or len(self._stroke["points"]) != n:
             if type(layer).__name__ == "Surface":
                 mesh = layer_to_mesh(layer)
                 pts, tris = mesh.vertices, mesh.triangles
@@ -1110,6 +1242,8 @@ class MeshPanel(QWidget):
                 pts, tris = layer_to_point_cloud(layer).points, None
             self._stroke = {"layer": layer, "points": pts, "triangles": tris, "tree": cKDTree(pts),
                             "selected": selection_of(layer)}
+        elif fresh_selection:
+            self._stroke["selected"] = selection_of(layer)
         return self._stroke
 
     def _brush_point(self, event: Any) -> np.ndarray | None:
@@ -1140,6 +1274,7 @@ class MeshPanel(QWidget):
         return int(st["selected"].sum())
 
     def _brush_drag(self, event: Any) -> Any:
+        self._stroke_cache(fresh_selection=True)
         hit = self._brush_point(event)
         if hit is None:
             # Off the surface: this drag turns the camera, as without the tool.
@@ -1200,6 +1335,7 @@ class MeshPanel(QWidget):
             return  # a click, not a box
         layer = self._pick_layer
         params = self.params()
+        self._stroke_cache(fresh_selection=True)
         picked = in_box(self._viewer, layer, p0, p1, facing_only=bool(params.get("sel_facing", True)),
                         view_direction=getattr(event, "view_direction", None))
         st = self._stroke_cache()
@@ -1346,7 +1482,13 @@ class MeshPanel(QWidget):
             if surfaces:
                 surf = surfaces[0]
                 self._shading.setCurrentText(str(getattr(surf, "shading", "smooth")))
-                self._wire.setChecked(bool(getattr(getattr(surf, "wireframe", None), "visible", False)))
+                parts = display_of(surf)
+                self._faces.setChecked(bool(parts.faces))
+                self._wire.setChecked(bool(parts.wireframe))
+                self._vertices.setChecked(bool(parts.points))
+                self._vertex_size.setValue(float(parts.point_size))
+                for w in (self._vertex_size, self._vertex_size_label):
+                    w.setVisible(bool(parts.points))
                 self._normals.setChecked(bool(getattr(getattr(getattr(surf, "normals", None), "face", None),
                                                       "visible", False)))
             if points:
@@ -1447,14 +1589,20 @@ class MeshPanel(QWidget):
             except Exception as exc:  # noqa: BLE001
                 self._status.setText(f"Display ({t.name}): {exc}")
 
-    def _on_wireframe(self, on: bool) -> None:
+    def _on_parts(self, **changes: Any) -> None:
+        """Faces / wireframe / points (point size) on every selected surface."""
+        if "points" in changes:
+            for w in (self._vertex_size, self._vertex_size_label):
+                w.setVisible(bool(changes["points"]))
         if self._display_guard:
             return
         for t in self._targets():
+            if type(t).__name__ != "Surface":
+                continue
             try:
-                t.wireframe.visible = bool(on)
-            except Exception:  # noqa: BLE001 — points have no wireframe
-                pass
+                set_parts(t, **changes)
+            except Exception as exc:  # noqa: BLE001
+                self._status.setText(f"Display ({t.name}): {exc}")
 
     def _on_normals(self, on: bool) -> None:
         if self._display_guard:

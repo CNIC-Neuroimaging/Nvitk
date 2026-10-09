@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as _host_np
 
-from nvitk.core.array import to_numpy
+from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup
 from nvitk.types import Image
 
@@ -67,11 +67,12 @@ def correct_z_rotation(image: Image | None, affine: _host_np.ndarray, rotation_d
     if image is None:
         return None, corrected_affine
 
+    data = as_backend_array(image.data)
     if abs(rotation_degrees - 180.0) < 0.01 or abs(rotation_degrees + 180.0) < 0.01:
-        flipped = np.flip(np.flip(image.data, axis=0), axis=1)
+        flipped = np.flip(np.flip(data, axis=0), axis=1)
     else:
         flipped = ndi.rotate(
-            image.data,
+            data,
             -float(rotation_degrees),
             axes=(0, 1),
             reshape=False,

@@ -119,6 +119,7 @@
       "err_subdir": "voxelwise",
       "sge_job_prefix": "nvitk-voxelwise",
       "sge_h_vmem": "40G",
+      "sge_pe_smp": 4,
       "default_sge_scripts_dir": "<DIR_FOR_GENERATED_JOB_SCRIPTS>",
       "default_sge_container_root": "<PATH_TO_NVITK_SIF>",
       "local_images_root": "<LOCAL_NORMALISED_IMAGES_ROOT>",

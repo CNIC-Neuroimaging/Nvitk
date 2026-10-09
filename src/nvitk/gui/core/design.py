@@ -583,6 +583,52 @@ QScrollBar::add-line, QScrollBar::sub-line {{
 QScrollBar::add-page, QScrollBar::sub-page {{
     background: transparent;
 }}
+/* Sliders draw their groove and handles from these rules. Without them the
+   QWidget background above has the style sheet paint the slider's whole
+   background under every handle it draws, so a range slider — Napari's
+   contrast limits — keeps only its last handle, and no groove. */
+QSlider {{
+    background: transparent;
+}}
+QSlider::groove:horizontal {{
+    border: 0px;
+    background-color: {COLOR_BORDER_STRONG};
+    height: 6px;
+    border-radius: 3px;
+}}
+QSlider::groove:vertical {{
+    border: 0px;
+    background-color: {COLOR_BORDER_STRONG};
+    width: 6px;
+    border-radius: 3px;
+}}
+QSlider::handle:horizontal {{
+    background-color: {COLOR_MUTED};
+    border: 0px;
+    width: 14px;
+    margin: -4px 0px;
+    border-radius: 7px;
+}}
+QSlider::handle:vertical {{
+    background-color: {COLOR_MUTED};
+    border: 0px;
+    height: 14px;
+    margin: 0px -4px;
+    border-radius: 7px;
+}}
+QSlider::handle:hover {{
+    background-color: {COLOR_TEXT};
+}}
+QSlider::handle:disabled {{
+    background-color: {COLOR_DISABLED};
+}}
+QSlider::sub-page:horizontal, QSlider::add-page:vertical {{
+    background: {COLOR_ACCENT_DEEP};
+    border-radius: 3px;
+}}
+QRangeSlider {{
+    qproperty-barColor: {COLOR_ACCENT_DEEP};
+}}
 QCheckBox::indicator, QRadioButton::indicator {{
     width: 14px;
     height: 14px;
@@ -994,11 +1040,18 @@ def clear_layout(layout: Any) -> None:
 
     ``deleteLater`` alone defers destruction to the next event-loop pass, during
     which the old widgets still draw over the newly built ones.
+
+    Each widget is hidden explicitly first. Adding a widget to a layout queues a
+    "show unless hidden" for the next event-loop pass; a widget built and then
+    cleared again before that pass (a panel rebuilt for every layer of a DICOM
+    import, the event loop pumped in between) would otherwise come up as a small
+    top-level window of its own, until ``deleteLater`` closed it.
     """
     while layout.count():
         item = layout.takeAt(0)
         widget = item.widget()
         if widget is not None:
+            widget.hide()
             widget.setParent(None)
             widget.deleteLater()
         else:

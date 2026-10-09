@@ -215,15 +215,11 @@ def _flood_step(
     """
     import numpy as np
 
-    from nvitk.core.array import as_backend_array, to_numpy
+    from nvitk.core.array import to_numpy
     from nvitk.segmentation.blood_flood import blood_flood
 
-    labels_in = to_numpy(as_backend_array(
-        labelmap.data if hasattr(labelmap, "data") else labelmap
-    ))
-    image = to_numpy(as_backend_array(
-        intensity.data if hasattr(intensity, "data") else intensity
-    ))
+    labels_in = to_numpy(labelmap.data if hasattr(labelmap, "data") else labelmap)
+    image = to_numpy(intensity.data if hasattr(intensity, "data") else intensity)
     if labels_in.shape != image.shape:
         log.warning(
             "flood: the image is %s and the mask is %s; skipping the step rather than "

@@ -249,28 +249,52 @@ def contrast_window(layer: Any, low: float = 1.0, high: float = 99.0) -> tuple[f
     return lo, hi
 
 
+#: The CT window choice that takes its HU bounds from ``lower`` / ``upper``.
+CT_WINDOW_CUSTOM = "custom"
+
+
 def ct_window_params(viewer: Any) -> tuple[OpParam, ...]:
-    """Preset picker for :func:`ct_window`, seeded from the active layer."""
+    """Preset picker for :func:`ct_window`, seeded from the active layer, plus
+    lower / upper HU for a window typed by hand (seeded from the current limits)."""
     from nvitk.viz.ct_windows import (
         DEFAULT_WINDOW_KEY,
         get_window,
         suggest_window,
+        window_from_limits,
         window_keys,
     )
 
     keys = tuple(window_keys())
     default = DEFAULT_WINDOW_KEY
+    lower, upper = get_window(default).limits
+    layer = _active(viewer)
+    data_range = None
     try:
-        layer = _active(viewer)
         data = layer_data(layer)
+        data_range = (float(np.nanmin(data)), float(np.nanmax(data)))
         suggested = suggest_window(
             str(getattr(layer, "metadata", {}).get("modality", "") or ""),
-            float(np.nanmin(data)),
-            float(np.nanmax(data)),
+            minimum=data_range[0],
+            maximum=data_range[1],
         )
         if suggested:
             default = suggested
+            lower, upper = get_window(default).limits
     except Exception:  # noqa: BLE001 — a suggestion is a convenience, not a gate
+        pass
+    try:
+        # Open on the window the layer shows now: its preset, or Custom with its
+        # bounds — unless it still shows its whole range (nothing chosen yet).
+        limits = getattr(layer, "contrast_limits", None)
+        if limits is not None:
+            lo, hi = (float(v) for v in limits)
+            matched = window_from_limits(lo, hi)
+            whole = data_range is not None and (hi - lo) >= 0.95 * (data_range[1] - data_range[0])
+            if matched is not None:
+                default, lower, upper = matched.key, lo, hi
+            elif not whole:
+                default, lower, upper = CT_WINDOW_CUSTOM, lo, hi
+    except Exception:  # noqa: BLE001
         pass
     return (
         OpParam(
@@ -278,23 +302,35 @@ def ct_window_params(viewer: Any) -> tuple[OpParam, ...]:
             "Window",
             "choice",
             default,
-            choices=tuple((get_window(k).label, k) for k in keys),
-            hint="Hounsfield presets. Changes the display window only, never the data.",
+            choices=(*((get_window(k).label, k) for k in keys), ("Custom (lower / upper HU)", CT_WINDOW_CUSTOM)),
+            hint="Hounsfield presets, or Custom with the lower and upper HU below. "
+                 "Changes the display window only, never the data.",
         ),
+        OpParam("lower", "Lower HU", "float", float(lower), minimum=-3000.0, maximum=5000.0, decimals=0),
+        OpParam("upper", "Upper HU", "float", float(upper), minimum=-3000.0, maximum=5000.0, decimals=0),
         OpParam("apply_all", "Apply to every image layer", "choice", "no",
                 choices=(("no", "no"), ("yes", "yes"))),
     )
 
 
-def ct_window_limits(preset: str) -> tuple[float, float]:
-    """The contrast limits *preset* maps to, for the live preview."""
+def ct_window_limits(preset: str, lower: float | None = None, upper: float | None = None) -> tuple[float, float]:
+    """The contrast limits *preset* maps to (*lower* / *upper* HU for Custom), for the live preview."""
+    if str(preset) == CT_WINDOW_CUSTOM:
+        if lower is None or upper is None:
+            raise ValueError("A custom window needs the lower and the upper HU.")
+        lo, hi = sorted((float(lower), float(upper)))
+        if hi <= lo:
+            raise ValueError("The upper HU must be above the lower HU.")
+        return lo, hi
     from nvitk.viz.ct_windows import limits_for
 
     return tuple(float(v) for v in limits_for(str(preset)))  # type: ignore[return-value]
 
 
-def ct_window(viewer: Any, *, preset: str = "brain", apply_all: str = "no") -> str:
-    """Set the display window to a named CT preset.
+def ct_window(viewer: Any, *, preset: str = "brain", apply_all: str = "no",
+              lower: float | None = None, upper: float | None = None) -> str:
+    """Set the display window to a named CT preset, or to *lower* … *upper* HU
+    (``preset="custom"``).
 
     The same presets the Layers tab's *CT display window* panel offers, reachable
     from the search bar. Like every windowing operation this moves the display
@@ -303,7 +339,7 @@ def ct_window(viewer: Any, *, preset: str = "brain", apply_all: str = "no") -> s
     from nvitk.viz.ct_windows import get_window
 
     layer, _data = _require_array_layer(viewer)
-    lo, hi = ct_window_limits(preset)
+    lo, hi = ct_window_limits(preset, lower, upper)
     targets = (
         [l for l in viewer.layers if l.__class__.__name__ == "Image"]
         if str(apply_all) == "yes"
@@ -315,7 +351,8 @@ def ct_window(viewer: Any, *, preset: str = "brain", apply_all: str = "no") -> s
         except Exception:  # noqa: BLE001 — a layer that will not take a window
             continue
     where = f"{len(targets)} image layer(s)" if len(targets) > 1 else f"“{layer.name}”"
-    return f"{get_window(preset).label} applied to {where}."
+    name = f"Window {lo:g} … {hi:g} HU" if str(preset) == CT_WINDOW_CUSTOM else get_window(preset).label
+    return f"{name} applied to {where}."
 
 
 def reset_contrast(viewer: Any) -> str:
@@ -447,31 +484,49 @@ def crop_bounds(data: np.ndarray, pad: int = 0) -> tuple[np.ndarray, np.ndarray]
 def cropped_spatial(layer: Any, lo: np.ndarray) -> dict[str, Any]:
     """Spatial kwargs placing a crop starting at voxel *lo* back where it came from.
 
-    Cropping moves the origin, so the source affine alone would put the result in
-    the wrong place. Composing it with the offset keeps the crop registered to the
-    volume it came out of — which is what lets the preview be shown in place.
+    Cropping moves the origin, so the source placement alone would put the result
+    in the wrong place: :func:`~nvitk.gui.core.spatial.crop_placement` shifts the
+    affine by the offset, which keeps the crop registered to the volume it came
+    out of — what lets the preview be shown in place, and the export land there.
     """
-    spatial = dict(layer_spatial_kwargs(layer))
-    affine = spatial.get("affine")
-    if affine is None:
-        return spatial
-    offset = np.eye(4, dtype=float)
-    offset[:3, 3] = np.asarray(lo, dtype=float)[:3]
-    spatial["affine"] = np.asarray(affine, dtype=float) @ offset
-    return spatial
+    from nvitk.gui.core.spatial import crop_placement
+
+    return crop_placement(layer, lo)[0]
 
 
 def crop_to_content(viewer: Any, pad: int = 0) -> str:
     """Crop the active layer to the bounding box of its non-zero voxels, in place."""
+    from nvitk.gui.core.spatial import crop_placement
+
     layer, data = _require_array_layer(viewer)
     lo, hi = crop_bounds(data, pad)
     out = data[tuple(slice(int(a), int(b)) for a, b in zip(lo, hi))]
-    kwargs = {"name": f"{getattr(layer, 'name', 'layer')}_crop", **cropped_spatial(layer, lo)}
+    placement, metadata = crop_placement(layer, lo)
+    kwargs = {"name": f"{getattr(layer, 'name', 'layer')}_crop", "metadata": metadata, **placement}
     if _is_labels(layer):
         viewer.add_labels(out.astype(np.int32, copy=False), **kwargs)
     else:
         viewer.add_image(out, **kwargs)
     return f"Cropped “{layer.name}” to {tuple(int(v) for v in out.shape)}."
+
+
+def crop_to_box(viewer: Any, what: str = "layer") -> str:
+    """Crop to the box drawn in the Labeling tab (its Box card): the active layer,
+    or every layer on the box's grid (*what* = ``"grid"``)."""
+    from nvitk.gui.labels.roi_box import crop_layers, roi_box
+
+    box = roi_box(viewer)
+    if not box.active:
+        raise ValueError("No box: draw one in the Labeling tab's Box card first.")
+    if str(what) == "grid":
+        layers = [ly for ly in viewer.layers if box.applies(ly)]
+    else:
+        layer = _active(viewer)
+        if layer is None or not box.applies(layer):
+            raise ValueError("The active layer is not on the box's grid.")
+        layers = [layer]
+    made = crop_layers(viewer, layers, box)
+    return f"Cropped {len(made)} layer(s) to the box: " + ", ".join(ly.name for ly in made) + "."
 
 
 # ── dtype ─────────────────────────────────────────────────────────────────────
@@ -863,11 +918,13 @@ __all__ = [
     "watershed_params",
     "watershed_split",
     "convert_dtype",
+    "CT_WINDOW_CUSTOM",
     "ct_window",
     "ct_window_limits",
     "ct_window_params",
     "contrast_window",
     "crop_bounds",
+    "crop_to_box",
     "cropped_spatial",
     "crop_to_content",
     "gaussian",

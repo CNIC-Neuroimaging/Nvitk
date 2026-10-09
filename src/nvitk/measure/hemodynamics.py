@@ -1070,7 +1070,7 @@ def bifurcation_conservation_error(
     if not math.isfinite(parent) or abs(parent) < 1e-9:
         return float("nan")
     with using("cpu"):
-        branches = to_numpy(as_backend_array(branch_flows_ml_s)).astype(float).reshape(-1)
+        branches = to_numpy(branch_flows_ml_s).astype(float).reshape(-1)
         branches = branches[np.isfinite(branches)]
         if branches.size == 0:
             return float("nan")
@@ -1126,7 +1126,7 @@ def proximal_station_mask(
     array([ True,  True,  True, False])
     """
     with using("cpu"):
-        values = to_numpy(as_backend_array(distance_mm)).astype(float).reshape(-1)
+        values = to_numpy(distance_mm).astype(float).reshape(-1)
         keep_all = np.ones(values.shape, dtype=bool)
         window = float(window_mm)
         if not math.isfinite(window) or window <= 0.0:
@@ -1156,7 +1156,7 @@ def segment_flow_consistency_cv(flow_per_cycle_stations: Any) -> float:
     Returns ``NaN`` for fewer than three stations or a mean of ~0, where a CV means nothing.
     """
     with using("cpu"):
-        values = to_numpy(as_backend_array(flow_per_cycle_stations)).astype(float).reshape(-1)
+        values = to_numpy(flow_per_cycle_stations).astype(float).reshape(-1)
         values = values[np.isfinite(values)]
         if values.size < 3:
             return float("nan")
@@ -1227,8 +1227,8 @@ def junction_consistency_regression(
     with using("cpu"):
         from scipy import stats as _stats
 
-        x = to_numpy(as_backend_array(inlet_flows)).astype(float).reshape(-1)
-        y = to_numpy(as_backend_array(outlet_flows)).astype(float).reshape(-1)
+        x = to_numpy(inlet_flows).astype(float).reshape(-1)
+        y = to_numpy(outlet_flows).astype(float).reshape(-1)
         if x.size != y.size:
             raise ValueError(
                 f"Inlet and outlet flows must be paired: got {x.size} and {y.size} values."
@@ -1271,7 +1271,7 @@ def percent_variation_from_mean(station_flows: Any) -> np.ndarray:
     empty array, since a percentage of nothing is undefined.
     """
     with using("cpu"):
-        values = to_numpy(as_backend_array(station_flows)).astype(float).reshape(-1)
+        values = to_numpy(station_flows).astype(float).reshape(-1)
         values = values[np.isfinite(values)]
         if values.size == 0:
             return np.zeros(0, dtype=float)
@@ -1309,7 +1309,7 @@ def gaussian_mvue_fit(values: Any, *, confidence: float = 0.95) -> dict[str, flo
     with using("cpu"):
         from scipy import stats as _stats
 
-        x = to_numpy(as_backend_array(values)).astype(float).reshape(-1)
+        x = to_numpy(values).astype(float).reshape(-1)
         x = x[np.isfinite(x)]
         n = int(x.size)
         if n < 2:

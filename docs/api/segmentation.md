@@ -8,7 +8,8 @@ lightweight in-process algorithms to external-tool wrappers.
 | Module | Purpose |
 |---|---|
 | `labels` | Generic label-map manipulation (relabel, merge, select). |
-| `mask_ops` | Boolean algebra over masks (union, intersection, keep-inside/outside). |
+| `interactive` | Region growing for manual segmentation (the Labeling tab's tools): `GrowSession` (an image prepared once — smoothed, on the backend — for the magic wand, the adaptive confidence-connected flood and the Frangi vesselness flood from seeds), `trace_vessel_path` (minimal path through the vesselness between clicked points), `path_radii` / `tube_from_path` (a tube around it, its radius measured from the lumen), `adaptive_brush_keep` (the smart brush's Otsu / tolerance split). |
+| `mask_ops` | Boolean algebra over masks (union, intersection, subtract, xor, complement), and keeping or removing an image's voxels by a mask's labels (`apply_mask_to_image`: fill with a value, the image minimum or NaN; margin in mm; 3D mask over 3D+t images). |
 | `region_growing` | Seeded region growing. |
 | `blood_flood` | Flood-fill style vessel/blood-pool segmentation. |
 | `hull_edt` | Convex-hull / Euclidean-distance-transform based segmentation helpers. |

@@ -12,6 +12,11 @@ layer's vocabulary — the one picked for it in a label picker, else the one
 guessed from its name, path and contents (:func:`~nvitk.gui.labels.catalog.layer_schema_key`).
 
 * click a line — show or hide that label; Alt+click — show only that label;
+* double-click a line — rename the label in place (Enter keeps, Esc cancels; an
+  empty name brings the vocabulary's back) — names given by hand are kept in the
+  layer's metadata (:func:`~nvitk.gui.labels.catalog.set_label_name`);
+* right-click a line — rename, colour, show only / all, go to the label, edit it
+  in the Labeling tab, or delete it (Ctrl+Z restores it on a Labels layer);
 * click the colour dot — change the label's colour (Labels layers);
 * **All** / **None** in the header; **Panel** opens the full Labels panel on the
   layer (filter box, vocabulary, colormaps);
@@ -24,14 +29,21 @@ the layer's live filter (:func:`~nvitk.gui.labels.selector.label_filter_hub`).
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import numpy as np
-from qtpy.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer
+from qtpy.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from qtpy.QtGui import QColor, QFontMetrics, QIcon, QPainter, QPainterPath, QPen
-from qtpy.QtWidgets import QApplication, QColorDialog, QStyle, QStyleOptionViewItem, QToolTip
+from qtpy.QtWidgets import QApplication, QColorDialog, QLineEdit, QStyle, QStyleOptionViewItem, QToolTip
 
-from nvitk.gui.labels.catalog import get_schema, layer_schema_key
+from nvitk.gui.labels.catalog import (
+    custom_label_names,
+    get_schema,
+    label_name,
+    layer_schema_key,
+    set_label_name,
+)
 from nvitk.gui.labels.panel import _known_label_like
 from nvitk.gui.labels.selector import label_filter_hub, set_layer_visible_ids
 from nvitk.gui.labels.visibility import (
@@ -82,6 +94,25 @@ def _label_colour(layer: Any, lid: int) -> QColor:
         return QColor(200, 200, 200)
 
 
+class _NameEditor(QLineEdit):
+    """The inline label-name editor: Esc cancels (Enter or leaving it keeps the text)."""
+
+    cancelled = Signal()
+
+    def keyPressEvent(self, event: Any) -> None:  # noqa: N802 - Qt naming
+        if event.key() == Qt.Key.Key_Escape:
+            self.cancelled.emit()
+            return
+        super().keyPressEvent(event)
+
+
+def _global_pos(event: Any) -> QPoint:
+    """Screen position of a mouse *event* (Qt 5 and 6)."""
+    if hasattr(event, "globalPosition"):
+        return event.globalPosition().toPoint()
+    return event.globalPos()
+
+
 class _Expansion:
     """Per-layer state of an unfolded row."""
 
@@ -104,10 +135,21 @@ def _delegate_class() -> type:
             super().__init__(parent)
             self._viewer = viewer
             self._expanded: dict[int, _Expansion] = {}
+            #: The label a click last showed/hid, ``(layer id, label, visible before)``,
+            #: and whether the release ending a double-click is still to come.
+            self._last_toggle: tuple[int, int, Any] | None = None
+            #: Until when a left release belongs to a double-click just handled. A
+            #: time rather than a flag: Qt does not always deliver that release.
+            self._swallow_until = 0.0
+            #: The inline name editor, while one is open.
+            self._name_editor: Any | None = None
             #: Folder state of the layer list (:mod:`nvitk.gui.core.layer_folders`),
             #: once folders are installed: headers above rows, members indented.
             self._folders: Any | None = None
-            label_filter_hub().changed.connect(lambda _layer: self._repaint())
+            hub = label_filter_hub()
+            hub.changed.connect(lambda _layer: self._repaint())
+            hub.names_changed.connect(lambda _layer: self._repaint())
+            hub.labels_changed.connect(lambda layer: self._relayout(layer) if self.is_expanded(layer) else None)
 
         # -- folders ----------------------------------------------------------
         #
@@ -315,15 +357,23 @@ def _delegate_class() -> type:
             style.drawPrimitive(QStyle.PrimitiveElement.PE_PanelItemViewItem, full, painter, widget)
 
             # Napari paints the item itself in the top part, narrowed by the chip.
+            super().paint(painter, self._item_option(option, index), index)
+            self._paint_chip(painter, option, index, expanded)
+            if expanded:
+                self._paint_labels(painter, option, index, layer)
+
+        def _item_option(self, option: QStyleOptionViewItem, index: Any) -> QStyleOptionViewItem:
+            """*option* cut down to where Napari's item is drawn on a chip row: the
+            top part, left of the chip. Events forwarded to Napari's delegate get
+            this rect too — Qt hit-tests the visibility box against the rect it is
+            given, and on an unfolded (taller) row the full rect put the box's hit
+            area mid-row, below the eye actually drawn, so the eye did nothing."""
             top = QStyleOptionViewItem(option)
             top.rect = QRect(
                 option.rect.left(), option.rect.top(),
                 option.rect.width() - (_CHIP_W + _CHIP_GAP), self._base_height(index),
             )
-            super().paint(painter, top, index)
-            self._paint_chip(painter, option, index, expanded)
-            if expanded:
-                self._paint_labels(painter, option, index, layer)
+            return top
 
         def _paint_chip(self, painter: QPainter, option: QStyleOptionViewItem, index: Any, expanded: bool) -> None:
             rect = self._chip_rect(option.rect, index)
@@ -377,6 +427,7 @@ def _delegate_class() -> type:
                 painter.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), name)
 
             visible = stored_visible_ids(layer)
+            custom = custom_label_names(layer)
             for lid, line, check, swatch, text_rect in geo["lines"]:
                 shown = visible is None or lid in visible
                 # Show/hide box.
@@ -399,7 +450,7 @@ def _delegate_class() -> type:
                 painter.setBrush(colour)
                 painter.drawEllipse(swatch)
                 # Name.
-                name = schema.name_for(lid) if schema else None
+                name = custom.get(lid) or (schema.name_for(lid) if schema else None)
                 label = f"{name}  ({lid})" if name else f"Label {lid}"
                 painter.setPen(text if shown else muted)
                 painter.drawText(
@@ -424,22 +475,42 @@ def _delegate_class() -> type:
             kind = event.type()
             mouse = (event.MouseButtonPress, event.MouseButtonRelease, event.MouseButtonDblClick)
             if kind not in mouse:
-                return super().editorEvent(event, model, option, index)
+                return super().editorEvent(event, model, self._item_option(option, index), index)
             pos = event.pos()
             layer = self._layer(index)
             on_chip = self._chip_rect(option.rect, index).contains(pos)
             in_panel = self.is_expanded(layer) and self._panel_rect(option.rect, index).contains(pos)
             if not (on_chip or in_panel):
-                return super().editorEvent(event, model, option, index)
+                return super().editorEvent(event, model, self._item_option(option, index), index)
             # Clicks here belong to the chip or the label list: not a selection
-            # change, a drag or a rename.
-            if kind == event.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
-                if on_chip:
+            # change, a drag or a rename of the layer.
+            button = event.button()
+            if kind == event.MouseButtonDblClick and in_panel and button == Qt.MouseButton.LeftButton:
+                lid = self._line_at(layer, option.rect, index, pos)
+                if lid is not None:
+                    self._rename_from_double_click(layer, lid)
+                return True
+            if kind == event.MouseButtonRelease and button == Qt.MouseButton.LeftButton:
+                if time.monotonic() < self._swallow_until:
+                    # The release that ends a double-click: the rename has it.
+                    self._swallow_until = 0.0
+                elif on_chip:
                     self.toggle(layer, index)
                 else:
                     alt = bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
                     self._click_panel(layer, option.rect, index, pos, alt=alt)
+            elif kind == event.MouseButtonRelease and button == Qt.MouseButton.RightButton and in_panel:
+                lid = self._line_at(layer, option.rect, index, pos)
+                if lid is not None:
+                    self._label_menu(layer, lid, _global_pos(event))
             return True
+
+        def _line_at(self, layer: Any, rect: QRect, index: Any, pos: QPoint) -> int | None:
+            """The label whose line is under *pos*, if any."""
+            for lid, line, _check, _swatch, _text in self._layout(rect, index)["lines"]:
+                if line.contains(pos):
+                    return lid
+            return None
 
         def _click_panel(self, layer: Any, rect: QRect, index: Any, pos: QPoint, *, alt: bool) -> None:
             geo = self._layout(rect, index)
@@ -460,6 +531,9 @@ def _delegate_class() -> type:
                     self._edit_colour(layer, lid)
                     return
                 visible = stored_visible_ids(layer)
+                # A double-click opens the rename: its first click must not leave
+                # the label hidden, so what this click changes is remembered.
+                self._last_toggle = (id(layer), lid, visible)
                 current = set(ids) if visible is None else set(visible)
                 if alt:
                     # Like Napari's Alt+click on a layer's eye: this one alone,
@@ -469,6 +543,155 @@ def _delegate_class() -> type:
                     new = current ^ {lid}
                 set_layer_visible_ids(layer, sorted(new), self._viewer, present=ids)
                 return
+
+        # -- rename -------------------------------------------------------------
+
+        def _rename_from_double_click(self, layer: Any, lid: int) -> None:
+            """Undo the show/hide the double-click's first click made, then rename."""
+            last = self._last_toggle
+            if last is not None and last[0] == id(layer) and last[1] == lid:
+                ids = self._ids(layer)
+                before = last[2]
+                set_layer_visible_ids(layer, ids if before is None else list(before), self._viewer, present=ids)
+            self._last_toggle = None
+            self._swallow_until = time.monotonic() + QApplication.doubleClickInterval() / 1000.0
+            # Once the double-click is over: the editor must get the focus after it.
+            QTimer.singleShot(0, lambda: self.start_rename(layer, lid))
+
+        def start_rename(self, layer: Any, lid: int) -> bool:
+            """Open an inline editor over *lid*'s name; Enter keeps it, Esc cancels.
+
+            An empty name drops the hand-given one (the vocabulary's shows again).
+            False when the label's line is not on screen.
+            """
+            self._close_name_editor(commit=True)
+            view = self.parent()
+            index = self._index_of(layer)
+            if view is None or index is None or not self.is_expanded(layer):
+                return False
+            rect = self.inner_rect(view.visualRect(index), index)
+            target = next((text for l_id, _line, _c, _s, text in self._layout(rect, index)["lines"] if l_id == lid), None)
+            if target is None:
+                return False
+            editor = _NameEditor(view.viewport())
+            editor.setText(custom_label_names(layer).get(lid) or label_name(layer, lid) or "")
+            editor.setPlaceholderText(f"Name for label {lid} (empty: default)")
+            editor.selectAll()
+            editor.setGeometry(target.adjusted(-2, 1, 0, -1))
+            editor._nvitk_target = (layer, lid)
+            editor.cancelled.connect(lambda: self._close_name_editor(commit=False))
+            editor.editingFinished.connect(lambda: self._close_name_editor(commit=True))
+            self._name_editor = editor
+            try:
+                view.verticalScrollBar().valueChanged.connect(self._commit_on_scroll)
+            except Exception:  # noqa: BLE001
+                pass
+            editor.show()
+            editor.setFocus()
+            return True
+
+        def _commit_on_scroll(self, _value: int = 0) -> None:
+            self._close_name_editor(commit=True)
+
+        def _close_name_editor(self, *, commit: bool) -> None:
+            editor = self._name_editor
+            if editor is None:
+                return
+            self._name_editor = None
+            try:
+                self.parent().verticalScrollBar().valueChanged.disconnect(self._commit_on_scroll)
+            except Exception:  # noqa: BLE001
+                pass
+            layer, lid = editor._nvitk_target
+            text = editor.text()
+            editor.hide()
+            editor.deleteLater()
+            if commit:
+                self.rename(layer, lid, text)
+
+        def rename(self, layer: Any, lid: int, name: str | None) -> None:
+            """Name *lid* on *layer* (empty: back to the vocabulary's) and tell the pickers."""
+            try:
+                vocabulary = label_name(layer, lid) if not custom_label_names(layer).get(lid) else None
+            except Exception:  # noqa: BLE001
+                vocabulary = None
+            text = str(name or "").strip()
+            # Typing the vocabulary's own name back is not a name given by hand.
+            if vocabulary and text == vocabulary:
+                return
+            if set_label_name(layer, lid, text):
+                label_filter_hub().names_changed.emit(layer)
+                self._repaint()
+
+        # -- right-click menu ---------------------------------------------------
+
+        def _label_menu(self, layer: Any, lid: int, global_pos: QPoint) -> None:
+            """Rename, recolour, show/hide, find, edit or delete one label."""
+            from qtpy.QtWidgets import QMenu
+
+            ids = self._ids(layer)
+            name = label_name(layer, lid)
+            title = f"{name} ({lid})" if name else f"Label {lid}"
+            menu = QMenu(self.parent())
+            head = menu.addAction(title)
+            head.setEnabled(False)
+            menu.addSeparator()
+            menu.addAction("Rename…", lambda: self.start_rename(layer, lid))
+            if supports_per_label_color(layer):
+                menu.addAction("Change colour…", lambda: self._edit_colour(layer, lid))
+            menu.addAction("Show only this", lambda: set_layer_visible_ids(layer, [lid], self._viewer, present=ids))
+            menu.addAction("Show all", lambda: set_layer_visible_ids(layer, ids, self._viewer, present=ids))
+            menu.addAction("Go to label", lambda: self._go_to(layer, lid))
+            if getattr(self._viewer, "_nvitk_labeling_panel", None) is not None:
+                menu.addAction("Edit in the Labeling tab", lambda: self._edit_in_labeling(layer, lid))
+            menu.addSeparator()
+            menu.addAction(f"Delete label {lid}", lambda: self.delete(layer, lid))
+            menu.exec(global_pos)
+
+        def _go_to(self, layer: Any, lid: int) -> None:
+            from nvitk.gui.labels.editing import go_to_label
+
+            try:
+                go_to_label(self._viewer, layer, lid)
+            except Exception as exc:  # noqa: BLE001
+                self._status(f"Could not go to label {lid}: {exc}")
+
+        def _edit_in_labeling(self, layer: Any, lid: int) -> None:
+            panel = getattr(self._viewer, "_nvitk_labeling_panel", None)
+            if panel is not None:
+                panel.edit(layer, lid)
+
+        def delete(self, layer: Any, lid: int, *, confirm: bool = True) -> int:
+            """Clear label *lid* from *layer*. A Labels layer can take it back with
+            Ctrl+Z; an Image mask cannot, so it is confirmed first."""
+            from nvitk.gui.labels.editing import delete_label, is_labels
+
+            if confirm and not is_labels(layer):
+                from qtpy.QtWidgets import QMessageBox
+
+                answer = QMessageBox.question(
+                    self.parent(), "Delete label",
+                    f"Clear label {lid} from “{layer.name}”?\n\nThis layer is an image mask, "
+                    "which has no undo (convert it to a Labels layer to edit with undo).",
+                )
+                if answer != QMessageBox.StandardButton.Yes:
+                    return 0
+            try:
+                count = delete_label(layer, lid)
+            except Exception as exc:  # noqa: BLE001 — a read-only or multiscale layer
+                self._status(f"Could not delete label {lid}: {exc}")
+                return 0
+            label_filter_hub().labels_changed.emit(layer)
+            self._relayout(layer)
+            undo = " — Ctrl+Z to undo" if is_labels(layer) else ""
+            self._status(f"Deleted label {lid} from “{layer.name}” ({count:,} voxels){undo}")
+            return count
+
+        def _status(self, text: str) -> None:
+            try:
+                self._viewer.status = text
+            except Exception:  # noqa: BLE001
+                pass
 
         def _edit_colour(self, layer: Any, lid: int) -> None:
             current = _label_colour(layer, lid)
@@ -512,17 +735,17 @@ def _delegate_class() -> type:
                             }[name]
                     for lid, line, _check, swatch, _text in geo["lines"]:
                         if line.contains(pos):
-                            key = layer_schema_key(layer)
-                            schema = get_schema(key) if key else None
-                            name = (schema.name_for(lid) if schema else None) or f"Label {lid}"
+                            name = label_name(layer, lid) or f"Label {lid}"
                             tip = (
                                 f"{name} ({lid}) — click to change its colour"
                                 if swatch.contains(pos) and supports_per_label_color(layer)
-                                else f"{name} ({lid}) — click to show/hide, Alt+click to show only this"
+                                else f"{name} ({lid}) — click to show/hide, Alt+click to show only this, "
+                                "double-click to rename, right-click for more (delete…)"
                             )
                 if tip:
                     QToolTip.showText(event.globalPos(), tip, view)
                     return True
+                return super().helpEvent(event, view, self._item_option(option, index), index)
             return super().helpEvent(event, view, option, index)
 
         def toggle(self, layer: Any, index: Any = None) -> bool:
@@ -655,6 +878,10 @@ def install_layer_list_label_buttons(viewer: Any) -> Any | None:
         events = getattr(layer, "events", None)
         if events is None:
             return
+        # Undo / Redo included: Napari announces neither by itself.
+        from nvitk.gui.labels.editing import announce_history_loads
+
+        announce_history_loads(layer)
 
         def _on_data(_event: Any = None) -> None:
             if delegate.is_expanded(layer) and layer_in_viewer(layer, viewer):
@@ -664,7 +891,7 @@ def install_layer_list_label_buttons(viewer: Any) -> Any | None:
             if delegate.is_expanded(layer):
                 delegate._repaint()
 
-        for name, slot in (("data", _on_data), ("colormap", _on_look), ("contrast_limits", _on_look)):
+        for name, slot in (("data", _on_data), ("paint", _on_data), ("colormap", _on_look), ("contrast_limits", _on_look)):
             emitter = getattr(events, name, None)
             if emitter is not None:
                 emitter.connect(slot)

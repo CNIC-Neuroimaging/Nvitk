@@ -140,9 +140,12 @@ def _scrollable_tab(widget: Any) -> Any:
 
 def run_app() -> None:
     """Build and launch the nvitk Napari GUI: creates the viewer, installs nvitk's I/O hooks, and
-    assembles the Imaging (tools)/Labels/Meshlab/Data/QC/Statmodels/Layers/Export/Pipeline panel docks."""
+    assembles the Imaging (tools)/Labels/Meshlab/Data/Labeling/QC/Statmodels/Layers/Export/Pipeline panel docks."""
     install_napari_display_warnings()
     install_notification_timeout()
+    from nvitk.gui.core.napari_fixes import install_napari_fixes
+
+    install_napari_fixes()
     import napari
     from magicgui import magicgui
     from qtpy.QtWidgets import (
@@ -490,11 +493,13 @@ def run_app() -> None:
     export_layout.addStretch(1)
     export_tab.setLayout(export_layout)
 
+    from nvitk.gui.labels.labeling import build_labeling_panel
     from nvitk.gui.mesh.panel import build_mesh_panel
     from nvitk.gui.panels.dicom_browser import build_dicom_browser
 
     mesh_panel = build_mesh_panel(viewer)
     dicom_browser = build_dicom_browser(viewer)
+    labeling_panel = build_labeling_panel(viewer)
 
     # One dock per panel rather than tabs in a single dock, so each can be popped
     # out, moved to the workspace window, or split beside another. Tabbed
@@ -521,6 +526,9 @@ def run_app() -> None:
     dicom_dock = _panel_dock(dicom_tags_panel, "dicom_tags", "DICOM tags")
     dicom_browser_dock = _panel_dock(dicom_browser, "dicom_browser", "DICOM browser")
     mesh_dock = _panel_dock(mesh_panel, "mesh", "Meshlab")
+    data_dock = _panel_dock(xnat_panel, "data", data_tab_label)
+    labeling_dock = _panel_dock(labeling_panel, "labeling", "Labeling")
+    viewer._nvitk_labeling_dock = labeling_dock
     panel_docks = [
         tools_dock,
         labels_dock,
@@ -528,7 +536,8 @@ def run_app() -> None:
         image_props_dock,
         dicom_dock,
         dicom_browser_dock,
-        _panel_dock(xnat_panel, "data", data_tab_label),
+        data_dock,
+        labeling_dock,
         _panel_dock(qc_panel, "qc", "QC"),
         _panel_dock(statmodels_panel, "statmodels", "Statmodels"),
         _panel_dock(export_tab, "export", "Export"),
@@ -610,11 +619,14 @@ def run_app() -> None:
         else:
             # A saved layout keeps its own tab order: tabs added or moved since it
             # was saved are put in place once. Version 3 moved the Meshlab tab next
-            # to Labels; version 4 added the DICOM browser after DICOM tags.
+            # to Labels; version 4 added the DICOM browser after DICOM tags; version
+            # 5 added Labeling just before QC (after the Data tab).
             if stored_version < 3:
                 _move_tab_after(qt_main, labels_dock, mesh_dock)
             if stored_version < 4:
                 _move_tab_after(qt_main, dicom_dock, dicom_browser_dock)
+            if stored_version < 5:
+                _move_tab_after(qt_main, data_dock, labeling_dock)
     except Exception:  # noqa: BLE001 — a stored layout must not block a launch
         pass
     if panel_manager is not None:

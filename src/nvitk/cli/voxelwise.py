@@ -5,7 +5,7 @@ from __future__ import annotations
 import shlex
 import sys
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Sequence
 
 import click
 
@@ -168,28 +168,26 @@ def _resolve_selection(**kw) -> tuple[list, int, int]:
 
 
 def _upload_inputs(
-    images: Sequence[Any],
-    mask_path: Path | None,
-    exclude_csv: Path | None,
+    pairs: Sequence[tuple[Path, str]],
     *,
+    refresh: Sequence[tuple[Path, str]] = (),
     remote_inputs: str,
     host: str,
     user: str,
     password: str,
 ) -> None:
-    """Send the selected volumes, the mask and the exclusion list to ``{out}/inputs/``."""
+    """Send ``(local, remote)`` *pairs* and *refresh* to ``{out}/inputs/``.
+
+    *pairs* skip a remote file of the same size — what makes re-running a cohort cheap. *refresh*
+    is always sent: it holds the small files uploaded under fixed names (``design.mat``,
+    ``mask_input…``, ``exclude.csv``), where a different file of the same size is not just
+    possible but likely — two designs over the same subjects differ in values, not in length.
+    """
     from nvitk.cluster.remote_transfer import cluster_session, upload_files
 
-    pairs: list[tuple[Path, str]] = [
-        (im.path, f"{remote_inputs}/{im.path.name}") for im in images
-    ]
-    if mask_path is not None:
-        pairs.append((mask_path.resolve(), f"{remote_inputs}/{CONTAINER_MASK_NAME}"))
-    if exclude_csv is not None:
-        pairs.append((exclude_csv.resolve(), f"{remote_inputs}/{CONTAINER_EXCLUDE_NAME}"))
-
-    total_mb = sum(p.stat().st_size for p, _ in pairs) / 1e6
-    log.info(f"Uploading {len(pairs)} file(s), {total_mb:.0f} MB → {remote_inputs}")
+    every = [*pairs, *refresh]
+    total_mb = sum(Path(p).stat().st_size for p, _ in every) / 1e6
+    log.info(f"Uploading {len(every)} file(s), {total_mb:.0f} MB → {remote_inputs}")
 
     def report(done: int, total: int) -> None:
         """Log every 10% so a long transfer visibly advances."""
@@ -199,29 +197,52 @@ def _upload_inputs(
 
     with cluster_session(host=host, user=user, password=password) as session:
         uploaded, skipped = upload_files(session, pairs, on_progress=report)
+        if refresh:
+            sent, _ = upload_files(session, refresh, skip_existing=False)
+            uploaded += sent
     log.info(f"Upload complete: {uploaded} sent, {skipped} already present")
+
+
+#: Slots requested for ``--parallel --submit sge`` when neither ``--jobs`` nor ``sge.json``
+#: (``pipelines.voxelwise.sge_pe_smp``) says otherwise. Inside the job the fragments run on exactly
+#: these, through ``NSLOTS``.
+DEFAULT_SGE_SLOTS = 4
+
+
+def _parallel_slots(parallel: bool, jobs: int | None) -> int | None:
+    """``-pe smp`` slots for a cluster run: ``None`` unless ``--parallel``."""
+    if not parallel:
+        return None
+    if jobs:
+        return int(jobs)
+    configured = _sge_settings().get("sge_pe_smp")
+    return int(configured) if configured else DEFAULT_SGE_SLOTS
 
 
 def _submit_sge(
     *,
     argv: list[str],
-    image_dir: Path,
     out_dir: Path,
     job_name: str,
     emit_script: Path | None,
     dry_run: bool,
     no_remote: bool = False,
-    from_source: str = "local",
-    exclude_csv: Path | None = None,
-    mask_path: Path | None = None,
-    selection: Sequence[Any] | None = None,
+    uploads: Sequence[tuple[Path, str]] = (),
+    refresh: Sequence[tuple[Path, str]] = (),
+    extra_binds: Sequence[tuple[Path, str]] = (),
+    slots: int | None = None,
     remote_host: str | None = None,
     remote_user: str | None = None,
 ) -> None:
     """Upload what the analysis needs, publish a driver script, and run it on the login node.
 
     The worker re-enters this same CLI on the cluster, so there is exactly one implementation of
-    the analysis and the SGE path cannot drift from the local one.
+    the analysis and the SGE path cannot drift from the local one. What to upload (*uploads*,
+    *refresh*, into ``<out>/inputs/``) and what to mount (*extra_binds*) is the caller's: ``run``
+    sends images, ``randomise`` a stack and its design.
+
+    *slots* requests ``-pe smp`` for ``--parallel``: the worker's ``randomise_parallel`` runs its
+    fragments inside this one job, on the slots SGE granted (``NSLOTS``).
 
     ``qsub`` does not exist on a workstation, so this never shells out to it directly: the script
     is written locally, published over sshfs, and executed over SSH — the same six steps the qvtpy and
@@ -244,28 +265,19 @@ def _submit_sge(
     pipe = _sge_settings()
     paths_section = sj.paths_section()
     binds = SingularityBinds()
-    local_source = str(from_source).strip().lower() != "sge"
 
-    # -o is always a cluster-visible root under --submit sge, so it is used verbatim; only the
-    # images move, and they move into it.
+    # -o is always a cluster-visible root under --submit sge, so it is used verbatim; uploaded
+    # inputs move into it.
     cluster_results = str(out_dir).rstrip("/")
     remote_inputs = f"{cluster_results}/{INPUTS_SUBDIR}"
-    cluster_images = remote_inputs if local_source else str(image_dir).rstrip("/")
 
     extra_env = {"PYTHONPATH": binds.src, "FSLOUTPUTTYPE": "NIFTI_GZ"}
-    extra_binds: list[tuple[Path, str]] = [(Path(cluster_images), CONTAINER_IMAGES)]
-    if not local_source:
-        # The inputs already live on the cluster and are not being copied, so the mask and the
-        # exclusion list keep their own paths and need their own mounts.
-        if mask_path is not None:
-            extra_binds.append((Path(mask_path), CONTAINER_MASK))
-        if exclude_csv is not None:
-            extra_binds.append((Path(exclude_csv), CONTAINER_EXCLUDE_CSV))
+    mounts: list[tuple[Path, str]] = list(extra_binds)
     dataset_root = configured_sge_dataset_root()
     if dataset_root is not None:
         extra_env["NVITK_SGE"] = "1"
         extra_env["NVITK_DATASET_ROOT"] = str(dataset_root)
-        extra_binds.append((dataset_root, str(dataset_root)))
+        mounts.append((dataset_root, str(dataset_root)))
 
     resources = SgeResources(
         project=str(pipe.get("sge_project") or "MCC"),
@@ -273,6 +285,7 @@ def _submit_sge(
         ngpu=int(pipe.get("sge_ngpu") or 0),
         h_vmem=str(pipe.get("sge_h_vmem") or "40G"),
         queue=str(pipe.get("sge_queue")) if pipe.get("sge_queue") else None,
+        pe_smp=int(slots) if slots else None,
     )
     log_dir, err_dir = sj.resolve_log_err_dirs(
         paths=paths_section,
@@ -297,7 +310,7 @@ def _submit_sge(
         # randomise is CPU-only; --nv would ask the scheduler for a device it never touches.
         use_nv=False,
         extra_env=extra_env,
-        extra_host_binds=tuple(extra_binds),
+        extra_host_binds=tuple(mounts),
     )
 
     # This host's FSL says nothing about the container the job runs in, so the note is
@@ -314,11 +327,9 @@ def _submit_sge(
 
     if dry_run:
         submit_stage(spec, cluster_paths, dry_run=True)
-        if local_source and selection is not None:
+        if uploads or refresh:
             click.echo(
-                f"(dry run) would upload {len(selection)} image(s)"
-                + (" + mask" if mask_path else "")
-                + f" → {remote_inputs}"
+                f"(dry run) would upload {len(uploads) + len(refresh)} file(s) → {remote_inputs}"
             )
         click.echo("(dry run — nothing uploaded, nothing submitted)")
         return
@@ -329,17 +340,13 @@ def _submit_sge(
         host, user, password = _ssh_credentials(remote_host, remote_user)
         _verify_ssh(host, user, password)
 
-    if local_source:
-        if selection is None:
-            raise click.ClickException(
-                "--from-source local needs the resolved image list; this is a bug in the caller."
-            )
+    if uploads or refresh:
         _upload_inputs(
-            selection, mask_path, exclude_csv,
+            uploads, refresh=refresh,
             remote_inputs=remote_inputs, host=host, user=user, password=password,
         )
     else:
-        log.info(f"--from-source sge: using {cluster_images} in place, uploading nothing")
+        log.info("--from-source sge: inputs used in place on the cluster, uploading nothing")
 
     local_script, remote_script = resolve_sge_script_paths(
         emit_script,
@@ -480,6 +487,60 @@ def design_options(f):
     return f
 
 
+def randomise_options(f):
+    """Attach the ``randomise`` options shared by ``run`` and ``randomise``."""
+    f = click.option("--n-perm", type=int, default=5000, show_default=True, help="Permutations.")(f)
+    f = click.option("--tfce/--no-tfce", default=True, show_default=True,
+                     help="Threshold-free cluster enhancement.")(f)
+    f = click.option("--vox-corrp/--no-vox-corrp", "voxelwise_corrp", default=True,
+                     show_default=True,
+                     help="Also write voxelwise FWE-corrected p-maps (randomise -x).")(f)
+    f = click.option("--uncorrp/--no-uncorrp", "uncorrected_p", default=True, show_default=True,
+                     help="Also write uncorrected p-maps. Paired rather than a bare flag: on by "
+                          "default, it needs a way to be switched off.")(f)
+    f = click.option("--parallel", is_flag=True, default=False,
+                     help="Use randomise_parallel: split the permutations into fragments run "
+                          "side by side on this machine (or on the job's slots on the cluster).")(f)
+    f = click.option("--jobs", type=click.IntRange(min=0), default=None,
+                     help="Fragments run at once with --parallel. Default: $FSLSUB_PARALLEL if "
+                          "set, else as many as the cores and free memory allow (each fragment "
+                          "holds the whole 4D stack). With --submit sge, the -pe smp slots "
+                          "requested [default: sge.json sge_pe_smp, else 4].")(f)
+    f = click.option("--seed", type=int, default=None,
+                     help="Permutation seed (reproducible runs). randomise_parallel seeds its "
+                          "fragments itself.")(f)
+    f = click.option("--out-name", default="randomise", show_default=True,
+                     help="Output file-root name inside the results folder.")(f)
+    return f
+
+
+def submission_options(source_help: str):
+    """Attach the ``--submit`` / cluster options; *source_help* describes ``--from-source``."""
+
+    def decorate(f):
+        """Apply the options to *f*."""
+        f = click.option("--submit", type=click.Choice(["local", "sge"], case_sensitive=False),
+                         default="local", show_default=True)(f)
+        f = click.option("--emit-script", type=click.Path(path_type=Path), default=None,
+                         help="Write the qsub driver script instead of submitting.")(f)
+        f = click.option("--dry-run", is_flag=True, default=False,
+                         help="With --submit sge, print the job without uploading or "
+                              "submitting it.")(f)
+        f = click.option("--from-source", type=click.Choice(["local", "sge"], case_sensitive=False),
+                         default="local", show_default=True, help=source_help)(f)
+        f = click.option("--no-remote", is_flag=True, default=False,
+                         help="Upload and publish the driver script, but do not run it — print "
+                              "the bash line to run on the login node yourself.")(f)
+        f = click.option("--remote-host", default=None,
+                         help="SSH host (or an alias from sge.json). Overridden by "
+                              "NVITK_SGE_SSH_HOST.")(f)
+        f = click.option("--remote-user", default=None,
+                         help="SSH user. Overridden by NVITK_SGE_SSH_USER.")(f)
+        return f
+
+    return decorate
+
+
 def friendly_errors(f):
     """Turn the resolvers' ``ValueError``/``FileNotFoundError`` into a clean Click error.
 
@@ -509,6 +570,9 @@ def main() -> None:
     Stack a cohort's spatially normalised images into one 4D volume and fit the same GLM at every
     voxel, with permutation-based family-wise-error correction. The images and the design matrix
     are independent: images come from a directory, the design from database measurements.
+
+    `randomise` skips all of that and runs on a 4D stack and design.mat / .con / .fts built
+    elsewhere.
     """
 
 
@@ -704,10 +768,11 @@ def cmd_report(results_dir: Path, threshold: float) -> None:
     manifest = result.manifest
     click.echo(click.style(f"{result.out_root.name}", bold=True))
     if manifest:
+        evs = ", ".join(manifest.get("evs", [])) or f"{len(manifest.get('columns', []))} column(s)"
         click.echo(
             f"  {manifest.get('n_subjects', '?')} subject(s) · "
             f"{manifest.get('n_perm', '?')} permutation(s) · "
-            f"EVs {', '.join(manifest.get('evs', []))} · FSL {manifest.get('fsl_version', '?')}"
+            f"EVs {evs} · FSL {manifest.get('fsl_version', '?')}"
         )
         if manifest.get("cohort"):
             click.echo(
@@ -715,14 +780,19 @@ def cmd_report(results_dir: Path, threshold: float) -> None:
                 f"{manifest.get('n_in_cohort', '?')} in cohort → {manifest.get('n_subjects', '?')} "
                 "complete"
             )
+        if manifest.get("inputs"):
+            for label, key in (("stack", "stack"), ("design", "design_mat"),
+                               ("contrasts", "design_con"), ("F-tests", "design_fts")):
+                if manifest["inputs"].get(key):
+                    click.echo(f"  {label:<10} {manifest['inputs'][key]}")
     for kind in sorted(result.maps):
         click.echo(f"\n  {kind} — {STAT_KINDS.get(kind, 'unknown kind')}")
-        for name in result.contrast_names:
+        for name in result.names_for(kind):
             try:
                 path = result.map_path(kind, name)
             except KeyError:
                 continue
-            if kind.endswith("corrp_tstat"):
+            if kind.endswith(("corrp_tstat", "corrp_fstat")):
                 n = count_significant(path, threshold=threshold)
                 click.echo(f"    {name:<24} {path.name}  ·  {n} voxel(s) p<{1 - threshold:.3g}")
             else:
@@ -742,37 +812,12 @@ def cmd_report(results_dir: Path, threshold: float) -> None:
 )
 @click.option("--mask", "mask_path", type=click.Path(path_type=Path, dir_okay=False), default=None,
               help="Analysis mask [default: nilearn MNI152 brain mask on the input grid].")
-@click.option("--n-perm", type=int, default=5000, show_default=True, help="Permutations.")
-@click.option("--tfce/--no-tfce", default=True, show_default=True,
-              help="Threshold-free cluster enhancement.")
-@click.option("--vox-corrp/--no-vox-corrp", "voxelwise_corrp", default=True, show_default=True,
-              help="Also write voxelwise FWE-corrected p-maps (randomise -x).")
-@click.option("--uncorrp/--no-uncorrp", "uncorrected_p", default=True, show_default=True,
-              help="Also write uncorrected p-maps. Paired rather than a bare flag: on by "
-                   "default, it needs a way to be switched off.")
-@click.option("--parallel", is_flag=True, default=False,
-              help="Use randomise_parallel instead of randomise.")
-@click.option("--seed", type=int, default=None, help="Permutation seed (reproducible runs).")
-@click.option("--out-name", default="randomise", show_default=True,
-              help="Output file-root name inside the results folder.")
-@click.option("--submit", type=click.Choice(["local", "sge"], case_sensitive=False),
-              default="local", show_default=True)
-@click.option("--emit-script", type=click.Path(path_type=Path), default=None,
-              help="Write the qsub driver script instead of submitting.")
-@click.option("--dry-run", is_flag=True, default=False,
-              help="With --submit sge, print the job without uploading or submitting it.")
-@click.option("--from-source", type=click.Choice(["local", "sge"], case_sensitive=False),
-              default="local", show_default=True,
-              help="Where --image-dir and --mask live. 'local' uploads the selected images to "
-                   "<output>/inputs/ on the cluster; 'sge' treats them as cluster paths already "
-                   "in place and uploads nothing.")
-@click.option("--no-remote", is_flag=True, default=False,
-              help="Upload and publish the driver script, but do not run it — print the bash "
-                   "line to run on the login node yourself.")
-@click.option("--remote-host", default=None,
-              help="SSH host (or an alias from sge.json). Overridden by NVITK_SGE_SSH_HOST.")
-@click.option("--remote-user", default=None,
-              help="SSH user. Overridden by NVITK_SGE_SSH_USER.")
+@randomise_options
+@submission_options(
+    "Where --image-dir and --mask live. 'local' uploads the selected images to "
+    "<output>/inputs/ on the cluster; 'sge' treats them as cluster paths already "
+    "in place and uploads nothing."
+)
 @friendly_errors
 def cmd_run(
     image_dir: Path, include: str, exclude_csv: Path | None, id_pattern: str | None,
@@ -782,16 +827,23 @@ def cmd_run(
     add_intercept: bool, demean: bool,
     pipeline_kind: str, feature: str, grouping: str, atlas: str | None,
     out_dir: Path, mask_path: Path | None, n_perm: int, tfce: bool, voxelwise_corrp: bool,
-    uncorrected_p: bool, parallel: bool, seed: int | None, out_name: str,
+    uncorrected_p: bool, parallel: bool, jobs: int | None, seed: int | None, out_name: str,
     submit: str, emit_script: Path | None, dry_run: bool,
     from_source: str, no_remote: bool, remote_host: str | None, remote_user: str | None,
 ) -> None:
     """Resolve the cohort, build the design, merge, and run ``randomise``."""
+    _warn_jobs_without_parallel(jobs, parallel)
     if submit.lower() == "sge":
-        # Which images the analysis keeps is decided here, on the workstation that can see both
-        # the directory and the database — so only those files are sent, not the whole tree.
-        selection = None
+        remote_inputs = f"{str(out_dir).rstrip('/')}/{INPUTS_SUBDIR}"
+        uploads: list[tuple[Path, str]] = []
+        refresh: list[tuple[Path, str]] = []
+        # The mask keeps its own extension: nibabel reads by name, and an uncompressed .nii
+        # renamed .nii.gz is "not a gzip file" to the worker.
+        mask_name = f"mask_input{_nifti_suffix(mask_path)}" if mask_path else CONTAINER_MASK_NAME
+        container_mask = f"{CONTAINER_IMAGES}{mask_name}"
         if str(from_source).lower() == "local":
+            # Which images the analysis keeps is decided here, on the workstation that can see
+            # both the directory and the database — so only those files are sent, not the tree.
             selection, n_found, n_cohort = _resolve_selection(
                 image_dir=image_dir, include=include, exclude_csv=exclude_csv,
                 id_pattern=id_pattern, namespaces=namespaces, on_duplicate=on_duplicate,
@@ -803,6 +855,20 @@ def cmd_run(
                 f"{n_found} image(s) found · {n_cohort} in cohort"
                 f"{f' {cohort}' if cohort else ''} · {len(selection)} to upload"
             )
+            uploads = [(im.path, f"{remote_inputs}/{im.path.name}") for im in selection]
+            if mask_path is not None:
+                refresh.append((mask_path.resolve(), f"{remote_inputs}/{mask_name}"))
+            if exclude_csv is not None:
+                refresh.append((exclude_csv.resolve(), f"{remote_inputs}/{CONTAINER_EXCLUDE_NAME}"))
+            binds = [(Path(remote_inputs), CONTAINER_IMAGES)]
+        else:
+            # The inputs already live on the cluster and are not being copied, so the mask and
+            # the exclusion list keep their own paths and need their own mounts.
+            binds = [(Path(str(image_dir).rstrip("/")), CONTAINER_IMAGES)]
+            if mask_path is not None:
+                binds.append((Path(mask_path), container_mask))
+            if exclude_csv is not None:
+                binds.append((Path(exclude_csv), CONTAINER_EXCLUDE_CSV))
         _submit_sge(
             argv=_worker_argv(
                 include=include, exclude_csv=exclude_csv,
@@ -812,20 +878,19 @@ def cmd_run(
                 prefilters=prefilters,
                 add_intercept=add_intercept, demean=demean, pipeline_kind=pipeline_kind,
                 feature=feature, grouping=grouping, atlas=atlas,
-                mask_path=mask_path, n_perm=n_perm, tfce=tfce,
+                mask_path=mask_path, container_mask=container_mask, n_perm=n_perm, tfce=tfce,
                 voxelwise_corrp=voxelwise_corrp, uncorrected_p=uncorrected_p,
                 parallel=parallel, seed=seed, out_name=out_name,
             ),
-            image_dir=image_dir,
             out_dir=out_dir,
             job_name=out_dir.name or "run",
             emit_script=emit_script,
             dry_run=dry_run,
             no_remote=no_remote,
-            from_source=from_source,
-            exclude_csv=exclude_csv,
-            mask_path=mask_path,
-            selection=selection,
+            uploads=uploads,
+            refresh=refresh,
+            extra_binds=binds,
+            slots=_parallel_slots(parallel, jobs),
             remote_host=remote_host,
             remote_user=remote_user,
         )
@@ -845,15 +910,19 @@ def cmd_run(
         cohort=cohort, cohort_id=cohort_id,
         pipeline_kind=pipeline_kind, feature=feature, grouping=grouping, atlas=atlas,
         mask=mask_path, n_perm=n_perm, tfce=tfce, voxelwise_corrp=voxelwise_corrp,
-        uncorrected_p=uncorrected_p, parallel=parallel, seed=seed,
+        uncorrected_p=uncorrected_p, parallel=parallel, n_jobs=jobs, seed=seed,
         add_intercept=add_intercept, demean=demean, out_name=out_name,
     )
 
     click.echo(result.summary())
-    click.echo(
-        "\nValues in *_corrp_* maps are 1−p (FWE-corrected), so 0.95 means p < 0.05 — "
-        "not an effect size."
-    )
+    click.echo(CORRP_NOTE)
+
+
+#: Printed under every finished run's summary.
+CORRP_NOTE = (
+    "\nValues in *_corrp_* maps are 1−p (FWE-corrected), so 0.95 means p < 0.05 — "
+    "not an effect size."
+)
 
 
 def _worker_argv(**kw) -> list[str]:
@@ -895,11 +964,185 @@ def _worker_argv(**kw) -> list[str]:
     if kw["atlas"]:
         argv += ["--atlas", str(kw["atlas"])]
     if kw["mask_path"]:
-        argv += ["--mask", CONTAINER_MASK]
+        argv += ["--mask", kw.get("container_mask") or CONTAINER_MASK]
     argv.append("--tfce" if kw["tfce"] else "--no-tfce")
     argv.append("--vox-corrp" if kw["voxelwise_corrp"] else "--no-vox-corrp")
     argv.append("--uncorrp" if kw["uncorrected_p"] else "--no-uncorrp")
     if kw["parallel"]:
+        argv.append("--parallel")
+    if kw["seed"] is not None:
+        argv += ["--seed", str(int(kw["seed"]))]
+    return argv
+
+
+def _warn_jobs_without_parallel(jobs: int | None, parallel: bool) -> None:
+    """``--jobs`` sizes ``randomise_parallel``; on its own it would silently do nothing."""
+    if jobs and not parallel:
+        log.warning("--jobs only applies with --parallel; ignoring it.")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# randomise (prepared inputs)
+# ──────────────────────────────────────────────────────────────────────────────
+#: Where ``<output>/inputs/`` appears inside the container: the output root is already mounted at
+#: ``/nvitk/output/``, so uploaded inputs need no mount of their own.
+CONTAINER_UPLOADED = f"/nvitk/output/{INPUTS_SUBDIR}/"
+
+
+def _nifti_suffix(path: Path) -> str:
+    """``.nii.gz`` or ``.nii`` — kept on upload, since nibabel reads by extension."""
+    return ".nii.gz" if path.name.endswith(".nii.gz") else path.suffix
+
+
+@main.command("randomise")
+@click.option("-i", "--stack", type=click.Path(path_type=Path, dir_okay=False), required=True,
+              help="4D NIfTI, one subject per volume (e.g. from `nvitk-voxelwise merge` or "
+                   "fslmerge -t).")
+@click.option("-d", "--design-mat", type=click.Path(path_type=Path, dir_okay=False), required=True,
+              help="Design matrix (VEST design.mat): row i is volume i of the stack.")
+@click.option("-t", "--design-con", type=click.Path(path_type=Path, dir_okay=False), required=True,
+              help="t-contrasts (VEST design.con).")
+@click.option("-f", "--design-fts", type=click.Path(path_type=Path, dir_okay=False), default=None,
+              help="Optional F-tests (VEST design.fts), each a 0/1 selection of t-contrasts.")
+@click.option("-m", "--mask", "mask_path", type=click.Path(path_type=Path, dir_okay=False),
+              default=None,
+              help="Analysis mask on the stack's grid [default: none — randomise tests every "
+                   "voxel that is non-zero in the data; no MNI mask is assumed].")
+@click.option("-o", "--output", "out_dir", type=click.Path(path_type=Path, file_okay=False),
+              required=True, help="Results folder: design copies, maps and manifest.json.")
+@click.option("--demean-data", is_flag=True, default=False,
+              help="Demean the data temporally before fitting (randomise -D).")
+@randomise_options
+@submission_options(
+    "Where the stack, design files and mask live. 'local' checks them here and uploads them "
+    "to <output>/inputs/ on the cluster; 'sge' treats them as absolute cluster paths already "
+    "in place and uploads nothing."
+)
+@friendly_errors
+def cmd_randomise(
+    stack: Path, design_mat: Path, design_con: Path, design_fts: Path | None,
+    mask_path: Path | None, out_dir: Path, demean_data: bool,
+    n_perm: int, tfce: bool, voxelwise_corrp: bool, uncorrected_p: bool, parallel: bool,
+    jobs: int | None, seed: int | None, out_name: str,
+    submit: str, emit_script: Path | None, dry_run: bool,
+    from_source: str, no_remote: bool, remote_host: str | None, remote_user: str | None,
+) -> None:
+    """Run randomise on a prepared 4D stack and design files — no cohort, no database.
+
+    For a design built anywhere: FSL's Glm GUI, another tool, or `design` and `merge` here. The
+    stack and the files are checked against each other from their headers before anything runs
+    or uploads, and every mismatch is reported at once.
+    """
+    _warn_jobs_without_parallel(jobs, parallel)
+    files: dict[str, Path | None] = {
+        "stack": stack, "mat": design_mat, "con": design_con, "fts": design_fts, "mask": mask_path,
+    }
+
+    if submit.lower() == "sge":
+        remote_inputs = f"{str(out_dir).rstrip('/')}/{INPUTS_SUBDIR}"
+        uploads: list[tuple[Path, str]] = []
+        refresh: list[tuple[Path, str]] = []
+        binds: list[tuple[Path, str]] = []
+        if str(from_source).lower() == "local":
+            from nvitk.measure.voxelwise import validate_randomise_inputs
+
+            inputs = validate_randomise_inputs(
+                stack, design_mat, design_con, fts=design_fts, mask=mask_path
+            )
+            click.echo(inputs.describe())
+            # The stack keeps its own name — it is the one large file, uploaded only when the
+            # cluster copy differs in size — while the small files go under fixed names and are
+            # always re-sent.
+            names = {
+                "mat": "design.mat",
+                "con": "design.con",
+                "fts": "design.fts",
+                "mask": f"mask_input{_nifti_suffix(mask_path) if mask_path else ''}",
+            }
+            stack_name = inputs.stack.name
+            if stack_name in names.values():
+                stack_name = f"stack_{stack_name}"
+            names["stack"] = stack_name
+            uploads = [(inputs.stack, f"{remote_inputs}/{stack_name}")]
+            refresh = [
+                (Path(path).resolve(), f"{remote_inputs}/{names[key]}")
+                for key, path in files.items()
+                if key != "stack" and path is not None
+            ]
+            in_container = {
+                key: f"{CONTAINER_UPLOADED}{names[key]}"
+                for key, path in files.items() if path is not None
+            }
+        else:
+            relative = [str(p) for p in files.values() if p is not None and not p.is_absolute()]
+            if relative:
+                raise click.ClickException(
+                    f"--from-source sge needs absolute cluster paths; got {relative}."
+                )
+            # Each input's folder is mounted at its own path, so the worker sees the paths as given.
+            in_container = {key: str(path) for key, path in files.items() if path is not None}
+            folders = sorted({str(Path(p).parent) for p in in_container.values()})
+            binds = [(Path(folder), folder) for folder in folders]
+
+        _submit_sge(
+            argv=_randomise_worker_argv(
+                in_container, n_perm=n_perm, tfce=tfce, voxelwise_corrp=voxelwise_corrp,
+                uncorrected_p=uncorrected_p, parallel=parallel, seed=seed,
+                demean_data=demean_data, out_name=out_name,
+            ),
+            out_dir=out_dir,
+            job_name=out_dir.name or "randomise",
+            emit_script=emit_script,
+            dry_run=dry_run,
+            no_remote=no_remote,
+            uploads=uploads,
+            refresh=refresh,
+            extra_binds=binds,
+            slots=_parallel_slots(parallel, jobs),
+            remote_host=remote_host,
+            remote_user=remote_user,
+        )
+        return
+
+    from nvitk.measure.voxelwise import run_randomise_direct
+
+    status = _fsl_status()
+    if not status.available:
+        raise click.ClickException(f"{status.reason}\n{status.install_hint()}")
+
+    result = run_randomise_direct(
+        stack, design_mat, design_con, out_dir,
+        fts=design_fts, mask=mask_path, n_perm=n_perm, tfce=tfce,
+        voxelwise_corrp=voxelwise_corrp, uncorrected_p=uncorrected_p,
+        parallel=parallel, n_jobs=jobs, seed=seed, demean_data=demean_data, out_name=out_name,
+    )
+    click.echo(result.summary())
+    click.echo(CORRP_NOTE)
+
+
+def _randomise_worker_argv(paths: dict[str, str], **kw) -> list[str]:
+    """The in-container ``randomise`` command line, reading *paths* as the container sees them."""
+    argv = [
+        "nvitk-voxelwise", "randomise",
+        "-i", paths["stack"],
+        "-d", paths["mat"],
+        "-t", paths["con"],
+        "-o", "/nvitk/output/",
+        "--n-perm", str(int(kw["n_perm"])),
+        "--out-name", str(kw["out_name"]),
+        "--submit", "local",
+    ]
+    if paths.get("fts"):
+        argv += ["-f", paths["fts"]]
+    if paths.get("mask"):
+        argv += ["-m", paths["mask"]]
+    argv.append("--tfce" if kw["tfce"] else "--no-tfce")
+    argv.append("--vox-corrp" if kw["voxelwise_corrp"] else "--no-vox-corrp")
+    argv.append("--uncorrp" if kw["uncorrected_p"] else "--no-uncorrp")
+    if kw["demean_data"]:
+        argv.append("--demean-data")
+    if kw["parallel"]:
+        # No --jobs: inside the job the fragments size themselves to the granted slots (NSLOTS).
         argv.append("--parallel")
     if kw["seed"] is not None:
         argv += ["--seed", str(int(kw["seed"]))]
@@ -913,7 +1156,8 @@ def _worker_argv(**kw) -> list[str]:
 #: at 2 mm the stack alone is several GB, and nothing local reads it — the maps and the manifest
 #: are what a viewer needs.
 FETCH_PATTERNS: tuple[str, ...] = (
-    "manifest.json", "design.mat", "design.con", "subjects.txt", "mask.nii.gz", "*tstat*.nii*",
+    "manifest.json", "design.mat", "design.con", "design.fts", "subjects.txt", "mask.nii.gz",
+    "*tstat*.nii*", "*fstat*.nii*",
 )
 
 
@@ -984,10 +1228,24 @@ def cmd_fetch(
 @main.command("status")
 def cmd_status() -> None:
     """Report whether FSL is usable here, and which binary is missing if not."""
+    import os
+
+    from nvitk.measure.voxelwise import PARALLEL_ENV, available_cores
+
     status = _fsl_status()
     click.echo(status.summary())
+    click.echo(f"  {'FSLDIR':<20} {status.fsldir or '(unresolved)'}")
     for name, path in sorted(status.binaries.items()):
         click.echo(f"  {name:<20} {path}")
+    if status.supports_parallel():
+        cap = os.environ.get(PARALLEL_ENV, "").strip()
+        click.echo(
+            "\n--parallel runs fragments through nvitk's local fsl_sub: "
+            + (f"{cap} at a time ({PARALLEL_ENV})" if cap.isdigit() and int(cap) > 0
+               else f"up to {available_cores()} at a time here, fewer if the stack needs the "
+                    f"memory (set {PARALLEL_ENV} or --jobs to fix the number)")
+            + "."
+        )
     if not status.available:
         click.echo()
         click.echo(status.install_hint())

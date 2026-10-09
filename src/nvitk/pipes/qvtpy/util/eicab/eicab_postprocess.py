@@ -171,7 +171,7 @@ def _compute_pp_centerlines(labels: np.ndarray, *, min_points: int = 5) -> np.nd
     seg_np = as_backend_array(labels).astype(np.int32, copy=False)
     present = [
         int(lid)
-        for lid in np.unique(to_numpy(seg_np))
+        for lid in to_numpy(np.unique(seg_np))
         if int(lid) > 0
     ]
     if not present:
