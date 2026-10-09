@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nvitk"
-version = "0.1.0"
+version = "0.2.0"
 description = "Neuro-Vascular Imaging ToolKit"
 authors = [
   { name = "Ignacio Marcos Serrano", email = "imarcoss@cnic.es" }

@@ -1,0 +1,6 @@
+outs:
+- md5: 4d6aea5299714df411244a2efde1f672.dir
+  size: 21809023
+  nfiles: 12
+  hash: md5
+  path: tables

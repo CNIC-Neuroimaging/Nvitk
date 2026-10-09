@@ -12,7 +12,7 @@
 # `version` is kept in manual sync with [project].version in ../pyproject.toml (that
 # field is static there, not setuptools_scm-driven).
 context:
-  version: "0.1.0"
+  version: "0.2.0"
 
 package:
   name: nvitk
