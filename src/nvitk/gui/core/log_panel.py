@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import subprocess
 from datetime import datetime
 from typing import Any, Callable
@@ -75,10 +77,51 @@ def run_subprocess_logged(
         return -1
 
     assert proc.stdout is not None
-    for line in proc.stdout:
+    import queue
+    import threading
+
+    from qtpy.QtCore import QTimer
+    from qtpy.QtWidgets import QApplication
+
+    def show(line: str) -> None:
         text = line.rstrip()
         if text:
             gui_log(text)
             if on_line is not None:
                 on_line(text)
-    return int(proc.wait())
+
+    if QApplication.instance() is None or threading.current_thread() is not threading.main_thread():
+        for line in proc.stdout:
+            show(line)
+        return int(proc.wait())
+
+    # The output is read on a worker thread and shown here, on the GUI thread, as it
+    # comes: the window keeps repainting (and the activity indicator moving) while
+    # the command runs, instead of freezing until it exits.
+    from nvitk.gui.core.activity import activity, run_in_background
+
+    lines: "queue.Queue[str]" = queue.Queue()
+
+    def read() -> int:
+        for line in proc.stdout:
+            lines.put(line)
+        return int(proc.wait())
+
+    def drain() -> None:
+        while True:
+            try:
+                show(lines.get_nowait())
+            except queue.Empty:
+                return
+
+    timer = QTimer()
+    timer.setInterval(100)
+    timer.timeout.connect(drain)
+    timer.start()
+    try:
+        with activity(f"Running {os.path.basename(str(argv[0]))}", cursor=False):
+            code = run_in_background(read)
+    finally:
+        timer.stop()
+        drain()
+    return int(code)

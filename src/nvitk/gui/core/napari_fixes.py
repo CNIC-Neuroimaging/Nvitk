@@ -12,6 +12,13 @@
   Labeling tab's: the voxel the reference image shows there) gives the brush a
   place to land. Only the brush uses it: a bucket fill landing on background
   would flood the whole background.
+* **A hidden image or label layer added in 3D** (Napari 0.7). Napari does not
+  slice a hidden layer, so it keeps the 2D placeholder slice it was created
+  with while its slice input says 3D; building its volume visual then fails
+  ("Volume visual needs a 3D array") and leaves the layer in the list with no
+  visual, which makes every later addition fail too. A hidden layer now gets
+  the empty slice of the current display (2D or 3D); it is sliced for real
+  when it is shown, as before.
 """
 
 from __future__ import annotations
@@ -118,9 +125,34 @@ def _fix_labels_3d_brush() -> None:
     Labels._draw = _draw
 
 
+def _fix_hidden_layer_slices() -> None:
+    from napari.layers._scalar_field._slice import _ScalarFieldSliceResponse
+    from napari.layers._scalar_field.scalar_field import ScalarFieldSlicingState
+
+    if getattr(ScalarFieldSlicingState.set_slice_input, "_nvitk_fixed", False):
+        return
+    original = ScalarFieldSlicingState.set_slice_input
+
+    def set_slice_input(self: Any, slice_input: Any, force: bool) -> bool:
+        changed = original(self, slice_input, force)
+        current = getattr(self, "_slice", None)
+        if (current is not None and not self.layer.visible
+                and current.slice_input.ndisplay != self._slice_input.ndisplay):
+            self._slice = _ScalarFieldSliceResponse.make_empty(
+                slice_input=self._slice_input,
+                rgb=len(self.layer.data.shape) != self.ndim,
+                dtype=self.layer._slice_dtype(),
+                request_id=current.request_id,
+            )
+        return changed
+
+    set_slice_input._nvitk_fixed = True  # type: ignore[attr-defined]
+    ScalarFieldSlicingState.set_slice_input = set_slice_input
+
+
 def install_napari_fixes() -> None:
     """Install every fix above (idempotent; a missing Napari internal skips its fix)."""
-    for fix in (_fix_ray_intersections, _fix_labels_3d_brush):
+    for fix in (_fix_ray_intersections, _fix_labels_3d_brush, _fix_hidden_layer_slices):
         try:
             fix()
         except Exception:  # noqa: BLE001 — another Napari version: leave it as it is

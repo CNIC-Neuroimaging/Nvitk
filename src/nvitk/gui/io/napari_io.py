@@ -441,35 +441,44 @@ def open_paths_with_nvitk(
     *force_type* is forwarded to :func:`~nvitk.io.imread` (e.g. ``\"nifti\"`` when
     opening a directory that must not be treated as DICOM).
     """
+    from nvitk.gui.core.activity import activity, run_in_background
+
     _ = stack
     path_list = _normalize_paths(paths)
     layers = []
 
-    for path in path_list:
-        if _is_surface_file(path):
-            panel = getattr(viewer, "_nvitk_mesh_panel", None)
+    with activity("Loading", total=len(path_list)) as task:
+        for k, path in enumerate(path_list):
+            task.update(done=k, message=f"Loading {path.name}")
+            if _is_surface_file(path):
+                panel = getattr(viewer, "_nvitk_mesh_panel", None)
+                try:
+                    if panel is not None:
+                        layers.extend(panel.open_paths([str(path)]))
+                    else:
+                        for data, kwargs, kind in _read_surface_layer_data(path) or []:
+                            layers.append(getattr(viewer, f"add_{kind}")(data, **kwargs))
+                except Exception as exc:  # noqa: BLE001
+                    _notify_error(f"Could not read {path}:\n{exc}")
+                continue
+            if not _nvitk_can_open(path):
+                continue
             try:
-                if panel is not None:
-                    layers.extend(panel.open_paths([str(path)]))
-                else:
-                    for data, kwargs, kind in _read_surface_layer_data(path) or []:
-                        layers.append(getattr(viewer, f"add_{kind}")(data, **kwargs))
-            except Exception as exc:  # noqa: BLE001
-                _notify_error(f"Could not read {path}:\n{exc}")
-            continue
-        if not _nvitk_can_open(path):
-            continue
-        try:
-            result = imread(path, backend="numpy", force_type=force_type)
-        except Exception as exc:
-            _notify_error(f"Could not read {path} with nvitk.io:\n{exc}")
-            continue
+                # Read on a worker thread: the GUI keeps repainting meanwhile. The
+                # layers are added back here, on the GUI thread.
+                result = run_in_background(imread, path, backend="numpy", force_type=force_type)
+            except Exception as exc:
+                _notify_error(f"Could not read {path} with nvitk.io:\n{exc}")
+                continue
 
-        images = result if isinstance(result, list) else [result]
-        for i, img in enumerate(images):
-            suffix = f"_{i}" if len(images) > 1 else ""
-            _name_image(img, path, suffix)
-            layers.append(_add_image_to_viewer(viewer, img, path))
+            images = result if isinstance(result, list) else [result]
+            for i, img in enumerate(images):
+                suffix = f"_{i}" if len(images) > 1 else ""
+                _name_image(img, path, suffix)
+                layers.append(_add_image_to_viewer(viewer, img, path))
+        names = [p.name for p in path_list]
+        task.update(done=len(path_list),
+                    message=f"Loading {names[0]}" if len(names) == 1 else f"Loading {len(names)} files")
 
     return layers
 
@@ -485,8 +494,12 @@ def open_dicom_files_with_nvitk(viewer: Any, files: Sequence[str | Path], *, sou
     if not paths:
         return []
     origin = Path(source) if source is not None else Path(os.path.commonpath(paths) if len(paths) > 1 else paths[0])
+    from nvitk.gui.core.activity import activity, run_in_background
+
     try:
-        result = load_dicom_series(paths, return_all_series=True)
+        with activity(f"Loading DICOM ({len(paths):,} files)"):
+            # Read on a worker thread: the GUI keeps repainting meanwhile.
+            result = run_in_background(load_dicom_series, paths, return_all_series=True)
     except Exception as exc:
         _notify_error(f"Could not load the selected DICOM files:\n{exc}")
         return []
@@ -666,6 +679,17 @@ def install_nvitk_io(viewer: Any) -> None:
         if getattr(qt, "_nvitk_dropping", False):
             # Dropped on the viewer: DICOM can go to the DICOM browser first.
             paths = _route_dropped_dicom(viewer, qt, paths)
+            if not paths:
+                return None
+            filenames = [str(p) for p in paths]
+
+        from nvitk.gui.io.scene import is_scene_file, open_scene_interactive
+
+        scenes = [p for p in paths if is_scene_file(p) and p.is_file()]
+        if scenes:
+            for scene in scenes:
+                open_scene_interactive(viewer, scene, parent=qt)
+            paths = [p for p in paths if p not in scenes]
             if not paths:
                 return None
             filenames = [str(p) for p in paths]

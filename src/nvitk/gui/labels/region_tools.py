@@ -6,7 +6,8 @@
   tuned with the mouse. The region shows in the layer as it grows and is written
   as one undo step when the button is released.
 * :class:`VesselTrace` — points clicked along a vessel, the cheapest path
-  through them, and the tube filled around that path.
+  through them, and what is filled around that path: a tube, or the voxels out
+  to the largest vessel radius whose intensity lies in the path's own range.
 * :class:`SmartBrushStroke` — a brush that only paints the voxels under it that
   go with the intensity at its centre.
 
@@ -27,7 +28,8 @@ from nvitk.gui.labels import editing as E
 from nvitk.segmentation.interactive import (
     GrowSession,
     adaptive_brush_keep,
-    path_radii,
+    center_path,
+    path_intensity_fill,
     trace_vessel_path,
     tube_from_path,
 )
@@ -261,6 +263,9 @@ class VesselTrace:
         self.session = GrowSession(ref.data[self.index], smooth_sigma=0.0, spacing=self.options["spacing"])
         self.points: list[tuple[int, ...]] = []      # layer voxels
         self._pieces: list[Any] = []                  # host (n, k) region voxels per segment
+        #: Filled once: the path stays (Undo, change the settings, fill again) until
+        #: the next click starts a new one.
+        self.filled = False
 
     @property
     def layer(self) -> Any | None:
@@ -329,21 +334,63 @@ class VesselTrace:
         """The whole path as layer voxels."""
         return self._to_layer(self.path_local())
 
+    def _around_path(self, reach_mm: float, allowed: Any | None = None) -> tuple[GrowSession, tuple[slice, ...], Any]:
+        """The reference around the path (out to *reach_mm*, and the smoothing's
+        reach), smoothed as the tracer's *Smoothing* says: ``(session, window, path
+        in the window's coordinates)``. Only that box is smoothed and searched."""
+        o = self.options
+        ref = self.panel.reference()
+        if ref is None:
+            raise ValueError("The tracer reads the reference image: pick one under Layer.")
+        path = self.path_local()
+        sp = self.session.spacing
+        margin = [int(math.ceil(reach_mm / s)) + int(math.ceil(3.0 * float(o["trace_smooth"]))) + 1 for s in sp]
+        win = tuple(slice(max(int(path[:, d].min()) - m, 0), min(int(path[:, d].max()) + m + 1, n))
+                    for d, (m, n) in enumerate(zip(margin, self.session.shape)))
+        sub = GrowSession(ref.data[self.index][win], smooth_sigma=o["trace_smooth"], spacing=sp,
+                          full_connectivity=o["full_connectivity"],
+                          allowed=None if allowed is None else allowed[win])
+        with using("cpu"):
+            local = path - np.asarray([w.start for w in win], dtype=int)[None, :]
+        return sub, win, local
+
     def tube(self) -> tuple[Any, Any]:
         """The tube around the path (region coordinates, on the backend) and the
-        radii used (mm)."""
+        radii used (mm): fixed, or measured from the lumen (on the smoothed image)."""
         o = self.options
         path = self.path_local()
         if o["tube_radius_mm"] > 0:
             radii = as_backend_array([float(o["tube_radius_mm"])] * len(path))
         else:
-            radii = path_radii(self.session, path, bright=o["bright"],
-                               min_radius_mm=min(o["radii_mm"]) * 0.5, max_radius_mm=max(o["radii_mm"]) * 1.5)
+            # Onto the centreline first (a minimal path hugs the inside of bends), then
+            # the radius there, on the smoothed image.
+            r_max = max(o["radii_mm"]) * 1.5
+            sub, win, local = self._around_path(r_max * 1.5)
+            centred, radii = center_path(sub, local, bright=o["bright"], max_radius_mm=r_max)
+            radii = as_backend_array(np.clip(radii, min(o["radii_mm"]) * 0.5, r_max))
+            with using("cpu"):
+                path = to_numpy(centred) + np.asarray([w.start for w in win], dtype=int)[None, :]
         return tube_from_path(self.session.shape, path, radii, spacing=self.session.spacing), radii
 
-    def fill(self) -> tuple[int, float]:
-        """Give the active label to the tube (preserve labels and the editable area
-        apply; one undo step): the voxels changed and the median radius (mm)."""
+    def intensity_region(self, allowed: Any | None = None) -> tuple[Any, tuple[float, float], float]:
+        """The voxels around the path out to the largest vessel radius whose
+        intensity lies in the path's own range (widened by the tracer's *Range ±*),
+        connected to the path — region coordinates, on the backend — with the
+        intensity range and the reach used."""
+        o = self.options
+        reach = float(max(o["radii_mm"]))
+        sub, win, local = self._around_path(reach, allowed)
+        region_win, bounds = path_intensity_fill(sub, local, reach, tolerance=o["trace_tolerance"],
+                                                 close_radius=o["close_radius"], fill_holes=True)
+        region = np.zeros(self.session.shape, dtype=bool)
+        region[win] = region_win
+        return region, bounds, reach
+
+    def fill(self) -> tuple[int, str]:
+        """Give the active label to what the tracer fills — the tube, or the voxels
+        of the path's intensity around it (*Fill*) — with preserve labels and the
+        editable area applied, as one undo step: the voxels changed and what was
+        filled, in words."""
         layer = self.layer
         if layer is None:
             raise ValueError("The layer traced on is gone.")
@@ -352,12 +399,23 @@ class VesselTrace:
         label = int(self.panel.label_id())
         if label == 0:
             raise ValueError("Pick the label to draw (not the background).")
-        tube, radii = self.tube()
+        # The settings as they are now (they may have changed since the first click).
+        self.options = self.panel.region_options(layer, "vessel", self.free)
         work = as_backend_array(to_numpy(E.editable_data(layer)[self.index]))
+        allowed = as_backend_array(self.panel._allowed(layer, self.index, work))
+        if self.options["trace_fill"] == "intensity":
+            region, (lo, hi), reach = self.intensity_region(allowed)
+            what = f"intensity {lo:.4g} … {hi:.4g} within {reach:g} mm of the path"
+        else:
+            region, radii = self.tube()
+            radius = float(np.median(radii)) if int(radii.size) else 0.0
+            how = "measured" if self.options["tube_radius_mm"] <= 0 else "fixed"
+            what = f"tube, radius {radius:.2f} mm ({how})"
         out = work.copy()
-        out[tube & as_backend_array(self.panel._allowed(layer, self.index, work))] = label
+        out[region & allowed] = label
         changed = int(self.panel._write(layer, self.index, out))
-        return changed, float(np.median(radii)) if int(radii.size) else 0.0
+        self.filled = True
+        return changed, what
 
 
 __all__ = [

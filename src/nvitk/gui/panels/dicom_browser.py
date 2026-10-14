@@ -596,6 +596,7 @@ class DicomBrowserPanel(QWidget):
         self._progress.setVisible(True)
         self._progress.setRange(0, 0)
         self._status.setText("Reading headers…")
+        self._start_activity("DICOM: reading headers")
         worker.start()
         if wait:
             worker.wait()
@@ -603,15 +604,32 @@ class DicomBrowserPanel(QWidget):
 
             QApplication.processEvents()
 
+    def _start_activity(self, message: str) -> None:
+        """Show the background job in the main window's activity indicator too."""
+        from nvitk.gui.core.activity import start_task
+
+        self._finish_activity()
+        self._activity = start_task(message)
+
+    def _finish_activity(self, ok: bool = True) -> None:
+        task, self._activity = getattr(self, "_activity", None), None
+        if task is not None:
+            task.finish(ok)
+
     def _on_progress(self, done: int, total: int) -> None:
         self._progress.setRange(0, max(total, 1))
         self._progress.setValue(done)
         self._progress.setFormat("%v / %m files")
+        task = getattr(self, "_activity", None)
+        if task is not None:
+            task.update(done=int(done), total=int(total))
 
     def _on_failed(self, message: str) -> None:
         self._status.setText(f"Failed: {message}")
+        self._finish_activity(ok=False)
 
     def _on_worker_finished(self) -> None:
+        self._finish_activity()
         worker, self._worker = self._worker, None
         if worker is not None:
             worker.relay.deleteLater()
@@ -1091,15 +1109,20 @@ class DicomBrowserPanel(QWidget):
 
         from nvitk.gui.io.napari_io import open_dicom_files_with_nvitk
 
+        from nvitk.gui.core.activity import activity
+
         layers: list[Any] = []
         skipped = [self._series[k].label for k in selection if not self._series[k].loadable]
         todo = [(k, v) for k, v in selection.items() if self._series[k].loadable]
-        for n, (key, paths) in enumerate(todo, 1):
-            s = self._series[key]
-            self._status.setText(f"Loading {s.label} ({n}/{len(todo)}, {len(paths):,} files)…")
-            QApplication.processEvents()
-            source = os.path.commonpath(paths) if len(paths) > 1 else os.path.dirname(paths[0])
-            layers.extend(open_dicom_files_with_nvitk(self._viewer, paths, source=source))
+        with activity("Loading DICOM series", total=len(todo)) as task:
+            for n, (key, paths) in enumerate(todo, 1):
+                s = self._series[key]
+                self._status.setText(f"Loading {s.label} ({n}/{len(todo)}, {len(paths):,} files)…")
+                task.update(done=n - 1, message=f"Loading {s.label}")
+                QApplication.processEvents()
+                source = os.path.commonpath(paths) if len(paths) > 1 else os.path.dirname(paths[0])
+                layers.extend(open_dicom_files_with_nvitk(self._viewer, paths, source=source))
+            task.update(done=len(todo))
         note = f" Skipped (not volumes): {', '.join(skipped)}." if skipped else ""
         self._status.setText(f"Loaded {len(layers)} volume(s) from {len(todo)} series.{note}")
         return layers
@@ -1133,6 +1156,7 @@ class DicomBrowserPanel(QWidget):
         self._progress.setVisible(True)
         self._progress.setRange(0, len(paths))
         self._status.setText(f"Exporting {len(paths):,} file(s)…")
+        self._start_activity(f"DICOM: exporting {len(paths):,} file(s)")
         worker.start()
         if wait:
             worker.wait()

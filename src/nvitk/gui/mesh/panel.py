@@ -989,8 +989,13 @@ class MeshPanel(QWidget):
                 extent = np.ptp(cloud.points, axis=0) if cloud.n_points else np.zeros(3)
                 return (f"Points {name}<br>{cloud.n_points:,} points · extent "
                         f"{' × '.join(f'{v:.4g}' for v in extent)} mm")
+            from nvitk.gui.labels.visibility import is_label_like_layer
+
             shape = " × ".join(str(s) for s in np.shape(layer.data))
-            n_lab = len(present_label_ids(layer))
+            # Only masks have labels to count: on an intensity image the count is
+            # a full unique over the volume (seconds on a 3D+t series) for nothing.
+            is_mask = type(layer).__name__ == "Labels" or is_label_like_layer(layer)
+            n_lab = len(present_label_ids(layer)) if is_mask else 0
             labs = f" · {n_lab} label(s)" if n_lab else ""
             return f"{type(layer).__name__} {name}<br>{shape} voxels{labs} — Create → Surfaces from labels."
         except Exception as exc:  # noqa: BLE001 — a summary must never break the panel
@@ -1040,8 +1045,11 @@ class MeshPanel(QWidget):
                         point=point, view_direction=view_direction, remember=self._push_undo)
         self._status.setText("Running…")
         self.repaint()
+        from nvitk.gui.core.activity import activity
+
         try:
-            result = op.run(ctx)
+            with activity(f"Meshlab: {op.label} on “{getattr(layer, 'name', '')}”"):
+                result = op.run(ctx)
         except Exception as exc:  # noqa: BLE001 — report, never crash the panel
             from nvitk.gui.tools.runner import log_tool_failure
 
@@ -1097,10 +1105,14 @@ class MeshPanel(QWidget):
         failures: list[str] = []
         self._status.setText(f"Running on {len(targets)} layers…")
         self.repaint()
+        from nvitk.gui.core.activity import start_task
+
+        task = start_task(f"Meshlab: {op.label}", total=len(targets))
         for k, layer in enumerate(targets, 1):
             if layer not in self._viewer.layers:
                 continue
             self._status.setText(f"Running on {layer.name} ({k}/{len(targets)})…")
+            task.update(done=k - 1, message=f"Meshlab: {op.label} on “{layer.name}”")
             QApplication.processEvents()
             ctx = OpContext(self._viewer, layer, dict(params), replace=self._replace.isChecked() and op.replaceable,
                             remember=lambda ly, prev: changed.append((weakref.ref(ly), prev)))
@@ -1112,6 +1124,8 @@ class MeshPanel(QWidget):
                 continue
             results.append((layer.name, result))
             gui_log(f"{op.label} · {layer.name}: {result.message}")
+        task.update(done=len(targets))
+        task.finish(ok=bool(results))
         if changed:
             # One Undo puts every layer this run changed back.
             self._push_undo_step(changed)

@@ -28,9 +28,10 @@ import weakref
 from typing import Any, Callable, Sequence
 
 import numpy as np
-from qtpy.QtCore import QStringListModel, Qt, QTimer, Signal
-from qtpy.QtGui import QColor, QIcon, QPixmap
+from qtpy.QtCore import QEvent, QObject, QStringListModel, Qt, QTimer, Signal
+from qtpy.QtGui import QColor, QIcon, QKeySequence, QPixmap
 from qtpy.QtWidgets import (
+    QAbstractSpinBox,
     QApplication,
     QButtonGroup,
     QCheckBox,
@@ -40,17 +41,20 @@ from qtpy.QtWidgets import (
     QDoubleSpinBox,
     QGridLayout,
     QHBoxLayout,
+    QKeySequenceEdit,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMenu,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QRadioButton,
     QSizePolicy,
     QSlider,
     QSpinBox,
+    QTextEdit,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -106,9 +110,22 @@ LABELING_DOCK_NAME = "nvitk:labeling"
 _NONE = "(none)"
 #: The vessel tracer's preview on the canvas.
 _TRACE_PREVIEW = "✎ vessel path (Labeling)"
+#: The key toggling between the tool in use and Pan, and where it is kept.
+_PAN_KEY_DEFAULT = "Q"
+_PAN_KEY_PREF = "labeling_pan_key"
+
+
+def _stored_pan_key() -> str:
+    try:
+        from nvitk.gui.core.prefs import load_prefs
+
+        return str(load_prefs().get(_PAN_KEY_PREF) or _PAN_KEY_DEFAULT)
+    except Exception:  # noqa: BLE001
+        return _PAN_KEY_DEFAULT
 #: Napari Labels modes behind the Draw buttons; the wand is ours (pan/zoom underneath).
 _TOOLS: tuple[tuple[str, str, str], ...] = (
-    ("pan_zoom", "Pan", "Move and zoom the view (Space held does it from any tool)."),
+    ("pan_zoom", "Pan", "Move and zoom the view. Hold the Pan key (Q by default) to pan from any tool, "
+                        "on the canvas and in the orthogonal views."),
     ("paint", "Paint", "Paint the active label (Napari: 2). [ and ] change the brush size."),
     ("erase", "Erase", "Erase to background (Napari: 1)."),
     ("fill", "Fill", "Bucket fill: the region clicked becomes the active label (Napari: 3)."),
@@ -126,8 +143,8 @@ _MORE_TOOLS: tuple[tuple[str, str, str], ...] = (
     ("vessel", "Vessel", "Vessel flood: click or drag on a vessel; it grows through the vesselness (tubes at "
                          "the radii below), not into blobs or the background. Alt+drag tunes how far it goes."),
     ("tracer", "Tracer", "Vessel tracer: click points along a vessel — on the canvas, in 3D, in any orthogonal "
-                         "view or slice; the path follows the lumen. Double-click or Fill tube labels a tube "
-                         "around it."),
+                         "view or slice; the path follows the lumen. Double-click or Fill labels a tube around "
+                         "it, or the voxels of the path's intensities out to the largest radius."),
     ("smart", "Smart brush", "A brush that paints only the voxels like the one under its centre (the brush's two "
                              "intensity populations split by Otsu, or a tolerance). Ctrl+drag pans."),
 )
@@ -138,7 +155,7 @@ _TOOL_HINTS = {
     "flood": "Click, or drag to add along the way · Shift removes · Alt+drag tunes k · Ctrl+drag pans.",
     "vessel": "Click on a vessel, or drag along it · Shift removes · Alt+drag tunes the vesselness fraction · "
               "Ctrl+drag pans.",
-    "tracer": "Click points along the vessel (any view, any slice, or in 3D); double-click or Fill tube.",
+    "tracer": "Click points along the vessel (any view, any slice, or in 3D); double-click or Fill.",
     "smart": "Drag to paint the voxels like the one under the brush's centre · Ctrl+drag pans.",
 }
 
@@ -323,6 +340,10 @@ class LabelingPanel(QWidget):
         self._counts: dict[int, int] = {}
         #: The tool a right-drag put aside for the eraser, until the button is released.
         self._erase_restore: str | None = None
+        #: The Pan key: the drawing tool it goes back to, its key, its shortcuts.
+        self._pan_key = QKeySequence(_stored_pan_key())
+        #: While the Pan key is held: the tool to go back to (``None``: not held).
+        self._pan_hold: str | None = None
         #: The vessel being traced, and its preview layer.
         self._trace: VesselTrace | None = None
         self._trace_ref: Callable[[], Any] = lambda: None
@@ -380,6 +401,14 @@ class LabelingPanel(QWidget):
         from nvitk.gui.core.napari_fixes import register_labels_3d_fallback
 
         register_labels_3d_fallback(self._brush_3d_fallback)
+        # The Pan key, heard wherever the focus is in the application (the canvas, the
+        # orthogonal views, the tabs, a panel window) except while typing text.
+        self._pan_filter = _PanKeyFilter(self)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self._pan_filter)
+            app.applicationStateChanged.connect(self._on_app_state)
+        self._update_draw_hint()
         hub = label_filter_hub()
         hub.names_changed.connect(self._on_names_changed)
         hub.labels_changed.connect(self._on_labels_changed)
@@ -516,9 +545,19 @@ class LabelingPanel(QWidget):
             button.clicked.connect(lambda _c=False, m=mode: self.set_tool(m))
             grid_more.addWidget(button, 0, i)
         card.add_layout(grid_more)
-        hint = QLabel("Right-drag erases, whatever the tool.")
-        hint.setStyleSheet(f"color: {COLOR_MUTED}; font-size: 10px;")
-        card.add(hint)
+        self._draw_hint = QLabel("")
+        self._draw_hint.setWordWrap(True)
+        self._draw_hint.setStyleSheet(f"color: {COLOR_MUTED}; font-size: 10px;")
+        self._pan_key_edit = QKeySequenceEdit(self._pan_key)
+        self._pan_key_edit.setToolTip("Hold this key to pan — on the canvas and in the orthogonal views — and let "
+                                      "go to get the tool in use back. Click, then press the new key.")
+        if hasattr(self._pan_key_edit, "setMaximumSequenceLength"):
+            self._pan_key_edit.setMaximumSequenceLength(1)
+        self._pan_key_edit.setMaximumWidth(90)
+        self._pan_key_edit.editingFinished.connect(self._on_pan_key_edited)
+        row = _row(self._draw_hint, "Pan key", self._pan_key_edit)
+        row.setStretch(0, 1)
+        card.add_layout(row)
 
         self._brush = QSlider(Qt.Orientation.Horizontal)
         self._brush.setRange(1, 100)
@@ -725,10 +764,18 @@ class LabelingPanel(QWidget):
         g.addWidget(self._vessel_tol, 1, 1)
         lay.addWidget(self._vessel_box)
 
-        # Tracer: the tube's radius and its buttons.
+        # Tracer: what is filled around the path, and its buttons.
         self._tracer_box = QWidget()
         g = QGridLayout(self._tracer_box)
         g.setContentsMargins(0, 0, 0, 0)
+        self._tracer_fill_mode = QComboBox()
+        self._tracer_fill_mode.addItem("tube", "tube")
+        self._tracer_fill_mode.addItem("intensities around the path", "intensity")
+        self._tracer_fill_mode.setToolTip(
+            "Tube: a tube around the path, its radius measured from the lumen point by point (or fixed).\n"
+            "Intensities around the path: a segmentation guided by the path — every voxel out to the largest "
+            "Radius whose intensity lies in the range of the path's own voxels (± Range), connected to the path.")
+        self._tracer_fill_mode.currentIndexChanged.connect(lambda _i: self._update_tracer_box())
         self._tracer_radius = QDoubleSpinBox()
         self._tracer_radius.setRange(0.0, 50.0)
         self._tracer_radius.setDecimals(1)
@@ -736,15 +783,49 @@ class LabelingPanel(QWidget):
         self._tracer_radius.setSuffix(" mm")
         self._tracer_radius.setSpecialValueText("measured")
         self._tracer_radius.setToolTip("The tube's radius; 'measured': the lumen's, point by point along the path.")
+        self._tracer_tol = QDoubleSpinBox()
+        self._tracer_tol.setRange(0.0, 100.0)
+        self._tracer_tol.setDecimals(1)
+        self._tracer_tol.setValue(10.0)
+        self._tracer_tol.setSuffix(" %")
+        self._tracer_tol.setToolTip("Widen the path's intensity range (its voxels' 2–98 %) by this % of the "
+                                    "window each way — the lumen's edge is darker than its centre.")
+        self._tracer_smooth = QDoubleSpinBox()
+        self._tracer_smooth.setRange(0.0, 10.0)
+        self._tracer_smooth.setDecimals(1)
+        self._tracer_smooth.setSingleStep(0.5)
+        self._tracer_smooth.setValue(1.0)
+        self._tracer_smooth.setSuffix(" vox")
+        self._tracer_smooth.setToolTip("Smooth the image first (Gaussian σ) for the fill and for measuring the "
+                                       "tube's radius, so noise does not punch holes or read as the wall.")
+        self._tracer_reach = QLabel("")
+        self._tracer_reach.setWordWrap(True)
+        self._tracer_reach.setStyleSheet(f"color: {COLOR_MUTED}; font-size: 10px;")
         self._tracer_info = QLabel("No points yet.")
+        self._tracer_info.setWordWrap(True)
         self._tracer_info.setStyleSheet(f"color: {COLOR_MUTED};")
-        g.addWidget(QLabel("Tube radius"), 0, 0)
-        g.addWidget(self._tracer_radius, 0, 1)
-        g.addLayout(_row(_button("Fill tube", "Label a tube around the path (one undo step).", self.tracer_fill),
+        self._tracer_rows = {
+            "tube": [QLabel("Tube radius"), self._tracer_radius],
+            "intensity": [QLabel("Range ±"), self._tracer_tol, self._tracer_reach],
+        }
+        g.addWidget(QLabel("Fill"), 0, 0)
+        g.addWidget(self._tracer_fill_mode, 0, 1)
+        g.addWidget(self._tracer_rows["tube"][0], 1, 0)
+        g.addWidget(self._tracer_radius, 1, 1)
+        g.addWidget(self._tracer_rows["intensity"][0], 2, 0)
+        g.addWidget(self._tracer_tol, 2, 1)
+        g.addWidget(QLabel("Smoothing"), 3, 0)
+        g.addWidget(self._tracer_smooth, 3, 1)
+        g.addWidget(self._tracer_reach, 4, 0, 1, 2)
+        g.addLayout(_row(_button("Fill", "Label what the Fill setting says around the path (one undo step; the "
+                                 "path stays: Undo, change the settings and Fill again).", self.tracer_fill),
                          _button("Undo point", "Take the last point back.", self.tracer_undo),
-                         _button("Cancel", "Drop the points.", self.tracer_cancel)), 1, 0, 1, 2)
-        g.addWidget(self._tracer_info, 2, 0, 1, 2)
+                         _button("Cancel", "Drop the path.", self.tracer_cancel)), 5, 0, 1, 2)
+        g.addWidget(self._tracer_info, 6, 0, 1, 2)
         lay.addWidget(self._tracer_box)
+        self._vessel_r0.valueChanged.connect(lambda _v: self._update_tracer_box())
+        self._vessel_r1.valueChanged.connect(lambda _v: self._update_tracer_box())
+        self._update_tracer_box()
 
         # Smart brush: Otsu, or a tolerance.
         self._smart_box = QWidget()
@@ -765,6 +846,15 @@ class LabelingPanel(QWidget):
         for box in (self._flood_box, self._vessel_common, self._vessel_box, self._tracer_box, self._smart_box):
             box.hide()
         return host
+
+    def _update_tracer_box(self) -> None:
+        mode = self._tracer_fill_mode.currentData()
+        for key, widgets in self._tracer_rows.items():
+            for widget in widgets:
+                widget.setVisible(key == mode)
+        reach = max(float(self._vessel_r0.value()), float(self._vessel_r1.value()))
+        self._tracer_reach.setText(f"Out to {reach:g} mm from the path (the largest Radius above), through the "
+                                   "intensities of the path's own voxels.")
 
     def _remember_grow_3d(self, on: bool) -> None:
         if self._extra in self._grow3d:
@@ -833,6 +923,9 @@ class LabelingPanel(QWidget):
             "bright": bool(self._vessel_bright.currentData()),
             "tolerance": vessel_tol / 100.0 * window if vessel_tol > 0 else None,
             "tube_radius_mm": float(self._tracer_radius.value()),
+            "trace_fill": str(self._tracer_fill_mode.currentData() or "tube"),
+            "trace_tolerance": float(self._tracer_tol.value()) / 100.0 * window,
+            "trace_smooth": float(self._tracer_smooth.value()),
         }
 
     def tune_step(self, tool: str) -> float:
@@ -1520,16 +1613,19 @@ class LabelingPanel(QWidget):
 
     # ── drawing ──────────────────────────────────────────────────────────────
 
-    def set_tool(self, mode: str) -> None:
+    def set_tool(self, mode: str, *, keep_work: bool = False) -> None:
         """Pick a Draw tool: a Napari Labels mode, or one of the tab's own (the wand,
-        the flood and vessel tools, the smart brush, the polygon)."""
+        the flood and vessel tools, the smart brush, the polygon).
+
+        With *keep_work*, going to Pan leaves a polygon or a traced path being
+        drawn as it is, to go on with when the tool comes back (the Pan key held)."""
         layer = self.target()
         if layer is None or not E.is_labels(layer):
             return
         # The mode first: Napari resets the layer's camera panning with it, and the
         # tab's tools then set it for themselves.
         layer.mode = "pan_zoom" if mode in EXTRA_TOOLS else mode
-        self._set_extra(mode if mode in EXTRA_TOOLS else None)
+        self._set_extra(mode if mode in EXTRA_TOOLS else None, keep_work=keep_work and mode == "pan_zoom")
         self._tool_buttons[mode].setChecked(True)
         try:
             self._viewer.layers.selection.active = layer
@@ -1539,12 +1635,14 @@ class LabelingPanel(QWidget):
     def _set_wand(self, on: bool) -> None:
         self._set_extra("wand" if on else None)
 
-    def _set_extra(self, tool: str | None) -> None:
+    def _set_extra(self, tool: str | None, *, keep_work: bool = False) -> None:
         changed = self._extra != tool
-        if self._extra == "polygon" and tool != "polygon":
-            self.cancel_polygon()
-        if self._extra == "tracer" and tool != "tracer":
-            self.tracer_cancel()
+        if not keep_work:
+            # A polygon or a path left for Pan goes when another tool is picked.
+            if self._poly is not None and tool != "polygon":
+                self.cancel_polygon()
+            if self._trace is not None and tool != "tracer":
+                self.tracer_cancel()
         self._extra = tool
         region = tool in REGION_TOOLS
         self._wand_box.setVisible(region)
@@ -1565,6 +1663,83 @@ class LabelingPanel(QWidget):
         self._update_camera_lock()
         if changed:
             self.tool_changed.emit()
+
+    # ── the Pan key: Pan while it is held ────────────────────────────────────
+
+    def pan_held(self) -> bool:
+        """True while the Pan key is held (the tool in use waits)."""
+        return self._pan_hold is not None
+
+    def pan_press(self) -> bool:
+        """The Pan key went down: Pan until it comes up (a polygon or a traced path
+        in progress waits). False when there is nothing to do it on."""
+        if self._pan_hold is not None:
+            return True
+        layer = self.target()
+        if layer is None or not E.is_labels(layer):
+            return False
+        current = self._extra or str(getattr(layer.mode, "value", layer.mode))
+        self._pan_hold = current
+        if current != "pan_zoom":
+            self.set_tool("pan_zoom", keep_work=True)
+        self._say(f"Pan while {self._pan_key_text()} is held.")
+        return True
+
+    def pan_release(self) -> bool:
+        """The Pan key came up: back to the tool in use before it went down."""
+        tool, self._pan_hold = self._pan_hold, None
+        if tool is None:
+            return False
+        layer = self.target()
+        if tool != "pan_zoom" and tool in self._tool_buttons and layer is not None and E.is_labels(layer):
+            self.set_tool(tool)
+            self._say(f"Back to {self._tool_buttons[tool].text()}.")
+        return True
+
+    def _on_app_state(self, state: Any) -> None:
+        # The key's release never comes if the window loses the focus while it is down.
+        if state != Qt.ApplicationState.ApplicationActive and self._pan_hold is not None:
+            self.pan_release()
+
+    def _pan_key_text(self) -> str:
+        return self._pan_key.toString(QKeySequence.SequenceFormat.NativeText) or "the Pan key"
+
+    def matches_pan_key(self, event: Any) -> bool:
+        """True when the key *event* is the Pan key (its modifiers too, on a press)."""
+        if self._pan_key.isEmpty():
+            return False
+        combo = self._pan_key[0]
+        if int(event.key()) != int(combo.key()):
+            return False
+        if event.type() == QEvent.Type.KeyRelease:
+            return True
+        wanted = combo.keyboardModifiers()
+        have = event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
+        return have == wanted
+
+    def _on_pan_key_edited(self) -> None:
+        seq = self._pan_key_edit.keySequence()
+        if seq.isEmpty():
+            seq = QKeySequence(_PAN_KEY_DEFAULT)
+        elif seq.count() > 1:
+            seq = QKeySequence(seq[0])
+        self._pan_key_edit.blockSignals(True)
+        self._pan_key_edit.setKeySequence(seq)
+        self._pan_key_edit.blockSignals(False)
+        if self._pan_hold is not None:
+            self.pan_release()
+        self._pan_key = seq
+        self._update_draw_hint()
+        try:
+            from nvitk.gui.core.prefs import save_prefs
+
+            save_prefs({_PAN_KEY_PREF: seq.toString(QKeySequence.SequenceFormat.PortableText)})
+        except Exception:  # noqa: BLE001 — a preference is a convenience
+            pass
+
+    def _update_draw_hint(self) -> None:
+        if hasattr(self, "_draw_hint"):
+            self._draw_hint.setText(f"Right-drag erases, whatever the tool · hold {self._pan_key_text()} to pan.")
 
     def extra_tool(self) -> str | None:
         """The tab's own Draw tool in use (``None``: one of Napari's)."""
@@ -2053,7 +2228,8 @@ class LabelingPanel(QWidget):
             return
         try:
             trace = self._trace
-            if trace is not None and trace.layer is not layer:
+            if trace is not None and (trace.layer is not layer or trace.filled):
+                # Another layer, or a path already filled: this click starts a new one.
                 self.tracer_cancel()
                 trace = None
             if trace is None:
@@ -2098,12 +2274,9 @@ class LabelingPanel(QWidget):
             return
 
         def run() -> str:
-            changed, radius = trace.fill()
-            self._trace = None
+            changed, what = trace.fill()
             self._show_trace()
-            how = "measured" if float(self._tracer_radius.value()) <= 0 else "fixed"
-            return (f"Tracer: tube of {changed:,} voxel(s) labelled {self.label_id()} "
-                    f"(radius {radius:.2f} mm, {how}).")
+            return f"Tracer: {changed:,} voxel(s) labelled {self.label_id()} ({what})."
 
         self._run("Tracer", run)
 
@@ -2145,8 +2318,12 @@ class LabelingPanel(QWidget):
             pass
         if ortho is not None:
             ortho._label_editor.show_trace(layer, trace.points, path)
-        self._tracer_info.setText(f"{len(trace.points)} point(s), path of {len(path)} voxel(s) — double-click "
-                                  "or Fill tube.")
+        if trace.filled:
+            self._tracer_info.setText(f"Filled ({len(path)}-voxel path). Ctrl+Z, change the settings and Fill "
+                                      "again — or click to start a new path.")
+        else:
+            self._tracer_info.setText(f"{len(trace.points)} point(s), path of {len(path)} voxel(s) — "
+                                      "double-click or Fill.")
 
     def _trace_preview(self) -> Any | None:
         preview = self._trace_ref()
@@ -2748,14 +2925,14 @@ class LabelingPanel(QWidget):
     # ── feedback ─────────────────────────────────────────────────────────────
 
     def _run(self, name: str, fn: Callable[[], str]) -> None:
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        from nvitk.gui.core.activity import activity
+
         try:
-            message = fn()
+            with activity(f"Labeling: {name}"):
+                message = fn()
         except Exception as exc:  # noqa: BLE001 — shown, not raised into Qt
             self._say(f"{name}: {exc}", error=True)
             return
-        finally:
-            QApplication.restoreOverrideCursor()
         self._say(message)
 
     def _say(self, text: str, *, error: bool = False) -> None:
@@ -2765,6 +2942,42 @@ class LabelingPanel(QWidget):
             self._viewer.status = text
         except Exception:  # noqa: BLE001
             pass
+
+
+#: Widgets the Pan key is typed into rather than acted on.
+_TEXT_INPUTS = (QLineEdit, QAbstractSpinBox, QTextEdit, QPlainTextEdit, QKeySequenceEdit)
+
+
+class _PanKeyFilter(QObject):
+    """The Labeling tab's Pan key for the whole application: down — Pan, up — the
+    tool back. An application-wide filter rather than a shortcut, because a
+    shortcut cannot see the key come up, and the views it should work in (the
+    canvas, the orthogonal views, panel windows) do not all take the focus."""
+
+    def __init__(self, panel: LabelingPanel) -> None:
+        super().__init__(panel)
+        self._panel = panel
+
+    def eventFilter(self, obj: Any, event: Any) -> bool:  # noqa: N802 - Qt naming
+        kind = event.type()
+        if kind not in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+            return False
+        panel = self._panel
+        try:
+            if not panel.matches_pan_key(event):
+                return False
+        except RuntimeError:  # the panel is gone
+            return False
+        if event.isAutoRepeat():
+            return panel.pan_held()  # the key held down repeats: nothing new
+        if kind == QEvent.Type.KeyRelease:
+            return panel.pan_release()
+        focus = QApplication.focusWidget()
+        if isinstance(focus, _TEXT_INPUTS) or (isinstance(focus, QComboBox) and focus.isEditable()):
+            return False
+        if QApplication.activeModalWidget() is not None or QApplication.activePopupWidget() is not None:
+            return False  # a dialog, a menu or an open drop-down list has the keyboard
+        return panel.pan_press()
 
 
 def build_labeling_panel(viewer: Any) -> LabelingPanel:

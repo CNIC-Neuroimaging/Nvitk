@@ -178,6 +178,9 @@ def run_app() -> None:
     except Exception:
         pass
     install_nvitk_io(viewer)
+    from nvitk.gui.core.activity import install_activity_indicator
+
+    install_activity_indicator(viewer)
     # The wheel scrolls panels; it never flips a dropdown or nudges an unfocused field.
     from nvitk.gui.core.wheel_guard import install_wheel_guard
 
@@ -490,6 +493,9 @@ def run_app() -> None:
     export_layout.addWidget(export_view_png_panel.native)
     export_layout.addWidget(export_view_gif_panel.native)
     export_layout.addWidget(save_panel.native)
+    from nvitk.gui.io.scene import build_scene_panel
+
+    export_layout.addWidget(build_scene_panel(viewer))
     export_layout.addStretch(1)
     export_tab.setLayout(export_layout)
 
@@ -639,6 +645,17 @@ def run_app() -> None:
         ortho_dock.raise_()
 
     _refresh_layer_list(layer_list, viewer, app_state)
+
+    # The summary follows the viewer's layers however they arrive or leave (a
+    # drop, a scene, a tool's own layers): once per burst of changes.
+    from qtpy.QtCore import QTimer
+
+    _summary_timer = QTimer(layer_list)
+    _summary_timer.setSingleShot(True)
+    _summary_timer.setInterval(0)
+    _summary_timer.timeout.connect(_on_layers_changed)
+    for _emitter in (viewer.layers.events.inserted, viewer.layers.events.removed, viewer.layers.events.reordered):
+        _emitter.connect(lambda _event=None: _summary_timer.start())
 
     # Panels whose contents are rebuilt from the active layer. Refreshing one that
     # nobody is looking at — tabbed behind another, closed, or in a hidden

@@ -459,9 +459,13 @@ def run_quick_op(
     the caller already fixed (a palette entry for "Gaussian blur (sigma 2)") are
     passed through and no dialog is shown.
     """
+    from nvitk.gui.core.activity import activity
+
+    label = title or op_name.replace("_", " ")
     builder = PARAM_BUILDERS.get(op_name) if not kwargs else None
     if builder is None:
-        return str(getattr(quick_ops, op_name)(viewer, **kwargs))
+        with activity(label):
+            return str(getattr(quick_ops, op_name)(viewer, **kwargs))
 
     params = builder(viewer)
     dialog = QuickOpDialog(viewer, op_name, params, title or op_name, parent=parent)
@@ -475,7 +479,8 @@ def run_quick_op(
             viewer.layers.selection.active = source
         except Exception:
             pass
-    return str(getattr(quick_ops, op_name)(viewer, **dialog.values()))
+    with activity(label):
+        return str(getattr(quick_ops, op_name)(viewer, **dialog.values()))
 
 
 __all__ = [

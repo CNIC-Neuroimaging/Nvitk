@@ -63,6 +63,7 @@ from nvitk.gui.labels.visibility import (
     label_source_data,
     invalidate_label_ids,
     layer_label_ids,
+    stored_visible_ids,
 )
 
 #: Axis codes → the plane you are looking at when you slice along that axis.
@@ -863,14 +864,19 @@ def image_rgba(
 def label_rgba_lut(layer: Any, label_ids: list[int]) -> dict[int, np.ndarray]:
     """RGBA uint8 per label id, read from the layer's own colours.
 
-    Alpha is kept, unlike :func:`label_lut`: a label nvitk has hidden is stored
-    as fully transparent, and dropping that would paint it solid black instead of
-    leaving what is underneath showing.
+    Alpha is kept, unlike :func:`label_lut`, and a label hidden in the label list
+    (nvitk's visibility filter) comes out fully transparent, as on the canvas.
+    :func:`get_label_color` returns a hidden label's *own* colour — the one it
+    gets back when shown — so the filter is read separately.
     """
+    visible = stored_visible_ids(layer)
+    shown = None if visible is None else {int(v) for v in visible}
     lut: dict[int, np.ndarray] = {}
     for lid in label_ids:
-        rgba = get_label_color(layer, int(lid))
-        lut[int(lid)] = (np.clip(np.asarray(rgba, dtype=float), 0, 1) * 255).astype(np.uint8)
+        rgba = np.clip(np.asarray(get_label_color(layer, int(lid)), dtype=float), 0, 1)
+        if shown is not None and int(lid) not in shown:
+            rgba = np.array([rgba[0], rgba[1], rgba[2], 0.0])
+        lut[int(lid)] = (rgba * 255).astype(np.uint8)
     return lut
 
 
@@ -1223,6 +1229,8 @@ class SliceView(QWidget):
         #: ``handler(kind, pixel, event) -> bool`` sees presses, drags and releases
         #: first; True means it drew, and the crosshair stays put.
         self.edit_handler: Any | None = None
+        #: Asked on a left press whether it pans (the Labeling tab's Pan key held).
+        self.pan_check: Any | None = None
         self._editing = False
         #: Brush outline ``(radius down, radius across)`` in slice pixels, drawn at
         #: the cursor while a brush tool is on; and the cursor's canvas position.
@@ -1266,6 +1274,9 @@ class SliceView(QWidget):
             f"background-color: #000000; border: 1px solid {COLOR_BORDER}; border-radius: 4px;"
         )
         self._canvas.installEventFilter(self)
+        # A click gives the view the keyboard: the views' Undo / Esc and the Labeling
+        # tab's Pan key then reach it, not a text box focused earlier.
+        self._canvas.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
 
         self._slider = QSlider(Qt.Horizontal)
         self._slider.setMinimum(0)
@@ -1672,7 +1683,8 @@ class SliceView(QWidget):
         if event.type() == QEvent.MouseMove:
             if self._brush is not None:
                 self._hover = self._cursor_xy(event)
-            if self._drag_from is not None and self._is_pan(event):
+            if self._drag_from is not None and event.buttons() & (Qt.LeftButton | Qt.MiddleButton):
+                # A drag that began as a pan stays one (the Pan key may come up meanwhile).
                 self._pan_by(event)
                 return True
             if self._editing:
@@ -1730,13 +1742,17 @@ class SliceView(QWidget):
         pos = event.position() if hasattr(event, "position") else event.pos()
         return float(pos.x()), float(pos.y())
 
-    @staticmethod
-    def _is_pan(event: Any) -> bool:
-        """True for the pan gesture: middle-drag, or shift with the left button."""
+    def _is_pan(self, event: Any) -> bool:
+        """True for the pan gesture: middle-drag, shift with the left button, or the
+        left button while the Labeling tab's Pan key is held (:attr:`pan_check`)."""
         buttons = event.buttons()
         if buttons & Qt.MiddleButton:
             return True
-        return bool(buttons & Qt.LeftButton) and bool(event.modifiers() & Qt.ShiftModifier)
+        if not buttons & Qt.LeftButton:
+            return False
+        if event.modifiers() & Qt.ShiftModifier:
+            return True
+        return self.pan_check is not None and bool(self.pan_check())
 
     def _pan_by(self, event: Any) -> None:
         """Drag the zoomed slice under the canvas."""
@@ -2362,6 +2378,14 @@ class OrthoViewerPanel(QWidget):
         self._style_timer.setSingleShot(True)
         self._style_timer.setInterval(_STYLE_SYNC_MS)
         self._style_timer.timeout.connect(self._on_style_settled)
+        # Labels shown / hidden in a label list: the colours change after the
+        # layer's own colormap event has been seen (the filter is written last).
+        try:
+            from nvitk.gui.labels.selector import label_filter_hub
+
+            label_filter_hub().changed.connect(self._on_label_filter_changed)
+        except Exception:  # noqa: BLE001
+            pass
 
         # Adding or moving layers arrives in bursts — a tool that drops four
         # overlays on the canvas fires four inserts. Rebuild once when they stop.
@@ -2466,6 +2490,9 @@ class OrthoViewerPanel(QWidget):
             shortcut = QShortcut(QKeySequence(keys), self)
             shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
             shortcut.activated.connect(slot)
+        # While the Labeling tab's Pan key is held, a left-drag pans the views too.
+        for view in self._slice_views:
+            view.pan_check = self._pan_key_held
         grid.addWidget(self._build_controls(), 1, 1)
         grid.setRowStretch(0, 1)
         grid.setRowStretch(1, 1)
@@ -2969,6 +2996,11 @@ class OrthoViewerPanel(QWidget):
         """A layer was shown or hidden: the draw list changed."""
         self.refresh_sources()
 
+    def _on_label_filter_changed(self, layer: Any = None) -> None:
+        """A label list showed or hid labels of *layer*: recolour if it is drawn."""
+        if any(source.layer is layer for source in self._sources):
+            self._on_style_changed()
+
     def _on_style_changed(self, _event: Any = None) -> None:
         """A colour or opacity moved: refresh the tables, keep the data."""
         for source in self._sources:
@@ -3083,6 +3115,13 @@ class OrthoViewerPanel(QWidget):
             source.label_ids = sorted(known | fresh)
             self._refresh_style(source)
         self._redraw(force=True)
+
+    def _pan_key_held(self) -> bool:
+        labeling = getattr(self._viewer, "_nvitk_labeling_panel", None)
+        try:
+            return labeling is not None and bool(labeling.pan_held())
+        except RuntimeError:  # the tab is gone
+            return False
 
     def set_draw_hint(self, text: str, *, error: bool = False) -> None:
         """The line saying what a click in the views does while a labeling tool is on."""

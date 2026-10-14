@@ -13,7 +13,9 @@ What the Labeling tab's region tools compute, from a voxel the user points at:
   or the background touches it;
 * :func:`trace_vessel_path` / :func:`tube_from_path` — the cheapest path between
   points clicked along a vessel (through the vesselness), and a tube around it
-  whose radius is measured from the lumen along the way;
+  whose radius is measured from the lumen along the way; or
+  :func:`path_intensity_fill` — the voxels around the path, out to a reach, whose
+  intensity lies in the path's own range (a segmentation guided by the path);
 * :func:`adaptive_brush_keep` — which voxels under a brush belong with the
   centre's intensity (the "smart brush").
 
@@ -348,6 +350,76 @@ def path_radii(
     return as_backend_array(radii)
 
 
+def center_path(
+    session: GrowSession,
+    path: Any,
+    *,
+    bright: bool = True,
+    max_radius_mm: float = 10.0,
+    smooth: int = 5,
+) -> tuple[Any, Any]:
+    """*path* moved onto the vessel's centreline, and the radius (mm) there.
+
+    A minimal path cuts the inside of every bend, running along the wall; its
+    distance to the wall then reads far less than the vessel's radius. The lumen
+    is taken as the voxels brighter (darker, for a dark vessel) than half way
+    between the path's intensity and the background around it, and each point
+    climbs that lumen's distance-to-the-wall map to its ridge — the centreline —
+    within *max_radius_mm*. Returns the centred points (``(N, ndim)`` integers,
+    consecutive duplicates dropped) and the radius at each, smoothed over *smooth*
+    points; both on the backend.
+    """
+    pts = to_numpy(path).astype(int).reshape(-1, session.ndim)
+    if pts.shape[0] == 0:
+        return as_backend_array(pts), as_backend_array([])
+    reach = float(max_radius_mm) * 1.5
+    win = tuple(
+        slice(max(int(pts[:, d].min()) - int(math.ceil(reach / s)), 0),
+              min(int(pts[:, d].max()) + int(math.ceil(reach / s)) + 1, n))
+        for d, (s, n) in enumerate(zip(session.spacing, session.shape))
+    )
+    image = session.image[win]
+    with using("cpu"):
+        start = np.asarray([w.start for w in win], dtype=int)
+        local = pts - start[None, :]
+    index = tuple(as_backend_array(local[:, d]) for d in range(session.ndim))
+    lumen = float(np.median(image[index]))
+    background = float(np.percentile(image, 25 if bright else 75))
+    edge = 0.5 * (lumen + background)
+    inside = (image >= edge) if bright else (image <= edge)
+    depth = ndi.distance_transform_edt(inside, sampling=session.spacing)
+    # Climb the depth map from every point at once (host index arithmetic, the
+    # depth read on the backend), one neighbour step at a time.
+    with using("cpu"):
+        offsets = np.stack(np.meshgrid(*([np.arange(-1, 2)] * session.ndim), indexing="ij"), -1).reshape(-1, session.ndim)
+        limits = np.asarray(image.shape, dtype=int) - 1
+        steps = int(math.ceil(float(max_radius_mm) / min(session.spacing))) + 2
+    cur = local.copy()
+    for _ in range(steps):
+        with using("cpu"):
+            cand = np.clip(cur[:, None, :] + offsets[None, :, :], 0, limits)
+            flat = cand.reshape(-1, session.ndim)
+        values = to_numpy(depth[tuple(as_backend_array(flat[:, d]) for d in range(session.ndim))])
+        with using("cpu"):
+            best = np.argmax(values.reshape(len(cur), len(offsets)), axis=1)
+            moved = cand[np.arange(len(cur)), best]
+            if np.array_equal(moved, cur):
+                break
+            cur = moved
+    radii = to_numpy(depth[tuple(as_backend_array(cur[:, d]) for d in range(session.ndim))]).astype(float)
+    with using("cpu"):
+        keep = np.ones(len(cur), dtype=bool)
+        keep[1:] = np.any(cur[1:] != cur[:-1], axis=1)
+        cur, radii = cur[keep], radii[keep]
+        if smooth > 1 and radii.size > 2:
+            k = int(smooth)
+            padded = np.pad(radii, (k // 2, k // 2), mode="edge")
+            radii = np.array([np.median(padded[i:i + k]) for i in range(radii.size)])
+        radii = np.clip(radii, 0.0, float(max_radius_mm))
+        centred = cur + start[None, :]
+    return as_backend_array(centred), as_backend_array(radii)
+
+
 def tube_from_path(
     shape: Sequence[int],
     path: Any,
@@ -359,10 +431,24 @@ def tube_from_path(
     *radii_mm* (one per point, or one for all) around its points, round in mm."""
     shape = tuple(int(n) for n in shape)
     sp = _spacing(spacing, len(shape))
-    pts = to_numpy(path).astype(int)
+    pts = to_numpy(path).astype(float).reshape(-1, len(shape))
     radii = to_numpy(radii_mm).astype(float).ravel()
     if radii.size == 1 and len(pts) > 1:
         radii = to_numpy([float(radii[0])] * len(pts)).astype(float)
+    # No gaps between points further apart than a voxel (a centred path can be).
+    with using("cpu"):
+        dense_p, dense_r = [pts[:1]], [radii[:1]]
+        for a, b, ra, rb in zip(pts[:-1], pts[1:], radii[:-1], radii[1:]):
+            n = int(math.ceil(float(np.abs(b - a).max())))
+            if n > 1:
+                t = np.linspace(0.0, 1.0, n + 1)[1:, None]
+                dense_p.append(a[None, :] + t * (b - a)[None, :])
+                dense_r.append(ra + t[:, 0] * (rb - ra))
+            else:
+                dense_p.append(b[None, :])
+                dense_r.append(np.asarray([rb]))
+        pts = np.rint(np.concatenate(dense_p, axis=0)).astype(int)
+        radii = np.concatenate(dense_r, axis=0)
     out = np.zeros(shape, dtype=bool)
     for p, r in zip(pts, radii):
         win = tuple(slice(max(int(c) - int(math.ceil(r / s)), 0), min(int(c) + int(math.ceil(r / s)) + 1, n))
@@ -371,6 +457,68 @@ def tube_from_path(
         dist2 = sum(((g - int(c)) * s) ** 2 for g, c, s in zip(grids, p, sp))
         out[win] |= dist2 <= float(r) ** 2
     return out
+
+
+def path_intensity_fill(
+    session: GrowSession,
+    path: Any,
+    reach_mm: float,
+    *,
+    percentiles: Sequence[float] = (2.0, 98.0),
+    tolerance: float = 0.0,
+    close_radius: int = 0,
+    fill_holes: bool = True,
+) -> tuple[Any, tuple[float, float]]:
+    """A segmentation guided by a traced path and the intensities around it.
+
+    The intensity range is the path's own: the *percentiles* of the (smoothed)
+    image on the path's voxels — the lumen the path was drawn along — widened by
+    *tolerance* each way. The region is every voxel within *reach_mm* of the path
+    whose intensity lies in that range and that connects to the path through
+    such voxels (so a neighbouring structure of the same brightness that does
+    not touch it stays out); gaps up to *close_radius* voxels are closed and
+    holes filled. Returns the region (a boolean array like the session's image,
+    on the backend) and the intensity range used.
+    """
+    pts = to_numpy(path).astype(int).reshape(-1, session.ndim)
+    if pts.shape[0] == 0:
+        raise ValueError("The path is empty.")
+    reach = float(reach_mm)
+    if reach <= 0:
+        raise ValueError("The reach (the largest radius) must be above 0 mm.")
+    win = tuple(
+        slice(max(int(pts[:, d].min()) - int(math.ceil(reach / s)), 0),
+              min(int(pts[:, d].max()) + int(math.ceil(reach / s)) + 1, n))
+        for d, (s, n) in enumerate(zip(session.spacing, session.shape))
+    )
+    # Index arithmetic on the host; the indices go to the backend to read the image.
+    with using("cpu"):
+        local = pts - np.asarray([w.start for w in win], dtype=int)[None, :]
+    index = tuple(as_backend_array(local[:, d]) for d in range(session.ndim))
+    image = session.image[win]
+    values = image[index]
+    lo, hi = (float(v) for v in np.percentile(values, [float(percentiles[0]), float(percentiles[1])]))
+    lo, hi = lo - float(tolerance), hi + float(tolerance)
+    on_path = np.zeros(image.shape, dtype=bool)
+    on_path[index] = True
+    near = ndi.distance_transform_edt(~on_path, sampling=session.spacing) <= reach
+    candidate = (near & (image >= lo) & (image <= hi)) | on_path
+    if session.allowed is not None:
+        candidate &= session.allowed[win] | on_path
+    lab, _n = ndi.label(candidate, structure=session.structure)
+    ids = np.unique(lab[index])
+    ids = ids[ids > 0]
+    region_win = np.isin(lab, ids) & near
+    if int(close_radius) > 0:
+        region_win = ndi.binary_closing(region_win, structure=_ball(int(close_radius), session.ndim)) | region_win
+    if fill_holes:
+        region_win = ndi.binary_fill_holes(region_win)
+    region_win &= near
+    region = np.zeros(session.shape, dtype=bool)
+    region[win] = region_win
+    if session.allowed is not None:
+        region &= session.allowed
+    return region, (lo, hi)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -404,6 +552,8 @@ __all__ = [
     "DEFAULT_RADII_MM",
     "GrowSession",
     "adaptive_brush_keep",
+    "center_path",
+    "path_intensity_fill",
     "path_radii",
     "trace_vessel_path",
     "tube_from_path",

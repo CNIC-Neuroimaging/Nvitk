@@ -1387,15 +1387,20 @@ def build_tool_panel(
         if tool_id == "seg_totalsegmentator" and get_totalseg_roi is not None:
             params["roi_subset"] = get_totalseg_roi()
 
+        from nvitk.gui.core.activity import activity
+
+        title = str(getattr(spec, "label", "") or tool_id) if spec is not None else tool_id
+        on = f" on “{layer.name}”" if layer is not None and run_mode == "layer" else ""
         try:
-            result = run_gui_tool(
-                tool_id,
-                layer,
-                viewer,
-                target_mode=target_mode,
-                label_ids=ids or None,
-                params=params,
-            )
+            with activity(f"{title}{on}"):
+                result = run_gui_tool(
+                    tool_id,
+                    layer,
+                    viewer,
+                    target_mode=target_mode,
+                    label_ids=ids or None,
+                    params=params,
+                )
         except NotImplementedError as exc:
             log_tool_failure(exc)
             notify(str(exc), error=True)

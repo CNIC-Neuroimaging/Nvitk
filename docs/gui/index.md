@@ -30,7 +30,7 @@ panels, each its own dock, tabbed together:
 | **Labeling** | Manual segmentation and re-segmentation of a label layer: Napari's brush, bucket and polygon plus a magic wand, an editable area, grow / shrink / smooth, slice interpolation, merge / split / renumber (below). |
 | **QC** | Quality-control review panels for pipeline outputs. |
 | **Statmodels** | Launches {doc}`the Stats GUI <../stats-gui/index>` as a floating window. |
-| **Export** | Layer export to disk. |
+| **Export** | Layer export to disk, view captures, and **scenes**: the whole viewer saved to one file and opened again where it was left (below). |
 | **Layers** | Layer management, a "record pipeline steps" toggle, and the CT display window picker (below). |
 | **Pipeline** | Writes the recorded step sequence (open/mesh/export/...) as JSON. |
 
@@ -42,6 +42,32 @@ several folders on the viewer does the same.
 (`nvitk.gui.core.wheel_guard`): scrolling over a dropdown never changes its choice, and a
 spin box or slider only takes the wheel once clicked into — otherwise the panel underneath
 scrolls. Choose from a dropdown with a click or the arrow keys.
+
+**Activity indicator** (`nvitk.gui.core.activity`): the main window's status bar says what is
+running — loading files or DICOM series, a tool, a Meshlab operation, a Labeling operation, a
+pipeline, a DICOM scan or export, saving or opening a scene — with a bar (filled as far as the
+work has got when it says, sweeping when it does not) and the time it has run; "✓ Done … (s)"
+or "✗ Failed …" stays a moment after anything that took more than half a second. Reading
+files, DICOM series, scenes and a pipeline's output happen on a worker thread, so the window
+keeps redrawing meanwhile (clicks wait until it is done). A tool from the Imaging tab runs on
+the GUI thread: its line is shown before it starts, but the window cannot redraw until it
+ends.
+
+**Scenes** (`nvitk.gui.io.scene`; *Export ▸ Scene*): *Save scene…* writes the whole viewer
+to one `.nvscene` file — every layer (images, labels, surfaces, points, shapes, vectors,
+tracks) with its data, placement, display (colormap, window, opacity, label colours and
+names, the labels shown), metadata (the source file's affine and axes, so a layer still
+exports as before), the layer folders (and which are folded), nvitk's per-layer state (mesh
+fields and colouring, mesh series, image masks), and the view (2D/3D, axis order, slice,
+camera, grid, active layer). *Open scene…* (or opening / dropping a `.nvscene` file) asks
+whether to replace the layers there are or add to them, and says what, if anything, could
+not be restored. Replacing closes the tool windows bound to the old layers (vessel CPR,
+cross-sections). The layers are added with the canvas in 2D and the saved view (3D
+included) is put back once they are all in. Tool windows and the overlays they draw (the
+CPR's centerline, control points, station and plane; the cross-sections' centerlines and
+picks) are not part of a scene: run the tool again on the restored layers. The file is a
+zip: `scene.json` (the manifest), each array as a standard `.npy`, the rest pickled — open
+scenes you or someone you trust saved. *Compress* makes a smaller file, more slowly.
 
 Keybindings: <kbd>Ctrl</kbd>+<kbd>T</kbd> transpose axes, <kbd>Ctrl</kbd>+<kbd>O</kbd> open,
 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> save the active layer,
@@ -197,14 +223,28 @@ orthogonal views follow undo and redo too.
   - **Tracer** (vessel tracer): click points along a vessel — on the canvas (2D or 3D), in
     any orthogonal view, on any slice. The cheapest path between them follows the lumen
     (vesselness and intensity); it shows as yellow dots on the canvas and a yellow line in
-    the views. Double-click or *Fill tube* labels a tube around it, its radius measured from
-    the lumen point by point (or a fixed *Tube radius*); *Undo point*, *Cancel*.
+    the views. Double-click or *Fill* labels, as *Fill* says:
+    - *tube* — a tube around the path, its radius measured from the lumen point by point
+      (or a fixed *Tube radius*);
+    - *intensities around the path* — a segmentation guided by the path: every voxel out to
+      the largest *Radius* whose intensity lies in the range of the path's own voxels (their
+      2–98 %, widened by *Range ±* % of the window — of the box's range with *Intensity range
+      from the box*) and that connects to the path through such voxels, after *Smoothing*;
+      holes are filled. A structure as bright that does not touch the vessel stays out.
+
+    The path stays after a fill: <kbd>Ctrl</kbd>+<kbd>Z</kbd>, change the settings and *Fill*
+    again; the next click starts a new path. *Undo point*, *Cancel*.
   - **Smart brush**: a brush (its size, 3D with *3D brush*) that paints only the voxels under
     it that go with the intensity at its centre — the brush's voxels split in two by Otsu, or
     within *Tolerance ±* % of the window.
 
   With the drag tools (the region tools in 2D, the smart brush) a drag draws, so
-  <kbd>Ctrl</kbd>+drag pans the canvas; the wheel zooms as always. Brush size, *Preserve
+  <kbd>Ctrl</kbd>+drag pans the canvas; the wheel zooms as always. **Hold the Pan
+  key** (<kbd>Q</kbd> by default; set it in the Draw card, it is remembered) to pan with any
+  tool: while it is down the tool is *Pan* — a left-drag moves the canvas, and in the
+  orthogonal views a left-drag pans the view — and letting go brings the tool back. A polygon
+  or a traced path being drawn waits meanwhile. The key is heard wherever the focus is
+  (canvas, views, tabs, panel windows), except while typing in a text box. Brush size, *Preserve
   other labels* (write only over background and the active label — the region tools also
   stop growing at other labels), *3D brush / fill*, *Fill contiguous only*, *Outlines*
   (drawn in the orthogonal views even when the canvas is in 3D, where Napari cannot draw
@@ -338,7 +378,8 @@ cached). It follows the active layer only onto real volumes. Selecting a localiz
 single-slice series or a colour capture keeps the volume already shown rather than rebinding
 to a one-voxel grid.
 
-- **Display follows the layers**: colormap, window, gamma, opacity, blending — and
+- **Display follows the layers**: colormap, window, gamma, opacity, blending, the labels
+  shown or hidden in a label list (the Labels panel, the layer list) — and
   **interpolation**. Each layer is magnified with its napari `interpolation2d` (napari's default,
   `nearest`, stays blocky; `linear`/`cubic` smooth), labels always nearest as on the canvas; an
   oblique plane is resliced with the matching spline order (0 / 1 / 3), and an off-grid layer set to
@@ -360,7 +401,7 @@ to a one-voxel grid.
   label clicked. The Labeling tab's region tools — *Wand*, *Flood*, *Vessel* — grow from the
   voxel clicked, add a region at every voxel a drag reaches (one undo step) and tune their
   setting with <kbd>Alt</kbd>+drag (<kbd>Shift</kbd>+click removes); the *Tracer* takes points in
-  any view and slice (double-click fills the tube); the *Smart brush* paints like the brush; its
+  any view and slice (double-click fills); the *Smart brush* paints like the brush; its
   *Polygon* takes corners in a view (double-click or the first corner fills, <kbd>Esc</kbd>
   cancels). A right-drag erases whatever the tool. With *Draw box*, a drag sets the box on the
   view's two axes; the box and a traced vessel are drawn in every view. The editable area
@@ -492,6 +533,28 @@ A mask on another grid is resampled onto the image's (nearest); a 3D mask applie
 frame of a 3D+t image, and a 3D+t mask of the same shape frame by frame. It runs on the GPU
 when the GPU toggle is on. The former *Filters ▸ Mask: keep inside / keep outside* tools are
 this one; their ids still run (`TOOL_ID_ALIASES`).
+
+### Vessel CPR (curved planar reformation)
+
+*Visualization ▸ Vessel CPR* (`nvitk.gui.viz.vessel_cpr_panel`), run on a lumen label layer
+with an optional intensity image, opens the vessel flattened along its centerline: arc length
+across, millimetres from the centerline up and down, the calibre profile under it and the true
+perpendicular cross-section beside it. A click picks a station; the cut angle, the ray, the
+station count and the centerline (its control points in 3D, or *Edit on image* drags) can be
+changed.
+
+- **Retouching the lumen** (*Mouse: Paint / Erase*, *Brush* radius in mm): drag on the flat
+  image or on the cross-section. Every point under the brush there is a point in the volume, so
+  a stroke paints (erases) a ball of that radius around each one, into the lumen layer itself:
+  only the vessel's label is written or erased, the other labels are kept, and the stroke is
+  one undo step (*Undo*, or Ctrl+Z on the canvas). A right-drag erases while painting. The flat
+  image and the calibre are rendered again from the new mask, through the same centerline
+  (*Reset centerline* derives it again). Napari's own brush on the volume updates the panel too.
+- **A 3D+t intensity image plays**: with an image that has time, a *Frame* row appears — play /
+  pause, a frame slider and the speed (fps). The frames are sampled straight from the image
+  layer along the reformation, so playing costs no resampling of the volume; Napari's time
+  slider and the panel's follow each other. The lumen, the centerline and the calibre are the 3D
+  mask's.
 
 ## Meshlab panel
 

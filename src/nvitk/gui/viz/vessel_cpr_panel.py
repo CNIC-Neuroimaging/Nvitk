@@ -8,18 +8,29 @@ true perpendicular cross-section, and the 3D view marks where it is.
 
 The centerline is exposed as an editable Points layer. Napari already lets a Points
 layer be dragged in select mode, so retouching is: switch that layer to select,
-move a control point, and the reformation re-renders through the moved curve. Mask
-retouching happens with Napari's own brush on the volume, where the geometry is
-unambiguous, and the panel re-renders when the mask changes.
+move a control point, and the reformation re-renders through the moved curve.
+
+The lumen mask is retouched right on the flat image or on the cross-section
+(*Paint* / *Erase*): every point under the brush there is a point in the volume,
+so a stroke paints (or erases) a ball of the brush's radius, in millimetres,
+around each one — into the lumen layer itself, as one undo step, keeping the
+other labels. Napari's own brush on the volume works too; either way the panel
+re-renders when the mask changes, through the centerline it has.
+
+An intensity image with time (3D+t) plays: the frames are sampled straight from
+the image layer along the reformation (no volume is resampled per frame), and
+the play button, the frame slider and Napari's own time slider follow each other.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from typing import Any
 
 from qtpy.QtCore import Qt, QTimer
 from qtpy.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QHBoxLayout,
@@ -29,6 +40,7 @@ from qtpy.QtWidgets import (
     QSlider,
     QSpinBox,
     QSplitter,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -172,6 +184,16 @@ class VesselCprPanel(QWidget):
         self._vessel: VesselCpr | None = None
         self._edited = False
         self._failures: dict[int, str] = {}
+        #: Retouching: what a stroke writes, where it is held ("cpr" / "xs"), and
+        #: the dabs drawn on the canvas meanwhile.
+        self._on_retouch: Any = None
+        self._on_undo: Any = None
+        self._stroke: dict[str, Any] | None = None
+        self._dabs: list[Any] = []
+        self._brush_outline: Any = None
+        #: Frames of a 3D+t image: how many, and what to call when one is shown.
+        self._on_frame: Any = None
+        self._n_frames = 0
 
         self._status = QLabel("Run the tool on a vessel mask to flatten it.")
         self._status.setWordWrap(True)
@@ -311,6 +333,57 @@ class VesselCprPanel(QWidget):
         self._btn_reset.setEnabled(False)
         self._btn_reset.clicked.connect(lambda: self._emit_reset())
 
+        # Retouching the lumen on the flat image and the cross-section.
+        self._mode_group = QButtonGroup(self)
+        self._mode_group.setExclusive(True)
+        self._mode_buttons: dict[str, QToolButton] = {}
+        for key, text, tip in (
+            ("inspect", "Inspect", "Clicks pick a station (and Edit on image pulls the centerline)."),
+            ("paint", "Paint", "Paint the vessel's label: drag on the flat image or the cross-section. Each "
+                               "point is a point in the volume; a ball of the brush radius is painted around "
+                               "it (other labels are kept). Right-drag erases."),
+            ("erase", "Erase", "Erase the vessel's label the same way (other labels are left alone)."),
+        ):
+            button = QToolButton()
+            button.setText(text)
+            button.setCheckable(True)
+            button.setToolTip(tip)
+            self._mode_group.addButton(button)
+            self._mode_buttons[key] = button
+        self._mode_buttons["inspect"].setChecked(True)
+        self._mode_group.buttonToggled.connect(lambda _b, _on: self._on_mode_changed())
+        self._brush_mm = QDoubleSpinBox()
+        self._brush_mm.setRange(0.1, 30.0)
+        self._brush_mm.setDecimals(2)
+        self._brush_mm.setSingleStep(0.25)
+        self._brush_mm.setValue(1.0)
+        self._brush_mm.setSuffix(" mm")
+        self._brush_mm.setToolTip("Brush radius, in millimetres (a ball in the volume).")
+        self._btn_undo = QPushButton("Undo")
+        self._btn_undo.setToolTip("Take back the last edit of the lumen layer (Ctrl+Z on the canvas).")
+        self._btn_undo.clicked.connect(lambda: self._on_undo() if self._on_undo is not None else None)
+
+        # Frames of a 3D+t intensity image.
+        self._btn_play = QToolButton()
+        self._btn_play.setText("▶")
+        self._btn_play.setToolTip("Play / pause the image's frames.")
+        self._btn_play.clicked.connect(self._toggle_play)
+        self._frame_slider = QSlider(Qt.Horizontal)
+        self._frame_slider.setRange(0, 0)
+        self._frame_slider.setToolTip("Frame of the 3D+t image shown.")
+        self._frame_slider.valueChanged.connect(self._on_frame_slider)
+        self._fps = QDoubleSpinBox()
+        self._fps.setRange(0.5, 60.0)
+        self._fps.setDecimals(1)
+        self._fps.setValue(8.0)
+        self._fps.setSuffix(" fps")
+        self._fps.valueChanged.connect(lambda v: self._play_timer.setInterval(int(1000.0 / max(float(v), 0.1))))
+        self._frame_label = QLabel("")
+        self._frame_label.setStyleSheet(f"color: {COLOR_MUTED};")
+        self._play_timer = QTimer(self)
+        self._play_timer.setInterval(int(1000.0 / 8.0))
+        self._play_timer.timeout.connect(self._play_tick)
+
         root = QVBoxLayout(self)
         root.setSpacing(SPACE_TIGHT)
         root.addWidget(self._status)
@@ -345,6 +418,31 @@ class VesselCprPanel(QWidget):
         toggles.addWidget(self._btn_reset)
         toggles.addWidget(self._btn_render)
         root.addLayout(toggles)
+
+        retouch = QHBoxLayout()
+        retouch.setSpacing(SPACE_TIGHT)
+        retouch.addWidget(self._caption("Mouse"))
+        for key in ("inspect", "paint", "erase"):
+            retouch.addWidget(self._mode_buttons[key])
+        retouch.addSpacing(SPACE_TIGHT)
+        retouch.addWidget(self._caption("Brush"))
+        retouch.addWidget(self._brush_mm)
+        retouch.addWidget(self._btn_undo)
+        self._retouch_hint = self._caption("")
+        retouch.addWidget(self._retouch_hint, stretch=1)
+        root.addLayout(retouch)
+
+        self._time_row = QWidget()
+        time_row = QHBoxLayout(self._time_row)
+        time_row.setContentsMargins(0, 0, 0, 0)
+        time_row.setSpacing(SPACE_TIGHT)
+        time_row.addWidget(self._caption("Frame"))
+        time_row.addWidget(self._btn_play)
+        time_row.addWidget(self._frame_slider, stretch=1)
+        time_row.addWidget(self._frame_label)
+        time_row.addWidget(self._fps)
+        root.addWidget(self._time_row)
+        self._time_row.hide()
 
         self._cpr_fig = self._cpr_ax = self._cpr_canvas = None
         self._profile_ax = None
@@ -462,13 +560,25 @@ class VesselCprPanel(QWidget):
         on_reset: Any = None,
         on_stations: Any = None,
         on_projection_edit: Any = None,
+        on_retouch: Any = None,
+        on_undo: Any = None,
+        on_frame: Any = None,
     ) -> None:
-        """Register what to call when the controls move."""
+        """Register what to call when the controls move.
+
+        *on_retouch* is called as ``(kind, point_mm, erase, radius_mm)`` — kind
+        ``"press"`` / ``"move"`` / ``"release"``, *point_mm* the stroke's point in
+        the volume (millimetres on the reformation's grid, ``None`` on release);
+        *on_frame* with a frame index of a 3D+t image.
+        """
         self._on_change = on_change
         self._on_station = on_station
         self._on_reset = on_reset
         self._on_stations = on_stations
         self._on_projection_edit = on_projection_edit
+        self._on_retouch = on_retouch
+        self._on_undo = on_undo
+        self._on_frame = on_frame
 
     def _emit_reset(self) -> None:
         """Ask the installer to throw this vessel's centerline edits away."""
@@ -530,6 +640,8 @@ class VesselCprPanel(QWidget):
 
     def _on_canvas_press(self, event: Any) -> None:
         """Start a centerline drag, or pick a station when not editing."""
+        if self._start_stroke(event, "cpr"):
+            return
         station = self._station_at(event)
         if station is None:
             return
@@ -542,6 +654,8 @@ class VesselCprPanel(QWidget):
 
     def _on_canvas_release(self, event: Any) -> None:
         """Finish a centerline drag and hand the correction to the installer."""
+        if self._end_stroke():
+            return
         drag = self._drag
         self._drag = None
         if drag is None or event.inaxes is not self._cpr_ax or event.ydata is None:
@@ -557,6 +671,8 @@ class VesselCprPanel(QWidget):
 
     def _on_canvas_motion(self, event: Any) -> None:
         """Read out the calibre under the cursor without committing to a station."""
+        if self._move_stroke(event, "cpr"):
+            return
         station = self._station_at(event)
         if station is None or self._vessel is None:
             return
@@ -717,6 +833,10 @@ class VesselCprPanel(QWidget):
         ax = self._cpr_ax
         ax.clear()
         ax.set_axis_on()
+        # The clear took the stroke marks and the brush outline with it.
+        self._dabs = [d for d in self._dabs if d.axes is not None and d.axes is not ax]
+        if self._brush_outline is not None and self._brush_outline.axes in (ax, None):
+            self._brush_outline = None
 
         # Matplotlib needs host arrays; this is the display boundary. The
         # reformation is stored station-major, so it is transposed to put arc
@@ -865,6 +985,9 @@ class VesselCprPanel(QWidget):
         ax = self._xs_ax
         ax.clear()
         ax.set_axis_off()
+        self._dabs = [d for d in self._dabs if d.axes is not None and d.axes is not ax]
+        if self._brush_outline is not None and self._brush_outline.axes in (ax, None):
+            self._brush_outline = None
         with using("cpu"):
             arr = to_numpy(image)
             overlay = None
@@ -947,6 +1070,8 @@ class VesselCprPanel(QWidget):
         """Grab the angle ring when the press lands near it."""
         if self._xs_last is None:
             return
+        if self._start_stroke(event, "xs"):
+            return
         radius = self._xs_radius_at(event)
         if radius is None:
             return
@@ -957,11 +1082,15 @@ class VesselCprPanel(QWidget):
 
     def _on_xs_motion(self, event: Any) -> None:
         """Turn the cutting plane while the ring is held."""
+        if self._move_stroke(event, "xs"):
+            return
         if self._angle_drag:
             self._set_angle_from(event)
 
     def _on_xs_release(self, _event: Any = None) -> None:
         """Commit the new angle once the ring is let go."""
+        if self._end_stroke():
+            return
         if not self._angle_drag:
             return
         self._angle_drag = False
@@ -991,6 +1120,214 @@ class VesselCprPanel(QWidget):
     def xs_zoom(self) -> float:
         """Current cross-section magnification."""
         return float(self._xs_zoom)
+
+    # ── retouching the lumen ─────────────────────────────────────────────────
+
+    def retouch_mode(self) -> str:
+        """``"inspect"``, ``"paint"`` or ``"erase"``."""
+        for key, button in self._mode_buttons.items():
+            if button.isChecked():
+                return key
+        return "inspect"
+
+    def set_retouch_mode(self, mode: str) -> None:
+        if mode in self._mode_buttons:
+            self._mode_buttons[mode].setChecked(True)
+
+    def brush_mm(self) -> float:
+        return float(self._brush_mm.value())
+
+    def _on_mode_changed(self) -> None:
+        mode = self.retouch_mode()
+        drawing = mode != "inspect"
+        for canvas in (self._cpr_canvas, self._xs_canvas):
+            if canvas is not None:
+                canvas.setCursor(Qt.CrossCursor) if drawing else canvas.unsetCursor()
+        self._retouch_hint.setText(
+            "Drag on the flat image or the cross-section · right-drag erases" if mode == "paint"
+            else "Drag to erase the vessel's label" if mode == "erase" else "")
+        if not drawing:
+            self._hide_brush_outline()
+
+    def _point_mm(self, event: Any, where: str) -> Any | None:
+        """The point in the volume (mm, on the reformation's grid) under *event*."""
+        vessel = self._vessel
+        if vessel is None or event.xdata is None or event.ydata is None:
+            return None
+        with using("cpu"):
+            samples = vessel.samples
+            pts = to_numpy(samples.points_mm).astype(float)
+            if where == "cpr":
+                if event.inaxes is not self._cpr_ax:
+                    return None
+                arc = to_numpy(vessel.cpr.arc_length_mm).astype(float)
+                direction = to_numpy(cut_direction(samples, vessel.cpr.angle_deg)).astype(float)
+                x = float(np.clip(float(event.xdata), arc[0], arc[-1]))
+                # Between two stations: the centre and the cut direction interpolated.
+                i = int(np.clip(np.searchsorted(arc, x) - 1, 0, max(arc.size - 2, 0)))
+                j = min(i + 1, arc.size - 1)
+                f = 0.0 if j == i or arc[j] == arc[i] else (x - arc[i]) / (arc[j] - arc[i])
+                centre = pts[i] * (1.0 - f) + pts[j] * f
+                cut = direction[i] * (1.0 - f) + direction[j] * f
+                cut /= max(float(np.linalg.norm(cut)), 1e-9)
+                return centre + float(event.ydata) * cut
+            if event.inaxes is not self._xs_ax:
+                return None
+            station = int(np.clip(self.station(), 0, pts.shape[0] - 1))
+            u = to_numpy(samples.u).astype(float)[station]
+            v = to_numpy(samples.v).astype(float)[station]
+            return pts[station] + float(event.xdata) * u + float(event.ydata) * v
+
+    def _start_stroke(self, event: Any, where: str) -> bool:
+        """A press in Paint / Erase: start a stroke (True), else leave it (False)."""
+        mode = self.retouch_mode()
+        if mode == "inspect" or self._on_retouch is None:
+            return False
+        button = getattr(event, "button", 1)
+        if int(getattr(button, "value", button) or 1) not in (1, 3):
+            return False
+        point = self._point_mm(event, where)
+        if point is None:
+            return False
+        erase = mode == "erase" or int(getattr(button, "value", button) or 1) == 3
+        self._stroke = {"where": where, "erase": erase}
+        self._on_retouch("press", point, erase, self.brush_mm())
+        self._dab(event, where, erase)
+        return True
+
+    def _move_stroke(self, event: Any, where: str) -> bool:
+        if self._stroke is None:
+            if self.retouch_mode() != "inspect":
+                self._move_brush_outline(event, where)
+            return False
+        if self._stroke["where"] == where:
+            point = self._point_mm(event, where)
+            if point is not None and self._on_retouch is not None:
+                self._on_retouch("move", point, self._stroke["erase"], self.brush_mm())
+                self._dab(event, where, self._stroke["erase"])
+        return True
+
+    def _end_stroke(self) -> bool:
+        if self._stroke is None:
+            return False
+        stroke, self._stroke = self._stroke, None
+        if self._on_retouch is not None:
+            self._on_retouch("release", None, stroke["erase"], self.brush_mm())
+        return True
+
+    def _dab(self, event: Any, where: str, erase: bool) -> None:
+        """Mark where the brush went, until the re-render shows the new mask."""
+        from matplotlib.patches import Ellipse
+
+        ax = self._cpr_ax if where == "cpr" else self._xs_ax
+        canvas = self._cpr_canvas if where == "cpr" else self._xs_canvas
+        if ax is None or canvas is None:
+            return
+        r = self.brush_mm()
+        colour = "#5bc0ff" if erase else LUMEN_HEX
+        patch = Ellipse((float(event.xdata), float(event.ydata)), 2 * r, 2 * r, facecolor=colour,
+                        edgecolor="none", alpha=0.35)
+        ax.add_patch(patch)
+        self._dabs.append(patch)
+        canvas.draw_idle()
+
+    def clear_dabs(self) -> None:
+        for patch in self._dabs:
+            try:
+                patch.remove()
+            except Exception:  # noqa: BLE001 — gone with an axes clear
+                pass
+        self._dabs = []
+
+    def _move_brush_outline(self, event: Any, where: str) -> None:
+        from matplotlib.patches import Ellipse
+
+        ax = self._cpr_ax if where == "cpr" else self._xs_ax
+        canvas = self._cpr_canvas if where == "cpr" else self._xs_canvas
+        if ax is None or canvas is None or event.inaxes is not ax or event.xdata is None:
+            self._hide_brush_outline()
+            return
+        r = self.brush_mm()
+        outline = self._brush_outline
+        if outline is None or outline.axes is not ax:
+            self._hide_brush_outline()
+            outline = Ellipse((0, 0), 2 * r, 2 * r, fill=False, edgecolor="white", lw=0.8, alpha=0.8)
+            ax.add_patch(outline)
+            self._brush_outline = outline
+        outline.set_center((float(event.xdata), float(event.ydata)))
+        outline.set_width(2 * r)
+        outline.set_height(2 * r)
+        canvas.draw_idle()
+
+    def _hide_brush_outline(self) -> None:
+        outline, self._brush_outline = self._brush_outline, None
+        if outline is not None:
+            try:
+                canvas = outline.figure.canvas if outline.figure is not None else None
+                outline.remove()
+                if canvas is not None:
+                    canvas.draw_idle()
+            except Exception:  # noqa: BLE001
+                pass
+
+    # ── frames of a 3D+t image ───────────────────────────────────────────────
+
+    def set_frames(self, count: int, frame: int = 0) -> None:
+        """Show the frame controls for *count* frames (0 hides them)."""
+        self._n_frames = int(count)
+        self._time_row.setVisible(self._n_frames > 1)
+        self._frame_slider.blockSignals(True)
+        self._frame_slider.setRange(0, max(self._n_frames - 1, 0))
+        self._frame_slider.setValue(min(max(int(frame), 0), max(self._n_frames - 1, 0)))
+        self._frame_slider.blockSignals(False)
+        self._update_frame_label()
+        if self._n_frames <= 1:
+            self._stop_play()
+
+    def frame(self) -> int:
+        return int(self._frame_slider.value())
+
+    def set_frame(self, frame: int, *, emit: bool = False) -> None:
+        """Move the frame slider (without announcing it unless *emit*)."""
+        if not self._n_frames:
+            return
+        self._frame_slider.blockSignals(not emit)
+        self._frame_slider.setValue(int(frame) % max(self._n_frames, 1))
+        self._frame_slider.blockSignals(False)
+        self._update_frame_label()
+
+    def _update_frame_label(self) -> None:
+        self._frame_label.setText(f"{self.frame() + 1} / {self._n_frames}" if self._n_frames else "")
+
+    def _on_frame_slider(self, value: int) -> None:
+        self._update_frame_label()
+        if self._on_frame is not None:
+            self._on_frame(int(value))
+
+    def playing(self) -> bool:
+        return self._play_timer.isActive()
+
+    def _toggle_play(self) -> None:
+        if self._play_timer.isActive():
+            self._stop_play()
+        elif self._n_frames > 1:
+            self._play_timer.setInterval(int(1000.0 / max(float(self._fps.value()), 0.1)))
+            self._play_timer.start()
+            self._btn_play.setText("⏸")
+
+    def _stop_play(self) -> None:
+        self._play_timer.stop()
+        self._btn_play.setText("▶")
+
+    def _play_tick(self) -> None:
+        if self._n_frames > 1:
+            self.set_frame((self.frame() + 1) % self._n_frames, emit=True)
+
+    def show_frame_image(self, vessel: VesselCpr) -> None:
+        """Repaint the flat vessel for another frame (same geometry, new intensities)."""
+        self._vessel = vessel
+        self.clear_dabs()
+        self.redraw()
 
 
 def attach_vessel_cpr_dock(viewer: Any, panel: VesselCprPanel) -> Any:
@@ -1056,6 +1393,117 @@ def _grid_ratio(layer_data: Any, mask: Any) -> Any:
         return np.array(
             [max(b - 1, 1) / max(f - 1, 1) for b, f in zip(base, fine)], dtype=float
         )
+
+
+# ── frames of a 3D+t intensity image ─────────────────────────────────────────
+
+#: Frame images kept (flat images and cross-sections, all frames of the current view).
+_FRAME_CACHE_SIZE = 256
+
+
+def _setup_frames(state: dict[str, Any], image_layer: Any, lumen_layer: Any) -> None:
+    """For a time-first 3D+t *image_layer*: how many frames, which to start on,
+    and the viewer's time dim it follows."""
+    state["n_frames"] = 0
+    state["frame_cache"] = {}
+    if image_layer is None or lumen_layer is None:
+        return
+    data = getattr(image_layer, "data", None)
+    if data is None or getattr(data, "ndim", 0) != 4:
+        return
+    from nvitk.gui.core.spatial import _time_axis_index
+
+    t_ax = _time_axis_index(image_layer)
+    if t_ax != 0:
+        return  # nvitk opens 3D+t time-first; another layout is shown as one frame
+    viewer = state["viewer"]
+    state["image_layer"] = image_layer
+    state["n_frames"] = int(data.shape[0])
+    dim = int(viewer.dims.ndim) - int(image_layer.ndim)
+    state["viewer_time_dim"] = dim if dim >= 0 else None
+    try:
+        state["frame0"] = int(viewer.dims.current_step[dim]) if dim >= 0 else 0
+    except Exception:  # noqa: BLE001
+        state["frame0"] = 0
+
+
+def _image_coords(state: dict[str, Any], grid_coords: Any) -> Any:
+    """``(3, ...)`` voxel coordinates on the reformation's grid as the image layer's
+    own spatial voxel coordinates (through the world: any grid, any placement)."""
+    lumen, image = state["lumen_layer"], state["image_layer"]
+    # Napari's transforms, on host coordinates.
+    with using("cpu"):
+        pts = to_numpy(grid_coords).astype(float)
+        shape = pts.shape[1:]
+        flat = pts.reshape(3, -1).T * to_numpy(state["overlay_scale"]).astype(float)[None, :]
+        world = to_numpy(lumen._data_to_world(flat)).astype(float)
+        full = np.zeros((flat.shape[0], int(image.ndim)), dtype=float)
+        full[:, -3:] = world[:, -3:]
+        data = to_numpy(image._data_to_world.inverse(full)).astype(float)
+        return data[:, 1:].T.reshape((3, *shape))
+
+
+def _sample_frame(state: dict[str, Any], coords: Any, frame: int) -> Any:
+    """The image's *frame* sampled at its voxel *coords* (linear, 0 outside)."""
+    from scipy.ndimage import map_coordinates
+
+    image = state["image_layer"]
+    # The frames are Napari's (host) arrays and the samples a few thousand: sampled
+    # on the host — sending a whole frame to the GPU would cost more than this.
+    with using("cpu"):
+        volume = to_numpy(image.data[int(frame)])
+        values = map_coordinates(volume, to_numpy(coords), order=1, mode="constant", cval=0.0)
+    return as_backend_array(values.astype("float32", copy=False))
+
+
+def _cache_put(state: dict[str, Any], key: tuple, value: Any) -> Any:
+    cache = state["frame_cache"]
+    if len(cache) >= _FRAME_CACHE_SIZE:
+        cache.pop(next(iter(cache)))
+    cache[key] = value
+    return value
+
+
+def _with_frame_image(state: dict[str, Any], vessel: VesselCpr, frame: int) -> VesselCpr:
+    """*vessel* with its flat image taken from *frame* of the 3D+t image."""
+    from nvitk.transform.cpr import cpr_coords
+
+    cpr = vessel.cpr
+    n_ray = int(to_numpy(cpr.ray_mm).size)
+    ray = float(abs(to_numpy(cpr.ray_mm)[-1])) if n_ray else 0.0
+    key = ("cpr", id(vessel.samples), float(cpr.angle_deg), ray, n_ray, int(frame))
+    image = state["frame_cache"].get(key)
+    if image is None:
+        coords_key = ("cpr-coords", id(vessel.samples), float(cpr.angle_deg), ray, n_ray)
+        coords = state["frame_cache"].get(coords_key)
+        if coords is None:
+            grid = cpr_coords(vessel.samples, angle_deg=cpr.angle_deg, ray_mm=ray, n_ray=n_ray)
+            coords = _cache_put(state, coords_key, _image_coords(state, grid))
+        image = _cache_put(state, key, _sample_frame(state, coords, frame))
+    return dataclasses.replace(vessel, cpr=dataclasses.replace(cpr, image=image))
+
+
+def _frame_cross_section(state: dict[str, Any], vessel: VesselCpr, station: int, ray_mm: float,
+                         frame: int, res: int = 129) -> Any:
+    """The perpendicular cross-section at *station*, from *frame* of the 3D+t image."""
+    from nvitk.transform.oblique import oblique_plane_coords
+
+    key = ("xs", id(vessel.samples), int(station), float(ray_mm), int(res), int(frame))
+    image = state["frame_cache"].get(key)
+    if image is not None:
+        return image
+    samples = vessel.samples
+    idx = int(max(0, min(int(station), samples.n_stations - 1)))
+    scale = as_backend_array(samples.spacing).astype(float, copy=False)
+    plane = oblique_plane_coords(
+        as_backend_array(samples.points_vox).astype(float, copy=False)[idx],
+        as_backend_array(samples.u).astype(float, copy=False)[idx] / scale,
+        as_backend_array(samples.v).astype(float, copy=False)[idx] / scale,
+        radius_vox=float(ray_mm),
+        res=int(res),
+    )
+    coords = _image_coords(state, plane.coords)
+    return _cache_put(state, key, _sample_frame(state, coords, frame))
 
 
 def install_vessel_cpr(
@@ -1129,6 +1577,8 @@ def install_vessel_cpr(
         "suspend_edit": False,
         "edited": {},
     }
+
+    _setup_frames(state, image_layer, lumen_layer)
 
     # Parented so the pending re-render cannot fire after the panel is gone.
     timer = QTimer(panel)
@@ -1221,7 +1671,11 @@ def install_vessel_cpr(
             ),
         )
         state["diameter_cache"] = (key, vessel.diameter)
+        if state.get("n_frames", 0) > 1:
+            # A 3D+t image: the frame on show, sampled straight from the layer.
+            vessel = _with_frame_image(state, vessel, panel.frame())
         state["vessel"] = vessel
+        panel.clear_dabs()
         panel.show_vessel(vessel)
         _keep_selection(lambda: _update_overlays(vessel))
         _show_station(panel.station())
@@ -1234,6 +1688,8 @@ def install_vessel_cpr(
         image_xs, mask_xs = vessel_cross_section(
             state["image"], vessel, station, ray_mm=panel.ray_mm(), lumen_mask=state["mask"]
         )
+        if state.get("n_frames", 0) > 1:
+            image_xs = _frame_cross_section(state, vessel, station, panel.ray_mm(), panel.frame())
         arc = to_numpy(vessel.cpr.arc_length_mm)
         at = float(arc[station]) if 0 <= station < arc.size else 0.0
         width = to_numpy(vessel.diameter_mm())
@@ -1411,7 +1867,16 @@ def install_vessel_cpr(
         timer.start()
 
     def _on_mask_changed(_event: Any = None) -> None:
-        """Pick up a brush stroke on the lumen layer and re-render."""
+        """Pick up an edit of the lumen layer (a stroke here, Napari's brush, an
+        undo) and re-render.
+
+        The centerlines are kept — derived or retouched — so the flat image does
+        not jump under a retouch; a vessel that had none is derived now, and
+        *Reset centerline* derives one again from the new mask. The calibre is
+        measured again.
+        """
+        if state.get("stroke") is not None:
+            return  # mid-stroke: the release re-renders once
         layer = state.get("lumen_layer")
         if layer is None:
             return
@@ -1421,10 +1886,149 @@ def install_vessel_cpr(
 
             fresh = to_numpy(upsample_volume(fresh, state["mask"].shape, order=0))
         state["mask"] = fresh
-        # Geometry may have changed under the centerline, so re-derive it too.
-        state["edited"].clear()
-        _derive_centerlines()
+        state["diameter_cache"] = None
+        missing = [lab for lab in (state["labels"] or []) if int(lab) not in state["samples"]]
+        if missing or not state["samples"]:
+            kept = dict(state["samples"])
+            _derive_centerlines()
+            state["samples"].update(kept)
         timer.start()
+
+    # ── retouching the lumen from the panel ───────────────────────────────────
+
+    def _retouch(kind: str, point_mm: Any, erase: bool, radius_mm: float) -> None:
+        layer = state.get("lumen_layer")
+        label = panel.selected_label()
+        if layer is None or label is None:
+            return
+        if kind == "press":
+            _end_stroke(commit=True)
+            labels_layer = type(layer).__name__ == "Labels"
+            previous = getattr(layer, "_block_history", None) if labels_layer else None
+            if previous is not None:
+                layer._block_history = True
+            state["stroke"] = {"last": None, "erase": bool(erase), "label": int(label),
+                               "labels_layer": labels_layer, "previous": previous, "seen": set()}
+        stroke = state.get("stroke")
+        if stroke is None:
+            return
+        if point_mm is not None:
+            _stroke_to(stroke, point_mm, float(radius_mm))
+        if kind == "release":
+            _end_stroke(commit=True)
+
+    def _stroke_to(stroke: dict[str, Any], point_mm: Any, radius_mm: float) -> None:
+        """Dabs from the last point to *point_mm*, at most half a brush apart."""
+        with using("cpu"):
+            here = to_numpy(point_mm).astype(float)
+            last = stroke["last"]
+            if last is None:
+                points = [here]
+            else:
+                n = max(int(math.ceil(float(np.linalg.norm(here - last)) / max(radius_mm * 0.5, 1e-3))), 1)
+                points = [last + (here - last) * (k / n) for k in range(1, n + 1)]
+        for point in points:
+            _dab(point, radius_mm, stroke)
+        stroke["last"] = here
+
+    def _dab(point_mm: Any, radius_mm: float, stroke: dict[str, Any]) -> int:
+        """Paint (erase) a ball of *radius_mm* around *point_mm* in the lumen layer."""
+        from nvitk.gui.core.spatial import layer_spacing
+
+        layer = state["lumen_layer"]
+        data = layer.data
+        # Host index arithmetic: the layer's voxels are Napari's (NumPy).
+        with using("cpu"):
+            grid_sp = to_numpy(state["spacing"]).astype(float)
+            centre = to_numpy(point_mm).astype(float) / grid_sp * to_numpy(state["overlay_scale"]).astype(float)
+            sp = to_numpy((layer_spacing(layer) or (1.0, 1.0, 1.0))[:3]).astype(float)
+            reach = np.ceil(float(radius_mm) / sp).astype(int)
+            axes = [np.arange(int(np.floor(c)) - r, int(np.ceil(c)) + r + 1) for c, r in zip(centre, reach)]
+            grid = np.stack(np.meshgrid(*axes, indexing="ij"), axis=-1).reshape(-1, 3)
+            dist2 = (((grid - centre[None, :]) * sp[None, :]) ** 2).sum(axis=1)
+            grid = grid[dist2 <= float(radius_mm) ** 2]
+            shape = to_numpy(list(data.shape[-3:]))
+            grid = grid[np.all((grid >= 0) & (grid < shape), axis=1)]
+            if not grid.size:
+                return 0
+            index = tuple(grid[:, d] for d in range(3))
+            current = to_numpy(data[index])
+            if stroke["erase"]:
+                keep = current == stroke["label"]
+                value = 0
+            else:
+                # The other labels are kept: only background and this vessel change.
+                keep = (current == 0) | (current == stroke["label"])
+                value = stroke["label"]
+            index = tuple(ix[keep] for ix in index)
+            n = int(index[0].size)
+            if n:
+                stroke["seen"].update(int(i) for i in np.ravel_multi_index(index, tuple(int(v) for v in shape)))
+        if n:
+            if stroke["labels_layer"]:
+                layer.data_setitem(index, value, refresh=False)
+            else:
+                data[index] = value
+        return n
+
+    def _end_stroke(*, commit: bool) -> None:
+        stroke, state["stroke"] = state.get("stroke"), None
+        if stroke is None:
+            return
+        layer = state["lumen_layer"]
+        if stroke["labels_layer"]:
+            if stroke["previous"] is not None:
+                layer._commit_staged_history()  # one undo step for the stroke (fires paint)
+                layer._block_history = stroke["previous"]
+        try:
+            layer.refresh()
+        except Exception:  # noqa: BLE001
+            pass
+        if not stroke["labels_layer"] or stroke["previous"] is None:
+            _on_mask_changed()
+        what = "erased" if stroke["erase"] else "painted"
+        panel._retouch_hint.setText(f"{len(stroke['seen']):,} voxel(s) {what} (Undo takes the stroke back).")
+
+    def _undo() -> None:
+        layer = state.get("lumen_layer")
+        if layer is not None and type(layer).__name__ == "Labels":
+            layer.undo()  # fires paint: the mask is read again and re-rendered
+
+    # ── frames of a 3D+t image ───────────────────────────────────────────────
+
+    def _show_frame(frame: int) -> None:
+        vessel = state.get("vessel")
+        if vessel is None or state.get("n_frames", 0) <= 1:
+            return
+        vessel = _with_frame_image(state, vessel, int(frame))
+        state["vessel"] = vessel
+        panel.show_frame_image(vessel)
+        _show_station(panel.station())
+        # Napari's time slider follows the panel (and the panel it, below).
+        dim = state.get("viewer_time_dim")
+        if dim is not None and not state.get("following_viewer"):
+            try:
+                state["setting_viewer"] = True
+                viewer.dims.set_current_step(dim, int(frame))
+            except Exception:  # noqa: BLE001
+                pass
+            finally:
+                state["setting_viewer"] = False
+
+    def _on_viewer_dims(_event: Any = None) -> None:
+        dim = state.get("viewer_time_dim")
+        if dim is None or state.get("setting_viewer") or panel.playing():
+            return
+        try:
+            frame = int(viewer.dims.current_step[dim])
+        except Exception:  # noqa: BLE001
+            return
+        if frame != panel.frame() and 0 <= frame < state.get("n_frames", 0):
+            state["following_viewer"] = True
+            try:
+                panel.set_frame(frame, emit=True)
+            finally:
+                state["following_viewer"] = False
 
     def _set_stations(count: int) -> None:
         """Re-cut the current vessel into *count* stations.
@@ -1513,13 +2117,26 @@ def install_vessel_cpr(
         on_reset=_reset_centerline,
         on_stations=_set_stations,
         on_projection_edit=_edit_from_projection,
+        on_retouch=_retouch,
+        on_undo=_undo,
+        on_frame=_show_frame,
     )
 
     if lumen_layer is not None:
         try:
+            # ``data`` when the array is replaced, ``paint`` for brush strokes and
+            # undo (Napari 0.7 announces a stroke with ``paint`` alone).
             lumen_layer.events.data.connect(_on_mask_changed)
+            lumen_layer.events.paint.connect(_on_mask_changed)
             state["mask_callback"] = _on_mask_changed
         except Exception:
+            pass
+    if state.get("n_frames", 0) > 1:
+        panel.set_frames(state["n_frames"], state.get("frame0", 0))
+        try:
+            viewer.dims.events.current_step.connect(_on_viewer_dims)
+            state["dims_callback"] = _on_viewer_dims
+        except Exception:  # noqa: BLE001
             pass
 
     _derive_centerlines()
@@ -1553,8 +2170,21 @@ def shutdown_vessel_cpr(app_state: dict[str, Any]) -> None:
     layer = state.get("lumen_layer")
     callback = state.get("mask_callback")
     if layer is not None and callback is not None:
+        for emitter in (layer.events.data, getattr(layer.events, "paint", None)):
+            try:
+                emitter.disconnect(callback)
+            except Exception:
+                pass
+    dims_callback = state.get("dims_callback")
+    if viewer is not None and dims_callback is not None:
         try:
-            layer.events.data.disconnect(callback)
+            viewer.dims.events.current_step.disconnect(dims_callback)
+        except Exception:
+            pass
+    panel = state.get("panel")
+    if panel is not None:
+        try:
+            panel._stop_play()
         except Exception:
             pass
 

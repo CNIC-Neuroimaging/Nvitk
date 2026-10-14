@@ -40,8 +40,11 @@ def unique_layer_labels(data: np.ndarray, *, max_labels: int = 500) -> list[int]
     if flat.size == 0:
         return []
     if np.issubdtype(flat.dtype, np.floating):
+        # Rounded as one array: a per-value Python loop took ~30 s on the
+        # millions of distinct values of a float intensity series.
         vals = np.unique(flat[np.isfinite(flat)])
-        labels = [int(round(v)) for v in vals if v != 0]
+        ids = np.unique(np.rint(vals).astype(np.int64))
+        labels = [int(v) for v in ids[ids != 0][: max_labels + 1]]
     else:
         vals = np.unique(flat)
         labels = [int(v) for v in vals if int(v) != 0]
