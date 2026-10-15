@@ -5,10 +5,10 @@ from __future__ import annotations
 import re
 import shutil
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from nvitk.cluster import sge_json
-from nvitk.cluster.remote_submit import run_sge_script_ssh
+from nvitk.cluster.remote_submit import run_sge_script_ssh_capture
 from nvitk.cluster.remote_transfer import resolve_cluster_host, upload_staged_job
 from nvitk.gui.core.backend import gpu_enabled
 from nvitk.gui.sge.dialog import SgeSubmitDialog
@@ -122,6 +122,12 @@ def _ensure_sge_monitor(app_state: dict[str, Any]) -> None:
     app_state["_sge_monitor_registered"] = True
 
 
+def ensure_sge_monitor(app_state: dict[str, Any]) -> Any:
+    """The session's cluster-job monitor (made, and wired to import results, on first use)."""
+    _ensure_sge_monitor(app_state)
+    return app_state.get("_sge_monitor")
+
+
 def submit_gui_sge(
     viewer: Any,
     tool_panel: Any,
@@ -188,46 +194,62 @@ def submit_gui_sge(
     if tool_id == "seg_totalsegmentator" and get_totalseg_roi is not None:
         params["roi_subset"] = get_totalseg_roi()
 
+    from nvitk.cluster.sge_chunk import parse_sge_submission_job_ids
+    from nvitk.gui.core.activity import activity, run_in_background, start_task
+
+    label = f"{spec.label if spec else tool_id} on “{getattr(layer, 'name', 'layer')}”"
     staging = None
     try:
-        staging, job = stage_job_locally(
-            viewer,
-            layer,
-            tool_id=tool_id,
-            params=params,
-            target_mode=target_mode,
-            label_ids=ids or None,
-            gpu=gpu_enabled(),
-        )
-        remote_job_root = _resolve_remote_job_root(conn.remote_job_root, job.job_id)
-        emit_gui_sge_script(
-            job,
-            local_staging=staging,
-            remote_job_root=remote_job_root,
-            overrides=conn.overrides,
-        )
-        host = resolve_cluster_host(conn.host)
-        notify(f"Uploading job {job.job_id} to {host}:{remote_job_root} …")
-        scripts_path = _resolve_remote_script_path(job.job_id, tool_id)
-        upload_staged_job(
-            host=conn.host,
-            user=conn.user,
-            password=conn.password,
-            local_staging=staging,
-            remote_job_root=remote_job_root,
-            remote_script_path=scripts_path or None,
-        )
-        remote_script = Path(scripts_path or f"{remote_job_root.rstrip('/')}/submit.sh")
-        notify(f"Submitting {remote_script} on {host} …")
-        ok = run_sge_script_ssh(
-            host,
-            conn.user,
-            conn.password,
-            script_path=remote_script,
-            # The summary reads the script; remote_script is a cluster path this host cannot
-            # open, so point it at the staged copy the upload came from.
-            local_script_path=staging / "submit.sh",
-        )
+        with activity(f"SGE: preparing {label}", total=3) as task:
+            # The layer is read here, on the GUI thread; the network steps below go
+            # to a worker, so the window keeps redrawing while they run.
+            staging, job = stage_job_locally(
+                viewer,
+                layer,
+                tool_id=tool_id,
+                params=params,
+                target_mode=target_mode,
+                label_ids=ids or None,
+                gpu=gpu_enabled(),
+            )
+            remote_job_root = _resolve_remote_job_root(conn.remote_job_root, job.job_id)
+            emit_gui_sge_script(
+                job,
+                local_staging=staging,
+                remote_job_root=remote_job_root,
+                overrides=conn.overrides,
+            )
+            host = resolve_cluster_host(conn.host)
+            notify(f"Uploading job {job.job_id} to {host}:{remote_job_root} …")
+            task.update(done=1, message=f"SGE: uploading {label}")
+            scripts_path = _resolve_remote_script_path(job.job_id, tool_id)
+            run_in_background(
+                upload_staged_job,
+                host=conn.host,
+                user=conn.user,
+                password=conn.password,
+                local_staging=staging,
+                remote_job_root=remote_job_root,
+                remote_script_path=scripts_path or None,
+            )
+            remote_script = Path(scripts_path or f"{remote_job_root.rstrip('/')}/submit.sh")
+            notify(f"Submitting {remote_script} on {host} …")
+            task.update(done=2, message=f"SGE: submitting {label}")
+            exit_code, stdout, stderr = run_in_background(
+                run_sge_script_ssh_capture,
+                host,
+                conn.user,
+                conn.password,
+                remote_script,
+                # The summary reads the script; remote_script is a cluster path this host
+                # cannot open, so point it at the staged copy the upload came from.
+                local_script_path=staging / "submit.sh",
+            )
+            task.update(done=3)
+            if exit_code != 0:
+                task.update(message=f"SGE: submitting {label} failed")
+                task.finish(ok=False)
+        ok = exit_code == 0
         if ok:
             pending = SgePendingJob(
                 job_id=job.job_id,
@@ -239,18 +261,23 @@ def submit_gui_sge(
                     password=conn.password,
                 ),
                 output_name=job.output_name,
+                label=label,
+                sge_job_ids=parse_sge_submission_job_ids(stdout or "", stderr or ""),
             )
             store_pending_job(app_state, pending)
             _ensure_sge_monitor(app_state)
             monitor = app_state.get("_sge_monitor")
             if monitor is not None:
-                monitor.track(pending)
+                # In the status bar until the job is done and its results are in.
+                monitor.track(pending, start_task(f"Cluster: {label} — submitted", kind="cluster"))
+            sge_ids = f" (SGE {', '.join(pending.sge_job_ids)})" if pending.sge_job_ids else ""
             notify(
                 f"SGE job submitted.\n"
-                f"  job_id: {job.job_id}\n"
+                f"  job_id: {job.job_id}{sge_ids}\n"
                 f"  remote: {remote_job_root}\n"
                 f"  tool: {tool_id}\n"
-                f"Results will auto-import when output/.done appears (~5s poll)."
+                f"Results will auto-import when output/.done appears (~5s poll); the status bar "
+                f"shows the job while it waits."
             )
         else:
             notify(
@@ -269,4 +296,4 @@ def submit_gui_sge(
             shutil.rmtree(staging, ignore_errors=True)
 
 
-__all__ = ["submit_gui_sge"]
+__all__ = ["ensure_sge_monitor", "submit_gui_sge"]

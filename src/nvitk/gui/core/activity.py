@@ -15,6 +15,10 @@ Two kinds of work, two behaviours:
 * **Work on the GUI thread** (a tool from the Imaging tab, most edits): the
   indicator is painted before the work starts and says what is running; the
   window cannot repaint until it ends, so the bar holds still meanwhile.
+* **Work elsewhere** — a job sent to the SGE cluster (``kind="cluster"``): the task
+  stays while the job is queued and running (its state in the message), for as long
+  as that takes, and the GUI is free meanwhile. Elapsed times read as minutes and
+  hours, and the tooltip lists every task when several are running.
 """
 
 from __future__ import annotations
@@ -41,8 +45,10 @@ _TICK_MS = 80
 class Task:
     """One piece of work the indicator shows. :meth:`update` is safe from any thread."""
 
-    def __init__(self, hub: "ActivityHub", message: str, total: int | None = None) -> None:
+    def __init__(self, hub: "ActivityHub", message: str, total: int | None = None, *, kind: str = "") -> None:
         self._hub = hub
+        #: ``"cluster"`` for a job running elsewhere (the GUI is not busy with it).
+        self.kind = str(kind or "")
         self.message = str(message)
         self.total = int(total) if total else None
         self.done = 0
@@ -88,8 +94,8 @@ class ActivityHub(QObject):
         self.tasks: list[Task] = []
         self.last: Task | None = None
 
-    def start(self, message: str, total: int | None = None) -> Task:
-        task = Task(self, message, total)
+    def start(self, message: str, total: int | None = None, *, kind: str = "") -> Task:
+        task = Task(self, message, total, kind=kind)
         self.tasks.append(task)
         self.changed.emit()
         return task
@@ -105,6 +111,16 @@ class ActivityHub(QObject):
 
 
 _HUB: ActivityHub | None = None
+
+
+def elapsed_text(seconds: float) -> str:
+    """``"8 s"``, ``"12 min"``, ``"1 h 05 min"``: how long something has been running."""
+    s = max(0, int(seconds))
+    if s < 60:
+        return f"{s} s"
+    if s < 3600:
+        return f"{s // 60} min" + (f" {s % 60:02d} s" if s < 600 else "")
+    return f"{s // 3600} h {(s % 3600) // 60:02d} min"
 
 
 def activity_hub() -> ActivityHub:
@@ -184,7 +200,9 @@ class ActivityIndicator(QWidget):
         last = hub.last
         if last is not None and last.elapsed >= _REPORT_AFTER_S:
             mark = "✓ Done" if last.ok else "✗ Failed"
-            self._label.setText(f"{mark}: {last.message} ({last.elapsed:.1f} s)")
+            took = f"{last.elapsed:.1f} s" if last.elapsed < 60 else elapsed_text(last.elapsed)
+            self._label.setText(f"{mark}: {last.message} ({took})")
+            self._label.setToolTip("")
             self._label.setStyleSheet(f"color: {COLOR_OK if last.ok else COLOR_ERROR};")
             self._bar.hide()
             self.show()
@@ -208,8 +226,11 @@ class ActivityIndicator(QWidget):
         if len(tasks) > 1:
             text += f" · +{len(tasks) - 1} more"
         if task.elapsed >= 1.0:
-            text += f" · {task.elapsed:.0f} s"
+            text += f" · {elapsed_text(task.elapsed)}"
         self._label.setText(text)
+        self._label.setToolTip("\n".join(
+            f"{t.message}" + (f" ({t.done}/{t.total})" if t.total else "") + f" · {elapsed_text(t.elapsed)}"
+            for t in reversed(tasks)))
         self._label.setStyleSheet(f"color: {COLOR_MUTED};")
         self._bar.fraction = task.fraction
         self._bar.show()
@@ -247,9 +268,10 @@ def _paint_now() -> None:
                 continue
 
 
-def start_task(message: str, total: int | None = None) -> Task:
-    """A task that finishes later (call :meth:`Task.finish`), e.g. a worker thread's."""
-    task = activity_hub().start(message, total)
+def start_task(message: str, total: int | None = None, *, kind: str = "") -> Task:
+    """A task that finishes later (call :meth:`Task.finish`), e.g. a worker thread's, or a
+    job on the cluster (*kind* ``"cluster"``)."""
+    task = activity_hub().start(message, total, kind=kind)
     _paint_now()
     return task
 
@@ -319,6 +341,7 @@ __all__ = [
     "Task",
     "activity",
     "activity_hub",
+    "elapsed_text",
     "install_activity_indicator",
     "run_in_background",
     "start_task",

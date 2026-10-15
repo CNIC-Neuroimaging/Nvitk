@@ -185,6 +185,12 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Export an animated GIF: one 3D screenshot per cardiac phase (4D image or "
         "4D flow vectors overlay)."
     ),
+    "recon_background_correction": (
+        "Polynomial background correction, as qvtpy applies it to the 4D-flow complex difference: "
+        "fit a smooth spatial polynomial on the lowest-valued voxels (lowest |values| for a signed "
+        "phase/velocity map), subtract it, floor magnitudes at 0. 3D, or 3D+t per frame / on the "
+        "temporal mean."
+    ),
     "time_extract_frame": "One time point of a 3D+t layer as a 3D layer (-1 = the frame on screen).",
     "time_projection": (
         "Collapse a 3D+t layer over time: max/mean/min/std/sum/median, or ttp (time to peak, "

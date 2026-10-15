@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import math
 import weakref
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup, using
@@ -398,10 +398,14 @@ def relabel_consecutive(layer: Any) -> dict[int, int]:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def writable(work: Any, label_id: int, *, preserve: bool) -> Any:
+def writable(work: Any, label_id: int, *, preserve: bool, over: Sequence[int] | None = None) -> Any:
     """Where *label_id* may be written: background and itself when other labels
-    are preserved, everywhere otherwise."""
+    are preserved; over the labels in *over* (0 is the background) and itself
+    when given; everywhere otherwise."""
     work = as_backend_array(work)
+    if over is not None:
+        ids = as_backend_array(sorted({int(i) for i in over} | {int(label_id)}))
+        return np.isin(work, ids)
     if not preserve:
         return np.ones(work.shape, dtype=bool)
     return (work == 0) | (work == int(label_id))
@@ -641,9 +645,10 @@ def interpolate_slices(
     method: str = "shape",
     spacing: Sequence[float] | None = None,
     preserve: bool = True,
+    allowed: Any | None = None,
 ) -> Any:
     """Fill the slices between the drawn ones of *label_id* (along *axis*, or its
-    sparsest one when ``None``)."""
+    sparsest one when ``None``); voxels outside *allowed* keep their value."""
     from nvitk.transform.interpolation import interpolate_mask_slices
     from nvitk.types import Image
 
@@ -656,16 +661,27 @@ def interpolate_slices(
     filled = interpolate_mask_slices(
         image, axes=axes, method=method, label_ids=[int(label_id)], overwrite=not preserve
     )
-    return as_backend_array(filled.data)
+    out = as_backend_array(filled.data)
+    if allowed is None:
+        return out
+    work = as_backend_array(work)
+    return np.where(as_backend_array(allowed), out, work)
 
 
 def copy_slice(
-    viewer: Any, layer: Any, label_id: int, step: int, *, preserve: bool
+    viewer: Any,
+    layer: Any,
+    label_id: int,
+    step: int,
+    *,
+    preserve: bool,
+    allowed: Callable[[tuple[Any, ...], Any], Any] | None = None,
 ) -> tuple[int, int | None]:
     """Copy *label_id*'s outline on the slice on screen to the slice *step* away.
 
-    The neighbour's own *label_id* is replaced by the copy. Returns the voxels
-    changed and the slice index written (``None`` past the volume's end).
+    The neighbour's own *label_id* is replaced by the copy, written only where
+    ``allowed(index, work)`` says (*preserve* alone when not given). Returns the
+    voxels changed and the slice index written (``None`` past the volume's end).
     """
     axis = normal_axis(viewer, layer)
     if axis is None:
@@ -682,7 +698,8 @@ def copy_slice(
     dst = as_backend_array(data[tuple(dst_index)])
     out = dst.copy()
     out[(dst == lid) & ~src] = 0
-    out[src & writable(dst, lid, preserve=preserve)] = lid
+    ok = writable(dst, lid, preserve=preserve) if allowed is None else as_backend_array(allowed(tuple(dst_index), dst))
+    out[src & ok] = lid
     return write_region(layer, dst_index, out), target
 
 
@@ -848,11 +865,17 @@ class PaintGuard:
 
     Napari's own *preserve labels* keeps other labels intact; this adds what it
     cannot: paint only where a reference image's intensity lies in a range, only
-    inside a mask, and only inside a box (:attr:`box`, an index of slices into the
-    layer's data). Each stroke reaches Napari's history as one item; once
-    it is committed, the voxels painted outside the area are put back and the
-    item is trimmed to the rest, so Undo still undoes exactly what stayed.
-    Erasing is never restricted.
+    inside a mask, only inside a box (:attr:`box`, an index of slices into the
+    layer's data), and only over some of the layer's own labels (:attr:`over`,
+    preserve labels the other way round). Erasing is not restricted, except
+    under :attr:`over`, where it clears only the active label, as with preserve
+    labels.
+
+    Every write through the layer's ``data_setitem`` (Napari's brush, bucket and
+    polygon, the orthogonal views' strokes) is trimmed as it is made, so what is
+    painted outside never shows. Once a stroke is committed to Napari's history,
+    any voxel that still got outside is put back and the item trimmed to the
+    rest, so Undo undoes exactly what stayed.
     """
 
     def __init__(self, layer: Any) -> None:
@@ -862,13 +885,79 @@ class PaintGuard:
         self.high = float("inf")
         self.inside: Any | None = None
         self.box: tuple[slice, ...] | None = None
+        #: The labels painting may cover (0 is the background); ``None``: any.
+        self.over: tuple[int, ...] | None = None
         #: Edits made by the tools are already constrained: they pass through.
         self.suspended = False
         layer.events.paint.connect(self._on_paint)
+        self._filter_writes(layer)
 
     @property
     def active(self) -> bool:
-        return self.intensity is not None or self.inside is not None or self.box is not None
+        return (self.intensity is not None or self.inside is not None or self.box is not None
+                or self.over is not None)
+
+    def _filter_writes(self, layer: Any) -> None:
+        """Route the layer's ``data_setitem`` through :meth:`trim`."""
+        cls = type(layer)
+        guard = weakref.ref(self)
+        target = weakref.ref(layer)
+
+        def data_setitem(indices: Any, value: Any, refresh: bool = True) -> None:
+            this, owner = guard(), target()
+            if owner is None:
+                return
+            if this is not None and not this.suspended and this.active:
+                indices, value = this.trim(indices, value)
+            cls.data_setitem(owner, indices, value, refresh=refresh)
+
+        try:
+            layer.data_setitem = data_setitem
+        except Exception:  # noqa: BLE001 — a layer that rejects attributes is trimmed on commit only
+            pass
+
+    def erase_label(self) -> int:
+        """The label erasing may clear under :attr:`over` (Napari's rule for preserve labels)."""
+        layer = self._layer()
+        if layer is None:
+            return 0
+        previous = getattr(layer, "_prev_selected_label", None)
+        return int(previous) if previous else int(layer.selected_label)
+
+    def _outside(self, indices: tuple[Any, ...], old: Any, new: Any) -> Any:
+        """Which of the writes ``old → new`` at *indices* leave the area (host arrays)."""
+        bad = np.zeros(np.shape(old), dtype=bool)
+        painting = new != 0
+        if self.intensity is not None:
+            values = self.intensity[indices]
+            bad |= painting & ((values < self.low) | (values > self.high))
+        if self.inside is not None:
+            bad |= painting & (self.inside[indices] == 0)
+        bounds = self._box_bounds()
+        if bounds is not None:
+            for (lo, hi), ix in zip(bounds, indices):
+                bad |= painting & ((ix < lo) | (ix >= hi))
+        if self.over is not None:
+            bad |= painting & ~np.isin(old, np.array(self.over, dtype=np.int64))
+            bad |= ~painting & (old != self.erase_label())
+        return bad
+
+    def trim(self, indices: Any, value: Any) -> tuple[Any, Any]:
+        """The part of a write of *value* at *indices* that stays inside the area."""
+        layer = self._layer()
+        if layer is None or not isinstance(indices, tuple):
+            return indices, value
+        # Napari's data and its index arrays are NumPy: this check stays on the host.
+        with using("cpu"):
+            if not all(np.ndim(ix) == 1 for ix in indices):
+                return indices, value
+            old = layer.data[indices]
+            new = np.broadcast_to(as_backend_array(value), np.shape(old))
+            bad = self._outside(indices, old, new)
+            if not bad.any():
+                return indices, value
+            keep = ~bad
+            return tuple(ix[keep] for ix in indices), (new[keep] if np.ndim(value) else value)
 
     def _box_bounds(self) -> list[tuple[int, int]] | None:
         layer = self._layer()
@@ -903,9 +992,14 @@ class PaintGuard:
                 layer.events.paint.disconnect(self._on_paint)
             except Exception:  # noqa: BLE001
                 pass
+            if "data_setitem" in vars(layer):
+                del layer.data_setitem
 
     def allowed(self, index: Sequence[Any]) -> Any | None:
-        """The editable area within ``data[index]`` (``None``: everywhere)."""
+        """The editable area within ``data[index]`` (``None``: everywhere).
+
+        :attr:`over` is not in it: it depends on the label written, so it is the
+        caller's (:func:`writable`)."""
         out = None
         if self.intensity is not None:
             values = as_backend_array(self.intensity[tuple(index)])
@@ -931,17 +1025,7 @@ class PaintGuard:
             reverted = 0
             for indices, old, new in item:
                 new_arr = np.broadcast_to(as_backend_array(new), np.shape(old))
-                bad = np.zeros(np.shape(old), dtype=bool)
-                painting = new_arr != 0
-                if self.intensity is not None:
-                    values = self.intensity[indices]
-                    bad |= painting & ((values < self.low) | (values > self.high))
-                if self.inside is not None:
-                    bad |= painting & (self.inside[indices] == 0)
-                bounds = self._box_bounds()
-                if bounds is not None:
-                    for (lo, hi), ix in zip(bounds, indices):
-                        bad |= painting & ((ix < lo) | (ix >= hi))
+                bad = self._outside(indices, old, new_arr)
                 if not bad.any():
                     trimmed.append((indices, old, new))
                     continue

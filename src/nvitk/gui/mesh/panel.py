@@ -1,16 +1,24 @@
 """The Meshlab panel (dock): MeshLab / ParaView basics for surfaces and point clouds, over time too.
 
 Top to bottom: the active layer (size, area, volume) with open / save; the
-operation pickers, the selected operation's parameters and Run; how the layer is
+selection tools; the operation pickers, the selected operation's parameters and Run; how the layer is
 drawn (Display: colour by a field, colormap, solid colour, opacity, wireframe,
 point size…); moving it by hand (Move: live, then Apply or Reset); a frame
 slider for mesh time series; and a plot for profiles and curves over time.
+
+The Selection card, always on screen under the active layer, holds the
+selection tools: Brush, Box and Piece stay on (every stroke, box or click
+selects) until clicked again, and follow the active layer; Add / Remove /
+Replace say how each one combines with the selection; All, Invert, Clear, Grow,
+Shrink, Delete, Keep only and Copy out act on it at once (Delete and Keep only
+can be undone).
 
 Operations that need a point — a cross-section, a cut, an edit — do not read
 the cursor: Run arms them and they wait for a click on the surface (in 3D, the
 click is cast into the scene and lands on the front-most face; dragging still
 rotates). A marker shows where the click landed; edits can be undone. The
-selection tools paint with a brush or drag a box instead, until Done.
+selection operations of the *Select* category paint with a brush or drag a box
+instead, until Done.
 
 Display and Move act on every selected surface, points and series layer at
 once (the active one leads); Undo puts back the last edit, whichever layers it
@@ -27,6 +35,7 @@ from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import QColor, QIcon, QPixmap
 from qtpy.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QColorDialog,
     QComboBox,
@@ -303,6 +312,9 @@ class MeshPanel(QWidget):
         self._stroke: dict[str, Any] | None = None
         self._saved_pan: bool | None = None
         self._rubber: Any = None
+        #: The armed pick came from the Selection card (its tools stay on until
+        #: switched off, follow the active layer and read the card's settings).
+        self._pick_from_card = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(SPACE_TIGHT, SPACE_TIGHT, SPACE_TIGHT, SPACE_TIGHT)
@@ -310,6 +322,7 @@ class MeshPanel(QWidget):
         root.setAlignment(Qt.AlignTop)
 
         root.addWidget(self._build_info_card())
+        root.addWidget(self._build_selection_card())
         root.addWidget(self._build_operation_card())
         self._display_card = self._build_display_card()
         root.addWidget(self._display_card)
@@ -354,6 +367,208 @@ class MeshPanel(QWidget):
             files.addWidget(b)
         info.add_layout(files)
         return info
+
+    def _build_selection_card(self) -> Card:
+        """Always on screen: the selection tools and what to do with a selection."""
+        card = Card("Selection")
+        card.setToolTip("Select vertices / points on the active surface or points layer (drawn red), then "
+                        "delete, keep or copy them, or run a selection-based filter on them.")
+        tools = QHBoxLayout()
+        tools.setSpacing(SPACE_TIGHT)
+        self._sel_tools: dict[str, QPushButton] = {}
+        for key, text, tip in (
+            ("brush", "Brush", "Paint the selection on the surface: drag on it. Dragging off the surface "
+                               "still turns the camera; the wheel zooms. Click again to stop."),
+            ("box", "Box", "Drag rectangles over the view: what falls inside is selected. Turning the camera "
+                           "pauses while the box is on (the wheel still zooms). Click again to stop."),
+            ("piece", "Piece", "Click on the surface: its whole connected piece is selected. Dragging still "
+                               "turns the camera. Click again to stop."),
+        ):
+            button = _button(text, tip, checkable=True)
+            button.toggled.connect(lambda on, k=key: self._toggle_selection_tool(k, on))
+            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self._sel_tools[key] = button
+            tools.addWidget(button)
+        card.add_layout(tools)
+
+        modes = QHBoxLayout()
+        modes.setSpacing(SPACE_TIGHT)
+        self._sel_mode_group = QButtonGroup(self)
+        self._sel_mode_group.setExclusive(True)
+        for k, (mode, tip) in enumerate((
+            ("add", "Strokes, boxes and clicks add to the selection."),
+            ("remove", "Strokes, boxes and clicks take away from the selection."),
+            ("replace", "Each stroke, box or click starts a new selection."),
+        )):
+            button = _button(mode.capitalize(), tip, checkable=True)
+            button.setProperty("sel_mode", mode)
+            button.setChecked(k == 0)
+            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self._sel_mode_group.addButton(button)
+            modes.addWidget(button)
+        card.add_layout(modes)
+
+        options = QHBoxLayout()
+        options.setSpacing(SPACE_TIGHT)
+        options.addWidget(QLabel("Brush"))
+        self._sel_radius = QDoubleSpinBox()
+        self._sel_radius.setRange(0.01, 10000.0)
+        self._sel_radius.setDecimals(2)
+        self._sel_radius.setValue(3.0)
+        self._sel_radius.setSuffix(" mm")
+        self._sel_radius.setToolTip("Brush radius.")
+        self._sel_radius.setStyleSheet(_INPUT_STYLE)
+        options.addWidget(self._sel_radius, 1)
+        self._sel_facing = QCheckBox("Box: front side only")
+        self._sel_facing.setChecked(True)
+        self._sel_facing.setToolTip("On: the box takes only what faces you. Off: straight through the surface.")
+        options.addWidget(self._sel_facing)
+        card.add_layout(options)
+
+        actions = QGridLayout()
+        actions.setHorizontalSpacing(SPACE_TIGHT)
+        actions.setVerticalSpacing(SPACE_TIGHT)
+        self._sel_rings = QSpinBox()
+        self._sel_rings.setRange(1, 1000)
+        self._sel_rings.setValue(1)
+        self._sel_rings.setPrefix("× ")
+        self._sel_rings.setToolTip("Rings of neighbouring vertices Grow and Shrink add or take away.")
+        self._sel_rings.setStyleSheet(_INPUT_STYLE)
+        self._sel_actions: list[QPushButton] = []
+        rows = (
+            (("All", "sel_all", {}, "Select every vertex / point."),
+             ("Invert", "sel_invert", {}, "Select what was not selected, and the other way round."),
+             ("Clear", "sel_clear", {}, "Drop the selection; the layer gets its colouring back.")),
+            (("Grow", "sel_grow", {"sel_grow_mode": "grow"}, "Add rings of vertices around the selection's edge."),
+             ("Shrink", "sel_grow", {"sel_grow_mode": "shrink"}, "Take rings of vertices off the selection's edge."),
+             None),
+            (("Delete", "sel_delete", {}, "Remove the selected vertices / points and the faces touching them "
+                                         "(Undo edit puts them back)."),
+             ("Keep only", "sel_keep", {"sel_keep_mode": "keep only the selection"},
+              "Crop the layer to the selection (faces with every corner selected)."),
+             ("Copy out", "sel_keep", {"sel_keep_mode": "copy to a new layer"},
+              "Copy the selected part into a new layer.")),
+        )
+        for r, row in enumerate(rows):
+            for c, item in enumerate(row):
+                if item is None:
+                    actions.addWidget(self._sel_rings, r, c)
+                    continue
+                text, op_id, extra, tip = item
+                button = _button(text, tip)
+                button.clicked.connect(lambda _c=False, o=op_id, e=extra: self._run_selection_op(o, **e))
+                button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                self._sel_actions.append(button)
+                actions.addWidget(button, r, c)
+        card.add_layout(actions)
+        self._sel_status = _muted()
+        card.add(self._sel_status)
+        return card
+
+    def _selection_params(self) -> dict[str, Any]:
+        """The Selection card's settings, named as the selection operations' parameters."""
+        checked = self._sel_mode_group.checkedButton()
+        return {
+            "sel_mode": str(checked.property("sel_mode")) if checked is not None else "add",
+            "sel_radius": float(self._sel_radius.value()),
+            "sel_facing": bool(self._sel_facing.isChecked()),
+            "sel_rings": int(self._sel_rings.value()),
+        }
+
+    def _pick_params(self) -> dict[str, Any]:
+        """The settings the armed tool reads: the card's, or the operation form's."""
+        return self._selection_params() if self._pick_from_card else self.params()
+
+    def _pick_note(self, text: str) -> None:
+        """A message about the armed tool, where its controls are."""
+        (self._sel_status if self._pick_from_card else self._status).setText(text)
+
+    def _selection_layer(self) -> Any | None:
+        """The layer the Selection card works on: the active surface or points layer."""
+        layer = self._viewer.layers.selection.active
+        if layer is None or layer.name == _MARKER_NAME or layer_kind(layer) not in _SHAPE_KINDS:
+            return None
+        return layer
+
+    def _toggle_selection_tool(self, key: str, on: bool) -> None:
+        if not on:
+            if self._pick_from_card and self._picking is not None and self._picking.id == f"sel_{key}":
+                layer = self._pick_layer
+                self._stop_pick()
+                self._sync_selection_card(layer)
+            return
+        op = operation(f"sel_{key}")
+        layer = self._selection_layer()
+        if op is None or layer is None or not accepts(op, layer):
+            self._set_tool_checked(None)
+            hint = input_hint(op) if op is not None else "a surface"
+            self._sel_status.setText(f"{op.label if op else key}: select {hint} first.")
+            return
+        self.start_pick(op, from_card=True)
+
+    def _set_tool_checked(self, key: str | None) -> None:
+        for k, button in self._sel_tools.items():
+            button.blockSignals(True)
+            button.setChecked(k == key)
+            button.blockSignals(False)
+
+    def _sync_selection_card(self, layer: Any | None = None) -> None:
+        """Enable the card for a surface / points layer and say how much is selected."""
+        from nvitk.gui.mesh.selection import selection_of
+
+        layer = layer if layer is not None else self._selection_layer()
+        usable = layer is not None and layer in self._viewer.layers
+        for button in self._sel_actions:
+            button.setEnabled(usable)
+        if self._picking is not None and self._pick_from_card:
+            return  # the armed tool is talking
+        if not usable:
+            self._sel_status.setText("Select a surface or points layer.")
+            return
+        try:
+            sel = selection_of(layer)
+        except Exception:  # noqa: BLE001 — a layer mid-change
+            return
+        what = "vertices" if type(layer).__name__ == "Surface" else "points"
+        n = int(sel.sum())
+        self._sel_status.setText(f"{n:,} of {len(sel):,} {what} selected on {layer.name}." if n
+                                 else f"Nothing selected on {layer.name} ({len(sel):,} {what}).")
+
+    def _run_selection_op(self, op_id: str, *, point: np.ndarray | None = None,
+                          view_direction: np.ndarray | None = None, layer: Any | None = None,
+                          **extra: Any) -> Any:
+        """Run a selection operation on the active layer with the card's settings."""
+        from nvitk.gui.core.activity import activity
+
+        op = operation(op_id)
+        layer = layer if layer is not None else self._selection_layer()
+        if op is None or layer is None or not accepts(op, layer):
+            self._sel_status.setText(f"{op.label if op else op_id}: select {input_hint(op) if op else 'a surface'} first.")
+            return None
+        params = {**self._selection_params(), **extra}
+        ctx = OpContext(self._viewer, layer, params, point=point, view_direction=view_direction,
+                        remember=self._push_undo)
+        try:
+            with activity(f"Meshlab: {op.label} on “{layer.name}”"):
+                result = op.run(ctx)
+        except ValueError as exc:  # nothing selected, the whole surface would go…
+            self._sel_status.setText(str(exc))
+            return None
+        except Exception as exc:  # noqa: BLE001 — report, never crash the panel
+            from nvitk.gui.tools.runner import log_tool_failure
+
+            log_tool_failure(exc)
+            self._sel_status.setText(f"Failed: {exc}")
+            _notify(f"{op.label} failed: {exc}", error=True)
+            return None
+        _notify(result.message)
+        # A copy or crop added a layer: the one being selected on stays the active one.
+        if layer in self._viewer.layers and self._viewer.layers.selection.active is not layer:
+            self._viewer.layers.selection.active = layer
+        self._on_active()
+        if self._picking is None or not self._pick_from_card:
+            self._sel_status.setText(result.message)
+        return result
 
     def _build_operation_card(self) -> Card:
         ops = Card("Operation")
@@ -855,6 +1070,8 @@ class MeshPanel(QWidget):
         layer = self._viewer.layers.selection.active
         if layer is not None and layer.name == _MARKER_NAME:
             return
+        if self._picking is not None and self._pick_from_card and layer is not None and layer is not self._pick_layer:
+            self._follow_active_with_tool(layer)
         changed = layer is not self._layer
         self._layer = layer
         n_selected = len(self._viewer.layers.selection)
@@ -875,6 +1092,38 @@ class MeshPanel(QWidget):
         self._sync_targets()
         self._sync_undo_button()
         self._update_run_state()
+        self._sync_selection_card()
+
+    def _follow_active_with_tool(self, layer: Any) -> None:
+        """The Selection card's tool moves on to the newly active layer (or switches
+        off when that layer cannot be selected on)."""
+        op = self._picking
+        if not accepts(op, layer):
+            self._stop_pick()
+            self._sel_status.setText(f"{op.label.split(':')[0]} switched off: “{layer.name}” is not a "
+                                     "surface or points layer.")
+            return
+        self._pick_layer = layer
+        self._stroke = None
+        if op.pick in ("brush", "box"):
+            # Napari hands the camera the new layer's pan setting, and other panels
+            # react to the change too: take the drags back once they all have.
+            self._viewer.camera.mouse_pan = False
+            QTimer.singleShot(0, self._hold_camera_for_tool)
+        self._pick_note(f"{op.label.split(':')[0]} now on {layer.name}.")
+
+    def _hold_camera_for_tool(self) -> None:
+        if self._picking is not None and self._picking.pick in ("brush", "box"):
+            self._viewer.camera.mouse_pan = False
+
+    def _sel_status_count(self) -> str:
+        from nvitk.gui.mesh.selection import selection_of
+
+        layer = self._pick_layer
+        try:
+            return f"{int(selection_of(layer).sum()):,} selected on {layer.name}."
+        except Exception:  # noqa: BLE001
+            return ""
 
     def _lead_layer(self) -> Any | None:
         """The active layer, or with several selected (Napari then has no active
@@ -1004,6 +1253,10 @@ class MeshPanel(QWidget):
     # ── running ──────────────────────────────────────────────────────────────
 
     def _on_run_clicked(self) -> None:
+        if self._picking is not None and self._pick_from_card:
+            layer = self._pick_layer
+            self._stop_pick()  # the Selection card's tool gives way to the operation
+            self._sync_selection_card(layer)
         if self._picking is not None:
             painting = self._picking.pick in ("brush", "box")
             layer = self._pick_layer
@@ -1162,29 +1415,43 @@ class MeshPanel(QWidget):
 
     # ── picking a point ──────────────────────────────────────────────────────
 
-    def start_pick(self) -> None:
-        """Arm the selected operation: it runs on the next click in the viewer (the
-        selection tools: on every brush stroke or box, until Done)."""
-        op = self._current_op()
+    def start_pick(self, op: Any = None, *, from_card: bool = False) -> None:
+        """Arm *op* (default: the selected operation): it runs on the next click in
+        the viewer (the selection tools: on every brush stroke or box, until Done).
+        From the Selection card (*from_card*) the tool stays on — every click, stroke
+        or box — until it is switched off, and it follows the active layer."""
+        op = op if op is not None else self._current_op()
         layer = self._viewer.layers.selection.active
         if op is None or layer is None or not accepts(op, layer):
             return
+        if self._picking is not None:
+            self._stop_pick()  # one tool at a time
         self._picking = op
         self._pick_layer = layer
+        self._pick_from_card = bool(from_card)
         self._stroke = None
         if self._pick_callback not in self._viewer.mouse_drag_callbacks:
             self._viewer.mouse_drag_callbacks.append(self._pick_callback)
+        if from_card:
+            self._set_tool_checked(op.pick if op.pick in ("brush", "box") else "piece")
         if op.pick in ("brush", "box"):
             # Drags select now; the brush hands drags that miss the surface back to the camera.
             self._saved_pan = bool(self._viewer.camera.mouse_pan)
             self._viewer.camera.mouse_pan = False
-            self._run.setText("Done selecting")
+            done = "click Brush again to stop" if from_card else "Done when finished"
+            if not from_card:
+                self._run.setText("Done selecting")
             if op.pick == "brush":
-                self._status.setText("Drag on the surface to paint the selection (red); drag off it to turn the "
-                                     "camera; the wheel zooms. Done when finished.")
+                self._pick_note("Drag on the surface to paint the selection (red); drag off it to turn the "
+                                f"camera; the wheel zooms. {done[0].upper() + done[1:]}.")
             else:
-                self._status.setText("Drag a rectangle over the view. Turning the camera is paused (the wheel "
-                                     "still zooms); Done when finished.")
+                done = done.replace("Brush", "Box")
+                self._pick_note("Drag a rectangle over the view. Turning the camera is paused (the wheel "
+                                f"still zooms); {done}.")
+            return
+        if from_card:
+            self._pick_note("Click on a piece of the surface to select it; dragging still turns the camera. "
+                            "Click Piece again to stop.")
             return
         self._run.setText("Cancel picking")
         where = "on the surface" if layer_kind(layer) != "points" else "on the points"
@@ -1192,6 +1459,8 @@ class MeshPanel(QWidget):
 
     def _stop_pick(self) -> None:
         self._picking = None
+        self._pick_from_card = False
+        self._set_tool_checked(None)
         self._stroke = None
         self._hide_rubber()
         try:
@@ -1231,7 +1500,14 @@ class MeshPanel(QWidget):
             return
         point, view_dir = self.resolve_pick(event.position, getattr(event, "view_direction", None))
         if point is None:
-            self._status.setText("Missed the surface — click on it (or Cancel).")
+            self._pick_note("Missed the surface — click on it." if self._pick_from_card
+                            else "Missed the surface — click on it (or Cancel).")
+            return
+        if self._pick_from_card:
+            # The card's Piece tool stays on: one piece per click.
+            self._run_selection_op(self._picking.id, point=np.asarray(point, dtype=float),
+                                   view_direction=view_dir, layer=self._pick_layer)
+            self._pick_note(f"{self._sel_status_count()} Click another piece, or Piece again to stop.")
             return
         self.pick_at(point, view_dir)
 
@@ -1272,7 +1548,7 @@ class MeshPanel(QWidget):
                 return ray_hit(pos, direction, st["triangles"])
             point, _d = self.resolve_pick(pos, direction)
             return point
-        radius = float(self.params().get("sel_radius") or 1.0)
+        radius = float(self._pick_params().get("sel_radius") or 1.0)
         dist, _i = st["tree"].query(pos)
         return pos if dist <= radius else None
 
@@ -1280,16 +1556,19 @@ class MeshPanel(QWidget):
         from nvitk.gui.mesh.selection import set_selection
 
         st = self._stroke_cache()
-        radius = float(self.params().get("sel_radius") or 1.0)
+        params = self._pick_params()
+        radius = float(params.get("sel_radius") or 1.0)
         idx = st["tree"].query_ball_point(np.asarray(centre, dtype=float), radius)
         if idx:
-            st["selected"][np.asarray(idx, dtype=int)] = self.params().get("sel_mode", "add") != "remove"
+            st["selected"][np.asarray(idx, dtype=int)] = params.get("sel_mode", "add") != "remove"
             set_selection(st["layer"], st["selected"])
         return int(st["selected"].sum())
 
     def _brush_drag(self, event: Any) -> Any:
-        self._stroke_cache(fresh_selection=True)
+        st = self._stroke_cache(fresh_selection=True)
         hit = self._brush_point(event)
+        if hit is not None and self._pick_params().get("sel_mode") == "replace":
+            st["selected"][:] = False  # each stroke starts a new selection
         if hit is None:
             # Off the surface: this drag turns the camera, as without the tool.
             self._viewer.camera.mouse_pan = True
@@ -1305,7 +1584,9 @@ class MeshPanel(QWidget):
             if hit is not None:
                 n = self._paint(hit)
             yield
-        self._status.setText(f"{n:,} selected on {self._pick_layer.name}. Paint more, or Done.")
+        self._pick_note(f"{n:,} selected on {self._pick_layer.name}. "
+                        + ("Paint more, or click Brush again to stop." if self._pick_from_card
+                           else "Paint more, or Done."))
 
     def _canvas_widget(self) -> Any:
         try:
@@ -1348,15 +1629,16 @@ class MeshPanel(QWidget):
         if np.abs(p1 - p0).max() < 3:
             return  # a click, not a box
         layer = self._pick_layer
-        params = self.params()
+        params = self._pick_params()
         self._stroke_cache(fresh_selection=True)
         picked = in_box(self._viewer, layer, p0, p1, facing_only=bool(params.get("sel_facing", True)),
                         view_direction=getattr(event, "view_direction", None))
         st = self._stroke_cache()
         st["selected"] = combine(st["selected"], picked, str(params.get("sel_mode") or "add"))
         n = set_selection(layer, st["selected"])
-        self._status.setText(f"{n:,} selected on {layer.name} ({int(picked.sum()):,} in the box). "
-                             "Drag another box, or Done.")
+        self._pick_note(f"{n:,} selected on {layer.name} ({int(picked.sum()):,} in the box). "
+                        + ("Drag another box, or click Box again to stop." if self._pick_from_card
+                           else "Drag another box, or Done."))
 
     def resolve_pick(self, position: Any, view_direction: Any) -> tuple[np.ndarray | None, np.ndarray | None]:
         """The world point a click at *position* lands on (front-most hit in 3D)."""

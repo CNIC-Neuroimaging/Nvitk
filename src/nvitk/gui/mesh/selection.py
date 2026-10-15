@@ -1,7 +1,8 @@
 """Selections on surfaces and point clouds, kept as a per-vertex ``selected`` field.
 
 A selection is painted with the brush, dragged out as a box on the screen or
-taken as the piece under a click (the Mesh panel's *Select* category). It is
+taken as the piece under a click (the Meshlab panel's Selection card, or its
+*Select* operations). It is
 drawn red over grey; the colouring the layer had comes back when the selection
 is cleared. The selection actions (delete, keep, copy, grow, shrink, invert) and
 MeshLab's selection-based filters work on it.

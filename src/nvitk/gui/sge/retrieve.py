@@ -5,9 +5,8 @@ from __future__ import annotations
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -200,12 +199,16 @@ def _apply_remote_cleanup(
             error=True,
         )
         return result
-    code, out, err = remove_remote_job_tree(
-        host=connection.host,
-        user=connection.user,
-        password=connection.password,
-        remote_job_root=root,
-    )
+    from nvitk.gui.core.activity import activity, run_in_background
+
+    with activity("SGE: cleaning up the remote job", cursor=False):
+        code, out, err = run_in_background(
+            remove_remote_job_tree,
+            host=connection.host,
+            user=connection.user,
+            password=connection.password,
+            remote_job_root=root,
+        )
     if code != 0:
         notify(
             f"Import succeeded but remote cleanup failed (exit {code}). "
@@ -272,13 +275,18 @@ def import_sge_job(
             resolved_job_id = None
 
         assert conn is not None
+        from nvitk.gui.core.activity import activity, run_in_background
+
         notify(f"Downloading SGE results from {root} …")
-        result = retrieve_sge_results(connection=conn, remote_job_root=root)
-        result = import_sge_results_to_viewer(
-            viewer,
-            result,
-            on_layers_changed=on_layers_changed,
-        )
+        with activity(f"SGE: downloading the results of {resolved_job_id or root}"):
+            # The download goes to a worker (the window keeps redrawing); the layers are
+            # opened here.
+            result = run_in_background(retrieve_sge_results, connection=conn, remote_job_root=root)
+            result = import_sge_results_to_viewer(
+                viewer,
+                result,
+                on_layers_changed=on_layers_changed,
+            )
 
         update_pending_job_status(
             app_state,

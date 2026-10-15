@@ -12,9 +12,12 @@ generic path gets wrong:
    (100 … 940 x 512). They are not pictures. The "pixels" are Philips' compressed spectral
    base data — byte entropy ~5.9 bits against ~0.6 for a real CT slice, and the row count
    tracks how much there was to compress (short at the scan ends, longest through the body).
-   Only a Philips spectral workstation can turn them into monoenergetic, iodine or Z-effective
-   images. Converting them yields noise — and, with per-geometry splitting, dozens of noise
-   files per series — so they are recognised and skipped.
+   Converting them as images yields noise — and, with per-geometry splitting, dozens of noise
+   files per series — so the converter recognises them and records or copies them instead
+   (``--sbi``). :mod:`nvitk.io.conversors.philips_sbi` decodes them (conventional,
+   photoelectric and Compton-scatter components) and :mod:`nvitk.transform.spectral` derives
+   monoenergetic, iodine, VNC, Z-effective and electron-density images; the GUI's Spectral
+   tab does both.
 
 2. **Heart rate.** The standard ``HeartRate`` (0018,1088) is present but *empty* on these
    exports; Philips records the rate at the start of the scan in private (01F1,1045)

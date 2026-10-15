@@ -20,12 +20,13 @@ panels, each its own dock, tabbed together:
 
 | Panel | What it's for |
 |---|---|
-| **Imaging** | The full tool catalog (below), form-driven via magicgui, with the tool search bar. The theme toggle sits on its title bar. |
+| **Imaging** | The full tool catalog (below), form-driven via magicgui, with the tool search bar. The theme toggle sits on its title bar (the light theme also turns the canvas behind the images white; the dark one keeps it black). |
 | **Labels** | Label selection for any label layer, whatever tool is selected (below). |
 | **Meshlab** | Meshes and point clouds, MeshLab/ParaView style (below): surfaces from labels, click-to-edit, clean/repair, smoothing, remeshing, alignment, measurements, vessel centerlines, image ↔ mesh ↔ points conversion, colouring, mesh time series. |
 | **Image properties** | Spacing, affine, orientation, and other metadata for the active layer. |
 | **DICOM tags** | DICOM header inspection. |
 | **DICOM browser** | Look inside a DICOM folder before loading: studies, series and files from the headers alone; load or export only what you tick, with header edits and anonymization (below). |
+| **Spectral** | Philips spectral base images (SBI): virtual monoenergetic images at any keV (live slider), iodine density, virtual non-contrast, effective Z, electron density, and HU–keV curves (below). |
 | **Data** | Dataset/subject browser over a `DataRepo` ({doc}`../api/db`). |
 | **Labeling** | Manual segmentation and re-segmentation of a label layer: Napari's brush, bucket and polygon plus a magic wand, an editable area, grow / shrink / smooth, slice interpolation, merge / split / renumber (below). |
 | **QC** | Quality-control review panels for pipeline outputs. |
@@ -52,6 +53,22 @@ files, DICOM series, scenes and a pipeline's output happen on a worker thread, s
 keeps redrawing meanwhile (clicks wait until it is done). A tool from the Imaging tab runs on
 the GUI thread: its line is shown before it starts, but the window cannot redraw until it
 ends.
+
+Cluster work shows there too. A *Run SGE* submission reports as it goes: preparing (staging
+the job), uploading, submitting. After that, a "Cluster: *tool* on “*layer*”" line stays
+for as long as the job runs. The state comes from polling (`nvitk.gui.sge.poll`): the
+`.done` marker every few seconds and `qstat` every 15 s (`query_sge_job_states`). It reads:
+- submitted (job *N*)
+- queued (job *N*)
+- running (job *N*)
+- held, suspended, or in error (Eqw), as `qstat` reports them
+- finishing (job *N*): the job has left the queue and the marker is not written yet
+- done: then the download, the import and the remote clean-up each show their own line
+- failed (exit *N*)
+
+A Voxelwise run sent to the cluster is followed the same way: its line holds until all its
+jobs have left the queue. With several things running, the line shows one of them with
+"· +*n* more", and its tooltip lists them all.
 
 **Scenes** (`nvitk.gui.io.scene`; *Export ▸ Scene*): *Save scene…* writes the whole viewer
 to one `.nvscene` file — every layer (images, labels, surfaces, points, shapes, vectors,
@@ -246,18 +263,33 @@ orthogonal views follow undo and redo too.
   or a traced path being drawn waits meanwhile. The key is heard wherever the focus is
   (canvas, views, tabs, panel windows), except while typing in a text box. Brush size, *Preserve
   other labels* (write only over background and the active label — the region tools also
-  stop growing at other labels), *3D brush / fill*, *Fill contiguous only*, *Outlines*
+  stop growing at other labels), *Paint only over* (its reverse; below), *3D brush / fill*,
+  *Fill contiguous only*, *Outlines*
   (drawn in the orthogonal views even when the canvas is in 3D, where Napari cannot draw
   them), opacity, *Undo* / *Redo*. Napari's own brush paints on the **3D canvas** too: on the
   first label the ray meets (Napari's rule) or, where there is none, on the voxel the image
   shows (the reference, else the top visible image on the grid). Every region tool runs on
   the GPU when the GPU toggle is on ({mod}`nvitk.segmentation.interactive`).
+- **Paint only over** (Draw card) is *preserve labels* the other way round, on the layer's
+  own labels. Tick the labels that may be painted over in its list. The background is
+  listed too, unticked by default. *All labels* means every label but the background, new
+  ones included as they are drawn, which is also the default.
+  - The brush, the bucket and every tool write only over the ticked labels, so a structure
+    can be drawn inside an existing one, e.g. a thrombus inside the aorta, without spilling
+    over its edge.
+  - The eraser clears only the active label, as with preserve labels, so the labels painted
+    over are safe from it. Erased voxels become background.
+  - It applies as you paint, on the canvas (2D and 3D) and in the orthogonal views. A stroke
+    over the edge never shows outside it.
+  - It applies to the Refine tools, slice interpolation and *Copy slice* too.
+  - Ticking it unticks *Preserve other labels*, and the other way round: the two rules
+    contradict each other. Ticks are kept per layer.
 - **Editable area.** Restrict where anything paints: *Only where the reference is between*
   two values (*From view* takes the reference's display window — *From box* the box's
   intensity range) and/or *Only inside* another mask — all its labels, or the ones ticked in
-  its list (*All* / *None*; the choice is kept per mask). A brush stroke over the edge keeps
-  only the part inside — the rest is put back as it was, and Undo takes back exactly what
-  stayed. Erasing is never restricted.
+  its list (*All* / *None*; the choice is kept per mask). A brush stroke over the edge only
+  paints the part inside, as you draw, and Undo takes back exactly that. Erasing is never
+  restricted.
 - **Box.** A box on the volume (`nvitk.gui.labels.roi_box`). *Draw box*, then drag a
   rectangle on the canvas (2D) or in an orthogonal view: it sets the box on those two axes,
   and a drag in another view sets the third (the tool in use comes back afterwards;
@@ -388,6 +420,19 @@ to a one-voxel grid.
   high-resolution wheels no longer race through the range), **about the cursor**: the point
   under the mouse stays under it, as in any image viewer (it used to jump to the middle of the
   view); double-click resets. The plain wheel steps one slice per notch the same way.
+- **Resizable panes**: drag the gap between the two rows, or between the two columns (it moves
+  in both rows, so the panes stay a grid), to give a view more room — the 3D card included,
+  which scrolls when made small. A pane dragged to nothing collapses; drag the gap back to
+  bring it out. Double-click a gap to even the panes out, double-click a view's title to show
+  that view alone (and again to go back). The sizes are remembered in `gui.json`.
+- **Orientation follows the image**: each view is laid out in the image's own orientation —
+  the direction its orientation codes name runs to the right (and down, on the axial plane),
+  the superior/inferior letter stays at the top. An RAS image reads L→R and P→A; an LPS one (a
+  DICOM series) R→L and A→P, exactly as the DICOM images are stored (the radiological view).
+  Changing the orientation with the orientation tools (RAS ↔ LPS, a swap of two axes) changes
+  the views at once: a mirrored display shows the image as a native one of that orientation
+  would look. Napari's own view settings — Ctrl+T, axis rolls, its camera — only rearrange the
+  main window.
 - **Outlines**: a Labels layer set to contours (*Outlines* in the Labeling tab, *contour* in its
   controls) is drawn as outlines in the views too — also while the canvas is in 3D, where
   Napari cannot draw them.
@@ -437,6 +482,44 @@ canvas* shows a person with R/L, A/P and H/F arrows — the marker of the QC rep
 renders — in the corner of the 3D view, turning with the camera
 (`nvitk.gui.viz.orientation_overlay`). Both choices are remembered in `gui.json`.
 
+## Spectral CT (Philips SBI)
+
+A Philips Spectral CT stores, next to each reconstruction, a *spectral base image* (SBI) series
+— the per-voxel photoelectric and Compton-scatter parts of the attenuation that every spectral
+result is derived from. nvitk decodes them (`nvitk.io.conversors.philips_sbi`) and derives the
+results itself (`nvitk.transform.spectral`), in the **Spectral** tab (`nvitk.gui.viz.spectral_panel`):
+
+- **Loading**: in the DICOM browser, SBI series are listed as *spectral base — opens in the
+  Spectral tab*; tick and load them (or double-click) like any series. *Open SBI series…* in
+  the tab picks them from a folder. A series reads in a few seconds (416 slices ≈ 4–9 s).
+- **One live layer per series** (`SBI IMR, 78% · …`) on the reconstruction's own grid — it
+  overlays the conventional series exactly — showing the chosen **result**: *Virtual
+  monoenergetic* at the energy of the **keV slider** (40–200 keV; the layer follows the slider,
+  computed on a worker thread, on the GPU when GPU computing is on), *Conventional*, *Iodine
+  density* (mg/mL), *Virtual non-contrast* (HU), *Effective Z*, *Electron density* (% of
+  water's), and the *Photoelectric* / *Compton-scatter* parts themselves. Each result opens with
+  a fitting colormap and range (the series' CT window for HU results; a range you set is kept
+  when you come back to that result).
+- **Add a copy** keeps the current result as a layer of its own (40 keV beside 70 keV);
+  **Energy series…** stacks monoenergetic images (e.g. 40–200 keV every 20) into one 3D+E layer
+  with an energy slider, which the time tools plot.
+- **Spectral curves**: *Curve at the cursor* plots HU against keV for the voxel under the mouse
+  (else the orthogonal views' crosshair); *Curve over a label* for the mean over a mask's label
+  (a Labels layer on the series' grid). They go to the time–intensity curve window (CSV export).
+- **Calibration**: the constants that tie Philips' photoelectric / scatter pair to physics
+  (reference energy 70 keV, the photoelectric share of water's and of iodine's attenuation, the
+  Z_eff exponent), with the defaults measured for SBI V5.1 at 120 kVp.
+
+The results are **nvitk's derivation, not Philips' calibrated results**: a two-process model
+(photoelectric ~E⁻³ and Klein–Nishina Compton, fitted to NIST water and iodine) mapped onto
+Philips' pair. Water stays at 0 HU at every energy and the 70 keV image reproduces the
+conventional one (±3 HU on average); iodine follows its NIST curve to about ±10 % between 40
+and 100 keV. On a contrast-enhanced cardiac study the blood pool gives ~11 mg/mL iodine, VNC
+~50 HU, electron density ~106 %; bone reads as iodine on the iodine map, as on any water–iodine
+decomposition. Fat comes out with Z_eff ≈ 7.2 rather than ~6.3 (Philips' photoelectric image
+separates fat from water less than the physics predicts). Expect the same picture as the
+workstation, not the same numbers to the HU.
+
 ## Performance (CPU threads)
 
 The views' host work — slicing and compositing every layer, resampling off-grid layers, oblique
@@ -475,12 +558,13 @@ window expressed in intensity units, and the live preview is reverted if the dia
 
 `nvitk.gui.tools.registry` defines every tool as a `GuiToolSpec` (id, category, parameter
 spec, whether it needs a reference layer or 3D data, and its run mode), merged with the
-pipeline shortcuts from `nvitk.gui.pipeline.catalog`. **121 tools across 13 categories**,
+pipeline shortcuts from `nvitk.gui.pipeline.catalog`. **122 tools across 14 categories**,
 each backed by the same functions documented in the {doc}`Main API Reference <../api/index>`:
 
 | Category | Count | Examples |
 |---|---|---|
 | Restoration | 3 | Bilateral filter, N4 bias correction, MRI super-resolution |
+| Reconstruction | 1 | Background phase correction (qvtpy's polynomial correction of the complex difference; 3D and 3D+t) |
 | Filters | 17 | Sliding threshold, Hessian, Jerman vesselness, snakes, skimage thresholds and filters |
 | Morphology | 11 | Dilate/erode/open/close, fill holes, connected components, ICA siphon correction, mask genus |
 | Centerline | 3 | Detect/cut junctions, convert to polyline |
@@ -505,6 +589,35 @@ Every parameter a tool declares in the registry gets a widget, whether or not th
 declares one by hand (`nvitk.gui.tools.panel._add_registry_widgets`), laid out in the
 order the tool lists them. Widgets are shared between tools by parameter name; selecting a
 tool gives each of its fields that tool's own caption, choices and numeric range.
+
+### Measurement results: colouring the labels
+
+Measurements open the **results window** (`nvitk.gui.viz.results_window`): one table per run,
+earlier runs kept in *History*, *Copy* as text. When a measurement was taken label by label
+— volumes, intensity statistics, Dice / Jaccard / surface metrics against a reference,
+centerline arc length, mask hemodynamics — each label row carries a swatch of its label's
+colour, and **Colour labels by** colours the measured layer's labels by any measured column,
+as the Meshlab panel colours a surface by a field: pick the column and a colormap; the range
+is the values' own (*auto*) or typed, with a legend beside it. Labels without a value (not
+measured) turn grey; labels hidden in a label list stay hidden, and every label list follows.
+*Original colours* gives the labels back the colours they had, hand-picked ones included
+(`nvitk.gui.labels.visibility.apply_label_value_colors`). An image mask is turned into a
+Labels layer to take per-label colours, as when a label's colour is changed by hand.
+
+### Background phase correction
+
+*Reconstruction ▸ Background phase correction (polynomial)*
+(`nvitk.gui.tools.reconstruction_tools`) is the correction qvtpy's stage 0 applies to the 4D-flow
+complex difference: a smooth spatial polynomial (order 2 or 3, in voxel coordinates) fitted by
+least squares on the image's background voxels — the lowest *N* % of the values (25 % by
+default, as qvtpy) — and subtracted, the result floored at 0. It runs on the active layer: a 3D
+image, or a **3D+t** series either **per frame** (each frame its own fit, as qvtpy does) or with
+one background fitted on the **temporal mean** and taken off every frame (steadier on noisy
+frames). *Signed image* is for phase / velocity maps: the background is then the lowest
+|values| and nothing is clipped. An optional mask limits the fit (e.g. static tissue); *Also add
+the fitted background* adds it as a layer. The result (`<name>_bgc`) is on the source's grid —
+time-first for a 3D+t series — and runs on the GPU when GPU computing is on
+(`nvitk.io.conversors._phase2volume_bg.subtract_polynomial_background`).
 
 ### Mask image: keep / remove regions
 
@@ -593,9 +706,21 @@ still rotates the camera. A red *picked point* marker shows where it landed. *Un
 puts back what the last edit changed — a crop, an erase, a move of several layers — up to 20
 steps back.
 
-**Selecting.** The *Select* operations keep a per-vertex (or per-point) selection, drawn red
-over grey. *Brush*: Run, then drag on the surface to paint (mode *add* or *remove*, a radius
-in mm); a drag that starts off the surface still turns the camera; *Done selecting* ends it.
+**Selecting.** The **Selection** card, always on screen under *Active layer* whatever operation
+is chosen, holds the selection tools: **Brush**, **Box** and **Piece** stay on — every stroke,
+box or click selects — until clicked again, and move on to whichever surface or points layer
+becomes active (another kind of layer switches them off). **Add / Remove / Replace** say how
+each stroke, box or click combines with the selection (with *Replace* each one starts a new
+selection); the brush radius and *Box: front side only* sit beside them. **All**, **Invert**,
+**Clear**, **Grow** / **Shrink** (by the rings given), **Delete**, **Keep only** and **Copy
+out** (to a new layer) act at once on the active layer; Delete and Keep only can be undone
+(*Undo edit*). The card says how much is selected. Running an operation from the form
+switches an armed card tool off.
+
+The same tools are also *Select* operations in the form. The selection is per vertex (or per
+point), drawn red over grey. *Brush*: Run, then drag on the surface to paint (mode *add* or
+*remove*, a radius in mm); a drag that starts off the surface still turns the camera; *Done
+selecting* ends it.
 *Box*: drag a rectangle over the view — only what faces you, or straight through — adding,
 removing or replacing; the camera waits until Done (the wheel still zooms). *Piece under a
 click* takes a whole connected piece. The selection can be grown or shrunk by rings,

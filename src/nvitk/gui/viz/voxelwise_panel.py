@@ -179,10 +179,13 @@ class _RunWorker(QThread):
         super().__init__()
         self._argv = [str(a) for a in argv]
         self._env = dict(env) if env else None
+        #: The command's output, kept to read the job ids a submission prints.
+        self.lines: list[str] = []
 
     def run(self) -> None:
         """Stream the command and report its exit code."""
-        self.finished_ok.emit(int(run_subprocess_logged(self._argv, env=self._env)))
+        self.finished_ok.emit(int(run_subprocess_logged(self._argv, env=self._env,
+                                                        on_line=self.lines.append)))
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -797,10 +800,64 @@ class VoxelwisePanel(QDialog):
         self._status.setText(
             "Running…" if submit == "local" else "Submitting…"
         )
+        from nvitk.gui.core.activity import start_task
+
+        self._task = start_task("Voxelwise: running randomise" if submit == "local"
+                                else "Voxelwise: submitting to the cluster")
+        self._ssh_env = env
         runner = _RunWorker(argv, env=env)
         runner.finished_ok.connect(lambda rc: self._on_run_finished(rc, submit))
         self._runner = runner
         runner.start()
+
+    def _watch_cluster_job(self) -> bool:
+        """Follow the submitted job(s) in ``qstat`` from the status bar; False when there
+        is nothing to follow (no job id printed, or no credentials to ask with)."""
+        import re
+
+        runner, env = self._runner, getattr(self, "_ssh_env", None) or {}
+        lines = list(getattr(runner, "lines", []) or [])
+        ids: list[str] = []
+        for line in lines:
+            match = re.search(r"Submitted:\s*(.+)", line)
+            if match:
+                ids += re.findall(r"\d+", match.group(1))
+        host, user, password = (env.get("NVITK_SGE_SSH_HOST", ""), env.get("NVITK_SGE_SSH_USER", ""),
+                                env.get("NVITK_SGE_SSH_PASSWORD", ""))
+        app_state = getattr(self._viewer, "_nvitk_app_state", None)
+        if not ids or not (host and user) or not isinstance(app_state, dict):
+            return False
+        try:
+            from nvitk.cluster.remote_transfer import resolve_cluster_host
+            from nvitk.gui.core.activity import start_task
+            from nvitk.gui.sge.models import SgeConnection
+            from nvitk.gui.sge.submit import ensure_sge_monitor
+
+            monitor = ensure_sge_monitor(app_state)
+            out_dir = self._out_dir
+            label = "voxelwise (randomise)"
+
+            def done() -> None:
+                from nvitk.gui.tools.runner import notify
+
+                notify(f"Voxelwise cluster job finished. Load the results folder: {out_dir}")
+                try:
+                    self._status.setText("The cluster job has finished: load the results folder.")
+                except RuntimeError:   # the dialog was closed meanwhile
+                    pass
+
+            monitor.watch_queue(
+                f"voxelwise:{','.join(ids)}",
+                SgeConnection(host=resolve_cluster_host(host), user=user, password=password),
+                ids,
+                label=label,
+                task=start_task(f"Cluster: {label} — submitted", kind="cluster"),
+                on_done=done,
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001 — following the job is a convenience
+            gui_log(f"Voxelwise: cannot follow the cluster job ({exc}).")
+            return False
 
     def _collect_ssh_env(self) -> dict[str, str] | None:
         """Ask for cluster credentials and return the child's environment, or ``None`` if cancelled.
@@ -844,11 +901,19 @@ class VoxelwisePanel(QDialog):
         """Re-enable the buttons and, for a finished local run, show the maps."""
         self._run_btn.setEnabled(True)
         self._sge_btn.setEnabled(True)
+        task = getattr(self, "_task", None)
+        if task is not None:
+            task.finish(ok=returncode == 0)
+            self._task = None
         if returncode != 0:
             self._status.setText(f"Failed (exit {returncode}) — see the log.")
             return
         if submit != "local":
-            self._status.setText("Submitted. Load the results folder when the job finishes.")
+            watched = self._watch_cluster_job()
+            self._status.setText(
+                "Submitted. The status bar shows the job until it leaves the queue; then load the "
+                "results folder." if watched else
+                "Submitted. Load the results folder when the job finishes.")
             return
         self._status.setText("Finished.")
         if self._out_dir is not None:

@@ -516,6 +516,14 @@ def run_gui_tool(
         run_interpolation_tool(tool_id, viewer, layer, params, label_ids=label_ids)
         return None
 
+    from nvitk.gui.tools.reconstruction_tools import RECONSTRUCTION_TOOL_IDS
+
+    if tool_id in RECONSTRUCTION_TOOL_IDS:
+        from nvitk.gui.tools.reconstruction_tools import run_reconstruction_tool
+
+        run_reconstruction_tool(tool_id, viewer, layer, params)
+        return None
+
     # 3D+t and k-space tools manage their own output layers (a 3D result of a
     # 3D+t layer, a k-space view with its complex data kept beside it).
     _time_freq = {
@@ -2539,12 +2547,15 @@ def _run_measure_centerline_arc_length(
                 "points": int(poly.shape[0]),
             }
 
+    arc_labels = {} if targets == [0] else {_label_display(viewer, layer, lid): int(lid) for lid in targets}
     _notify_results(
         viewer,
         _tool_label("measure_centerline_arc_length"),
         rows,
         subtitle=getattr(layer, "name", ""),
         row_header="Branch" if targets == [0] else "Label",
+        label_layer=layer,
+        row_labels={k: v for k, v in arc_labels.items() if k in rows},
     )
 
 
@@ -2663,6 +2674,7 @@ def _run_measure_mask_hemodynamics(
             mag = cd = vel_mag = as_backend_array(ref_layer.data).astype(np.float64)
     method = str(params.get("hemo_method") or "both")
     rows: dict[str, dict[str, Any]] = {}
+    hemo_labels: dict[str, int] = {}
     for lid in lids:
         results = measure_mask_hemodynamics(
             mask_data,
@@ -2683,6 +2695,7 @@ def _run_measure_mask_hemodynamics(
             # One row per (label, method): a label measured both ways yields two
             # results, and collapsing them would hide which method produced what.
             key = f"{_label_display(viewer, layer, int(lid))} [{res.method}]"
+            hemo_labels[key] = int(lid)
             row: dict[str, Any] = {"PI": round(float(res.pi), 6), "RI": round(float(res.ri), 6)}
             if res.mean_flow_ml_s is not None:
                 row["flow_ml_s"] = round(float(res.mean_flow_ml_s), 6)
@@ -2694,6 +2707,8 @@ def _run_measure_mask_hemodynamics(
         rows,
         subtitle=getattr(layer, "name", ""),
         row_header="Label [method]",
+        label_layer=layer,
+        row_labels=hemo_labels,
     )
 
 
@@ -4297,8 +4312,11 @@ def _run_mask_comparison(
         return
 
     rows: dict[str, dict[str, float]] = {}
+    row_labels: dict[str, int] = {}
     for lid in ids:
-        rows[_label_display(viewer, layer, lid)] = _row(lid)
+        key = _label_display(viewer, layer, lid)
+        rows[key] = _row(lid)
+        row_labels[key] = int(lid)
     columns = list(next(iter(rows.values())).keys())
     # Ratios only. The mean of a confusion count across labels ("average TP")
     # is not a quantity anyone reports, and printing 105.333333 under a column
@@ -4324,6 +4342,8 @@ def _run_mask_comparison(
         subtitle=subtitle,
         row_header="Label",
         note=note,
+        label_layer=layer,
+        row_labels=row_labels,
     )
 
 
@@ -4344,17 +4364,22 @@ def _notify_results(
     subtitle: str = "",
     row_header: str = "",
     note: str = "",
+    label_layer: Any = None,
+    row_labels: dict[str, int] | None = None,
 ) -> None:
     """Show *payload* in the results window and log the same thing as text.
 
     Both, deliberately: the window is where you read a table, the log is where
-    you find what a run produced an hour later.
+    you find what a run produced an hour later. A per-label table names the layer
+    measured and each row's label id (*label_layer*, *row_labels*), so the window
+    can colour those labels by a measured column.
     """
     from nvitk.gui.viz.results_window import show_results
 
     try:
         text = show_results(
-            viewer, title, payload, subtitle=subtitle, row_header=row_header, note=note
+            viewer, title, payload, subtitle=subtitle, row_header=row_header, note=note,
+            label_layer=label_layer if row_labels else None, row_labels=row_labels,
         )
     except Exception:  # noqa: BLE001 — a window failure must not lose the numbers
         text = _format_metrics(payload) if isinstance(payload, dict) else str(payload)
@@ -4374,18 +4399,21 @@ def _run_measure_per_label(
     if not gpu_enabled():
         data = as_backend_array(to_numpy(data))
     rows: dict[str, dict[str, float]] = {}
+    row_labels: dict[str, int] = {}
     for lid in label_ids:
         proc, _ = prepare_layer_data(data, target_mode="label", label_ids=[lid])
         img = layer_to_image(layer, proc)
-        rows[_label_display(viewer, layer, lid)] = _measure_row(
-            tool_id, img, layer, viewer, params
-        )
+        key = _label_display(viewer, layer, lid)
+        rows[key] = _measure_row(tool_id, img, layer, viewer, params)
+        row_labels[key] = int(lid)
     _notify_results(
         viewer,
         _tool_label(tool_id),
         rows,
         subtitle=getattr(layer, "name", ""),
         row_header="Label",
+        label_layer=layer,
+        row_labels=row_labels,
     )
 
 

@@ -517,6 +517,105 @@ def apply_label_colormap(
     return len(colors)
 
 
+#: Colour of the labels a value colouring has no value for.
+NO_VALUE_RGBA = (0.45, 0.45, 0.45, 1.0)
+
+
+def _reapply_label_colors(layer: Any, visible: tuple[int, ...] | None, colors: dict[int, np.ndarray]) -> None:
+    """Push the stored colours, keeping the labels hidden in a label list hidden."""
+    if visible is not None:
+        apply_label_visibility(layer, list(visible))
+    else:
+        _apply_label_color_dict(layer, colors)
+
+
+def label_color_state(layer: Any) -> dict[str, Any]:
+    """*layer*'s label colours as they are now, for :func:`restore_label_color_state`."""
+    meta = _layer_metadata(layer)
+    backup = meta.get(_NVITK_COLOR_BACKUP_KEY)
+    return {
+        "backup": None if backup is None else {int(k): _normalize_rgba(v) for k, v in dict(backup).items()},
+        "colormap_key": meta.get(_NVITK_COLORMAP_KEY),
+        # Napari's own colours (no nvitk backup yet): its colormap object itself.
+        "napari_colormap": getattr(layer, "colormap", None) if backup is None else None,
+    }
+
+
+def restore_label_color_state(layer: Any, state: dict[str, Any]) -> None:
+    """Put *layer*'s label colours back as :func:`label_color_state` found them
+    (the labels hidden meanwhile stay hidden)."""
+    meta = _layer_metadata(layer)
+    visible = stored_visible_ids(layer)
+    meta.pop(_NVITK_VISIBLE_IDS_KEY, None)
+    backup = state.get("backup")
+    if backup is None:
+        meta.pop(_NVITK_COLOR_BACKUP_KEY, None)
+        meta.pop(_NVITK_COLORMAP_KEY, None)
+        layer.metadata = meta
+        original = state.get("napari_colormap")
+        if original is not None:
+            try:
+                layer.colormap = original
+            except Exception:  # noqa: BLE001
+                _reset_to_napari_colormap(layer)
+        else:
+            _reset_to_napari_colormap(layer)
+        if visible is not None:
+            apply_label_visibility(layer, list(visible))
+        return
+    meta[_NVITK_COLOR_BACKUP_KEY] = dict(backup)
+    if state.get("colormap_key"):
+        meta[_NVITK_COLORMAP_KEY] = state["colormap_key"]
+    else:
+        meta.pop(_NVITK_COLORMAP_KEY, None)
+    layer.metadata = meta
+    _reapply_label_colors(layer, visible, dict(backup))
+
+
+def apply_label_value_colors(
+    layer: Any,
+    values: dict[int, float],
+    colormap: str,
+    *,
+    limits: tuple[float, float] | None = None,
+) -> tuple[float, float]:
+    """Colour each label of *layer* by its value in *values* through *colormap*
+    (a Matplotlib name), from ``limits[0]`` to ``limits[1]`` (default: the values'
+    range); labels without a value turn grey. Returns the limits used.
+
+    The colours go into the backup the label lists read, so hiding and showing
+    labels keeps them (and the hidden ones stay hidden).
+    """
+    from matplotlib import colormaps
+
+    if not supports_per_label_color(layer):
+        raise TypeError("Per-label colours require a Napari Labels layer.")
+    finite = {int(k): float(v) for k, v in values.items() if v is not None and np.isfinite(float(v))}
+    if not finite:
+        raise ValueError("No numeric values to colour the labels by.")
+    if limits is None:
+        lo, hi = min(finite.values()), max(finite.values())
+    else:
+        lo, hi = float(limits[0]), float(limits[1])
+    cmap = colormaps[str(colormap)]
+    grey = _normalize_rgba(NO_VALUE_RGBA)
+    colors: dict[int, np.ndarray] = {}
+    for lid in layer_label_ids(layer):
+        if lid in finite:
+            t = 0.5 if hi <= lo else float(np.clip((finite[lid] - lo) / (hi - lo), 0.0, 1.0))
+            colors[lid] = _normalize_rgba(cmap(t))
+        else:
+            colors[lid] = grey.copy()
+    meta = _layer_metadata(layer)
+    visible = stored_visible_ids(layer)
+    meta[_NVITK_COLOR_BACKUP_KEY] = colors
+    meta.pop(_NVITK_COLORMAP_KEY, None)
+    meta.pop(_NVITK_VISIBLE_IDS_KEY, None)
+    layer.metadata = meta
+    _reapply_label_colors(layer, visible, colors)
+    return lo, hi
+
+
 def stored_label_colormap(layer: Any | None) -> str:
     """Colormap key last applied to *layer*, or ``""`` for Napari's own colours.
 
@@ -738,8 +837,10 @@ def restore_label_visibility(
 
 __all__ = [
     "LABEL_COLORMAPS",
+    "NO_VALUE_RGBA",
     "NVITK_LAYER_METADATA_KEYS",
     "apply_label_colormap",
+    "apply_label_value_colors",
     "apply_label_visibility",
     "copy_layer_metadata_for_output",
     "ensure_label_source",
@@ -747,11 +848,13 @@ __all__ = [
     "get_label_color",
     "infer_target_mode",
     "is_label_like_layer",
+    "label_color_state",
     "label_colormap_colors",
     "label_source_data",
     "invalidate_label_ids",
     "layer_label_ids",
     "layer_in_viewer",
+    "restore_label_color_state",
     "restore_label_visibility",
     "stored_label_colormap",
     "set_label_color",

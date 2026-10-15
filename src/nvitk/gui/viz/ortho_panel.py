@@ -11,6 +11,11 @@ one: with ``Show 3D planes`` on, the three slices are pushed onto the canvas as
 three cuts in space. ``Clip volume`` then takes one axis and throws away
 everything on one side of its slice, which is how you see *inside* a volume
 instead of only at its surface.
+
+The four panes are resizable (:class:`PaneGrid`): drag the gap between two rows
+or two columns, double-click a gap to even them out, double-click a view's title
+to see that view alone (and again to come back). The sizes are kept for the next
+session.
 """
 
 from __future__ import annotations
@@ -27,14 +32,17 @@ from qtpy.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
-    QGridLayout,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSlider,
     QSpinBox,
+    QSplitter,
+    QSplitterHandle,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -107,6 +115,9 @@ _MAX_ZOOM = 12.0
 #: race through the whole zoom range in one flick.
 _ZOOM_STEP = 1.1
 _WHEEL_NOTCH = 120.0
+
+#: Grid cells of the axial, coronal and sagittal views (the 3D card is the fourth).
+_VIEW_CELLS = ((0, 0), (0, 1), (1, 0))
 
 #: Default cine rate of the time/energy play button.
 _PLAY_FPS = 8
@@ -214,13 +225,10 @@ def _orient_in_plane(axis: int, codes: str, plane: str) -> tuple[int, bool, int,
 _PLANE_ORDER: dict[str, int] = {"Axial": 0, "Coronal": 1, "Sagittal": 2}
 
 
-def _axis_views(layer: Any) -> list[AxisView]:
-    """The three orthogonal views for *layer*, named from its anatomical axis codes.
-
-    Slicing *along* an axis shows the plane perpendicular to it: stepping the
-    superior axis gives axial slices, the anterior axis coronal, the left-right
-    axis sagittal.
-    """
+def _anatomical_views(layer: Any) -> list[AxisView]:
+    """The three views in one fixed anatomical convention (superior / anterior up,
+    the patient's right on the viewer's right), from the axis codes alone — for a
+    layer whose affine says nothing usable."""
     codes = layer_orientation_codes(layer) or ""
     views: list[AxisView] = []
     for axis in range(3):
@@ -228,16 +236,61 @@ def _axis_views(layer: Any) -> list[AxisView]:
         plane = _PLANE_NAMES.get(code, f"Axis {axis}")
         label = f"{plane}" + (f"  ·  {code}" if code else "")
         row_axis, flip_rows, col_axis, flip_cols = _orient_in_plane(axis, codes, plane)
-        views.append(
-            AxisView(
-                axis=axis,
-                title=label,
-                rows=row_axis,
-                flip_rows=flip_rows,
-                cols=col_axis,
-                flip_cols=flip_cols,
-            )
-        )
+        views.append(AxisView(axis=axis, title=label, rows=row_axis, flip_rows=flip_rows,
+                              cols=col_axis, flip_cols=flip_cols))
+    views.sort(key=lambda v: (_PLANE_ORDER.get(v.title.split(" ")[0], 3), v.axis))
+    return views
+
+
+#: In-plane axes of each plane: the codes drawn down the view and across it.
+_PLANE_AXES: dict[str, tuple[str, str]] = {
+    "Axial": ("AP", "RL"),
+    "Coronal": ("SI", "RL"),
+    "Sagittal": ("SI", "AP"),
+}
+
+
+def _axis_views(layer: Any, viewer: Any = None) -> list[AxisView]:
+    """The three orthogonal views for *layer*, laid out in the image's own orientation.
+
+    The orientation codes say which way each voxel axis runs, and the views put that
+    direction to the right (across) and down (anterior-posterior on the axial plane) —
+    superior-inferior keeps its letter at the top: an RAS image reads left to right L→R
+    and top to bottom P→A, an LPS one (a DICOM series) R→L and A→P, superior up in both.
+    When the display has been reoriented (RAS → LPS by the orientation tools, which
+    mirrors the affine and leaves the voxels where they are), the views follow the new
+    codes over the voxels' real anatomy, so they mirror as the canvas does. Slicing
+    *along* an axis shows the plane perpendicular to it: the superior axis gives axial
+    slices, the anterior axis coronal, the left-right axis sagittal. Napari's own view
+    settings (Ctrl+T, axis rolls, the camera) are the main window's alone.
+    """
+    from nvitk.gui.core.orientation import layer_true_orientation_codes
+
+    codes = (layer_orientation_codes(layer) or "").upper()
+    true = (layer_true_orientation_codes(layer) or codes).upper()
+    if len(codes) != 3 or len(true) != 3:
+        return _anatomical_views(layer)
+    pair_of = {c: "RL" if c in "RL" else "AP" if c in "AP" else "SI" for c in codes}
+    views: list[AxisView] = []
+    for axis in range(3):
+        code = codes[axis]
+        plane = _PLANE_NAMES.get(code, f"Axis {axis}")
+        if plane not in _PLANE_AXES:
+            return _anatomical_views(layer)
+        down_pair, across_pair = _PLANE_AXES[plane]
+        rest = [d for d in range(3) if d != axis]
+        row = next((d for d in rest if pair_of[codes[d]] == down_pair), None)
+        col = next((d for d in rest if pair_of[codes[d]] == across_pair), None)
+        if row is None or col is None or row == col:
+            return _anatomical_views(layer)
+        # A voxel axis runs where its code says unless the display mirrored it.
+        kept_row, kept_col = true[row] == codes[row], true[col] == codes[col]
+        # Across (and down, on the axial plane): the code's direction to the right /
+        # bottom. Superior-inferior: the code's letter at the top.
+        flip_rows = kept_row if down_pair == "SI" else not kept_row
+        flip_cols = not kept_col
+        views.append(AxisView(axis=axis, title=f"{plane}  ·  {code}", rows=row, flip_rows=flip_rows,
+                              cols=col, flip_cols=flip_cols))
     views.sort(key=lambda v: (_PLANE_ORDER.get(v.title.split(" ")[0], 3), v.axis))
     return views
 
@@ -1198,6 +1251,8 @@ class SliceView(QWidget):
     pixelPicked = Signal(int, int)
     #: (line index, screen angle in radians) while a crosshair end is dragged.
     handleDragged = Signal(int, float)
+    #: The title was double-clicked (the panel shows this view alone, or the grid again).
+    titleDoubleClicked = Signal()
 
     def __init__(self, view: AxisView, parent: QWidget | None = None) -> None:
         """Build the titled image canvas and its slice slider."""
@@ -1256,6 +1311,10 @@ class SliceView(QWidget):
         self._title.setStyleSheet(
             f"color: {COLOR_MUTED}; font-size: 10px; font-weight: bold; letter-spacing: 1px;"
         )
+        self._title.setToolTip("Double-click: this view alone, and back to the four panes.\n"
+                               "Drag the gaps between the panes to resize them; double-click a "
+                               "gap to even them out.")
+        self._title.installEventFilter(self)
         self._index_label = QLabel("—")
         self._index_label.setStyleSheet(f"color: {COLOR_TEXT}; font-size: 10px;")
         self._index_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -1268,7 +1327,9 @@ class SliceView(QWidget):
 
         self._canvas = QLabel()
         self._canvas.setAlignment(Qt.AlignCenter)
-        self._canvas.setMinimumSize(140, 140)
+        # Small enough for a pane to be dragged narrow; set explicitly, or the
+        # label's pixmap would become its minimum and stop the dividers.
+        self._canvas.setMinimumSize(60, 60)
         self._canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._canvas.setStyleSheet(
             f"background-color: #000000; border: 1px solid {COLOR_BORDER}; border-radius: 4px;"
@@ -1515,6 +1576,8 @@ class SliceView(QWidget):
         from qtpy.QtCore import QPointF, QRectF
         from qtpy.QtGui import QColor, QPainter, QPen
 
+        if self._canvas.width() < 2 or self._canvas.height() < 2:
+            return  # a collapsed pane: drawn again when it is opened
         geometry = self._geometry()
         if geometry is None:
             self._canvas.setPixmap(QPixmap())
@@ -1637,6 +1700,11 @@ class SliceView(QWidget):
         """Scroll to step slices; click to move the crosshair."""
         from qtpy.QtCore import QEvent
 
+        if obj is self._title:
+            if event.type() == QEvent.MouseButtonDblClick:
+                self.titleDoubleClicked.emit()
+                return True
+            return False
         if obj is not self._canvas:
             return False
         if event.type() == QEvent.Wheel:
@@ -2281,7 +2349,8 @@ def clear_clip(layer: Any) -> None:
         pass
 
 
-#: Preference key holding the 3D card's toggles (``resample``, ``orientation_marker``).
+#: Preference key holding the 3D card's toggles (``resample``, ``orientation_marker``)
+#: and the panes' sizes (``panes``).
 _ORTHO_PREFS_KEY = "ortho_view"
 
 
@@ -2306,11 +2375,124 @@ def _save_ortho_pref(key: str, value: Any) -> None:
         pass
 
 
+class _PaneHandle(QSplitterHandle):
+    """A divider that evens the panes out on a double click."""
+
+    def mouseDoubleClickEvent(self, event: Any) -> None:  # noqa: N802 - Qt naming
+        grid = getattr(self.splitter(), "grid", None)
+        if grid is not None:
+            grid.even()
+        event.accept()
+
+
+class _PaneSplitter(QSplitter):
+    grid: "PaneGrid | None" = None
+
+    def createHandle(self) -> QSplitterHandle:  # noqa: N802 - Qt naming
+        return _PaneHandle(self.orientation(), self)
+
+
+class PaneGrid(QWidget):
+    """Two rows of two panes with draggable dividers.
+
+    The row divider sizes the two rows; the column divider sizes the two
+    columns, and dragging it in either row moves it in both, so the panes stay a
+    grid. A pane dragged down to nothing collapses (drag the divider back to
+    bring it out). A double click on a divider evens them all out again;
+    :meth:`toggle_maximized` gives one pane the whole area and back.
+    """
+
+    #: The user moved a divider (or evened / maximised the panes).
+    changed = Signal()
+
+    def __init__(self, cells: list[list[QWidget]], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._rows = _PaneSplitter(Qt.Vertical)
+        self._cols = [_PaneSplitter(Qt.Horizontal), _PaneSplitter(Qt.Horizontal)]
+        for splitter, row in zip(self._cols, cells):
+            for widget in row:
+                splitter.addWidget(widget)
+            self._rows.addWidget(splitter)
+        for splitter in (self._rows, *self._cols):
+            splitter.grid = self
+            splitter.setChildrenCollapsible(True)
+            splitter.setHandleWidth(SPACE)
+        self._cols[0].splitterMoved.connect(lambda *_: self._follow(0))
+        self._cols[1].splitterMoved.connect(lambda *_: self._follow(1))
+        self._rows.splitterMoved.connect(lambda *_: self._moved())
+        #: ``(row, col)`` of the pane shown alone, and the sizes to go back to.
+        self._maximized: tuple[int, int] | None = None
+        self._before: dict[str, list[float]] | None = None
+        self.set_fractions((1, 1), (1, 1))
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(self._rows)
+
+    def _follow(self, moved: int) -> None:
+        """The column divider was dragged in one row: the other row follows."""
+        self._cols[1 - moved].setSizes(self._cols[moved].sizes())
+        self._moved()
+
+    def _moved(self) -> None:
+        self._maximized = None
+        self.changed.emit()
+
+    @staticmethod
+    def _shares(sizes: list[int]) -> list[float]:
+        total = float(sum(sizes))
+        return [s / total for s in sizes] if total > 0 else [0.5, 0.5]
+
+    def fractions(self) -> dict[str, list[float]]:
+        """The rows' and columns' shares of the area (each pair sums to 1)."""
+        return {"rows": self._shares(self._rows.sizes()), "cols": self._shares(self._cols[0].sizes())}
+
+    def set_fractions(self, rows: Any = None, cols: Any = None) -> bool:
+        """Size the rows and columns by their shares; False when the values are unusable."""
+        def _pair(values: Any) -> list[int] | None:
+            try:
+                pair = [max(float(v), 0.0) for v in values]
+            except (TypeError, ValueError):
+                return None
+            if len(pair) != 2 or sum(pair) <= 0:
+                return None
+            # QSplitter spreads its size by these weights.
+            return [int(round(10000 * v / sum(pair))) for v in pair]
+
+        rows_px, cols_px = _pair(rows if rows is not None else (1, 1)), _pair(cols if cols is not None else (1, 1))
+        if rows_px is None or cols_px is None:
+            return False
+        self._rows.setSizes(rows_px)
+        for splitter in self._cols:
+            splitter.setSizes(cols_px)
+        return True
+
+    def even(self) -> None:
+        """All four panes the same size."""
+        self.set_fractions((1, 1), (1, 1))
+        self._moved()
+
+    def maximized(self) -> tuple[int, int] | None:
+        return self._maximized
+
+    def toggle_maximized(self, row: int, col: int) -> None:
+        """Show the pane at (*row*, *col*) alone, or put the grid back as it was."""
+        if self._maximized == (row, col):
+            before = self._before or {}
+            self.set_fractions(before.get("rows"), before.get("cols"))
+            self._maximized = None
+        else:
+            if self._maximized is None:
+                self._before = self.fractions()
+            self.set_fractions((1, 0) if row == 0 else (0, 1), (1, 0) if col == 0 else (0, 1))
+            self._maximized = (row, col)
+        self.changed.emit()
+
+
 class OrthoViewerPanel(QWidget):
     """Axial / coronal / sagittal views of the active layer, plus 3D plane controls."""
 
     def __init__(self, viewer: Any, parent: QWidget | None = None) -> None:
-        """Build the 2x2 grid: three orthogonal views and the 3D controls."""
+        """Build the 2x2 panes: three orthogonal views and the 3D controls."""
         super().__init__(parent)
         self._viewer = viewer
         self._layer: Any | None = None
@@ -2401,6 +2583,14 @@ class OrthoViewerPanel(QWidget):
         self._rebuild_timer.setInterval(_REBUILD_SYNC_MS)
         self._rebuild_timer.timeout.connect(self._rebuild_sources)
 
+        # A layer moved, mirrored or reoriented (its affine): re-lay the views. Not
+        # Napari's own view settings (axis order, camera) — those are the main window's.
+        self._geometry_dirty: list[Any] = []
+        self._geometry_timer = QTimer(self)
+        self._geometry_timer.setSingleShot(True)
+        self._geometry_timer.setInterval(0)
+        self._geometry_timer.timeout.connect(self._flush_geometry)
+
         self._status = QLabel("Select a 3D or 3D+t image or labels layer.")
         self._status.setWordWrap(True)
         self._status.setStyleSheet(f"color: {COLOR_MUTED};")
@@ -2455,10 +2645,7 @@ class OrthoViewerPanel(QWidget):
             pass
 
         self._slice_views: list[SliceView] = []
-        grid = QGridLayout()
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(SPACE)
-        for cell, (row, col) in enumerate([(0, 0), (0, 1), (1, 0)]):
+        for cell, (row, col) in enumerate(_VIEW_CELLS):
             view = SliceView(AxisView(axis=cell, title="—", rows=0, cols=1))
             view.sliceChanged.connect(self._on_slice_changed)
             view.pixelPicked.connect(
@@ -2467,7 +2654,9 @@ class OrthoViewerPanel(QWidget):
             view.handleDragged.connect(
                 lambda line, angle, index=cell: self._on_handle_dragged(index, line, angle)
             )
-            grid.addWidget(view, row, col)
+            view.titleDoubleClicked.connect(
+                lambda row=row, col=col: self._panes.toggle_maximized(row, col)
+            )
             self._slice_views.append(view)
         # Drawing labels in the views: the Labeling tab's tools (or the active
         # Labels layer's mode) take a click before the crosshair does.
@@ -2493,11 +2682,25 @@ class OrthoViewerPanel(QWidget):
         # While the Labeling tab's Pan key is held, a left-drag pans the views too.
         for view in self._slice_views:
             view.pan_check = self._pan_key_held
-        grid.addWidget(self._build_controls(), 1, 1)
-        grid.setRowStretch(0, 1)
-        grid.setRowStretch(1, 1)
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 1)
+        # Axial | coronal over sagittal | the 3D card, with draggable dividers;
+        # the sizes are remembered between sessions.
+        axial, coronal, sagittal = self._slice_views
+        # The 3D card scrolls rather than set a floor: its table and toggles would
+        # otherwise keep its pane (and so the whole column) from being narrowed.
+        controls = QScrollArea()
+        controls.setWidget(self._build_controls())
+        controls.setWidgetResizable(True)
+        controls.setFrameShape(QFrame.NoFrame)
+        controls.setMinimumSize(60, 60)
+        self._panes = PaneGrid([[axial, coronal], [sagittal, controls]])
+        stored_panes = stored.get("panes")
+        if isinstance(stored_panes, dict):
+            self._panes.set_fractions(stored_panes.get("rows"), stored_panes.get("cols"))
+        self._panes_timer = QTimer(self)
+        self._panes_timer.setSingleShot(True)
+        self._panes_timer.setInterval(400)
+        self._panes_timer.timeout.connect(self._save_pane_sizes)
+        self._panes.changed.connect(self._panes_timer.start)
 
         #: What a click does while a labeling tool is on (or why it cannot draw).
         self._draw_hint = QLabel("")
@@ -2510,7 +2713,12 @@ class OrthoViewerPanel(QWidget):
         root.addWidget(self._status)
         root.addWidget(self._draw_hint)
         root.addWidget(self._time_box)
-        root.addLayout(grid, stretch=1)
+        root.addWidget(self._panes, stretch=1)
+
+    def _save_pane_sizes(self) -> None:
+        """Remember how the panes are sized (not a view shown alone, which is a moment's)."""
+        if self._panes.maximized() is None:
+            _save_ortho_pref("panes", self._panes.fractions())
 
     def _build_controls(self) -> QWidget:
         """The fourth quadrant: what the 3D canvas should show."""
@@ -2667,7 +2875,7 @@ class OrthoViewerPanel(QWidget):
             self._layer = None
             self._status.setText("This layer has no 3D volume to show.")
             return
-        self._views = _axis_views(layer)
+        self._views = _axis_views(layer, self._viewer)
         # Keep what stays valid. On the same grid the rendered slices are the
         # ones already on screen, so clearing them would force a redraw that
         # reproduces them exactly — and resetting the crosshair below would
@@ -2991,10 +3199,48 @@ class OrthoViewerPanel(QWidget):
                         emitter,
                         functools.partial(self._on_layer_data_changed, layer=layer),
                     )
+        # Placement: a drawn layer that moves is resampled again; the bound one
+        # (drawn or not) sets the views' layout — an orientation change mirrors or
+        # reorders it, and the views follow as the canvas does.
+        watched = [s.layer for s in self._sources]
+        if self._layer is not None and all(ly is not self._layer for ly in watched):
+            watched.append(self._layer)
+        for layer in watched:
+            events = getattr(layer, "events", None)
+            for name in ("affine", "scale", "translate"):
+                emitter = getattr(events, name, None) if events is not None else None
+                if emitter is not None:
+                    self._connect(emitter, functools.partial(self._on_geometry_changed, layer=layer))
 
     def _on_visible_changed(self, _event: Any = None) -> None:
         """A layer was shown or hidden: the draw list changed."""
         self.refresh_sources()
+
+    def _on_geometry_changed(self, _event: Any = None, *, layer: Any = None) -> None:
+        """*layer* was moved, mirrored or reoriented: re-lay it out on the next turn."""
+        if layer is not None:
+            self._geometry_dirty.append(layer)
+        self._geometry_timer.start()
+
+    def _flush_geometry(self) -> None:
+        dirty, self._geometry_dirty = self._geometry_dirty, []
+        if not dirty or self._layer is None:
+            return
+        if any(layer is self._layer for layer in dirty):
+            # Every other layer was resampled against the old placement, and the
+            # turned planes against the old layout: both start again.
+            self._resample_cache.clear()
+            self._source_cache.clear()
+            self._plane_dirty.update(id(s.layer) for s in self._sources)
+            self._frames = []
+            self.refresh_from_layer(self._layer)
+            return
+        for layer in dirty:
+            for key in [k for k in self._resample_cache if k[0] == id(layer)]:
+                self._resample_cache.pop(key, None)
+            self._source_cache.pop(id(layer), None)
+            self._plane_dirty.add(id(layer))
+        self._rebuild_sources()
 
     def _on_label_filter_changed(self, layer: Any = None) -> None:
         """A label list showed or hid labels of *layer*: recolour if it is drawn."""

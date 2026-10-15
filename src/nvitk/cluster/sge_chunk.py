@@ -95,6 +95,60 @@ def query_active_sge_job_ids(
     return active
 
 
+def query_sge_job_states(
+    host: str,
+    user: str,
+    password: str,
+    *,
+    port: int = 22,
+    connect_timeout: float | None = 30.0,
+) -> dict[str, str]:
+    """``{job id: state}`` for *user*'s jobs in ``qstat`` (``qw`` queued, ``r`` running,
+    ``Eqw`` in error, ``hqw`` held…); a job missing from it has left the queue.
+
+    Raises ``RuntimeError`` when ``qstat`` itself could not be run, so a caller can
+    tell "no jobs" from "could not ask".
+    """
+    from nvitk.cluster.remote_transfer import ssh_exec
+
+    code, out, err = ssh_exec(
+        host=host,
+        user=user,
+        password=password,
+        command=f"qstat -u {shlex.quote(user)} 2>&1",
+        port=port,
+        timeout=connect_timeout,
+    )
+    if code != 0:
+        raise RuntimeError(f"qstat failed (exit {code}): {(err or out).strip()[:200]}")
+    states: dict[str, str] = {}
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 5 and parts[0].isdigit():
+            states[parts[0]] = parts[4]
+    return states
+
+
+def describe_sge_state(state: str | None) -> str:
+    """A ``qstat`` state code in words (``"qw"`` → ``"queued"``)."""
+    code = str(state or "")
+    if not code:
+        return ""
+    if "E" in code:
+        return f"in error ({code})"
+    if "d" in code:
+        return "being deleted"
+    if "h" in code:
+        return "held"
+    if "s" in code or "S" in code:
+        return "suspended"
+    if "r" in code or "t" in code:
+        return "running"
+    if "q" in code or "w" in code:
+        return "queued"
+    return code
+
+
 def count_active_sge_jobs(
     host: str,
     user: str,
@@ -339,9 +393,11 @@ def wait_for_sge_job_ids(
 __all__ = [
     "chunk_sequence",
     "count_active_sge_jobs",
+    "describe_sge_state",
     "drip_submit_subjects",
     "parse_sge_submission_job_ids",
     "query_active_sge_job_ids",
+    "query_sge_job_states",
     "subject_fits_in_sge_limit",
     "subjects_fit_in_sge_limit",
     "wait_for_sge_job_ids",

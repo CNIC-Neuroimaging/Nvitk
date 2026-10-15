@@ -8,8 +8,9 @@ it lacks:
 * **Label** — the active label: id, name (named by hand, or picked from the
   layer's vocabulary), colour, a list of every label with its size, go-to;
 * **Draw** — Napari's paint / erase / fill / pick / polygon modes and the magic
-  wand, brush size, preserve-other-labels, 2D or 3D brush, Undo / Redo — on the
-  canvas and in the orthogonal views (:mod:`nvitk.gui.labels.ortho_edit`);
+  wand, brush size, preserve-other-labels or its reverse (paint only over picked
+  labels of the layer), 2D or 3D brush, Undo / Redo — on the canvas and in the
+  orthogonal views (:mod:`nvitk.gui.labels.ortho_edit`);
 * **Editable area** — paint only where the reference intensity is in a range
   and/or inside a mask (brush, bucket and every tool here);
 * **Refine** — grow, shrink, smooth, fill holes, keep the largest piece, drop
@@ -586,6 +587,7 @@ class LabelingPanel(QWidget):
         grid2.addWidget(self._contiguous, 1, 0)
         grid2.addWidget(self._contour, 1, 1)
         card.add_layout(grid2)
+        card.add(self._build_over_box())
 
         self._opacity = QSlider(Qt.Orientation.Horizontal)
         self._opacity.setRange(0, 100)
@@ -612,6 +614,45 @@ class LabelingPanel(QWidget):
         card.add(self._poly_box)
         self._poly_box.hide()
         return card
+
+    def _build_over_box(self) -> QWidget:
+        """*Paint only over*: preserve labels the other way round, on labels picked
+        from the layer's own."""
+        outer = QWidget()
+        lay = QVBoxLayout(outer)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(2)
+        self._over_on = QCheckBox("Paint only over")
+        self._over_on.setToolTip(
+            "Preserve labels the other way round: brush, bucket and every tool here only write over the "
+            "ticked labels of this layer (and the background, when ticked). Erasing clears only the "
+            "active label."
+        )
+        self._over_on.toggled.connect(self._on_over_toggled)
+        self._preserve.toggled.connect(self._on_preserve_toggled)
+        self._over_count = QLabel("")
+        self._over_count.setStyleSheet(f"color: {COLOR_MUTED}; font-size: 10px;")
+        lay.addLayout(_row(self._over_on, self._over_count, stretch_last=True))
+        self._over_box = QWidget()
+        box = QVBoxLayout(self._over_box)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(2)
+        self._over_list = QListWidget()
+        self._over_list.setMaximumHeight(130)
+        self._over_list.setToolTip("Tick the labels to paint over; the others, and unticked background, are "
+                                   "left as they are.")
+        self._over_list.itemChanged.connect(self._on_over_ticked)
+        box.addWidget(self._over_list)
+        box.addLayout(_row(
+            _button("All labels", "Every label of the layer, now and as new ones are drawn, not the "
+                    "background: paint only inside what is already labelled.", lambda: self._tick_over(True)),
+            _button("None", "Untick all (nothing can be painted).", lambda: self._tick_over(False)),
+        ))
+        lay.addWidget(self._over_box)
+        self._over_box.hide()
+        #: The labels ticked by hand, per label layer (none kept: every label but the background).
+        self._over_sets: dict[str, set[int]] = {}
+        return outer
 
     def _build_wand_box(self) -> QWidget:
         """The region tools' options: how a region grows (shared by the wand, the
@@ -1314,7 +1355,7 @@ class LabelingPanel(QWidget):
         if old is not None:
             guard = E.paint_guard(old)
             if guard is not None:
-                guard.intensity = guard.inside = None
+                guard.intensity = guard.inside = guard.over = None
         self._layer_ref = weakref.ref(layer) if layer is not None else (lambda: None)
         self._set_wand(False)
         if layer is not None:
@@ -1456,6 +1497,7 @@ class LabelingPanel(QWidget):
         if layer is None:
             self._fit_list()
             self._update_active_label_view()
+            self._refresh_over_ids()
             return
         lid_now = self.label_id()
         for lid, count in sorted(self._counts.items()):
@@ -1472,6 +1514,7 @@ class LabelingPanel(QWidget):
                 self._merge_combo.addItem(text, lid)
         self._fit_list()
         self._update_active_label_view()
+        self._refresh_over_ids()
 
     def _fit_list(self) -> None:
         """The list as tall as its rows, between a few and a screenful-ish."""
@@ -2354,8 +2397,120 @@ class LabelingPanel(QWidget):
         guard.inside = mask
         box = self.box()
         guard.box = box.index(layer) if (self._box_keep.isChecked() and box.applies(layer)) else None
+        guard.over = self._over_ids()
         if self._range_on.isChecked() and ref is None:
             self._say("The intensity range needs a reference image on the labels' grid.", error=True)
+
+    # ── paint only over: which of the layer's own labels ─────────────────────
+
+    def _on_over_toggled(self, on: bool) -> None:
+        if on and self._preserve.isChecked():
+            self._preserve.setChecked(False)  # the two rules contradict each other
+        self._refresh_over_ids()
+
+    def _on_preserve_toggled(self, on: bool) -> None:
+        if on and self._over_on.isChecked():
+            self._over_on.setChecked(False)
+
+    def _over_ids(self) -> tuple[int, ...] | None:
+        """The labels painting may cover (``None``: the rule is off)."""
+        layer = self.target()
+        if not self._over_on.isChecked() or layer is None:
+            return None
+        return tuple(sorted(self._over_set(layer)))
+
+    @staticmethod
+    def _labels_of(layer: Any) -> set[int]:
+        """Every label of *layer* but the background."""
+        try:
+            return {int(i) for i in layer_label_ids(layer, max_labels=1_000_000) if int(i) != 0}
+        except Exception:  # noqa: BLE001 — a layer mid-removal
+            return set()
+
+    def _over_set(self, layer: Any) -> set[int]:
+        """The ticked labels of *layer*: as ticked by hand, else every label it has
+        (but the background), new ones included."""
+        ticked = self._over_sets.get(layer.name)
+        return set(ticked) if ticked is not None else self._labels_of(layer)
+
+    def _apply_over(self) -> None:
+        """Hand the label rule to the layer's guard (also mid-sync, unlike :meth:`_apply_guard`)."""
+        layer = self.target()
+        if layer is None or not E.is_labels(layer):
+            return
+        over = self._over_ids()
+        guard = E.paint_guard(layer, create=over is not None)
+        if guard is not None:
+            guard.over = over
+
+    def _refresh_over_ids(self) -> None:
+        """List the background and the layer's labels, ticked as last left, and hand
+        the rule to the guard (new labels join an untouched "every label")."""
+        layer = self.target()
+        shown = self._over_on.isChecked() and layer is not None and E.is_labels(layer)
+        self._over_box.setVisible(shown)
+        self._over_list.blockSignals(True)
+        self._over_list.clear()
+        if shown:
+            ticked = self._over_set(layer)
+            for lid in [0] + sorted(int(i) for i in self._counts if int(i) != 0):
+                if lid == 0:
+                    text = "Background (0)"
+                else:
+                    name = label_name(layer, lid)
+                    text = f"{name} ({lid})" if name else f"Label {lid}"
+                item = QListWidgetItem(text)
+                item.setData(Qt.ItemDataRole.UserRole, lid)
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Checked if lid in ticked else Qt.CheckState.Unchecked)
+                if lid:
+                    try:
+                        item.setIcon(_swatch_icon(_rgba_qcolor(get_label_color(layer, lid))))
+                    except Exception:  # noqa: BLE001
+                        pass
+                self._over_list.addItem(item)
+        self._over_list.blockSignals(False)
+        self._update_over_count()
+        self._apply_over()
+
+    def _on_over_ticked(self, item: Any = None) -> None:
+        layer = self.target()
+        if layer is not None and item is not None:
+            ticked = self._over_set(layer)
+            lid = int(item.data(Qt.ItemDataRole.UserRole))
+            if item.checkState() == Qt.CheckState.Checked:
+                ticked.add(lid)
+            else:
+                ticked.discard(lid)
+            self._over_sets[layer.name] = ticked
+        self._update_over_count()
+        self._apply_over()
+
+    def _tick_over(self, on: bool) -> None:
+        """Tick every label (not the background, and new ones as they come), or none."""
+        layer = self.target()
+        if layer is None:
+            return
+        if on:
+            self._over_sets.pop(layer.name, None)
+        else:
+            self._over_sets[layer.name] = set()
+        self._refresh_over_ids()
+
+    def _update_over_count(self) -> None:
+        if not self._over_on.isChecked():
+            self._over_count.setText("")
+            return
+        layer = self.target()
+        ids = self._over_ids() or ()
+        if layer is None or not E.is_labels(layer):
+            self._over_count.setText("")
+        elif not ids:
+            self._over_count.setText("nothing ticked: nothing can be painted")
+        else:
+            names = ["background" if i == 0 else (label_name(layer, i) or f"label {i}") for i in ids]
+            shown = ", ".join(names[:4]) + (f" +{len(names) - 4}" if len(names) > 4 else "")
+            self._over_count.setText(shown)
 
     # ── editable area: which labels of the mask ──────────────────────────────
 
@@ -2680,7 +2835,7 @@ class LabelingPanel(QWidget):
 
     def _allowed(self, layer: Any, index: tuple[Any, ...], work: Any) -> Any:
         """Where the active label may be written in ``data[index]``."""
-        allowed = E.writable(work, self.label_id(), preserve=self._preserve.isChecked())
+        allowed = E.writable(work, self.label_id(), preserve=self._preserve.isChecked(), over=self._over_ids())
         guard = E.paint_guard(layer)
         if guard is not None and guard.active:
             extra = guard.allowed(index)
@@ -2777,9 +2932,11 @@ class LabelingPanel(QWidget):
             from nvitk.gui.core.spatial import layer_spacing
 
             spacing = layer_spacing(layer)
-            out = E.interpolate_slices(layer.data[index], lid, axis=axis,
+            work = layer.data[index]
+            out = E.interpolate_slices(work, lid, axis=axis,
                                        method=self._interp_method.currentData(),
-                                       spacing=spacing, preserve=self._preserve.isChecked())
+                                       spacing=spacing, preserve=self._preserve.isChecked(),
+                                       allowed=self._allowed(layer, index, work))
             return f"Interpolation: {self._write(layer, index, out):,} voxel(s) filled between drawn slices."
 
         self._run("Interpolate", run)
@@ -2794,7 +2951,9 @@ class LabelingPanel(QWidget):
             if guard is not None:
                 guard.suspended = True
             try:
-                changed, target = E.copy_slice(self._viewer, layer, lid, step, preserve=self._preserve.isChecked())
+                changed, target = E.copy_slice(
+                    self._viewer, layer, lid, step, preserve=self._preserve.isChecked(),
+                    allowed=lambda index, work: self._allowed(layer, index, work))
             finally:
                 if guard is not None:
                     guard.suspended = False

@@ -5,8 +5,8 @@ and groups the files the way :func:`~nvitk.io.conversors._dicom_conversion.load_
 would split them into volumes: by study, by ``SeriesInstanceUID``, then — when a
 series mixes them — by ``ImageType`` (magnitude / phase, water / fat…). Every
 file says what it is (an image, a waveform, a structured report, a Philips
-spectral base image that cannot be shown…), so a browser can list everything and
-offer only what can become a volume.
+spectral base image — read by :mod:`nvitk.io.conversors.philips_sbi`, not as a
+picture…), so a browser can list everything and offer only what can become a volume.
 
 Example::
 

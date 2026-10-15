@@ -99,6 +99,7 @@ TOOL_IDS_USING_LABEL_PICKER: frozenset[str] = frozenset({
 
 _CATEGORY_ORDER = (
     "Restoration",
+    "Reconstruction",
     "Filters",
     "Morphology",
     "Centerline",
@@ -270,6 +271,27 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ),
         ),
         needs_3d=True,
+    ),
+    GuiToolSpec(
+        "recon_background_correction",
+        "Reconstruction",
+        "Background phase correction (polynomial)",
+        (
+            ParamSpec("bgc_order", "Polynomial order", "choice", "2", choices=("2", "3")),
+            ParamSpec("bgc_percentile", "Fit on the lowest % of the image", "float", 25.0, min=1.0, max=90.0),
+            ParamSpec("bgc_time_mode", "3D+t: background fitted", "choice", "per frame",
+                      choices=("per frame", "time mean")),
+            ParamSpec("bgc_signed", "Signed image (phase / velocity): fit on the lowest |values|, no clipping",
+                      "bool", False),
+            ParamSpec("bgc_mask_layer", "Fit only inside (optional mask)", "layer", ""),
+            ParamSpec("bgc_add_background", "Also add the fitted background", "bool", False),
+        ),
+        run_mode="notify",
+        description=(
+            "qvtpy's background correction of the 4D-flow complex difference: a smooth spatial "
+            "polynomial (order 2 or 3) fitted on the image's background voxels and subtracted. "
+            "3D images, and 3D+t series frame by frame (or one background from the temporal mean)."
+        ),
     ),
     GuiToolSpec(
         "sliding_threshold",

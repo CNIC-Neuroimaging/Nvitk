@@ -21,18 +21,30 @@ A result may come with an ``on_select`` callback: selecting a row calls it with
 that row's key (a branch, a frame…) so the viewer can show what the row is
 about, and ``None`` when that should go (*Clear highlight*, another result, the
 window closing).
+
+A per-label result may also name the label layer it measured and which label
+each row is (``label_layer``, ``row_labels``). The window then offers *Colour
+labels by*: pick a measured column and a colormap, and the layer's labels take
+the colour of their value (the range automatic or typed, a legend beside it;
+labels without a value turn grey), as the Meshlab panel colours a surface by a
+field. *Original colours* puts the label colours back as they were. Each label
+row carries a swatch of its label's colour.
 """
 
 from __future__ import annotations
 
+import weakref
 from typing import Any, Callable, Mapping, Sequence
 
 from qtpy.QtCore import Qt
+from qtpy.QtGui import QColor, QIcon, QImage, QPixmap
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
+    QDoubleSpinBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -58,10 +70,45 @@ _WINDOW_ATTR = "_nvitk_results_window"
 #: How many past results stay in the picker before the oldest is dropped.
 _HISTORY_LIMIT = 25
 
+#: Colormaps offered for colouring labels by a measurement.
+VALUE_COLORMAPS = ("viridis", "plasma", "magma", "inferno", "turbo", "cividis", "coolwarm",
+                   "RdYlGn", "RdYlGn_r", "RdYlBu_r", "Blues", "Reds", "Greens", "jet")
+#: The column choice meaning "the labels' own colours".
+_OWN_COLOURS = "— label colours —"
+
+#: The label colours a layer had before it was first coloured by a measurement.
+_ORIGINAL_COLOURS: "weakref.WeakKeyDictionary[Any, dict[str, Any]]" = weakref.WeakKeyDictionary()
+
 
 def _is_matrix(payload: Mapping[Any, Any]) -> bool:
     """Whether *payload* maps row keys to per-column dicts rather than to values."""
     return bool(payload) and all(isinstance(v, Mapping) for v in payload.values())
+
+
+def _int_key(key: str) -> Any:
+    """*key* as the int a payload may use for it (row keys are compared as text)."""
+    try:
+        return int(key)
+    except (TypeError, ValueError):
+        return key
+
+
+def _gradient(colormap: str, width: int = 140, height: int = 12) -> QPixmap:
+    """A horizontal swatch of *colormap*, low on the left."""
+    import numpy as np
+    from matplotlib import colormaps
+
+    ramp = (np.asarray(colormaps[colormap](np.linspace(0.0, 1.0, width)))[:, :3] * 255).astype(np.uint8)
+    rgb = np.ascontiguousarray(np.repeat(ramp[None, :, :], height, axis=0))
+    image = QImage(rgb.data, width, height, 3 * width, QImage.Format_RGB888).copy()
+    return QPixmap.fromImage(image)
+
+
+def _swatch_icon(rgba: Any, size: int = 10) -> QIcon:
+    pix = QPixmap(size, size)
+    r, g, b = (max(0.0, min(1.0, float(c))) for c in list(rgba)[:3])
+    pix.fill(QColor.fromRgbF(r, g, b, 1.0))
+    return QIcon(pix)
 
 
 #: Metrics that are voxel counts rather than ratios. Formatting is decided by
@@ -102,6 +149,8 @@ class _Result:
         row_header: str = "",
         note: str = "",
         on_select: Callable[[str | None], None] | None = None,
+        label_layer: Any = None,
+        row_labels: Mapping[Any, int] | None = None,
     ) -> None:
         self.title = title
         self.payload = dict(payload)
@@ -109,6 +158,43 @@ class _Result:
         self.row_header = row_header
         self.note = note
         self.on_select = on_select
+        #: The label layer measured (weakly) and the label id of each row key.
+        self.label_ref: Any = None
+        if label_layer is not None:
+            try:
+                self.label_ref = weakref.ref(label_layer)
+            except TypeError:
+                self.label_ref = None
+        self.row_labels = {str(k): int(v) for k, v in dict(row_labels or {}).items()}
+        #: How this result last coloured its labels.
+        self.colour: dict[str, Any] = {"column": "", "colormap": VALUE_COLORMAPS[0], "auto": True,
+                                       "limits": None}
+
+    def label_layer(self) -> Any:
+        return self.label_ref() if self.label_ref is not None else None
+
+    def numeric_columns(self) -> list[str]:
+        """The columns with a number for at least one label row."""
+        if not self.row_labels or not _is_matrix(self.payload):
+            return []
+        out = []
+        for column in self._columns():
+            for key in self.row_labels:
+                value = self.payload.get(key, self.payload.get(_int_key(key), {})).get(column)
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    out.append(column)
+                    break
+        return out
+
+    def label_values(self, column: str) -> dict[int, float]:
+        """Label id → its value in *column* (the first row of a label measured twice)."""
+        out: dict[int, float] = {}
+        for key, lid in self.row_labels.items():
+            row = self.payload.get(key, self.payload.get(_int_key(key), {}))
+            value = row.get(column) if isinstance(row, Mapping) else None
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and lid not in out:
+                out[lid] = float(value)
+        return out
 
     def as_text(self) -> str:
         """The result as plain text, for the clipboard and the GUI log."""
@@ -200,6 +286,10 @@ class ResultsWindow(QDialog):
         self._note.setWordWrap(True)
         self._note.setStyleSheet(f"color: {COLOR_MUTED};")
 
+        #: Set by :func:`results_window`: Image masks are turned into Labels to be coloured.
+        self._viewer: Any = None
+        self._colour_row = self._build_colour_row()
+
         toolbar = QHBoxLayout()
         toolbar.setSpacing(SPACE_TIGHT)
         toolbar.addWidget(QLabel("History"))
@@ -212,8 +302,189 @@ class ResultsWindow(QDialog):
         root.addWidget(self._heading)
         root.addWidget(self._subtitle)
         root.addLayout(toolbar)
+        root.addWidget(self._colour_row)
         root.addWidget(self._table, stretch=1)
         root.addWidget(self._note)
+
+    def _build_colour_row(self) -> QWidget:
+        """*Colour labels by*: a measured column, a colormap, the range, a legend."""
+        row = QWidget()
+        outer = QVBoxLayout(row)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(2)
+        lay = QHBoxLayout()
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(SPACE_TIGHT)
+        outer.addLayout(lay)
+        self._colour_column = QComboBox()
+        self._colour_column.setMinimumWidth(150)
+        self._colour_column.setToolTip("Colour the measured labels in the viewer by this column "
+                                       "(as the Meshlab panel colours a surface by a field).")
+        self._colour_map = QComboBox()
+        self._colour_map.addItems(VALUE_COLORMAPS)
+        self._colour_auto = QCheckBox("auto")
+        self._colour_auto.setChecked(True)
+        self._colour_auto.setToolTip("Range from the lowest to the highest value; untick to type it.")
+        self._colour_lo = QDoubleSpinBox()
+        self._colour_hi = QDoubleSpinBox()
+        for spin in (self._colour_lo, self._colour_hi):
+            spin.setRange(-1e12, 1e12)
+            spin.setDecimals(4)
+            spin.setEnabled(False)
+            spin.setMinimumWidth(120)
+        self._colour_lo.setToolTip("Value at the low end of the colormap")
+        self._colour_hi.setToolTip("Value at the high end of the colormap")
+        self._colour_legend = QLabel()
+        self._colour_legend.setToolTip("The colormap, low value on the left")
+        self._colour_reset = QPushButton("Original colours")
+        self._colour_reset.setToolTip("Give the labels back the colours they had before")
+        self._colour_status = QLabel("")
+        self._colour_status.setStyleSheet(f"color: {COLOR_MUTED};")
+        lay.addWidget(QLabel("Colour labels by"))
+        lay.addWidget(self._colour_column, stretch=1)
+        lay.addWidget(self._colour_map)
+        lay.addWidget(self._colour_legend)
+        second = QHBoxLayout()
+        second.setContentsMargins(0, 0, 0, 0)
+        second.setSpacing(SPACE_TIGHT)
+        second.addWidget(QLabel("Range"))
+        second.addWidget(self._colour_auto)
+        second.addWidget(self._colour_lo)
+        second.addWidget(QLabel("–"))
+        second.addWidget(self._colour_hi)
+        second.addStretch(1)
+        second.addWidget(self._colour_reset)
+        outer.addLayout(second)
+        outer.addWidget(self._colour_status)
+        self._colour_column.currentTextChanged.connect(lambda _t: self._on_colour_changed())
+        self._colour_map.currentTextChanged.connect(lambda _t: self._on_colour_changed())
+        self._colour_auto.toggled.connect(self._on_colour_auto)
+        self._colour_lo.editingFinished.connect(self._on_colour_changed)
+        self._colour_hi.editingFinished.connect(self._on_colour_changed)
+        self._colour_reset.clicked.connect(lambda: self._colour_column.setCurrentText(_OWN_COLOURS))
+        row.setVisible(False)
+        self._colour_guard = False
+        return row
+
+    def colour_status(self) -> str:
+        return self._colour_status.text()
+
+    def _on_colour_auto(self, on: bool) -> None:
+        for spin in (self._colour_lo, self._colour_hi):
+            spin.setEnabled(not on)
+        self._on_colour_changed()
+
+    def _sync_colour_row(self, result: _Result) -> None:
+        """Offer *Colour labels by* for a per-label result whose layer is still there."""
+        columns = result.numeric_columns()
+        layer = result.label_layer()
+        usable = bool(columns) and layer is not None and (
+            self._viewer is None or layer in self._viewer.layers)
+        self._colour_row.setVisible(usable)
+        if not usable:
+            return
+        self._colour_guard = True
+        try:
+            self._colour_column.clear()
+            self._colour_column.addItems([_OWN_COLOURS, *columns])
+            state = result.colour
+            self._colour_column.setCurrentText(state["column"] if state["column"] in columns else _OWN_COLOURS)
+            self._colour_map.setCurrentText(state["colormap"])
+            self._colour_auto.setChecked(bool(state["auto"]))
+            for spin in (self._colour_lo, self._colour_hi):
+                spin.setEnabled(not state["auto"])
+            if state["limits"] is not None:
+                self._colour_lo.setValue(float(state["limits"][0]))
+                self._colour_hi.setValue(float(state["limits"][1]))
+            self._colour_legend.setPixmap(_gradient(self._colour_map.currentText()))
+            if state["column"] in columns and state["limits"] is not None:
+                lo, hi = state["limits"]
+                self._colour_status.setText(f"“{layer.name}” coloured by {state['column']} ({lo:.4g} – {hi:.4g}).")
+            else:
+                self._colour_status.setText(f"Colour the {len(result.row_labels)} measured label(s) of "
+                                            f"“{layer.name}” by a column.")
+        finally:
+            self._colour_guard = False
+
+    def _colour_layer(self, result: _Result) -> Any:
+        """The result's label layer, as a Labels layer (an Image mask is converted)."""
+        from nvitk.gui.labels.visibility import ensure_labels_layer, supports_per_label_color
+
+        layer = result.label_layer()
+        if layer is None or supports_per_label_color(layer):
+            return layer
+        if self._viewer is None:
+            raise TypeError("Per-label colours need a Labels layer.")
+        labels = ensure_labels_layer(self._viewer, layer)
+        result.label_ref = weakref.ref(labels)
+        return labels
+
+    def _on_colour_changed(self) -> None:
+        """Colour (or give back) the labels as the row's controls say."""
+        result = self._shown
+        if self._colour_guard or result is None or not self._colour_row.isVisible():
+            return
+        from nvitk.gui.labels.visibility import (
+            apply_label_value_colors,
+            label_color_state,
+            restore_label_color_state,
+        )
+
+        column = self._colour_column.currentText()
+        colormap = self._colour_map.currentText()
+        self._colour_legend.setPixmap(_gradient(colormap))
+        auto = self._colour_auto.isChecked()
+        result.colour.update(column="" if column == _OWN_COLOURS else column, colormap=colormap, auto=auto)
+        try:
+            layer = self._colour_layer(result)
+            if layer is None:
+                self._colour_status.setText("The measured layer is gone.")
+                return
+            if column == _OWN_COLOURS:
+                original = _ORIGINAL_COLOURS.pop(layer, None)
+                if original is not None:
+                    restore_label_color_state(layer, original)
+                    self._colour_status.setText(f"“{layer.name}”: its own label colours again.")
+                self._row_swatches(result)
+                return
+            values = result.label_values(column)
+            if layer not in _ORIGINAL_COLOURS:
+                _ORIGINAL_COLOURS[layer] = label_color_state(layer)
+            limits = None if auto else (self._colour_lo.value(), self._colour_hi.value())
+            lo, hi = apply_label_value_colors(layer, values, colormap, limits=limits)
+        except Exception as exc:  # noqa: BLE001 — a colouring must never break the window
+            self._colour_status.setText(f"Could not colour the labels: {exc}")
+            return
+        result.colour["limits"] = (lo, hi)
+        if auto:
+            self._colour_guard = True
+            self._colour_lo.setValue(lo)
+            self._colour_hi.setValue(hi)
+            self._colour_guard = False
+        from nvitk.gui.labels.visibility import layer_label_ids
+
+        missing = len(set(layer_label_ids(layer)) - set(values))
+        self._colour_status.setText(
+            f"{len(values)} label(s) of “{layer.name}” coloured by {column} ({lo:.4g} – {hi:.4g})"
+            + (f"; {missing} without a value in grey." if missing else ".")
+        )
+        self._row_swatches(result)
+
+    def _row_swatches(self, result: _Result) -> None:
+        """A swatch of each label row's current label colour, beside its key."""
+        layer = result.label_layer()
+        if layer is None or not result.row_labels or result is not self._shown:
+            return
+        from nvitk.gui.labels.visibility import get_label_color
+
+        for row in range(self._table.rowCount()):
+            item = self._table.item(row, 0)
+            if item is None or item.text() not in result.row_labels:
+                continue
+            try:
+                item.setIcon(_swatch_icon(get_label_color(layer, result.row_labels[item.text()])))
+            except Exception:  # noqa: BLE001
+                continue
 
     def add_result(
         self,
@@ -224,11 +495,17 @@ class ResultsWindow(QDialog):
         row_header: str = "",
         note: str = "",
         on_select: Callable[[str | None], None] | None = None,
+        label_layer: Any = None,
+        row_labels: Mapping[Any, int] | None = None,
     ) -> None:
-        """Show *payload* and keep the previous results in the history picker."""
+        """Show *payload* and keep the previous results in the history picker.
+
+        With *label_layer* and *row_labels* (row key → label id), the labels can be
+        coloured by any measured column."""
         if on_select is not None and not note:
             note = "Click a row to show it in the viewer."
-        result = _Result(title, payload, subtitle=subtitle, row_header=row_header, note=note, on_select=on_select)
+        result = _Result(title, payload, subtitle=subtitle, row_header=row_header, note=note, on_select=on_select,
+                         label_layer=label_layer, row_labels=row_labels)
         self._results.insert(0, result)
         del self._results[_HISTORY_LIMIT:]
         # Repopulating fires currentIndexChanged; suppress it so rebuilding the
@@ -331,6 +608,8 @@ class ResultsWindow(QDialog):
         header.setStretchLastSection(True)
         self._table.clearSelection()
         self._filling = False
+        self._sync_colour_row(result)
+        self._row_swatches(result)
 
 
 def _item(text: str, *, align_left: bool = False) -> QTableWidgetItem:
@@ -363,6 +642,7 @@ def results_window(viewer: Any) -> ResultsWindow | None:
         except Exception:  # noqa: BLE001 — a parentless dialog still works
             parent = None
         window = ResultsWindow(parent)
+        window._viewer = viewer
         apply_theme(window)
         try:
             setattr(viewer, _WINDOW_ATTR, window)
@@ -381,11 +661,14 @@ def show_results(
     row_header: str = "",
     note: str = "",
     on_select: Callable[[str | None], None] | None = None,
+    label_layer: Any = None,
+    row_labels: Mapping[Any, int] | None = None,
 ) -> str:
     """Show *payload* in the viewer's results window; return it as text.
 
     With *on_select*, selecting a row calls it with the row's key (and ``None``
-    when the highlight should go).
+    when the highlight should go). With *label_layer* and *row_labels* (row key →
+    label id), the window offers to colour those labels by a measured column.
 
     The text is returned rather than logged here so the caller keeps control of
     the log — every measurement already writes one line, and this must not
@@ -395,10 +678,11 @@ def show_results(
     window = results_window(viewer)
     if window is None:
         return text
-    window.add_result(title, payload, subtitle=subtitle, row_header=row_header, note=note, on_select=on_select)
+    window.add_result(title, payload, subtitle=subtitle, row_header=row_header, note=note, on_select=on_select,
+                      label_layer=label_layer, row_labels=row_labels)
     window.show()
     window.raise_()
     return text
 
 
-__all__ = ["COUNT_METRICS", "ResultsWindow", "results_window", "show_results"]
+__all__ = ["COUNT_METRICS", "VALUE_COLORMAPS", "ResultsWindow", "results_window", "show_results"]

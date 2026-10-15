@@ -130,6 +130,7 @@ computes for the input.
 | `threaded` | Slab-parallel `affine_transform` / `map_coordinates` on the shared worker pool (`map_coordinates` bit-identical to SciPy; slab layout independent of the thread count). `resample_to(..., threaded=True)` opts in. |
 | `fourier` | K-space: `kspace` / `inverse_kspace` (centred, orthonormal; 3D or 2D slice-wise; 3D+t per frame), display components, radial `kspace_filter`. CPU (`scipy.fft`, multi-threaded) or GPU (CuPy). |
 | `temporal` | 3D+t: `extract_frame`, `temporal_projection` (incl. time-to-peak and AUC), `time_intensity_curve`, `stack_frames`. |
+| `spectral` | Spectral CT from a photoelectric / Compton-scatter basis pair (Philips SBI): `monoenergetic` (any keV), `iodine_density` / `virtual_non_contrast` (water–iodine decomposition), `effective_z`, `electron_density`, `spectral_curve` (HU vs keV); `SpectralCalibration` ties the vendor pair to physics (NIST water and iodine, Klein–Nishina). CPU (parallel slabs) or GPU (CuPy). |
 | `interpolation` | `resample_axes` (up/down-sample any axes, time included, by factor / spacing / size; shape-based for masks; field of view kept), `block_reduce_axes`, `interpolate_mask_slices` (fill between sparsely annotated slices), `fill_missing_slices`. |
 
 ```{code-block} python

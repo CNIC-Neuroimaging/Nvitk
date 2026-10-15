@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -27,6 +28,10 @@ class SgePendingJob:
     status: str = "submitted"
     done_payload: dict[str, Any] | None = None
     local_download_dir: str | None = None
+    #: What the job is, for the activity indicator (``"Bilateral filter on “ct”"``).
+    label: str = ""
+    #: The scheduler's job id(s) ``qsub`` printed, to follow the job in ``qstat``.
+    sge_job_ids: list[str] = field(default_factory=list)
 
 
 @dataclass

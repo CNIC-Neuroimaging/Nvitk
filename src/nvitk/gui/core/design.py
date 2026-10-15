@@ -683,9 +683,10 @@ def napari_theme_colors(theme: str | None = None) -> dict[str, str]:
         "label": f"nvitk {name}",
         # Pygments' dark palette is unreadable on a light console and vice versa.
         "syntax_style": "native" if name == "dark" else "default",
-        # The canvas stays true black in both themes: it is image data, not
-        # chrome, and a tinted surround shifts how the intensities in it read.
-        "canvas": "black",
+        # The canvas behind the images: black in the dark theme, white in the light
+        # one (asked for: a light workspace all through). Pure, untinted, so the
+        # surround does not shift how the intensities read.
+        "canvas": "white" if name == "light" else "black",
         "console": tokens["COLOR_WELL"],
         "background": tokens["COLOR_BG"],
         "foreground": tokens["COLOR_CONTROL"],

@@ -154,6 +154,21 @@ def _muted(text: str = "") -> QLabel:
     return label
 
 
+def _can_load(series: Any) -> bool:
+    """A volume, or Philips spectral base images (the Spectral tab reads those)."""
+    return bool(series.loadable) or series.kind == "spectral base"
+
+
+def _show_spectral_tab(viewer: Any) -> None:
+    dock = getattr(viewer, "_nvitk_spectral_dock", None)
+    if dock is not None:
+        try:
+            dock.show()
+            dock.raise_()
+        except RuntimeError:
+            pass
+
+
 def _date(text: str) -> str:
     return f"{text[:4]}-{text[4:6]}-{text[6:8]}" if len(text) >= 8 and text[:8].isdigit() else text
 
@@ -720,14 +735,16 @@ class DicomBrowserPanel(QWidget):
             sitem.setCheckState(0, Qt.Unchecked)
             self._tree.addTopLevelItem(sitem)
             for s in st.series:
+                spectral = s.kind == "spectral base"
                 info = ", ".join(x for x in (_date(s.date), s.body_part,
-                                             "" if s.loadable else f"{s.kind} — not a volume") if x)
+                                             "spectral base — opens in the Spectral tab" if spectral
+                                             else "" if s.loadable else f"{s.kind} — not a volume") if x)
                 item = QTreeWidgetItem([s.label, f"{len(s.files):,}", s.modality, s.matrix if s.loadable else "", info])
                 item.setData(0, _ROLE, ("series", s.key))
                 item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
                 item.setCheckState(0, Qt.Unchecked)
                 item.setToolTip(0, f"{s.label}\nUID {s.uid}\n{s.manufacturer} {s.protocol}".strip())
-                if not s.loadable:
+                if not _can_load(s):
                     for col in range(5):
                         item.setForeground(col, QBrush(QColor(COLOR_MUTED)))
                 placeholder = QTreeWidgetItem([_PLACEHOLDER])
@@ -859,7 +876,7 @@ class DicomBrowserPanel(QWidget):
     def _sync_ticks(self) -> None:
         ticked = self.ticked()
         n_files = sum(len(v) for v in ticked.values())
-        loadable = sum(1 for k in ticked if self._series[k].loadable)
+        loadable = sum(1 for k in ticked if _can_load(self._series[k]))
         self._b_load.setEnabled(loadable > 0)
         self._b_export.setEnabled(n_files > 0)
         self._tick_info.setText(f"Ticked: {len(ticked)} series, {n_files:,} file(s)"
@@ -875,7 +892,7 @@ class DicomBrowserPanel(QWidget):
 
     def _on_tree_double_click(self, item: QTreeWidgetItem, _column: int) -> None:
         data = item.data(0, _ROLE)
-        if data and data[0] == "series" and self._series[data[1]].loadable:
+        if data and data[0] == "series" and _can_load(self._series[data[1]]):
             self.load({data[1]: self._series[data[1]].paths})
 
     # ── header ────────────────────────────────────────────────────────────────
@@ -1112,8 +1129,21 @@ class DicomBrowserPanel(QWidget):
         from nvitk.gui.core.activity import activity
 
         layers: list[Any] = []
-        skipped = [self._series[k].label for k in selection if not self._series[k].loadable]
+        skipped = [self._series[k].label for k in selection if not _can_load(self._series[k])]
+        # Philips spectral base images go to the Spectral tab, which decodes them.
+        spectral = [(k, v) for k, v in selection.items() if self._series[k].kind == "spectral base"]
         todo = [(k, v) for k, v in selection.items() if self._series[k].loadable]
+        for key, paths in spectral:
+            panel = getattr(self._viewer, "_nvitk_spectral_panel", None)
+            if panel is None:
+                skipped.append(self._series[key].label)
+                continue
+            self._status.setText(f"Reading spectral base images {self._series[key].label}…")
+            ds = panel.load_sbi(list(paths), source=os.path.commonpath(paths) if len(paths) > 1
+                                else os.path.dirname(paths[0]))
+            if ds is not None and ds.layer is not None:
+                layers.append(ds.layer)
+            _show_spectral_tab(self._viewer)
         with activity("Loading DICOM series", total=len(todo)) as task:
             for n, (key, paths) in enumerate(todo, 1):
                 s = self._series[key]
@@ -1124,7 +1154,9 @@ class DicomBrowserPanel(QWidget):
                 layers.extend(open_dicom_files_with_nvitk(self._viewer, paths, source=source))
             task.update(done=len(todo))
         note = f" Skipped (not volumes): {', '.join(skipped)}." if skipped else ""
-        self._status.setText(f"Loaded {len(layers)} volume(s) from {len(todo)} series.{note}")
+        self._status.setText(f"Loaded {len(layers)} volume(s) from {len(todo) + len(spectral)} series"
+                             + (f" ({len(spectral)} spectral, in the Spectral tab)" if spectral else "")
+                             + f".{note}")
         return layers
 
     def _export_dialog(self) -> None:

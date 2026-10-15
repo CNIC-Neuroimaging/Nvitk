@@ -129,11 +129,27 @@ and the two localizers (COR/SAG) as 2D HU images, the tracker graph and the dose
 RGB captures, the ECG as CSV/JSON, and — with `--stack-phases` — one `X x Y x Z x 3` stack per
 reconstruction at 73/78/83 % R-R.
 
+### Philips spectral base images (SBI)
+
+`nvitk.io.conversors.philips_sbi.read_sbi_series` reads the SBI series a Philips Spectral CT
+stores next to each reconstruction (``SBI(V5.1)_…|IMR, 78%``, Secondary Captures with
+``ImageType = DERIVED\SECONDARY\SBI\SBI_CSPN``). Their pixel data is a container — an int32
+header (format version, then per component its byte length, id, slope and intercept) followed
+by each component compressed with Philips' ``PMSCT_RLE1`` scheme — decoded exactly (the
+conventional component equals the conventional reconstruction to the kernel difference). The
+components are the conventional image, the **photoelectric** and **Compton-scatter** parts of
+the attenuation (they add up to the conventional image), a noise estimate and three masks; they
+come back as ``X x Y x Z`` volumes with the affine the conventional series loads with.
+`nvitk.transform.spectral` derives virtual monoenergetic images, iodine density, VNC, Z_eff and
+electron density from the photoelectric / scatter pair; the GUI's **Spectral** tab does it live.
+The format notes are reverse-engineered from SBI V5.1 (not a Philips specification), and the
+derived results are nvitk's own model, not Philips' calibrated ones.
+
 ### Spectral CT results
 
-The usable spectral data comes from a Philips spectral workstation (IntelliSpace Portal / Spectral
-Diagnostic Suite / Spectral Magic Glass): load the original study including the SBI series,
-generate the results and export them as DICOM. They then convert like any CT series, and
+Spectral results can also come from a Philips spectral workstation (IntelliSpace Portal /
+Spectral Diagnostic Suite / Spectral Magic Glass): load the original study including the SBI
+series, generate the results and export them as DICOM. They then convert like any CT series, and
 `nvitk.io.conversors._dicom_spectral` labels them — `spectral_result` (`monoe`,
 `iodine_density`, `iodine_no_water`, `vnc`, `z_effective`, `electron_density`, `uric_acid`,
 `calcium_suppressed`), `spectral_units`, `spectral_energy_kev` — from the DICOM multi-energy

@@ -505,6 +505,9 @@ def run_app() -> None:
 
     mesh_panel = build_mesh_panel(viewer)
     dicom_browser = build_dicom_browser(viewer)
+    from nvitk.gui.viz.spectral_panel import build_spectral_panel
+
+    spectral_panel = build_spectral_panel(viewer)
     labeling_panel = build_labeling_panel(viewer)
 
     # One dock per panel rather than tabs in a single dock, so each can be popped
@@ -531,6 +534,8 @@ def run_app() -> None:
     image_props_dock = _panel_dock(image_props_panel, "image_properties", "Image properties")
     dicom_dock = _panel_dock(dicom_tags_panel, "dicom_tags", "DICOM tags")
     dicom_browser_dock = _panel_dock(dicom_browser, "dicom_browser", "DICOM browser")
+    spectral_dock = _panel_dock(spectral_panel, "spectral", "Spectral")
+    viewer._nvitk_spectral_dock = spectral_dock
     mesh_dock = _panel_dock(mesh_panel, "mesh", "Meshlab")
     data_dock = _panel_dock(xnat_panel, "data", data_tab_label)
     labeling_dock = _panel_dock(labeling_panel, "labeling", "Labeling")
@@ -542,6 +547,7 @@ def run_app() -> None:
         image_props_dock,
         dicom_dock,
         dicom_browser_dock,
+        spectral_dock,
         data_dock,
         labeling_dock,
         _panel_dock(qc_panel, "qc", "QC"),
@@ -626,13 +632,16 @@ def run_app() -> None:
             # A saved layout keeps its own tab order: tabs added or moved since it
             # was saved are put in place once. Version 3 moved the Meshlab tab next
             # to Labels; version 4 added the DICOM browser after DICOM tags; version
-            # 5 added Labeling just before QC (after the Data tab).
+            # 5 added Labeling just before QC (after the Data tab); version 6 the
+            # Spectral tab after the DICOM browser.
             if stored_version < 3:
                 _move_tab_after(qt_main, labels_dock, mesh_dock)
             if stored_version < 4:
                 _move_tab_after(qt_main, dicom_dock, dicom_browser_dock)
             if stored_version < 5:
                 _move_tab_after(qt_main, data_dock, labeling_dock)
+            if stored_version < 6:
+                _move_tab_after(qt_main, dicom_browser_dock, spectral_dock)
     except Exception:  # noqa: BLE001 — a stored layout must not block a launch
         pass
     if panel_manager is not None:

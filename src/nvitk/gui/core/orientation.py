@@ -629,7 +629,7 @@ def _apply_voxel_axis_flip(layer: Any, axis: int) -> None:
     layer.affine = aff @ flip
 
 
-def reorient_layer_for_view(layer: Any, target: str) -> tuple[str, str | None]:
+def reorient_layer_for_view(layer: Any, target: str, viewer: Any = None) -> tuple[str, str | None]:
     """
     Change Napari display to *target* axis codes (e.g. ``LAS``).
 
@@ -678,8 +678,30 @@ def reorient_layer_for_view(layer: Any, target: str) -> tuple[str, str | None]:
         id_ornt = nib.orientations.io_orientation(np.eye(4))
         id_to_target = nib.orientations.ornt_transform(id_ornt, target_ornt)
         new_affine = zoom_affine @ nib.orientations.inv_ornt_aff(id_to_target, new_data.shape)
-        layer.data = new_data
-        layer.affine = np.asarray(new_affine, dtype=float)
+        # Napari slices along data axes it can match to world axes: a reordering that
+        # cycles all three (LPS -> PIR) leaves no displayed pair it can invert, and
+        # the canvas would fail half-way through. Refuse before touching the layer.
+        if not any(_displayed_block_is_invertible(new_affine, pair) for pair in ((0, 1), (0, 2), (1, 2))):
+            raise ValueError(
+                f"Napari cannot display {current_codes} as {target_codes}: that reorders all three "
+                "axes in a cycle. Choose an orientation that keeps one axis in place "
+                "(only flips, or one swap of two axes)."
+            )
+        # Data, axis order and affine change together: the canvas inverts the
+        # block of the affine over its displayed axes, and an old affine under the
+        # new order — or the new one under the old order — can be singular. The
+        # layer's redraws wait until all three are in place.
+        events = layer.events
+        with events.set_data.blocker(), events.affine.blocker(), events.data.blocker():
+            layer.data = new_data
+            if viewer is not None:
+                try:
+                    ndim = int(viewer.dims.ndim)
+                    if ndim == int(new_data.ndim):
+                        viewer.dims.order = dim_order_2d_for_display(np.asarray(new_affine, dtype=float), ndim)
+                except Exception:  # noqa: BLE001 — configure_viewer_for_layer sets it again
+                    pass
+            layer.affine = np.asarray(new_affine, dtype=float)
 
         axes_str = _axes_string_from_layer(layer)
         if axes_str is not None and len(axes_str) >= 3:
@@ -696,6 +718,10 @@ def reorient_layer_for_view(layer: Any, target: str) -> tuple[str, str | None]:
     if not flip_only:
         try:
             layer.events.data(value=layer.data)
+        except Exception:
+            pass
+        try:
+            layer.refresh()
         except Exception:
             pass
 
@@ -736,6 +762,34 @@ def layer_orientation_codes(layer: Any) -> str | None:
         return None
 
 
+#: Metadata key holding the anatomy the voxels really have, as axis codes, once a
+#: display reorientation (:func:`apply_target_orientation`) has made the layer's
+#: affine say otherwise. Mirroring the display (RAS -> LPS) flips the affine and
+#: leaves the voxels where they are; only this key still knows which way they run.
+TRUE_ORIENTATION_KEY = "true_orientation"
+
+_OPPOSITE_CODE = {"R": "L", "L": "R", "A": "P", "P": "A", "S": "I", "I": "S"}
+
+
+def layer_true_orientation_codes(layer: Any) -> str | None:
+    """The axis codes of *layer*'s voxels as they really lie: those recorded when its
+    display was reoriented, else its affine's (nothing has reoriented it)."""
+    stored = _metadata_for_layer(layer).get(TRUE_ORIENTATION_KEY) if layer is not None else None
+    if isinstance(stored, str) and len(stored) == 3:
+        return stored.upper()
+    return layer_orientation_codes(layer)
+
+
+def _transform_codes(codes: str, xfm: Any) -> str:
+    """*codes* after the voxels are moved by the nibabel orientation transform *xfm*
+    (old axis i goes to axis ``xfm[i, 0]``, reversed when ``xfm[i, 1] == -1``)."""
+    out = list(codes)
+    for i, letter in enumerate(codes):
+        target, flip = int(xfm[i, 0]), int(xfm[i, 1])
+        out[target] = letter if flip == 1 else _OPPOSITE_CODE.get(letter, letter)
+    return "".join(out)
+
+
 def _reset_dims_order(viewer: Any, layer: Any) -> None:
     """Put ``viewer.dims.order`` back to the natural axis order for *layer*'s ndim."""
     try:
@@ -760,6 +814,7 @@ def apply_target_orientation(viewer: Any, layer: Any, target: str) -> tuple[str,
     current = layer_orientation_codes(layer)
     if current == target_codes:
         return target_codes, target_codes
+    true_codes = layer_true_orientation_codes(layer) or current
 
     # A permuting reorientation can leave the *displayed* 2x2 block of the new
     # affine singular under a stale ``dims.order`` (vispy inverts that block and
@@ -767,7 +822,7 @@ def apply_target_orientation(viewer: Any, layer: Any, target: str) -> tuple[str,
     # below installs the right one for the new orientation.
     _reset_dims_order(viewer, layer)
 
-    previous, new_axes = reorient_layer_for_view(layer, target_codes)
+    previous, new_axes = reorient_layer_for_view(layer, target_codes, viewer)
     new_aff = np.asarray(to_numpy(layer.affine), dtype=float)
     meta = dict(getattr(layer, "metadata", None) or {})
     if new_axes:
@@ -775,6 +830,15 @@ def apply_target_orientation(viewer: Any, layer: Any, target: str) -> tuple[str,
     nv = dict(meta.get("nvitk_metadata") or {})
     nv["affine"] = new_aff
     nv["orientation"] = target_codes
+    if true_codes and previous and len(true_codes) == 3:
+        import nibabel as nib
+
+        xfm = nib.orientations.ornt_transform(nib.orientations.axcodes2ornt(tuple(previous)),
+                                              nib.orientations.axcodes2ornt(tuple(target_codes)))
+        if any(int(xfm[i, 0]) != i for i in range(3)):
+            # The voxels were reordered along with the display: so was their anatomy.
+            true_codes = _transform_codes(true_codes, xfm)
+        nv[TRUE_ORIENTATION_KEY] = true_codes
     for i, key in enumerate(("x_res", "y_res", "z_res")):
         nv[key] = float(np.linalg.norm(new_aff[:3, i]))
     nv["spacing"] = (nv["x_res"], nv["y_res"], nv["z_res"])
