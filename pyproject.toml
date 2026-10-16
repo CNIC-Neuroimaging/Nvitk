@@ -48,6 +48,7 @@ dependencies = [
   "plotly>=6.3.0",                # Interactive Plotting
   "kaleido>=1.0.0",               # Plotly image renderer
   "pyvista>=0.48.0",              # 3D plotting
+  "pyvista[notebook]",
   "seaborn>=0.13.2",              # Statistical data visualization
   "rich>=14.1.0",                 # Rich text formatting for logging
   # Live training curves. Needed both to write event files (torch.utils.tensorboard is only a
@@ -120,7 +121,7 @@ dependencies = [
   # -----------------------------------------------------------------------------
   # "trimesh>=",
   # "open3d>=",
-  "pymeshlab>=2023.12",            # MeshLab filters (nvitk.meshlab.pymeshlab_filters, GUI Mesh panel)
+  "pymeshlab>=2025.7.post1",            # MeshLab filters (nvitk.meshlab.pymeshlab_filters, GUI Mesh panel)
 ]
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -197,21 +198,31 @@ nvidia-nccl-cu13 = ">=2.27.0"
 channels = ["conda-forge", "bioconda", "defaults", "ejolly"]
 
 [tool.pixi.feature.stats.dependencies]
-r-base = ">=4.3.0"
-r-lme4 = "*"
-r-lmertest = "*"
-r-mmrm = "*"
-r-emmeans = "*"
-r-parameters = "*"
-r-performance = "*"
-r-report = "*"
-r-tibble = "*"
-r-broom = "*"
-r-broom-mixed = "*"
-r-insight = "*"
-r-robustbase = "*"       
-rpy2 = ">=3.6.0"
-pymer4 = ">=0.9.2"
+r-base = "==4.5.3"
+rpy2 = "==3.6.7"
+r-lme4 = "==2.0_6"
+r-lmertest = "==3.2_1"
+r-mmrm = "==0.3.18"
+r-emmeans = "==2.0.4"
+r-parameters = "==0.29.2"
+r-performance = "==0.17.1"
+r-report = "==0.6.4"
+r-tibble = "==3.3.1"
+r-broom = "==1.0.13"
+r-broom-mixed = "==0.2.9.7"
+r-insight = "==1.5.2"
+r-robustbase = "==0.99_7"
+# pymer4 = ">=0.9.2"
+
+freeimage = "==3.18.0"
+libstdcxx-ng = "==15.2.0"
+
+pyqt6 = "==6.11.0"
+qt6-main = "==6.11.0"
+qtpy = "==2.4.3"
+napari = "==0.7.0"
+magicgui = "==0.10.2"
+superqt = "==0.8.2"
 
 [tool.pixi.feature.stats.pypi-dependencies]
 great-tables = "*"
