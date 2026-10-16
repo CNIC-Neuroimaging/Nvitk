@@ -146,11 +146,12 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "4D flow velocity vectors in Napari: all phases precomputed, arrow length and "
         "color from speed (mm/s). Syncs to the cardiac-phase slider; optional auto-play."
     ),
-    "viz_flow_streamlines": (
-        "4D flow streamlines or pathlines in Napari. Active layer = vessel segmentation mask. "
-        "Streamlines: instantaneous flow at each cardiac phase. Pathlines: particle tracks "
-        "integrated forward through time from the selected phase. Color by speed, arc length, "
-        "integration time, or fixed; optional per-vertex gradient. Planar inlet seeding by default."
+    "viz_flow_traces": (
+        "4D flow particle traces in Napari, traced by VMTK (vmtkparticletracer's temporal stream "
+        "tracer, mm and seconds). Active layer = vessel segmentation mask. Streamlines: the "
+        "frozen flow of each cardiac phase. Pathlines: particles released at the selected phase "
+        "and advected through the cardiac cycle. Color by speed, arc length, integration time, "
+        "or fixed; optional per-vertex gradient. Planar inlet seeding by default."
     ),
     "viz_vessel_cross_sections": (
         "Active layer = centerline mask; choose CD, AP/RL/FH phases, and optional segmentation. "

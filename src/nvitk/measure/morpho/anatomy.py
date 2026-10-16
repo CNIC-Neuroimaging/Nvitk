@@ -7,7 +7,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 from scipy import ndimage as ndi
 
-from nvitk.measure.morphometrics_config import EXPORT_ANATOMIC_SPLIT_CENTERLINES, TREE_REGION_ROLE_CODES
+from nvitk.measure import morphometrics_config as _cfg
 from .anatomy_axes import AnatomicalAxes
 from .io_utils import safe_filename
 from .models import SkeletonTree, VesselInfo
@@ -175,7 +175,7 @@ def orient_centerline_points_by_flow(
 def make_path_id(label: int, vessel_name: str, component_id: int, path_i: int, terminal_i: int, tree_label: Optional[str] = None) -> str:
     """Build the export filename stem for one centerline path (trunk/arm/anatomic-M1 naming)."""
     prefix = f"{label}_{vessel_name}_comp{component_id:02d}"
-    if EXPORT_ANATOMIC_SPLIT_CENTERLINES and int(terminal_i) == 0:
+    if _cfg.EXPORT_ANATOMIC_SPLIT_CENTERLINES and int(terminal_i) == 0:
         suffix = "M1"
         if int(component_id) != 1:
             suffix += f"_comp{int(component_id):02d}"
@@ -220,7 +220,7 @@ def tree_region_metadata(region_name: str) -> dict:
     if name in {"trunk", "common_base"}:
         return {
             "tree_region_role": "trunk",
-            "tree_region_role_code": TREE_REGION_ROLE_CODES["trunk"],
+            "tree_region_role_code": _cfg.TREE_REGION_ROLE_CODES["trunk"],
             "tree_branch_depth": 0,
             "tree_branch_index": 0,
             "tree_branch_path": "",
@@ -232,7 +232,7 @@ def tree_region_metadata(region_name: str) -> dict:
         branch_index = int(suffix) if suffix.isdigit() else 0
         return {
             "tree_region_role": "fused_trunk_branch",
-            "tree_region_role_code": TREE_REGION_ROLE_CODES["fused_trunk_branch"],
+            "tree_region_role_code": _cfg.TREE_REGION_ROLE_CODES["fused_trunk_branch"],
             "tree_branch_depth": 1 if branch_index else 0,
             "tree_branch_index": branch_index,
             "tree_branch_path": str(branch_index) if branch_index else "",
@@ -244,7 +244,7 @@ def tree_region_metadata(region_name: str) -> dict:
         branch_index = int(suffix) if suffix.isdigit() else 0
         return {
             "tree_region_role": "branch",
-            "tree_region_role_code": TREE_REGION_ROLE_CODES["branch"],
+            "tree_region_role_code": _cfg.TREE_REGION_ROLE_CODES["branch"],
             "tree_branch_depth": 1 if branch_index else 0,
             "tree_branch_index": branch_index,
             "tree_branch_path": str(branch_index) if branch_index else "",
@@ -259,7 +259,7 @@ def tree_region_metadata(region_name: str) -> dict:
         role = "unassigned"
     return {
         "tree_region_role": role,
-        "tree_region_role_code": TREE_REGION_ROLE_CODES[role],
+        "tree_region_role_code": _cfg.TREE_REGION_ROLE_CODES[role],
         "tree_branch_depth": 0,
         "tree_branch_index": 0,
         "tree_branch_path": "",

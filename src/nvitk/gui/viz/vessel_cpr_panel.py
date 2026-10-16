@@ -1521,6 +1521,7 @@ def install_vessel_cpr(
     step_mm: float = 0.5,
     join_gap_vox: int = DEFAULT_JOIN_GAP_VOX,
     schema_key: str | None = None,
+    skeleton_method: str = "vmtk",
 ) -> VesselCprPanel:
     """Flatten the requested vessels and wire the panel, overlays and edits.
 
@@ -1560,6 +1561,7 @@ def install_vessel_cpr(
         "spacing": sp,
         "step_mm": float(step_mm),
         "join_gap_vox": int(join_gap_vox),
+        "skeleton_method": str(skeleton_method),
         "schema_key": schema_key or None,
         "labels": labels,
         "centerline_mask": None if centerline_mask is None else to_numpy(centerline_mask),
@@ -1598,6 +1600,7 @@ def install_vessel_cpr(
             step_mm=state["step_mm"],
             reasons=reasons,
             join_gap_vox=state["join_gap_vox"],
+            skeleton_method=state.get("skeleton_method", "vmtk"),
         )
         panel.set_failure_reasons(reasons)
         panel.set_vessels(

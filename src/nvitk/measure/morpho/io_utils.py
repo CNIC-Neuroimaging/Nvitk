@@ -10,7 +10,7 @@ from typing import Optional, Tuple
 import nibabel as nib
 import numpy as np
 
-from nvitk.measure.morphometrics_config import EXPORT_ANATOMIC_SPLIT_CENTERLINES
+from nvitk.measure import morphometrics_config as _cfg
 from .models import VesselInfo
 
 def ensure_dir(path: str) -> None:
@@ -33,7 +33,7 @@ def clean_generated_vtp_dir(path: Optional[str]) -> None:
 
 def clean_legacy_centerline_vtp_names(path: Optional[str]) -> None:
     """Remove old-convention (``trunk``/``armN``/``branchN``) centerline VTPs before an anatomic-split re-export."""
-    if not EXPORT_ANATOMIC_SPLIT_CENTERLINES or not path or not os.path.isdir(path):
+    if not _cfg.EXPORT_ANATOMIC_SPLIT_CENTERLINES or not path or not os.path.isdir(path):
         return
     legacy_re = re.compile(
         r"^\d+_.*_(?:trunk|arm\d+|branch\d+|subarm\d+|trunk_plus_.+)(?:_radius)?\.vtp$",

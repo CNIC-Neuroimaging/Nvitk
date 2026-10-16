@@ -1,8 +1,9 @@
 """Publish qvtpy stage-7 TOF morphometrics into the NVITK ``image_measurements`` table.
 
-Long-form rows are upserted under pipeline ``tof_morpho_v1``. Per-vessel scalar
-summaries are aggregated from the ``00_Path_Summary`` sheet of
-``case_metrics_donut_tree.xlsx``.
+Long-form rows are upserted under pipeline ``tof_morpho_v1``. Per-vessel scalars come from
+``vessel_summary.csv`` (one row per vessel, written since the compact tables were added) plus the
+subject-level ``subject_summary.csv`` (region ``subject``); older runs without them fall back to
+aggregating the ``00_Path_Summary`` sheet of ``case_metrics_donut_tree.xlsx``.
 
 When ``stenosis_percent_max`` / length totals are absent (older Excel exports),
 values are recovered from ``*_segments_detail_json``.
@@ -76,6 +77,7 @@ def _measurement_row(
     unit: str,
     source_file: str,
     updated_at: str,
+    source_sheet: str = "00_Path_Summary",
 ) -> dict[str, Any]:
     """Build one ``image_measurements`` row dict for a TOF-morphometrics scalar value."""
     return {
@@ -96,7 +98,7 @@ def _measurement_row(
         "source_asset": pd.NA,
         "source_table": f"qvtpy_stage7::{source_file}",
         "source_file": source_file,
-        "source_sheet": "00_Path_Summary",
+        "source_sheet": source_sheet,
         "source_column": pd.NA,
         "source_batch_id": pd.NA,
         "measured_at": pd.NaT,
@@ -261,13 +263,80 @@ def _aggregate_vessel_metrics(path_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+#: Identity / text columns of the compact tables (never published as measurements).
+_COMPACT_NON_NUMERIC = {
+    "case_id", "label", "vessel_name", "full_name", "side", "pair", "territory", "present",
+    "component_id", "segment", "path_id",
+}
+
+
+def unit_for_column(name: str) -> str:
+    """Unit of a compact-table column, from its suffix."""
+    n = str(name)
+    for suffix, unit in (
+        ("_mm3", "mm3"), ("_mm2", "mm2"), ("_1_per_mm", "1/mm"), ("_deg_per_mm", "deg/mm"),
+        ("_mm_per_mm", "mm/mm"), ("_mm", "mm"), ("_deg", "deg"), ("_rad", "rad"), ("_percent_max", "%"),
+        ("_percent", "%"), ("_pct", "%"),
+    ):
+        if n.endswith(suffix):
+            return unit
+    if n.startswith("n_") or n.startswith("total_n_") or n.endswith("_present"):
+        return "count"
+    return "dimensionless"
+
+
+def _rows_from_compact_tables(subject_uid: str, stage7_dir: Path, updated_at: str) -> list[dict[str, Any]]:
+    """``image_measurements`` rows from ``vessel_summary.csv`` and ``subject_summary.csv``."""
+    rows: list[dict[str, Any]] = []
+    vs = stage7_dir / "vessel_summary.csv"
+    df = pd.read_csv(vs)
+    for _, r in df.iterrows():
+        if not bool(r.get("present", True)):
+            continue
+        region = str(r.get("vessel_name") or "").strip()
+        if not region:
+            continue
+        for col in df.columns:
+            if col in _COMPACT_NON_NUMERIC or df[col].dtype == object:
+                continue
+            val = _finite(r.get(col))
+            if val is None:
+                continue
+            rows.append(_measurement_row(
+                subject_uid=subject_uid, variable_id=str(col), value=val, region_id=region,
+                unit=unit_for_column(col), source_file=vs.name, updated_at=updated_at,
+                source_sheet="Vessel_Summary",
+            ))
+    ss = stage7_dir / "subject_summary.csv"
+    if ss.is_file():
+        sdf = pd.read_csv(ss)
+        for col in sdf.columns:
+            if col in _COMPACT_NON_NUMERIC or sdf[col].dtype == object:
+                continue
+            val = _finite(sdf[col].iloc[0]) if len(sdf) else None
+            if val is None:
+                continue
+            rows.append(_measurement_row(
+                subject_uid=subject_uid, variable_id=str(col), value=val, region_id="subject",
+                unit=unit_for_column(col), source_file=ss.name, updated_at=updated_at,
+                source_sheet="Subject",
+            ))
+    return rows
+
+
 def build_image_measurement_rows_from_stage7(
     *,
     subject_uid: str,
     stage7_dir: Path,
 ) -> pd.DataFrame:
-    """Long-form ``image_measurements`` rows from stage-7 morphometrics Excel."""
+    """Long-form ``image_measurements`` rows from stage-7 morphometrics outputs."""
     stage7_dir = Path(stage7_dir)
+    if (stage7_dir / "vessel_summary.csv").is_file():
+        try:
+            return pd.DataFrame(_rows_from_compact_tables(subject_uid, stage7_dir, utc_now_iso()))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Failed reading compact tables in %s: %s", stage7_dir, exc)
+            return pd.DataFrame()
     excel_path = stage7_dir / "case_metrics_donut_tree.xlsx"
     if not excel_path.is_file():
         return pd.DataFrame()

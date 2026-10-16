@@ -8,11 +8,7 @@ import numpy as np
 import vtk
 from vtk.util import numpy_support
 
-from nvitk.measure.morphometrics_config import (
-    REFINE_SURFACE_FOR_VMTK,
-    SURFACE_REFINEMENT_SMOOTH_ITERATIONS,
-    SURFACE_SUBDIVISION_LEVELS,
-)
+from nvitk.measure import morphometrics_config as _cfg
 from .geometry import cumulative_s
 from .models import SkeletonTree
 
@@ -60,7 +56,7 @@ def mask_to_surface(mask: np.ndarray, spacing, pre_refined_surface_path: Optiona
 
 def refine_surface_for_vmtk(surface):
     """Subdivide + smooth a surface so VMTK centerline extraction has denser, more regular triangles."""
-    if not REFINE_SURFACE_FOR_VMTK or int(SURFACE_SUBDIVISION_LEVELS) <= 0:
+    if not _cfg.REFINE_SURFACE_FOR_VMTK or int(_cfg.SURFACE_SUBDIVISION_LEVELS) <= 0:
         return surface
 
     tri = vtk.vtkTriangleFilter()
@@ -69,14 +65,14 @@ def refine_surface_for_vmtk(surface):
 
     subdiv = vtk.vtkLinearSubdivisionFilter()
     subdiv.SetInputData(tri.GetOutput())
-    subdiv.SetNumberOfSubdivisions(int(SURFACE_SUBDIVISION_LEVELS))
+    subdiv.SetNumberOfSubdivisions(int(_cfg.SURFACE_SUBDIVISION_LEVELS))
     subdiv.Update()
 
     refined = subdiv.GetOutput()
-    if int(SURFACE_REFINEMENT_SMOOTH_ITERATIONS) > 0:
+    if int(_cfg.SURFACE_REFINEMENT_SMOOTH_ITERATIONS) > 0:
         smooth = vtk.vtkWindowedSincPolyDataFilter()
         smooth.SetInputData(refined)
-        smooth.SetNumberOfIterations(int(SURFACE_REFINEMENT_SMOOTH_ITERATIONS))
+        smooth.SetNumberOfIterations(int(_cfg.SURFACE_REFINEMENT_SMOOTH_ITERATIONS))
         smooth.BoundarySmoothingOff()
         smooth.FeatureEdgeSmoothingOff()
         smooth.SetPassBand(0.15)
@@ -106,11 +102,58 @@ def snap_to_surface(pt_mm: np.ndarray, surface):
     return list(surface.GetPoint(closest_id))
 
 
+# Output frame of the written VTPs. Every computation runs in ``index × spacing`` millimetres
+# (origin 0, as cow_morpho), which is a rigid motion away from the scanner frame; :func:`save_vtp`
+# maps points to the input NIfTI's RAS world once a run installs the case transform.
+_WORLD: dict = {"affine": None, "spacing": None}
+
+#: Field-data tag of VTPs written in scanner RAS (absent on legacy ``index × spacing`` files).
+COORDINATE_FRAME_KEY = "NVITK_COORDINATE_FRAME"
+AFFINE_KEY = "NVITK_AFFINE"
+
+
+def set_world_transform(affine, spacing) -> None:
+    """Install the case's voxel→RAS *affine* (and the mask *spacing*) for :func:`save_vtp`;
+    ``None`` restores the legacy ``index × spacing`` output."""
+    if affine is None:
+        _WORLD.update(affine=None, spacing=None)
+        return
+    _WORLD.update(
+        affine=np.asarray(affine, dtype=float).reshape(4, 4),
+        spacing=np.asarray(spacing, dtype=float)[:3],
+    )
+
+
+def to_world(points_mm: np.ndarray) -> np.ndarray:
+    """``index × spacing`` millimetres → scanner RAS (identity when no transform is installed)."""
+    pts = np.asarray(points_mm, dtype=float).reshape(-1, 3)
+    aff = _WORLD["affine"]
+    if aff is None:
+        return pts.copy()
+    ijk = pts / _WORLD["spacing"]
+    return ijk @ aff[:3, :3].T + aff[:3, 3]
+
+
 def save_vtp(poly, path: str) -> None:
-    """Write a VTK polydata object to a ``.vtp`` file."""
+    """Write a VTK polydata object to a ``.vtp`` file, in the case's RAS frame when installed."""
+    out = poly
+    if _WORLD["affine"] is not None and poly.GetNumberOfPoints() > 0:
+        out = vtk.vtkPolyData()
+        out.DeepCopy(poly)
+        pts = numpy_support.vtk_to_numpy(out.GetPoints().GetData()).astype(float)
+        new = vtk.vtkPoints()
+        new.SetData(numpy_support.numpy_to_vtk(np.ascontiguousarray(to_world(pts)), deep=True))
+        out.SetPoints(new)
+        tag = vtk.vtkStringArray()
+        tag.SetName(COORDINATE_FRAME_KEY)
+        tag.InsertNextValue("RAS")
+        out.GetFieldData().AddArray(tag)
+        aff = numpy_support.numpy_to_vtk(np.ascontiguousarray(_WORLD["affine"].ravel()), deep=True)
+        aff.SetName(AFFINE_KEY)
+        out.GetFieldData().AddArray(aff)
     writer = vtk.vtkXMLPolyDataWriter()
     writer.SetFileName(path)
-    writer.SetInputData(poly)
+    writer.SetInputData(out)
     writer.Write()
 
 

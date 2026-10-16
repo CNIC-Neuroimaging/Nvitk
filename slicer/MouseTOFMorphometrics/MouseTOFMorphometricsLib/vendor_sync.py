@@ -42,12 +42,16 @@ SYNCED_MODULES: tuple[str, ...] = (
     "nvitk/measure/morphometrics.py",
     "nvitk/measure/morphometrics_config.py",
     "nvitk/morphology/centerline.py",
+    "nvitk/morphology/centering.py",
     "nvitk/morphology/mst_bridge.py",
     "nvitk/morphology/polyline_graph.py",
+    "nvitk/morphology/raycast_skeleton.py",
+    "nvitk/morphology/skeleton_methods.py",
 )
 
-#: Whole directories copied verbatim (``*.py`` plus the listed data suffixes).
-SYNCED_TREES: tuple[str, ...] = ("nvitk/measure/morpho",)
+#: Whole directories copied verbatim (``*.py`` plus the listed data suffixes). ``nvitk/vmtk`` only
+#: needs VMTK when its centerline backend actually runs (imports are lazy).
+SYNCED_TREES: tuple[str, ...] = ("nvitk/measure/morpho", "nvitk/vmtk")
 DATA_SUFFIXES: tuple[str, ...] = (".json",)
 
 #: Never overwritten — the NumPy-only stand-ins and package markers.

@@ -202,6 +202,34 @@ pipelines put them on the training subprocess's `PYTHONPATH`, so run them from a
 or the cluster container. Check an environment with
 `python -c "import torch, nnunetv2; print(torch.cuda.is_available())"`.
 
+### VMTK
+
+The centerline, surface and 4D-flow tracing tools ({doc}`api/vmtk`) need VMTK 1.5.2. No ready
+package fits a Python 3.11 / NumPy 2 environment:
+- conda-forge's py311 VMTK pins `numpy<2`;
+- upstream publishes PyPI wheels only for CPython ≥ 3.12.
+
+The post-link step therefore installs a **cp311 wheel of VMTK 1.5.2**, built from the upstream
+sdist against the same `vtk==9.6.2` wheel that upstream uses. VTK is pinned to that version for
+this reason.
+
+| Step | What happens |
+|---|---|
+| 1 | Download the wheel from the `vmtk-1.5.2-cp311` GitHub release and verify its sha256 |
+| 2 | If that fails: build the wheel from the sdist with `recipe/vmtk/build_wheel.sh native` (needs gcc/g++, git and network; takes a while) |
+| 3 | Install it with `--no-deps` and check that `vmtk.vmtkscripts` and `vtkvmtk` import |
+
+To use another wheel, set `NVITK_VMTK_WHEEL_URL` (a URL or a local path) and
+`NVITK_VMTK_WHEEL_SHA256`; an empty checksum skips the check. To rebuild the portable release
+wheel (manylinux_2_28, needs docker):
+
+```bash
+bash recipe/vmtk/build_wheel.sh manylinux dist/vmtk
+```
+
+Check an environment with
+`python -c "from nvitk.vmtk import vmtk_version; print(vmtk_version())"`.
+
 ## External prerequisites (not installed by conda or `install.sh`)
 
 Separately licensed or with no package-manager distribution — install these yourself and

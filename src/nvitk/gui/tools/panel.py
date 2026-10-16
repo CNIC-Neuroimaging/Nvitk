@@ -929,9 +929,9 @@ def build_tool_panel(
         },
         n_seeds={"label": "Seed count", "min": 1, "max": 10000, "value": 64},
         max_length={
-            "label": "Max length (vox; pathline horizon s if pathlines)",
+            "label": "Max length (mm; pathline horizon in seconds if pathlines)",
             "value": 35.0,
-            "min": 1.0,
+            "min": 0.01,
             "max": 500.0,
         },
         stream_seed={"label": "Random seed", "min": 0, "max": 999999, "value": 42},
@@ -951,7 +951,7 @@ def build_tool_panel(
             "label": "Planar seed side",
             "value": "min",
         },
-        dt_seconds={"label": "Pathline dt (seconds)", "value": 1.0, "min": 0.01, "max": 60.0},
+        dt_seconds={"label": "Time between phases (s)", "value": 1.0, "min": 0.001, "max": 60.0},
         color_metric={
             "choices": ["speed", "integration_time", "arc_length", "fixed"],
             "label": "Color by",

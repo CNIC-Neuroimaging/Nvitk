@@ -36,12 +36,18 @@ tortuosity, stenosis, tree topology) — the engine behind {doc}`the QVTPy pipel
 |---|---|
 | `anatomy`, `anatomy_axes`, `labels_util` | Anatomical region/label definitions. |
 | `centerlines`, `skeleton` | Centerline/skeleton extraction feeding the morphometrics. |
-| `caliber`, `metrics` | Per-segment caliber and derived morphometric measures. |
+| `caliber`, `metrics` | Taper reference, stenosis / enlargement detection (cow_morpho's rules), the siphon mask, curvature (`discrete_curvature` = κ/2 legacy, `menger_curvature`, `smoothed_curvature`). |
+| `vessel_features` | Scale-aware vessel descriptors (calibre, end windows, blanking, curvature integrals, direction angles) and lesion severity / confidence. |
 | `tree_regions`, `tree_segments`, `topology_io` | Vessel-tree topology construction and I/O. |
 | `donut_loops`, `geometry`, `surface` | Cross-section geometry helpers. |
 | `orchestration`, `run_case` | Full-case orchestration entry points. |
-| `export_utils/` | Tortuosity metric export, radius histograms, PVSM scene generation, summary tables. |
+| `export_utils/` | Compact vessel / segment / lesion / subject tables (`vessel_tables`), tortuosity metric export, radius histograms, PVSM scene generation, summary tables. |
 | `topology/*.json` | Per-cohort topology definitions (eICAB, mouse-root, QVTPy). |
+
+Parameters come from named profiles in `nvitk.measure.morphometrics_config` (`eicab_cw` by
+default; `morphometrics_config()`, `MorphometricsConfig.with_params()`, `active_config()`), and the
+centerline backend is `vmtk`, `native` or `raycast`. The outputs, parity notes with cow_morpho and
+the lesion confidence model are described in {doc}`../pipelines/qvtpy-morphometrics`.
 
 ## Voxelwise analysis (`nvitk.measure.voxelwise`)
 

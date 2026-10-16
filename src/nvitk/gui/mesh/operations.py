@@ -34,6 +34,10 @@ from nvitk.gui.mesh.layers import (
     series_controller,
 )
 from nvitk.gui.tools.registry import ParamSpec
+from nvitk.morphology.skeleton_methods import SKELETON_METHOD_CHOICES as _SKELETON_CHOICES
+from nvitk.morphology.skeleton_methods import SKELETON_METHOD_LABELS as _SKELETON_LABELS
+from nvitk.morphology.skeleton_methods import VMTK_COVERAGE_CHOICES as _COVERAGE_CHOICES
+from nvitk.morphology.skeleton_methods import VMTK_COVERAGE_LABELS as _COVERAGE_LABELS
 from nvitk.types import Mesh, MeshSeries, PointCloud
 
 _P = ParamSpec
@@ -1084,8 +1088,13 @@ def _run_centerlines(ctx: OpContext) -> OpResult:
     )
 
     mesh = ctx.mesh()
+    from nvitk.morphology.skeleton_methods import normalize_skeleton_method
+
     branches = mesh_centerlines(
         mesh,
+        method=normalize_skeleton_method(ctx.params.get("cl_method"), default="vmtk"),
+        vmtk_coverage=str(ctx.params.get("cl_vmtk_coverage") or "full"),
+        center=bool(ctx.params.get("cl_center", True)),
         voxel_size=float(ctx.params.get("cl_voxel") or 0.0),
         min_branch_length=float(ctx.params.get("cl_min_branch") or 0.0),
         smooth=float(ctx.params.get("cl_smooth") if ctx.params.get("cl_smooth") is not None else 0.5),
@@ -1147,6 +1156,58 @@ def _run_centerlines(ctx: OpContext) -> OpResult:
         on_row=CenterlineHighlighter(ctx.viewer, ctx.layer, new_layers[0], branches, bifs, owner,
                                      points=new_layers[1]),
     )
+
+
+def _run_centerline_center(ctx: OpContext) -> OpResult:
+    from nvitk.gui.viz.centerline_centering import center_lines, layer_polylines_world, summary
+    from nvitk.meshlab.convert import to_pyvista
+
+    src = ctx.layer_named("center_source")
+    if src is ctx.layer:
+        raise ValueError("Pick the centerline layer, not the surface itself.")
+    lines = layer_polylines_world(src)
+    if not lines:
+        raise ValueError(f"No centerline in '{src.name}'.")
+    mesh = ctx.mesh()
+    step = float(ctx.params.get("center_step") or 0.0)
+    if step <= 0:
+        edges = np.linalg.norm(mesh.vertices[mesh.faces[:, 0]] - mesh.vertices[mesh.faces[:, 1]], axis=1)
+        step = float(np.clip(0.5 * np.median(edges), 0.05, 1.0))
+    centred = center_lines(
+        lines, to_pyvista(mesh),
+        iterations=int(ctx.params.get("center_iter") or 5),
+        smooth_mm=float(ctx.params.get("center_smooth") if ctx.params.get("center_smooth") is not None else 0.3),
+        step_mm=step,
+    )
+    if not centred:
+        raise ValueError("Nothing to centre.")
+    span = float(np.ptp(mesh.vertices, axis=0).max())
+    cloud = PointCloud(
+        points=np.vstack([c.points for c in centred]), metadata={"name": f"{src.name}_centred"},
+        point_data={
+            "radius": np.concatenate([c.radius for c in centred]),
+            "shift": np.concatenate([c.shift for c in centred]),
+            "branch": np.concatenate([np.full(len(c.points), i + 1, dtype=np.float32) for i, c in enumerate(centred)]),
+        },
+    )
+    layers = [
+        add_polylines_layer(ctx.viewer, [c.points for c in centred], name=f"{src.name}_centred_lines",
+                            width=max(span / 400.0, 0.1)),
+        add_point_cloud_layer(ctx.viewer, cloud, name=f"{src.name}_centred", color_by="radius",
+                              size=max(span / 120.0, 0.3)),
+    ]
+    _gather(ctx, [lyr for lyr in layers if lyr is not None], f"{src.name} centred")
+    table = {
+        f"line {i}": {
+            "length (mm)": f"{_fmt(c.length_before)} → {_fmt(c.length_after)}",
+            "mean shift (mm)": _fmt(float(np.mean(c.shift))),
+            "max shift (mm)": _fmt(float(np.max(c.shift))),
+            "inscribed r (mm)": f"{_fmt(c.radius_before)} → {_fmt(float(np.median(c.radius)))}",
+        }
+        for i, c in enumerate(centred, 1)
+    }
+    return OpResult(f"Centred '{src.name}' on {ctx.name}: {summary(centred)}.", table=table,
+                    title=f"Centred centerline: {src.name}", row_header="Line")
 
 
 #: Highlight colours: the rest of the vessel / the branch or junction clicked in the table.
@@ -1772,15 +1833,30 @@ OPERATIONS: tuple[MeshOp, ...] = (
         _run_cross_section, "Run, then click on the surface: the section through that point — perpendicular to "
         "the vessel there, facing you, or normal to an axis. Contour, area, perimeter, diameters.", pick="surface"),
     _op("centerlines", _VESSELS, "Centerlines & diameter profile", ("mesh",),
-        (_P("cl_every", "Section every (mm, 0 = every centerline point)", "float", 1.0, min=0.0, max=100.0),
+        (_P("cl_method", "Centerline method", "choice", _SKELETON_LABELS["vmtk"], choices=_SKELETON_CHOICES),
+         _P("cl_every", "Section every (mm, 0 = every centerline point)", "float", 1.0, min=0.0, max=100.0),
          _P("cl_voxel", "Skeleton voxel size (mm, 0 = auto)", "float", 0.0, min=0.0, max=10.0),
          _P("cl_min_branch", "Drop branches shorter than (mm, 0 = auto)", "float", 0.0, min=0.0, max=1000.0),
+         _P("cl_vmtk_coverage", "VMTK centerlines", "choice", _COVERAGE_LABELS["full"], choices=_COVERAGE_CHOICES),
+         _P("cl_center", "Re-centre native / ray-cast centerlines on the lumen", "bool", True),
          _P("cl_smooth", "Centerline smoothing", "float", 0.5, min=0.0, max=10.0),
          _P("cl_colour_surface", "Colour the surface by diameter", "bool", True)),
         _run_centerlines,
-        "Skeleton of the closed surface split into branches. Along each: lumen area, area-equivalent / min / max "
+        "Centerlines of the closed surface (VMTK by default; native skeleton or experimental ray casting) split "
+        "into branches. VMTK traces all branches by default — every loop and separate piece of the surface — or "
+        "one tree from the widest end. Along each: lumen area, area-equivalent / min / max "
         "diameter, circularity and the inscribed radius; per branch length, tortuosity, curvature and stenosis "
         "(vs its median diameter); angles at bifurcations. The centerline points carry the profile."),
+    _op("centerline_center", _VESSELS, "Centre a centerline on the lumen", ("mesh",),
+        (_P("center_source", "Centerline layer", "layer", ""),
+         _P("center_iter", "Centring iterations", "int", 5, min=1, max=50),
+         _P("center_smooth", "Smoothing along the line (mm)", "float", 0.3, min=0.0, max=10.0),
+         _P("center_step", "Sample step (mm, 0 = half the edge length)", "float", 0.0, min=0.0, max=5.0)),
+        _run_centerline_center,
+        "Moves a centerline onto the lumen centre of the active surface: each point goes to the centroid of the "
+        "cross-section, then up the inscribed-radius ridge (where VMTK's centerlines run). The centerline can be "
+        "any centerline layer — these lines or points, a Tools-panel path or skeleton. Adds the centred lines and "
+        "radius-coloured points; the table gives each line's shift and inscribed radius before and after."),
     _op("vessel_section", _VESSELS, "Vessel cross-section at a click", ("mesh",), (),
         _run_vessel_section, "Run, then click on the vessel wall (or inside it, in 2D): the section perpendicular "
         "to the local vessel axis — no centerline needed.", pick="surface"),
@@ -1857,6 +1933,13 @@ OPERATIONS: tuple[MeshOp, ...] = (
     _op("series_frame", _TIME, "Current frame as a mesh", ("series",), (),
         _run_series_frame, "Copy the frame on screen into a static mesh layer."),
 )
+
+# VMTK surface / vessel tools and the experimental EXPIGEO ray-cast skeleton (nvitk.gui.mesh.vmtk_ops).
+from nvitk.gui.mesh.vmtk_ops import vmtk_operations as _vmtk_operations  # noqa: E402
+
+OPERATIONS = OPERATIONS + _vmtk_operations(_op, {
+    "clean": _CLEAN, "smooth": _SMOOTHING, "remesh": _REMESH, "measure": _MEASURE, "vessels": _VESSELS,
+})
 
 
 # ──────────────────────────────────────────────────────────────────────────────

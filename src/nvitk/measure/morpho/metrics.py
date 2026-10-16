@@ -20,7 +20,14 @@ def tortuosity_dm(pts: np.ndarray) -> float:
 
 
 def discrete_curvature(pts: np.ndarray) -> np.ndarray:
-    """Menger curvature at each interior point of a 3-D polyline (NaN at the two endpoints)."""
+    """cow_morpho's discrete curvature at each interior point (NaN at the two endpoints).
+
+    It computes ``|ab × ac| / (|ab|·|ac|·|bc|)`` = 2·area/(abc), which is **half** the Menger
+    curvature (4·area/(abc) = 1/R): a circle of radius R reads 1/(2R). Kept as-is because every
+    cow-parity output (``curvature_*_1_per_mm`` columns, VTP ``Curvature``, the legacy siphon mask,
+    ``INFLECT_KAPPA_MIN`` / ``BEND_KAPPA_PEAK``) is defined on it; the scale-aware descriptors use
+    :func:`menger_curvature` (true 1/mm).
+    """
     n = len(pts)
     kappa = np.full(n, np.nan)
     for i in range(1, n - 1):
@@ -31,6 +38,54 @@ def discrete_curvature(pts: np.ndarray) -> np.ndarray:
             continue
         kappa[i] = np.linalg.norm(np.cross(ab, ac)) / (la * lac * lbc)
     return kappa
+
+
+def menger_curvature(pts: np.ndarray) -> np.ndarray:
+    """True curvature 1/R (Menger: 4·area / product of the side lengths) at each interior point."""
+    return 2.0 * discrete_curvature(pts)
+
+
+def smooth_polyline(pts: np.ndarray, sigma_mm: float) -> np.ndarray:
+    """Gaussian-smooth a polyline along arc length at scale *sigma_mm* (same points, same count).
+
+    The path is resampled uniformly at its median step, filtered, and mapped back. Ends are padded
+    by point reflection (``2·p₀ − p_k``), which keeps the end tangent: plain edge repetition would
+    pull the ends inward, mirroring would fold the path back on itself.
+    """
+    pts = np.asarray(pts, dtype=float)
+    n = len(pts)
+    if n < 3 or not sigma_mm or sigma_mm <= 0:
+        return pts.copy()
+    s = cumulative_s(pts)
+    if not np.isfinite(s[-1]) or s[-1] <= 0:
+        return pts.copy()
+    ds = float(np.median(np.diff(s)))
+    if not np.isfinite(ds) or ds <= 1e-9:
+        return pts.copy()
+    su = np.arange(0.0, s[-1] + 0.5 * ds, ds)
+    pu = np.column_stack([np.interp(su, s, pts[:, k]) for k in range(3)])
+    sig = float(sigma_mm) / ds
+    pad = min(len(pu) - 1, int(np.ceil(4.0 * sig)))
+    if pad < 1:
+        return pts.copy()
+    head = 2.0 * pu[0] - pu[pad:0:-1]
+    tail = 2.0 * pu[-1] - pu[-2:-pad - 2:-1]
+    padded = np.vstack([head, pu, tail])
+    sm = ndi.gaussian_filter1d(padded, sigma=sig, axis=0, mode="nearest")[pad:pad + len(pu)]
+    return np.column_stack([np.interp(s, su, sm[:, k]) for k in range(3)])
+
+
+def smoothed_curvature(pts: np.ndarray, sigma_mm: float) -> np.ndarray:
+    """True curvature (1/mm, :func:`menger_curvature`) of the centerline smoothed at *sigma_mm*.
+
+    Curvature measured on the raw 0.1 mm resampling is dominated by sampling noise (a voxel
+    staircase or VMTK's piecewise-linear Voronoi path gives ≫0.1 mm⁻¹ everywhere); at a 1–2 mm
+    scale it reflects the vessel's actual bends. End points take their neighbour's value.
+    """
+    k = menger_curvature(smooth_polyline(pts, sigma_mm))
+    if len(k) >= 3:
+        k[0], k[-1] = k[1], k[-2]
+    return k
 
 
 def discrete_torsion(pts: np.ndarray) -> np.ndarray:

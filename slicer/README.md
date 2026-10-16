@@ -38,10 +38,15 @@ Works on Windows Slicer builds (no antspyx wheels).
 
 ### TOF CoW Morphometrics
 
-Measures a multilabel vessel labelmap: Taubin smoothing → skeleton → centerlines →
+Measures a multilabel vessel labelmap: Taubin smoothing → centerlines →
 radius / tortuosity / stenosis / enlargement → **per-label volumetry**. Outputs
-`case_metrics_donut_tree.xlsx` (incl. sheet `06_Volumetry`), `volumetry.csv`, and
-centerline / surface VTPs, and shows the tables plus 3D models inside Slicer.
+`case_metrics_donut_tree.xlsx` (incl. sheet `06_Volumetry`), the compact CSV tables,
+`volumetry.csv`, and centerline / surface VTPs, and shows the tables plus 3D models inside Slicer.
+
+Centerlines are VMTK's when VMTK imports in Slicer's Python (install the **SlicerVMTK**
+extension). Otherwise the module uses the native backend, a voxel skeleton re-centred on the
+lumen, and says so in the log. Both are the vendored nvitk code, the same as stage 7 of the
+qvtpy pipeline.
 
 **Does not import nvitk.** Like Mouse TOF CoW, compute lives under
 `MouseTOFMorphometrics/MouseTOFMorphometricsLib/` — nvitk's install requirements (antspyx,
@@ -129,14 +134,19 @@ Outputs:
 
 Outputs, under the case directory:
 
+- `vessel_summary.csv`, `segments.csv`, `lesions.csv`, `subject_summary.csv`: the compact
+  tables (one row per vessel / segment / lesion / subject, with lesion severity and confidence),
+  also the first workbook sheets
 - `case_metrics_donut_tree.xlsx`:
+  - `Vessel_Summary`, `Segments`, `Lesions`, `Subject`: the compact tables
   - `00_Path_Summary` — **non-overlapping** vessel segments, one row per piece of vessel
   - `01_Tree_Summary` — per label/component, incl. the resolved `species` /
     `orientation_axcodes` / `root_rule_axis`, `centerline_total_length_mm` and
     `unique_skeleton_graph_length_mm`
   - `02_Branchpoints`, `03_LR_Asymmetry`, `04_Tree_Segments`, `05_Hemisphere`, `06_Volumetry`
   - `07_Root_To_Terminal_Paths` — the raw measured paths (see the caveat below)
-  - per-vessel point sheets
+  - per-path point sheets `P###_…`, mapped to their path ids by `Sheet_Index`
+- `points/<path_id>.csv` — the same point tables as CSVs
 - `volumetry.csv` — the `06_Volumetry` table, openpyxl-free
 - `centerlines/`, `centerlines_radius/`, `surfaces/` — VTPs, loaded into the 3D view
 - `radius_histograms/`, `centerlines/tortuosity_metrics.xlsx`
@@ -145,12 +155,14 @@ Outputs, under the case directory:
 
 #### Result models are placed in RAS
 
-The pipeline works in a scaled voxel-index frame: VTP points are `voxel_index * spacing`
-with the origin at `(0, 0, 0)` and no direction cosines. Loaded as-is they would sit in a
-corner of the volume, rotated away from the labelmap. The module maps them back with
-`affine @ diag(1/spacing)` — read from the NIfTI it handed the pipeline — and bakes the
-transform into the points, so the models are plain RAS geometry sitting on the
-segmentation, with no transform node left in the scene.
+The pipeline computes in a scaled voxel-index frame (`voxel_index * spacing`, origin
+`(0, 0, 0)`, no direction cosines), but it **writes** every VTP in scanner RAS through the
+NIfTI affine. Those files carry field data `NVITK_COORDINATE_FRAME = "RAS"` and are loaded
+as-is.
+
+VTPs from older runs, which lack the tag, are mapped back with `affine @ diag(1/spacing)`, read
+from the NIfTI handed to the pipeline. In both cases the models are plain RAS geometry sitting on
+the segmentation, with no transform node left in the scene.
 
 ## Note on N4
 

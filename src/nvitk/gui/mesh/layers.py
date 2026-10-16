@@ -39,6 +39,8 @@ from nvitk.types import Mesh, MeshSeries, PointCloud
 
 #: Metadata key marking layers made by the Mesh panel (and how).
 MESH_META_KEY = "nvitk_mesh"
+#: Metadata key of a polylines layer (:func:`add_polylines_layer`) holding its polylines (world mm).
+POLYLINES_META = "nvitk_polylines"
 
 #: Colormaps offered for field colouring (Napari names).
 COLORMAPS: tuple[str, ...] = (
@@ -733,16 +735,22 @@ def add_normals_layer(viewer: Any, cloud: PointCloud, *, name: str, length: floa
 
 def add_polylines_layer(viewer: Any, polylines: list[np.ndarray], *, name: str, color: str = "#ffd34d",
                         width: float = 0.5) -> Any | None:
-    """Polylines (world mm) as a Vectors layer of segments — lines that show in 3D."""
-    segs = []
+    """Polylines (world mm) as a Vectors layer of segments — lines that show in 3D.
+
+    The polylines themselves are kept in ``metadata["nvitk_polylines"]``: segments alone cannot
+    tell two branches meeting end to end from one.
+    """
+    segs, kept = [], []
     for line in polylines:
         line = np.asarray(line, dtype=float)
         if len(line) >= 2:
             segs.append(np.stack([line[:-1], line[1:] - line[:-1]], axis=1))
+            kept.append(line.astype(np.float32))
     if not segs:
         return None
     return viewer.add_vectors(np.concatenate(segs).astype(np.float32), name=name, edge_width=float(width),
-                              edge_color=color, length=1.0, out_of_slice_display=True)
+                              edge_color=color, length=1.0, out_of_slice_display=True,
+                              metadata={POLYLINES_META: kept})
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -920,6 +928,7 @@ __all__ = [
     "BUILTIN_FIELDS",
     "COLORMAPS",
     "MESH_META_KEY",
+    "POLYLINES_META",
     "Display",
     "MeshSeriesController",
     "set_parts",

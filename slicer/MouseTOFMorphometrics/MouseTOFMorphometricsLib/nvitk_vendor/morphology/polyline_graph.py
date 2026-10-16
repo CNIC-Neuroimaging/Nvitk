@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import Literal
+from typing import Literal, Sequence
 
 from nvitk_vendor.core.array import as_backend_array, to_numpy
 from nvitk_vendor.core.backend import setup
@@ -562,21 +562,24 @@ def _coords_from_centerline_volume(
     *,
     label_id: int | None = None,
     reskeletonize: bool = False,
+    method: str = "native",
+    spacing: Sequence[float] | None = None,
 ) -> np.ndarray:
-    """Voxel coordinates (N, 3) from a 3D centerline mask."""
-    arr = to_numpy(centerline)
+    """Voxel coordinates (N, 3) from a 3D centerline mask (re-thinned with *method* if asked)."""
+    arr = as_backend_array(centerline)
     if arr.ndim != 3:
         raise ValueError("Centerline volume must be 3D.")
     if label_id is not None and int(label_id) > 0:
         mask = arr == int(label_id)
     else:
         mask = arr > 0
+    # The points feed the (host) graph walk: located on the backend, returned on the host.
     if not bool(mask.any()):
-        return np.zeros((0, 3), dtype=np.float32)
+        return to_numpy(np.zeros((0, 3), dtype=np.float32))
     if reskeletonize:
-        sk = to_numpy(skeletonize_binary(mask))
-        return np.argwhere(sk > 0).astype(np.float32)
-    return np.argwhere(mask > 0).astype(np.float32)
+        sk = as_backend_array(skeletonize_binary(mask, method=method, spacing=spacing))
+        return to_numpy(np.argwhere(sk > 0).astype(np.float32))
+    return to_numpy(np.argwhere(mask).astype(np.float32))
 
 
 def extract_polylines_from_centerline(
@@ -587,6 +590,8 @@ def extract_polylines_from_centerline(
     label_id: int | None = None,
     reskeletonize: bool = False,
     per_connected_component: bool = True,
+    method: str = "native",
+    spacing: Sequence[float] | None = None,
 ) -> list[np.ndarray]:
     """
     Extract ordered polylines from a 3D centerline mask (not a thick vessel mask).
@@ -600,7 +605,8 @@ def extract_polylines_from_centerline(
     label_id
         When set, only voxels equal to this label are used.
     reskeletonize
-        If True, skeletonize before graph extraction (use for thick masks only).
+        If True, skeletonize before graph extraction (use for thick masks only), with *method*
+        (``native`` / ``vmtk`` / ``raycast``, see :mod:`nvitk_vendor.morphology.skeleton_methods`).
     per_connected_component
         When True, run extraction separately on each 6-connected foreground component.
     """
@@ -619,7 +625,7 @@ def extract_polylines_from_centerline(
     def _extract_on_mask(mask: np.ndarray) -> list[np.ndarray]:
         """Extract branch polylines from a single centerline *mask* volume."""
         coords = _coords_from_centerline_volume(
-            mask.astype(np.uint8), reskeletonize=reskeletonize
+            mask.astype(np.uint8), reskeletonize=reskeletonize, method=method, spacing=spacing
         )
         if coords.shape[0] < min_pts:
             return []
@@ -645,10 +651,12 @@ def detect_junctions_from_centerline(
     min_degree: int = 3,
     label_id: int | None = None,
     reskeletonize: bool = False,
+    method: str = "native",
+    spacing: Sequence[float] | None = None,
 ) -> np.ndarray:
     """Junction voxels (degree >= *min_degree*) on the centerline skeleton graph."""
     coords = _coords_from_centerline_volume(
-        centerline, label_id=label_id, reskeletonize=reskeletonize
+        centerline, label_id=label_id, reskeletonize=reskeletonize, method=method, spacing=spacing
     )
     return junction_nodes_from_skeleton(coords, min_degree=min_degree)
 

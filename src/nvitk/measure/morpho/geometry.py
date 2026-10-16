@@ -8,15 +8,7 @@ import numpy as np
 from scipy import ndimage as ndi
 from scipy.spatial import cKDTree
 
-from nvitk.measure.morphometrics_config import (
-    CENTERLINE_RESAMPLE_MIN_SEGMENT_MM,
-    CENTERLINE_RESAMPLE_STEP_MM,
-    DONUT_ARM_MAIN_OVERLAP_TOL_MM,
-    DONUT_ARM_MIN_POINTS_AFTER_MAIN_OVERLAP_TRIM,
-    RESAMPLE_CENTERLINES_BY_ARCLENGTH,
-    TRIM_DONUT_ARM_OVERLAP_WITH_MAIN_CENTERLINE,
-    VMTK_MIN_RETRIED_SEED_SEPARATION_MM,
-)
+from nvitk.measure import morphometrics_config as _cfg
 
 def unit_vector(v: np.ndarray) -> Optional[np.ndarray]:
     """Normalize *v* to unit length; ``None`` if it is (near) zero."""
@@ -128,7 +120,7 @@ def resample_polyline_by_arclength(pts_mm: np.ndarray, step_mm: Optional[float])
         return pts_mm
 
     keep = [0]
-    min_seg = float(CENTERLINE_RESAMPLE_MIN_SEGMENT_MM)
+    min_seg = float(_cfg.CENTERLINE_RESAMPLE_MIN_SEGMENT_MM)
     for i in range(1, len(pts_mm)):
         if np.linalg.norm(pts_mm[i] - pts_mm[keep[-1]]) > min_seg:
             keep.append(i)
@@ -217,9 +209,9 @@ def resample_polyline_by_arclength(pts_mm: np.ndarray, step_mm: Optional[float])
 
 def resample_generated_centerline_points(pts_mm: np.ndarray) -> np.ndarray:
     """Apply the configured arc-length resampling (:func:`resample_polyline_by_arclength`) if enabled."""
-    if not RESAMPLE_CENTERLINES_BY_ARCLENGTH:
+    if not _cfg.RESAMPLE_CENTERLINES_BY_ARCLENGTH:
         return np.asarray(pts_mm, dtype=float)
-    return resample_polyline_by_arclength(pts_mm, CENTERLINE_RESAMPLE_STEP_MM)
+    return resample_polyline_by_arclength(pts_mm, _cfg.CENTERLINE_RESAMPLE_STEP_MM)
 
 
 def chord_length(pts: np.ndarray) -> float:
@@ -274,7 +266,7 @@ def trimmed_seed_pair_from_path(path_mm: np.ndarray, trim_start_mm: float, trim_
         return None
     trim_start_mm = max(0.0, float(trim_start_mm))
     trim_end_mm = trim_start_mm if trim_end_mm is None else max(0.0, float(trim_end_mm))
-    if trim_start_mm + trim_end_mm >= total - float(VMTK_MIN_RETRIED_SEED_SEPARATION_MM):
+    if trim_start_mm + trim_end_mm >= total - float(_cfg.VMTK_MIN_RETRIED_SEED_SEPARATION_MM):
         return None
     return point_at_arc_length(pts, trim_start_mm), point_at_arc_length(pts, total - trim_end_mm)
 
@@ -303,10 +295,10 @@ def trim_polyline_overlap_with_reference_ends(
     original path (or empties it) per *keep_original_if_too_short*.
     """
     pts = np.asarray(pts, dtype=float)
-    min_points = int(min_points_after_trim) if min_points_after_trim is not None else int(DONUT_ARM_MIN_POINTS_AFTER_MAIN_OVERLAP_TRIM)
+    min_points = int(min_points_after_trim) if min_points_after_trim is not None else int(_cfg.DONUT_ARM_MIN_POINTS_AFTER_MAIN_OVERLAP_TRIM)
     refs = [np.asarray(x, dtype=float) for x in (reference_centerline_points or []) if len(x)]
     if (
-        not TRIM_DONUT_ARM_OVERLAP_WITH_MAIN_CENTERLINE
+        not _cfg.TRIM_DONUT_ARM_OVERLAP_WITH_MAIN_CENTERLINE
         or len(pts) < min_points
         or not refs
     ):
@@ -314,8 +306,8 @@ def trim_polyline_overlap_with_reference_ends(
 
     spacing = np.asarray(spacing, dtype=float)
     overlap_tol = (
-        float(DONUT_ARM_MAIN_OVERLAP_TOL_MM)
-        if DONUT_ARM_MAIN_OVERLAP_TOL_MM is not None
+        float(_cfg.DONUT_ARM_MAIN_OVERLAP_TOL_MM)
+        if _cfg.DONUT_ARM_MAIN_OVERLAP_TOL_MM is not None
         else max(0.75, 2.0 * float(np.min(spacing)))
     )
     ref = np.vstack(refs)

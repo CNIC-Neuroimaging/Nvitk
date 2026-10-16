@@ -33,7 +33,8 @@ FIG_DPI = 180
 # ============================================================================
 
 
-SUMMARY_SHEET_RE = re.compile(r"^\d{2}_")
+# Summary sheets: the numbered cow_morpho-style ones and the compact tables / sheet index.
+SUMMARY_SHEET_RE = re.compile(r"^(\d{2}_|(Vessel_Summary|Segments|Lesions|Subject|Sheet_Index)$)")
 
 
 def safe_filename(name: str) -> str:

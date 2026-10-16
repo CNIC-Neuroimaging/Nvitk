@@ -4,7 +4,7 @@
 # Regenerate: python MouseTOFMorphometricsLib/vendor_sync.py
 # The only change from upstream is the root package rename nvitk -> nvitk_vendor.
 # ─────────────────────────────────────────────────────────────────────────
-"""VMTK centerline generation, validation, retries, and result handling."""
+"""Centerline generation (VMTK / native / raycast backends), validation, retries, and result handling."""
 
 from __future__ import annotations
 
@@ -32,39 +32,7 @@ from .caliber import (
     stenosis_total_length,
     stenosis_valid_mask_from_ends,
 )
-from nvitk_vendor.measure.morphometrics_config import (
-    BEND_KAPPA_PEAK,
-    CENTERLINE_RESAMPLE_STEP_MM,
-    ENLARGEMENT_CANDIDATE_EXCLUDE_END_MM,
-    ENLARGEMENT_CENTERLINE_START_EXCLUDE_MM,
-    ENLARGEMENT_EXCLUDE_END_MM,
-    ENLARGEMENT_MIN_LEN_MM,
-    ENLARGEMENT_SUPPORT_THRESHOLD_PCT,
-    ENLARGEMENT_THRESHOLD_PCT,
-    FINAL_CENTERLINE_MIN_POINTS_AFTER_OVERLAP_PRUNE,
-    FINAL_CENTERLINE_OVERLAP_TOL_MM,
-    INFLECT_KAPPA_MIN,
-    INFLECT_SMOOTH_WIN,
-    KEEP_SHARED_PREFIX_AT_BIFURCATION_MM,
-    PRUNE_OVERLAPPING_FINAL_CENTERLINE_PREFIXES,
-    RADIUS_SOURCE_FOR_CALIBER_DETECTION,
-    RETRY_VMTK_WITH_TRIMMED_SEEDS,
-    STENOSIS_CANDIDATE_EXCLUDE_END_MM,
-    STENOSIS_EXCLUDE_END_MM,
-    STENOSIS_MIN_LEN_MM,
-    STENOSIS_SUPPORT_THRESHOLD_PCT,
-    STENOSIS_THRESHOLD_PCT,
-    SUPPRESS_ENLARGEMENT_NEAR_CENTERLINE_STARTS,
-    VALIDATE_VMTK_CENTERLINE_GEOMETRY,
-    VMTK_MAX_CENTERLINE_ENDPOINT_SEED_DIST_MM,
-    VMTK_MIN_CENTERLINE_TO_SEED_PATH_LENGTH_RATIO,
-    VMTK_MIN_VALID_CENTERLINE_POINTS,
-    VMTK_REFERENCE_CONNECTION_TOL_MM,
-    VMTK_SEED_TRIM_RETRY_MM,
-    VMTK_VALIDATE_ENDPOINT_SEEDS,
-    VMTK_VALIDATE_LENGTH_RATIO,
-    VMTK_VALIDATE_REFERENCE_CONNECTION,
-)
+from nvitk_vendor.measure import morphometrics_config as _cfg
 from .geometry import (
     arc_length,
     chord_length,
@@ -97,24 +65,30 @@ from .surface import (
     snap_to_surface,
 )
 
-# nvitk-native centerlines (skeleton path + EDT MIS); pipeline API preserved.
-VMTK_AVAILABLE = True
+def centerline_backend_available(backend: Optional[str] = None) -> bool:
+    """Whether the configured (or given) centerline backend can run here."""
+    backend = str(backend or _cfg.CENTERLINE_BACKEND)
+    if backend == "vmtk":
+        from nvitk_vendor.vmtk import vmtk_available
+
+        return vmtk_available()
+    return backend in ("native", "raycast")
 
 
-def _centerline_poly_from_path_mm(path_mm: np.ndarray) -> object:
-    """Build VTK polyline from a mm path with discrete curvature/torsion arrays."""
-    pts = resample_generated_centerline_points(np.asarray(path_mm, dtype=float))
+def _polyline_poly_with_radius(pts_mm: np.ndarray, radius_mis: np.ndarray) -> object:
+    """Centerline polydata with ``Curvature`` / ``Torsion`` / ``MaximumInscribedSphereRadius``,
+    resampled like the VMTK path (``resample_generated_centerline_points``)."""
+    pts_mm = np.asarray(pts_mm, dtype=float)
+    pts = resample_generated_centerline_points(pts_mm)
     if len(pts) < 2:
         raise RuntimeError("centerline path has fewer than 2 points after resampling")
-    kappa = discrete_curvature(pts)
-    torsion = discrete_torsion(pts)
-    radius_mis = np.full(len(pts), np.nan, dtype=float)
+    radius = resample_point_data_by_arclength(pts_mm, pts, np.asarray(radius_mis, dtype=float))
     return build_polyline_polydata(
         points=pts,
         arrays=[
-            (kappa, "Curvature"),
-            (torsion, "Torsion"),
-            (radius_mis, "MaximumInscribedSphereRadius"),
+            (discrete_curvature(pts), "Curvature"),
+            (discrete_torsion(pts), "Torsion"),
+            (radius, "MaximumInscribedSphereRadius"),
         ],
     )
 
@@ -133,14 +107,54 @@ def centerline_points_from_result(res: dict) -> np.ndarray:
 
 
 def run_vmtk_centerline_between_seeds(surface, seed_start_mm, seed_end_mm, spacing):
-    """Build a straight-line centerline polydata between two seed points (native, non-VMTK fallback path)."""
-    _ = surface
-    _ = spacing
-    pts = np.vstack(
-        [np.asarray(seed_start_mm, dtype=float), np.asarray(seed_end_mm, dtype=float)]
+    """cow_morpho's VMTK centerline between two seeds (snapped to the surface; ``vmtkCenterlines``
+    with the point-list selector, resampled at half the smallest voxel spacing, then
+    ``vmtkCenterlineGeometry`` without smoothing)."""
+    from nvitk_vendor.vmtk.centerlines import centerlines_between_points
+
+    src = snap_to_surface(seed_start_mm, surface)
+    tgt = snap_to_surface(seed_end_mm, surface)
+    print(f"    VMTK seeds: src={np.round(src, 2)}  tgt={np.round(tgt, 2)}")
+    return centerlines_between_points(
+        surface, src, tgt, resampling_step=float(np.min(np.asarray(spacing, dtype=float))) * 0.5
     )
-    print(f"    native centerline seeds: src={np.round(pts[0], 2)}  tgt={np.round(pts[-1], 2)}")
-    return _centerline_poly_from_path_mm(pts)
+
+
+def native_centerline_from_path(surface, path_mm: np.ndarray) -> object:
+    """Native backend: the voxel-skeleton seed path re-centred on the lumen
+    (:func:`nvitk_vendor.morphology.centering.centered_centerline`), MIS = distance to the surface."""
+    from nvitk_vendor.morphology.centering import centered_centerline
+
+    pts, radius = centered_centerline(
+        np.asarray(path_mm, dtype=float),
+        surface,
+        iterations=int(_cfg.NATIVE_CENTERING_ITERATIONS),
+        smooth_mm=float(_cfg.NATIVE_CENTERING_SMOOTH_MM),
+    )
+    return _polyline_poly_with_radius(pts, radius)
+
+
+_RAYCAST_CACHE: dict = {}
+
+
+def raycast_centerline_from_path(surface, path_mm: np.ndarray) -> object:
+    """Raycast backend (experimental): the EXPIGEO skeleton path between the vertices nearest the
+    seed path's ends, with the ray-probing radius. The skeleton is built once per surface."""
+    from nvitk_vendor.morphology.raycast_skeleton import raycast_skeleton_from_surface
+
+    key = id(surface)
+    if key not in _RAYCAST_CACHE:
+        _RAYCAST_CACHE.clear()  # one component at a time
+        _RAYCAST_CACHE[key] = (surface, raycast_skeleton_from_surface(surface))
+    skel = _RAYCAST_CACHE[key][1]
+    pts = np.asarray(path_mm, dtype=float)
+    path, radius = skel.path_between(pts[0], pts[-1])
+    if len(path) < 2:
+        raise RuntimeError("ray-cast skeleton has no path between the seeds")
+    # Keep the seed ends (the skeleton stops a radius short of the wall).
+    path = np.vstack([pts[0], path, pts[-1]])
+    radius = np.concatenate([[radius[0]], radius, [radius[-1]]])
+    return _polyline_poly_with_radius(path, radius)
 
 
 def centerline_points_from_polydata(centerline_poly) -> np.ndarray:
@@ -166,11 +180,11 @@ def validate_vmtk_centerline_attempt(
     that fail to connect back to already-accepted reference centerlines. Each
     check is individually toggleable via config flags.
     """
-    if not VALIDATE_VMTK_CENTERLINE_GEOMETRY:
+    if not _cfg.VALIDATE_VMTK_CENTERLINE_GEOMETRY:
         return True, ""
 
     pts = centerline_points_from_polydata(centerline_poly)
-    min_points = int(VMTK_MIN_VALID_CENTERLINE_POINTS)
+    min_points = int(_cfg.VMTK_MIN_VALID_CENTERLINE_POINTS)
     if len(pts) < min_points:
         return False, f"centerline has only {len(pts)} point(s), fewer than required {min_points}"
 
@@ -178,12 +192,12 @@ def validate_vmtk_centerline_attempt(
     seed_path_len = arc_length(seed_path_mm)
     cl_len = arc_length(pts)
     if (
-        VMTK_VALIDATE_LENGTH_RATIO
+        _cfg.VMTK_VALIDATE_LENGTH_RATIO
         and
         np.isfinite(seed_path_len)
         and seed_path_len > 1e-8
         and np.isfinite(cl_len)
-        and cl_len < float(VMTK_MIN_CENTERLINE_TO_SEED_PATH_LENGTH_RATIO) * seed_path_len
+        and cl_len < float(_cfg.VMTK_MIN_CENTERLINE_TO_SEED_PATH_LENGTH_RATIO) * seed_path_len
     ):
         return (
             False,
@@ -191,10 +205,10 @@ def validate_vmtk_centerline_attempt(
             f"({cl_len:.2f} mm vs {seed_path_len:.2f} mm)",
         )
 
-    if VMTK_VALIDATE_ENDPOINT_SEEDS:
+    if _cfg.VMTK_VALIDATE_ENDPOINT_SEEDS:
         endpoint_tol = (
-            float(VMTK_MAX_CENTERLINE_ENDPOINT_SEED_DIST_MM)
-            if VMTK_MAX_CENTERLINE_ENDPOINT_SEED_DIST_MM is not None
+            float(_cfg.VMTK_MAX_CENTERLINE_ENDPOINT_SEED_DIST_MM)
+            if _cfg.VMTK_MAX_CENTERLINE_ENDPOINT_SEED_DIST_MM is not None
             else max(1.5, 3.0 * float(np.min(spacing)))
         )
         direct = max(float(np.linalg.norm(pts[0] - seed_start_mm)), float(np.linalg.norm(pts[-1] - seed_end_mm)))
@@ -207,11 +221,11 @@ def validate_vmtk_centerline_attempt(
             )
 
     ref_pts = [np.asarray(x, dtype=float) for x in (reference_centerline_points or []) if len(x)]
-    if VMTK_VALIDATE_REFERENCE_CONNECTION and ref_pts:
+    if _cfg.VMTK_VALIDATE_REFERENCE_CONNECTION and ref_pts:
         ref = np.vstack(ref_pts)
         ref_tol = (
-            float(VMTK_REFERENCE_CONNECTION_TOL_MM)
-            if VMTK_REFERENCE_CONNECTION_TOL_MM is not None
+            float(_cfg.VMTK_REFERENCE_CONNECTION_TOL_MM)
+            if _cfg.VMTK_REFERENCE_CONNECTION_TOL_MM is not None
             else max(1.0, 2.5 * float(np.min(spacing)))
         )
         ref_tree = cKDTree(ref)
@@ -262,33 +276,33 @@ def refresh_centerline_result_metrics(res: dict) -> None:
     res["curvature_median_1_per_mm"] = float(np.nanmedian(curvature)) if k_valid.size else np.nan
     res["curvature_p95_1_per_mm"] = float(np.nanpercentile(k_valid, 95)) if k_valid.size else np.nan
     res["curvature_max_1_per_mm"] = float(np.nanmax(curvature)) if k_valid.size else np.nan
-    res["inflection_count"] = int(inflection_count(curvature, res["turn_proxy"], INFLECT_KAPPA_MIN, INFLECT_SMOOTH_WIN))
-    res["bend_peak_count"] = int(bend_peak_count(curvature, BEND_KAPPA_PEAK, INFLECT_SMOOTH_WIN))
+    res["inflection_count"] = int(inflection_count(curvature, res["turn_proxy"], _cfg.INFLECT_KAPPA_MIN, _cfg.INFLECT_SMOOTH_WIN))
+    res["bend_peak_count"] = int(bend_peak_count(curvature, _cfg.BEND_KAPPA_PEAK, _cfg.INFLECT_SMOOTH_WIN))
     res.update(radius_stats(radius))
     res["taper_slope_mm_per_mm"] = float(taper_slope(s, radius))
     sten = detect_stenosis_segments(
-        s=s, r=radius, threshold_pct=STENOSIS_THRESHOLD_PCT,
-        min_segment_mm=STENOSIS_MIN_LEN_MM, exclude_end_mm=STENOSIS_EXCLUDE_END_MM,
+        s=s, r=radius, threshold_pct=_cfg.STENOSIS_THRESHOLD_PCT,
+        min_segment_mm=_cfg.STENOSIS_MIN_LEN_MM, exclude_end_mm=_cfg.STENOSIS_EXCLUDE_END_MM,
         pts=pts,
     )
     sten_pct_point, is_stenotic = stenosis_pointwise(
         s=s, r=radius, r_ref_per_point=sten.r_ref_per_point,
-        threshold_pct=STENOSIS_THRESHOLD_PCT, exclude_end_mm=STENOSIS_EXCLUDE_END_MM,
-        min_segment_mm=STENOSIS_MIN_LEN_MM,
+        threshold_pct=_cfg.STENOSIS_THRESHOLD_PCT, exclude_end_mm=_cfg.STENOSIS_EXCLUDE_END_MM,
+        min_segment_mm=_cfg.STENOSIS_MIN_LEN_MM,
     )
     sten_raw_pct_point = stenosis_raw_percent(
         s=s, r=radius, r_ref_per_point=sten.r_ref_per_point,
         exclude_end_mm=0.0,
     )
     enlarg = detect_enlargement_segments(
-        s=s, r=radius, threshold_pct=ENLARGEMENT_THRESHOLD_PCT,
-        min_segment_mm=ENLARGEMENT_MIN_LEN_MM, exclude_end_mm=ENLARGEMENT_EXCLUDE_END_MM,
+        s=s, r=radius, threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT,
+        min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
         pts=pts,
     )
     enlargement_pct_point, is_enlarged = enlargement_pointwise(
         s=s, r=radius, r_ref_per_point=enlarg.r_ref_per_point,
-        threshold_pct=ENLARGEMENT_THRESHOLD_PCT, exclude_end_mm=ENLARGEMENT_EXCLUDE_END_MM,
-        min_segment_mm=ENLARGEMENT_MIN_LEN_MM,
+        threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
+        min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM,
         pts=pts,
     )
     sten_pct_point, is_stenotic, enlargement_pct_point, is_enlarged = resolve_stenosis_enlargement_overlap(
@@ -297,14 +311,14 @@ def refresh_centerline_result_metrics(res: dict) -> None:
     # CS-based enlargement binary flag (radius_mm is always cross-section radius)
     radius_cs = np.asarray(res["radius_mm"], dtype=float)
     enlarg_cs = detect_enlargement_segments(
-        s=s, r=radius_cs, threshold_pct=ENLARGEMENT_THRESHOLD_PCT,
-        min_segment_mm=ENLARGEMENT_MIN_LEN_MM, exclude_end_mm=ENLARGEMENT_EXCLUDE_END_MM,
+        s=s, r=radius_cs, threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT,
+        min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
         pts=pts,
     )
     _, is_enlarged_cs = enlargement_pointwise(
         s=s, r=radius_cs, r_ref_per_point=enlarg_cs.r_ref_per_point,
-        threshold_pct=ENLARGEMENT_THRESHOLD_PCT, exclude_end_mm=ENLARGEMENT_EXCLUDE_END_MM,
-        min_segment_mm=ENLARGEMENT_MIN_LEN_MM, pts=pts,
+        threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
+        min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM, pts=pts,
     )
     is_enlarged_cs = np.where(is_stenotic == 1, 0, is_enlarged_cs).astype(int)
     siphon_mask = compute_siphon_mask(pts, s)
@@ -312,22 +326,22 @@ def refresh_centerline_result_metrics(res: dict) -> None:
     res["stenosis_percent_point"] = sten_pct_point
     res["stenosis_raw_percent_point"] = sten_raw_pct_point
     res["stenosis_core_candidate_point"] = (
-        (sten_raw_pct_point >= STENOSIS_THRESHOLD_PCT) & np.isfinite(sten_raw_pct_point)
+        (sten_raw_pct_point >= _cfg.STENOSIS_THRESHOLD_PCT) & np.isfinite(sten_raw_pct_point)
     ).astype(float)
     res["stenosis_support_candidate_point"] = (
-        (sten_raw_pct_point >= min(STENOSIS_SUPPORT_THRESHOLD_PCT, STENOSIS_THRESHOLD_PCT))
+        (sten_raw_pct_point >= min(_cfg.STENOSIS_SUPPORT_THRESHOLD_PCT, _cfg.STENOSIS_THRESHOLD_PCT))
         & np.isfinite(sten_raw_pct_point)
-        & (s >= float(STENOSIS_EXCLUDE_END_MM))
+        & (s >= float(_cfg.STENOSIS_EXCLUDE_END_MM))
     ).astype(float)
     res["is_stenotic"] = is_stenotic
     res["stenosis_reference_radius_point"] = sten.r_ref_per_point
-    res["stenosis_threshold_radius_point"] = (1.0 - STENOSIS_THRESHOLD_PCT / 100.0) * sten.r_ref_per_point
+    res["stenosis_threshold_radius_point"] = (1.0 - _cfg.STENOSIS_THRESHOLD_PCT / 100.0) * sten.r_ref_per_point
     res["enlargement_percent_point"] = enlargement_pct_point
     res["is_enlarged"] = is_enlarged
     res["is_enlarged_mis"] = is_enlarged
     res["is_enlarged_cs"] = is_enlarged_cs
     res["enlargement_reference_radius_point"] = enlarg.r_ref_per_point
-    res["enlargement_threshold_radius_point"] = (1.0 + ENLARGEMENT_THRESHOLD_PCT / 100.0) * enlarg.r_ref_per_point
+    res["enlargement_threshold_radius_point"] = (1.0 + _cfg.ENLARGEMENT_THRESHOLD_PCT / 100.0) * enlarg.r_ref_per_point
     stenotic_radius = radius[(is_stenotic == 1) & np.isfinite(radius)]
     enlarged_radius = radius[(is_enlarged == 1) & np.isfinite(radius)]
     res["radius_ref_mm"] = float(sten.r_ref)
@@ -408,9 +422,9 @@ def summarize_segment_result(res: dict) -> dict:
     res["curvature_p95_1_per_mm"] = float(np.nanpercentile(k_valid, 95)) if k_valid.size else np.nan
     res["curvature_max_1_per_mm"] = float(np.nanmax(curvature)) if k_valid.size else np.nan
     res["inflection_count"] = int(
-        inflection_count(curvature, res["turn_proxy"], INFLECT_KAPPA_MIN, INFLECT_SMOOTH_WIN)
+        inflection_count(curvature, res["turn_proxy"], _cfg.INFLECT_KAPPA_MIN, _cfg.INFLECT_SMOOTH_WIN)
     )
-    res["bend_peak_count"] = int(bend_peak_count(curvature, BEND_KAPPA_PEAK, INFLECT_SMOOTH_WIN))
+    res["bend_peak_count"] = int(bend_peak_count(curvature, _cfg.BEND_KAPPA_PEAK, _cfg.INFLECT_SMOOTH_WIN))
 
     res.update(radius_stats(radius))
     res["taper_slope_mm_per_mm"] = float(taper_slope(s, radius))
@@ -655,12 +669,12 @@ def suppress_enlargements_near_centerline_starts(
     Re-exports the VTPs of any path whose flags changed. Returns the number of
     paths modified.
     """
-    if not SUPPRESS_ENLARGEMENT_NEAR_CENTERLINE_STARTS or len(path_results) <= 1:
+    if not _cfg.SUPPRESS_ENLARGEMENT_NEAR_CENTERLINE_STARTS or len(path_results) <= 1:
         return 0
     spacing = np.asarray(spacing, dtype=float)
     exclude_mm = (
-        float(ENLARGEMENT_CENTERLINE_START_EXCLUDE_MM)
-        if ENLARGEMENT_CENTERLINE_START_EXCLUDE_MM is not None
+        float(_cfg.ENLARGEMENT_CENTERLINE_START_EXCLUDE_MM)
+        if _cfg.ENLARGEMENT_CENTERLINE_START_EXCLUDE_MM is not None
         else max(1.5, 3.0 * float(np.min(spacing)))
     )
     starts = []
@@ -714,13 +728,13 @@ def prune_overlapping_final_centerlines(
     per ``KEEP_SHARED_PREFIX_AT_BIFURCATION_MM``), or discarded entirely if too
     few points would remain. Returns ``(kept_results, discarded_path_ids, n_trimmed)``.
     """
-    if not PRUNE_OVERLAPPING_FINAL_CENTERLINE_PREFIXES or len(path_results) <= 1:
+    if not _cfg.PRUNE_OVERLAPPING_FINAL_CENTERLINE_PREFIXES or len(path_results) <= 1:
         return path_results, set(), 0
 
     spacing = np.asarray(spacing, dtype=float)
     overlap_tol = (
-        float(FINAL_CENTERLINE_OVERLAP_TOL_MM)
-        if FINAL_CENTERLINE_OVERLAP_TOL_MM is not None
+        float(_cfg.FINAL_CENTERLINE_OVERLAP_TOL_MM)
+        if _cfg.FINAL_CENTERLINE_OVERLAP_TOL_MM is not None
         else max(0.75, 2.0 * float(np.min(spacing)))
     )
     ordered = sorted(path_results, key=lambda r: int(r.get("path_index", 0)))
@@ -754,7 +768,7 @@ def prune_overlapping_final_centerlines(
 
         # Keep a short shared neighborhood so the bifurcation junction remains
         # on each arm (full shared trunk is still removed to avoid duplicates).
-        keep_mm = float(KEEP_SHARED_PREFIX_AT_BIFURCATION_MM)
+        keep_mm = float(_cfg.KEEP_SHARED_PREFIX_AT_BIFURCATION_MM)
         if keep_mm > 0 and prefix_n >= 2:
             prefix_pts = pts[:prefix_n]
             prefix_len = float(np.linalg.norm(np.diff(prefix_pts, axis=0), axis=1).sum()) if prefix_n > 1 else 0.0
@@ -772,7 +786,7 @@ def prune_overlapping_final_centerlines(
             start_idx = max(0, prefix_n - keep_n)
         else:
             start_idx = max(0, prefix_n - 1)
-        if len(pts) - start_idx < int(FINAL_CENTERLINE_MIN_POINTS_AFTER_OVERLAP_PRUNE):
+        if len(pts) - start_idx < int(_cfg.FINAL_CENTERLINE_MIN_POINTS_AFTER_OVERLAP_PRUNE):
             discarded.add(str(res["path_id"]))
             print(
                 f"    [final overlap] Discarding {res['path_id']}: only "
@@ -809,41 +823,52 @@ def run_vmtk_centerline_for_path_with_tip_retries(
     reference_centerline_points: Optional[List[np.ndarray]] = None,
     require_both_reference_endpoints_connected: bool = False,
 ):
-    """Run VMTK centerline extraction with retry-by-trimmed-seeds when validation fails.
+    """Centerline along a seed path with the configured ``CENTERLINE_BACKEND``.
 
-    First tries the full seed path; if the result fails
-    :func:`validate_vmtk_centerline_attempt` and ``RETRY_VMTK_WITH_TRIMMED_SEEDS``
-    is set, retries with seeds trimmed inward by each amount in
-    ``VMTK_SEED_TRIM_RETRY_MM`` (helps when a noisy tip/branch confuses VMTK's
-    seed-to-surface projection). Raises with the collected failure reasons if
-    every attempt fails.
+    ``vmtk`` (cow_morpho): VMTK between the path's end seeds, retried with trimmed seeds when the
+    result fails validation. ``native`` / ``raycast``: one attempt (see the backend functions).
+
+
+    VMTK retry: when the attempt fails :func:`validate_vmtk_centerline_attempt` and
+    ``RETRY_VMTK_WITH_TRIMMED_SEEDS`` is set, the seeds are trimmed inward by each amount in
+    ``VMTK_SEED_TRIM_RETRY_MM`` (helps when a noisy tip confuses the seed-to-surface snapping).
+    Raises with the collected failure reasons if every attempt fails.
     """
     pts = np.asarray(path_mm, dtype=float)
     if len(pts) < 2:
         raise RuntimeError("Cannot run VMTK: seed path has fewer than 2 points.")
 
     attempts = [(0.0, pts[0], pts[-1])]
-    if RETRY_VMTK_WITH_TRIMMED_SEEDS:
-        for trim_mm in VMTK_SEED_TRIM_RETRY_MM:
+    if _cfg.RETRY_VMTK_WITH_TRIMMED_SEEDS:
+        for trim_mm in _cfg.VMTK_SEED_TRIM_RETRY_MM:
             pair = trimmed_seed_pair_from_path(pts, float(trim_mm))
             if pair is not None:
                 attempts.append((float(trim_mm), pair[0], pair[1]))
+
+    backend = str(_cfg.CENTERLINE_BACKEND)
+    if backend != "vmtk":
+        # The native / raycast centerlines follow the seed path itself, so trimming the seeds
+        # cannot help: one attempt, validated like a VMTK one.
+        attempts = attempts[:1]
+    elif not centerline_backend_available("vmtk"):
+        from nvitk_vendor.vmtk import require_vmtk
+
+        require_vmtk()
 
     errors = []
     for trim_mm, seed_start_mm, seed_end_mm in attempts:
         try:
             if trim_mm > 0:
                 print(
-                    f"    [centerline retry] {context} retry with both seeds trimmed "
+                    f"    [vmtk retry] {context} retry with both seeds trimmed "
                     f"{trim_mm:.2f} mm inward."
                 )
-                pair = trimmed_seed_pair_from_path(pts, float(trim_mm))
-                if pair is None:
-                    raise RuntimeError("trimmed seed pair unavailable")
-                sub_pts = np.vstack([pair[0], pair[1]]).astype(float)
+            if backend == "vmtk":
+                centerline_poly = run_vmtk_centerline_between_seeds(surface, seed_start_mm, seed_end_mm, spacing)
+            elif backend == "native":
+                centerline_poly = native_centerline_from_path(surface, pts)
             else:
-                sub_pts = pts
-            centerline_poly = _centerline_poly_from_path_mm(sub_pts)
+                centerline_poly = raycast_centerline_from_path(surface, pts)
             ok, reason = validate_vmtk_centerline_attempt(
                 centerline_poly=centerline_poly,
                 seed_path_mm=pts,
@@ -856,14 +881,14 @@ def run_vmtk_centerline_for_path_with_tip_retries(
             if not ok:
                 raise RuntimeError(reason)
             if trim_mm > 0:
-                print(f"    [centerline retry] {context} succeeded after {trim_mm:.2f} mm seed trim.")
+                print(f"    [vmtk retry] {context} succeeded after {trim_mm:.2f} mm seed trim.")
             return centerline_poly, seed_start_mm, seed_end_mm, trim_mm
         except Exception as e:
             errors.append(f"trim={trim_mm:.2f} mm: {e}")
             if trim_mm == 0:
-                print(f"    [centerline retry] {context} original endpoint seeds failed: {e}")
+                print(f"    [{backend} centerline] {context} original endpoint seeds failed: {e}")
 
-    raise RuntimeError("Centerline generation failed for original and trimmed seeds. " + " | ".join(errors))
+    raise RuntimeError(f"{backend} centerline failed for original and trimmed seeds. " + " | ".join(errors))
 
 
 def analyze_centerline_poly(
@@ -931,7 +956,7 @@ def analyze_centerline_poly(
     if resampled_centerline:
         print(
             f"    [centerline] Resampled {original_n} -> {len(pts_resampled)} point(s) "
-            f"at {float(CENTERLINE_RESAMPLE_STEP_MM):.3f} mm arc-length spacing."
+            f"at {float(_cfg.CENTERLINE_RESAMPLE_STEP_MM):.3f} mm arc-length spacing."
         )
         pts = pts_resampled
         kappa_vmtk = discrete_curvature(pts)
@@ -957,7 +982,7 @@ def analyze_centerline_poly(
         radius = radius_from_edt(mask_cc.astype(bool), spacing, path_vox_cl)
         radius_area = radius.copy()
     detection_radius = select_caliber_detection_radius(radius_area, radius_mis)
-    if str(RADIUS_SOURCE_FOR_CALIBER_DETECTION).lower() in {"maximum_inscribed_sphere", "mis", "vmtk"}:
+    if str(_cfg.RADIUS_SOURCE_FOR_CALIBER_DETECTION).lower() in {"maximum_inscribed_sphere", "mis", "vmtk"}:
         n_mis = int(np.sum(np.isfinite(radius_mis) & (radius_mis > 1e-6)))
         print(f"    Using maximum-inscribed-sphere radius for stenosis/enlargement detection ({n_mis}/{len(radius_mis)} valid).")
 
@@ -971,55 +996,55 @@ def analyze_centerline_poly(
     k_p95 = float(np.nanpercentile(k_valid, 95)) if k_valid.size else np.nan
     k_max = float(np.nanmax(kappa)) if k_valid.size else np.nan
     turn_proxy = signed_turn_proxy(pts)
-    n_inflections = inflection_count(kappa, turn_proxy, INFLECT_KAPPA_MIN, INFLECT_SMOOTH_WIN)
-    n_bends = bend_peak_count(kappa, BEND_KAPPA_PEAK, INFLECT_SMOOTH_WIN)
+    n_inflections = inflection_count(kappa, turn_proxy, _cfg.INFLECT_KAPPA_MIN, _cfg.INFLECT_SMOOTH_WIN)
+    n_bends = bend_peak_count(kappa, _cfg.BEND_KAPPA_PEAK, _cfg.INFLECT_SMOOTH_WIN)
     r_stats = radius_stats(radius_area)
     taper = taper_slope(s, detection_radius)
     sten = detect_stenosis_segments(
-        s=s, r=detection_radius, threshold_pct=STENOSIS_THRESHOLD_PCT,
-        min_segment_mm=STENOSIS_MIN_LEN_MM, exclude_end_mm=STENOSIS_EXCLUDE_END_MM,
+        s=s, r=detection_radius, threshold_pct=_cfg.STENOSIS_THRESHOLD_PCT,
+        min_segment_mm=_cfg.STENOSIS_MIN_LEN_MM, exclude_end_mm=_cfg.STENOSIS_EXCLUDE_END_MM,
         pts=pts,
     )
     sten_pct_point, is_stenotic = stenosis_pointwise(
         s=s, r=detection_radius, r_ref_per_point=sten.r_ref_per_point,
-        threshold_pct=STENOSIS_THRESHOLD_PCT, exclude_end_mm=STENOSIS_EXCLUDE_END_MM,
-        min_segment_mm=STENOSIS_MIN_LEN_MM,
+        threshold_pct=_cfg.STENOSIS_THRESHOLD_PCT, exclude_end_mm=_cfg.STENOSIS_EXCLUDE_END_MM,
+        min_segment_mm=_cfg.STENOSIS_MIN_LEN_MM,
     )
     sten_raw_pct_point = stenosis_raw_percent(
         s=s, r=detection_radius, r_ref_per_point=sten.r_ref_per_point,
         exclude_end_mm=0.0,
     )
-    candidate_valid = stenosis_valid_mask_from_ends(s, float(STENOSIS_CANDIDATE_EXCLUDE_END_MM))
+    candidate_valid = stenosis_valid_mask_from_ends(s, float(_cfg.STENOSIS_CANDIDATE_EXCLUDE_END_MM))
     sten_core_candidate = (
-        (sten_raw_pct_point >= STENOSIS_THRESHOLD_PCT) & np.isfinite(sten_raw_pct_point)
+        (sten_raw_pct_point >= _cfg.STENOSIS_THRESHOLD_PCT) & np.isfinite(sten_raw_pct_point)
         & candidate_valid
     ).astype(np.float64)
     sten_support_candidate = (
-        (sten_raw_pct_point >= min(STENOSIS_SUPPORT_THRESHOLD_PCT, STENOSIS_THRESHOLD_PCT))
+        (sten_raw_pct_point >= min(_cfg.STENOSIS_SUPPORT_THRESHOLD_PCT, _cfg.STENOSIS_THRESHOLD_PCT))
         & np.isfinite(sten_raw_pct_point)
         & candidate_valid
     ).astype(np.float64)
     enlarg = detect_enlargement_segments(
-        s=s, r=radius_area, threshold_pct=ENLARGEMENT_THRESHOLD_PCT,
-        min_segment_mm=ENLARGEMENT_MIN_LEN_MM, exclude_end_mm=ENLARGEMENT_EXCLUDE_END_MM,
+        s=s, r=radius_area, threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT,
+        min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
         pts=pts,
     )
     enlargement_pct_point, is_enlarged = enlargement_pointwise(
         s=s, r=radius_area, r_ref_per_point=enlarg.r_ref_per_point,
-        threshold_pct=ENLARGEMENT_THRESHOLD_PCT, exclude_end_mm=ENLARGEMENT_EXCLUDE_END_MM,
-        min_segment_mm=ENLARGEMENT_MIN_LEN_MM,
+        threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
+        min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM,
         pts=pts,
     )
     enlarg_raw_pct_point = np.full(len(pts), np.nan, dtype=float)
     enlarg_ref_valid = np.isfinite(radius_area) & np.isfinite(enlarg.r_ref_per_point) & (enlarg.r_ref_per_point > 1e-8)
     enlarg_raw_pct_point[enlarg_ref_valid] = (radius_area[enlarg_ref_valid] / enlarg.r_ref_per_point[enlarg_ref_valid] - 1.0) * 100.0
-    enlarg_candidate_valid = stenosis_valid_mask_from_ends(s, float(ENLARGEMENT_CANDIDATE_EXCLUDE_END_MM))
+    enlarg_candidate_valid = stenosis_valid_mask_from_ends(s, float(_cfg.ENLARGEMENT_CANDIDATE_EXCLUDE_END_MM))
     enlarg_core_candidate = (
-        (enlarg_raw_pct_point >= ENLARGEMENT_THRESHOLD_PCT) & np.isfinite(enlarg_raw_pct_point)
+        (enlarg_raw_pct_point >= _cfg.ENLARGEMENT_THRESHOLD_PCT) & np.isfinite(enlarg_raw_pct_point)
         & enlarg_candidate_valid
     ).astype(np.float64)
     enlarg_support_candidate = (
-        (enlarg_raw_pct_point >= min(ENLARGEMENT_SUPPORT_THRESHOLD_PCT, ENLARGEMENT_THRESHOLD_PCT))
+        (enlarg_raw_pct_point >= min(_cfg.ENLARGEMENT_SUPPORT_THRESHOLD_PCT, _cfg.ENLARGEMENT_THRESHOLD_PCT))
         & np.isfinite(enlarg_raw_pct_point)
         & enlarg_candidate_valid
     ).astype(np.float64)
@@ -1034,14 +1059,14 @@ def analyze_centerline_poly(
     # CS-based enlargement is already computed above (radius_area); MIS-based is new.
     is_enlarged_cs = is_enlarged
     enlarg_mis = detect_enlargement_segments(
-        s=s, r=detection_radius, threshold_pct=ENLARGEMENT_THRESHOLD_PCT,
-        min_segment_mm=ENLARGEMENT_MIN_LEN_MM, exclude_end_mm=ENLARGEMENT_EXCLUDE_END_MM,
+        s=s, r=detection_radius, threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT,
+        min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
         pts=pts,
     )
     _, is_enlarged_mis = enlargement_pointwise(
         s=s, r=detection_radius, r_ref_per_point=enlarg_mis.r_ref_per_point,
-        threshold_pct=ENLARGEMENT_THRESHOLD_PCT, exclude_end_mm=ENLARGEMENT_EXCLUDE_END_MM,
-        min_segment_mm=ENLARGEMENT_MIN_LEN_MM, pts=pts,
+        threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
+        min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM, pts=pts,
     )
     is_enlarged_mis = np.where(is_stenotic == 1, 0, is_enlarged_mis).astype(int)
 
@@ -1053,13 +1078,13 @@ def analyze_centerline_poly(
             (detection_radius, "StenosisDetectionRadius"),
             (cross_section_area, "CrossSectionArea"),
             (sten.r_ref_per_point, "StenosisReferenceRadius"),
-            ((1.0 - STENOSIS_THRESHOLD_PCT / 100.0) * sten.r_ref_per_point, "StenosisThresholdRadius"),
+            ((1.0 - _cfg.STENOSIS_THRESHOLD_PCT / 100.0) * sten.r_ref_per_point, "StenosisThresholdRadius"),
             (sten_raw_pct_point, "StenosisRawPercent"),
             (sten_core_candidate, "StenosisCoreCandidate"),
             (sten_support_candidate, "StenosisSupportCandidate"),
             (sten_pct_point, "StenosisPercent"), (stenosis_binary, "StenosisBinary"),
             (enlarg.r_ref_per_point, "EnlargementReferenceRadius"),
-            ((1.0 + ENLARGEMENT_THRESHOLD_PCT / 100.0) * enlarg.r_ref_per_point, "EnlargementThresholdRadius"),
+            ((1.0 + _cfg.ENLARGEMENT_THRESHOLD_PCT / 100.0) * enlarg.r_ref_per_point, "EnlargementThresholdRadius"),
             (enlarg_raw_pct_point, "EnlargementRawPercent"),
             (enlarg_core_candidate, "EnlargementCoreCandidate"),
             (enlarg_support_candidate, "EnlargementSupportCandidate"),
@@ -1080,13 +1105,13 @@ def analyze_centerline_poly(
             (radius_mis, "MaximumInscribedSphereRadius"),
             (detection_radius, "StenosisDetectionRadius"),
             (sten.r_ref_per_point, "StenosisReferenceRadius"),
-            ((1.0 - STENOSIS_THRESHOLD_PCT / 100.0) * sten.r_ref_per_point, "StenosisThresholdRadius"),
+            ((1.0 - _cfg.STENOSIS_THRESHOLD_PCT / 100.0) * sten.r_ref_per_point, "StenosisThresholdRadius"),
             (sten_raw_pct_point, "StenosisRawPercent"),
             (sten_core_candidate, "StenosisCoreCandidate"),
             (sten_support_candidate, "StenosisSupportCandidate"),
             (sten_pct_point, "StenosisPercent"), (stenosis_binary, "StenosisBinary"),
             (enlarg.r_ref_per_point, "EnlargementReferenceRadius"),
-            ((1.0 + ENLARGEMENT_THRESHOLD_PCT / 100.0) * enlarg.r_ref_per_point, "EnlargementThresholdRadius"),
+            ((1.0 + _cfg.ENLARGEMENT_THRESHOLD_PCT / 100.0) * enlarg.r_ref_per_point, "EnlargementThresholdRadius"),
             (enlarg_raw_pct_point, "EnlargementRawPercent"),
             (enlarg_core_candidate, "EnlargementCoreCandidate"),
             (enlarg_support_candidate, "EnlargementSupportCandidate"),
@@ -1110,7 +1135,7 @@ def analyze_centerline_poly(
         "stenosis_support_candidate_point": sten_support_candidate,
         "stenosis_percent_point": sten_pct_point, "is_stenotic": is_stenotic,
         "stenosis_reference_radius_point": sten.r_ref_per_point,
-        "stenosis_threshold_radius_point": (1.0 - STENOSIS_THRESHOLD_PCT / 100.0) * sten.r_ref_per_point,
+        "stenosis_threshold_radius_point": (1.0 - _cfg.STENOSIS_THRESHOLD_PCT / 100.0) * sten.r_ref_per_point,
         "enlargement_raw_percent_point": enlarg_raw_pct_point,
         "enlargement_core_candidate_point": enlarg_core_candidate,
         "enlargement_support_candidate_point": enlarg_support_candidate,
@@ -1118,7 +1143,7 @@ def analyze_centerline_poly(
         "is_enlarged_cs": is_enlarged_cs, "is_enlarged_mis": is_enlarged_mis,
         "siphon_mask_point": siphon_mask.astype(float),
         "enlargement_reference_radius_point": enlarg.r_ref_per_point,
-        "enlargement_threshold_radius_point": (1.0 + ENLARGEMENT_THRESHOLD_PCT / 100.0) * enlarg.r_ref_per_point,
+        "enlargement_threshold_radius_point": (1.0 + _cfg.ENLARGEMENT_THRESHOLD_PCT / 100.0) * enlarg.r_ref_per_point,
         "length_mm": float(L), "chord_length_mm": float(C), "tortuosity_dm": float(T),
         "curvature_mean_1_per_mm": float(k_mean), "curvature_median_1_per_mm": float(k_median),
         "curvature_p95_1_per_mm": float(k_p95), "curvature_max_1_per_mm": float(k_max),

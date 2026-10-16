@@ -40,32 +40,7 @@ from .centerlines import (
     run_vmtk_centerline_for_path_with_tip_retries,
     suppress_enlargements_near_centerline_starts,
 )
-from nvitk_vendor.measure.morphometrics_config import (
-    CENTERLINE_RESAMPLE_STEP_MM,
-    DONUT_ARM_ENDPOINT_BLEND_MM,
-    DONUT_ARM_END_TRIM_RADIUS_FACTOR,
-    DONUT_ARM_MASK_MARGIN_MM,
-    ENLARGEMENT_EXCLUDE_END_MM,
-    ENLARGEMENT_MIN_LEN_MM,
-    ENLARGEMENT_THRESHOLD_PCT,
-    EXPORT_ANATOMIC_SPLIT_CENTERLINES,
-    FINAL_CENTERLINE_MIN_POINTS_AFTER_OVERLAP_PRUNE,
-    PRESERVE_DONUT_ARM_ENDPOINTS,
-    RUN_VMTK_ON_ISOLATED_DONUT_ARM,
-    SAVE_DONUT_LOOP_DEBUG,
-    SAVE_UNSELECTED_DONUT_ARM_SKELETON,
-    SKELETON_MAX_STEPS,
-    SKELETON_STEP_MM,
-    SKELETON_TANGENT_NPTS,
-    SKELETON_WALL_TOL_MM,
-    STENOSIS_EXCLUDE_END_MM,
-    STENOSIS_MIN_LEN_MM,
-    STENOSIS_SUPPORT_THRESHOLD_PCT,
-    STENOSIS_THRESHOLD_PCT,
-    TRIM_DONUT_ARM_ENDS_BY_RADIUS,
-    TRIM_DONUT_ARM_VMTK_TO_SKELETON_ENDPOINTS,
-    USE_SKELETON_CONNECTORS_AFTER_TRIM,
-)
+from nvitk_vendor.measure import morphometrics_config as _cfg
 from .geometry import (
     arc_length,
     cumulative_s,
@@ -76,7 +51,7 @@ from .geometry import (
     trim_polyline_ends_by_length,
     trim_polyline_overlap_with_reference_ends,
 )
-from .io_utils import safe_filename, safe_sheet_name
+from .io_utils import safe_filename
 from .metrics import compute_branchpoint_metrics, discrete_curvature, discrete_torsion, radius_from_edt
 from .models import SkeletonTree, VesselInfo
 from .skeleton import dijkstra_dist_from_root, skeleton_total_graph_length_mm
@@ -121,7 +96,7 @@ def isolate_donut_arm_mask(
 
     dist_arm, _ = cKDTree(arm_pts).query(vox_mm, k=1)
     dist_comp, _ = cKDTree(comp_pts).query(vox_mm, k=1)
-    margin = float(DONUT_ARM_MASK_MARGIN_MM)
+    margin = float(_cfg.DONUT_ARM_MASK_MARGIN_MM)
     keep = dist_arm <= (dist_comp + margin)
 
     arm_mask = np.zeros_like(mask_bool, dtype=bool)
@@ -183,7 +158,7 @@ def run_isolated_donut_arm_vmtk(
         pts = pts.copy()
         if np.linalg.norm(pts[0] - seed_start_mm) > np.linalg.norm(pts[-1] - seed_start_mm):
             pts = pts[::-1]
-        if TRIM_DONUT_ARM_VMTK_TO_SKELETON_ENDPOINTS and len(pts) >= 4:
+        if _cfg.TRIM_DONUT_ARM_VMTK_TO_SKELETON_ENDPOINTS and len(pts) >= 4:
             i_start = int(np.argmin(np.linalg.norm(pts - seed_start_mm, axis=1)))
             i_end = int(np.argmin(np.linalg.norm(pts - seed_end_mm, axis=1)))
             if i_start > i_end:
@@ -192,22 +167,22 @@ def run_isolated_donut_arm_vmtk(
                 i_end = len(pts) - 1 - i_end
             if i_end > i_start:
                 pts = pts[i_start:i_end + 1].copy()
-        if TRIM_DONUT_ARM_ENDS_BY_RADIUS and len(pts) >= 3:
+        if _cfg.TRIM_DONUT_ARM_ENDS_BY_RADIUS and len(pts) >= 3:
             dist_mm = ndi.distance_transform_edt(arm_mask.astype(bool), sampling=spacing)
             center_vox = np.clip(np.round(pts / spacing).astype(int), 0, np.array(arm_mask.shape) - 1)
             radii = dist_mm[tuple(center_vox.T)]
             valid_radii = radii[np.isfinite(radii) & (radii > 0)]
-            trim_mm = float(np.nanmean(valid_radii) * DONUT_ARM_END_TRIM_RADIUS_FACTOR) if len(valid_radii) else 0.0
+            trim_mm = float(np.nanmean(valid_radii) * _cfg.DONUT_ARM_END_TRIM_RADIUS_FACTOR) if len(valid_radii) else 0.0
             if trim_mm > 0:
                 pts = trim_polyline_ends_by_length(pts, trim_mm)
                 print(f"    [donut] Trimmed isolated arm VMTK ends by {trim_mm:.2f} mm (mean radius).")
-        if PRESERVE_DONUT_ARM_ENDPOINTS and USE_SKELETON_CONNECTORS_AFTER_TRIM and len(pts) >= 2:
-            pts = splice_skeleton_end_connectors(pts, arm_pts_mm, float(DONUT_ARM_ENDPOINT_BLEND_MM))
+        if _cfg.PRESERVE_DONUT_ARM_ENDPOINTS and _cfg.USE_SKELETON_CONNECTORS_AFTER_TRIM and len(pts) >= 2:
+            pts = splice_skeleton_end_connectors(pts, arm_pts_mm, float(_cfg.DONUT_ARM_ENDPOINT_BLEND_MM))
         pts, main_overlap_trim_start_n, main_overlap_trim_end_n, _, main_overlap_tol = trim_polyline_overlap_with_reference_ends(
             pts,
             reference_centerline_points,
             spacing,
-            min_points_after_trim=FINAL_CENTERLINE_MIN_POINTS_AFTER_OVERLAP_PRUNE,
+            min_points_after_trim=_cfg.FINAL_CENTERLINE_MIN_POINTS_AFTER_OVERLAP_PRUNE,
             keep_original_if_too_short=False,
         )
         if main_overlap_trim_start_n or main_overlap_trim_end_n:
@@ -216,10 +191,10 @@ def run_isolated_donut_arm_vmtk(
                 f"{main_overlap_trim_start_n} start point(s), {main_overlap_trim_end_n} end point(s) "
                 f"(tol {main_overlap_tol:.2f} mm)."
             )
-        if len(pts) < int(FINAL_CENTERLINE_MIN_POINTS_AFTER_OVERLAP_PRUNE):
+        if len(pts) < int(_cfg.FINAL_CENTERLINE_MIN_POINTS_AFTER_OVERLAP_PRUNE):
             raise RuntimeError(
                 f"isolated donut arm left only {len(pts)} point(s) after overlap trimming "
-                f"(minimum {FINAL_CENTERLINE_MIN_POINTS_AFTER_OVERLAP_PRUNE})"
+                f"(minimum {_cfg.FINAL_CENTERLINE_MIN_POINTS_AFTER_OVERLAP_PRUNE})"
             )
     else:
         main_overlap_trim_start_n = 0
@@ -230,7 +205,7 @@ def run_isolated_donut_arm_vmtk(
     if len(pts) != original_n:
         print(
             f"    [donut] Resampled isolated arm {original_n} -> {len(pts)} point(s) "
-            f"at {float(CENTERLINE_RESAMPLE_STEP_MM):.3f} mm arc-length spacing."
+            f"at {float(_cfg.CENTERLINE_RESAMPLE_STEP_MM):.3f} mm arc-length spacing."
         )
     length_mm = arc_length(pts)
 
@@ -245,36 +220,36 @@ def run_isolated_donut_arm_vmtk(
     detection_radius = select_caliber_detection_radius(radius_area, radius_mis)
     s = cumulative_s(pts)
     sten = detect_stenosis_segments(
-        s=s, r=detection_radius, threshold_pct=STENOSIS_THRESHOLD_PCT,
-        min_segment_mm=STENOSIS_MIN_LEN_MM, exclude_end_mm=STENOSIS_EXCLUDE_END_MM,
+        s=s, r=detection_radius, threshold_pct=_cfg.STENOSIS_THRESHOLD_PCT,
+        min_segment_mm=_cfg.STENOSIS_MIN_LEN_MM, exclude_end_mm=_cfg.STENOSIS_EXCLUDE_END_MM,
         pts=pts,
     )
     stenosis_pct_point, is_stenotic = stenosis_pointwise(
         s=s, r=detection_radius, r_ref_per_point=sten.r_ref_per_point,
-        threshold_pct=STENOSIS_THRESHOLD_PCT, exclude_end_mm=STENOSIS_EXCLUDE_END_MM,
-        min_segment_mm=STENOSIS_MIN_LEN_MM,
+        threshold_pct=_cfg.STENOSIS_THRESHOLD_PCT, exclude_end_mm=_cfg.STENOSIS_EXCLUDE_END_MM,
+        min_segment_mm=_cfg.STENOSIS_MIN_LEN_MM,
     )
     stenosis_raw_pct_point = stenosis_raw_percent(
         s=s, r=detection_radius, r_ref_per_point=sten.r_ref_per_point,
         exclude_end_mm=0.0,
     )
     stenosis_core_candidate = (
-        (stenosis_raw_pct_point >= STENOSIS_THRESHOLD_PCT) & np.isfinite(stenosis_raw_pct_point)
+        (stenosis_raw_pct_point >= _cfg.STENOSIS_THRESHOLD_PCT) & np.isfinite(stenosis_raw_pct_point)
     ).astype(np.float64)
     stenosis_support_candidate = (
-        (stenosis_raw_pct_point >= min(STENOSIS_SUPPORT_THRESHOLD_PCT, STENOSIS_THRESHOLD_PCT))
+        (stenosis_raw_pct_point >= min(_cfg.STENOSIS_SUPPORT_THRESHOLD_PCT, _cfg.STENOSIS_THRESHOLD_PCT))
         & np.isfinite(stenosis_raw_pct_point)
-        & (s >= float(STENOSIS_EXCLUDE_END_MM))
+        & (s >= float(_cfg.STENOSIS_EXCLUDE_END_MM))
     ).astype(np.float64)
     enlarg = detect_enlargement_segments(
-        s=s, r=detection_radius, threshold_pct=ENLARGEMENT_THRESHOLD_PCT,
-        min_segment_mm=ENLARGEMENT_MIN_LEN_MM, exclude_end_mm=ENLARGEMENT_EXCLUDE_END_MM,
+        s=s, r=detection_radius, threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT,
+        min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
         pts=pts,
     )
     enlargement_pct_point, is_enlarged = enlargement_pointwise(
         s=s, r=detection_radius, r_ref_per_point=enlarg.r_ref_per_point,
-        threshold_pct=ENLARGEMENT_THRESHOLD_PCT, exclude_end_mm=ENLARGEMENT_EXCLUDE_END_MM,
-        min_segment_mm=ENLARGEMENT_MIN_LEN_MM,
+        threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
+        min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM,
         pts=pts,
     )
     stenosis_pct_point, is_stenotic, enlargement_pct_point, is_enlarged = resolve_stenosis_enlargement_overlap(
@@ -292,14 +267,14 @@ def run_isolated_donut_arm_vmtk(
         (detection_radius, "StenosisDetectionRadius"),
         (cross_section_area, "CrossSectionArea"),
         (sten.r_ref_per_point, "StenosisReferenceRadius"),
-        ((1.0 - STENOSIS_THRESHOLD_PCT / 100.0) * sten.r_ref_per_point, "StenosisThresholdRadius"),
+        ((1.0 - _cfg.STENOSIS_THRESHOLD_PCT / 100.0) * sten.r_ref_per_point, "StenosisThresholdRadius"),
         (stenosis_raw_pct_point, "StenosisRawPercent"),
         (stenosis_core_candidate, "StenosisCoreCandidate"),
         (stenosis_support_candidate, "StenosisSupportCandidate"),
         (stenosis_pct_point, "StenosisPercent"),
         (is_stenotic.astype(np.float64), "StenosisBinary"),
         (enlarg.r_ref_per_point, "EnlargementReferenceRadius"),
-        ((1.0 + ENLARGEMENT_THRESHOLD_PCT / 100.0) * enlarg.r_ref_per_point, "EnlargementThresholdRadius"),
+        ((1.0 + _cfg.ENLARGEMENT_THRESHOLD_PCT / 100.0) * enlarg.r_ref_per_point, "EnlargementThresholdRadius"),
         (enlargement_pct_point, "EnlargementPercent"),
         (is_enlarged.astype(np.float64), "EnlargementBinary"),
         (np.full(len(pts), loop_i, dtype=float), "DonutLoopIndex"),
@@ -393,8 +368,8 @@ def process_donut_loop_component_vmtk(
         order_text = ", ".join(f"{row['terminal_id']}:{row['length_mm']:.1f}mm" for row in terminal_path_records)
         print(f"    [donut] Terminal path order (longest first): {order_text}")
 
-    step_mm = SKELETON_STEP_MM if SKELETON_STEP_MM is not None else float(np.min(spacing)) * 0.5
-    wall_tol_mm = SKELETON_WALL_TOL_MM if SKELETON_WALL_TOL_MM is not None else max(0.25, float(np.min(spacing)) * 0.75)
+    step_mm = _cfg.SKELETON_STEP_MM if _cfg.SKELETON_STEP_MM is not None else float(np.min(spacing)) * 0.5
+    wall_tol_mm = _cfg.SKELETON_WALL_TOL_MM if _cfg.SKELETON_WALL_TOL_MM is not None else max(0.25, float(np.min(spacing)) * 0.75)
 
     for path_i, path_record in enumerate(terminal_path_records, start=1):
         terminal_id = int(path_record["terminal_id"])
@@ -404,16 +379,16 @@ def process_donut_loop_component_vmtk(
             path_mm=path_mm,
             mask_bool=mask_cc.astype(bool),
             spacing=spacing,
-            tangent_pts=SKELETON_TANGENT_NPTS,
+            tangent_pts=_cfg.SKELETON_TANGENT_NPTS,
             step_mm=step_mm,
             wall_tol_mm=wall_tol_mm,
-            max_steps=SKELETON_MAX_STEPS,
+            max_steps=_cfg.SKELETON_MAX_STEPS,
         )
         seed_start_mm = path_mm_ext[0]
         seed_end_mm = path_mm_ext[-1]
         tree_label, tree_path = tree_path_label_for_terminal(tree, int(tree.root), int(terminal_id), spacing)
         path_id = make_path_id(label, vessel_info.name, component_id, path_i, int(terminal_id), tree_label=tree_label)
-        defer_donut_full_path_vtp_export = bool(EXPORT_ANATOMIC_SPLIT_CENTERLINES)
+        defer_donut_full_path_vtp_export = bool(_cfg.EXPORT_ANATOMIC_SPLIT_CENTERLINES)
         cl_path = os.path.join(centerline_dir, path_id + ".vtp") if centerline_dir and not defer_donut_full_path_vtp_export else None
         cl_radius_path = os.path.join(centerline_radius_dir, path_id + "_radius.vtp") if centerline_radius_dir and not defer_donut_full_path_vtp_export else None
 
@@ -519,7 +494,7 @@ def process_donut_loop_component_vmtk(
                 "node_indices": [int(x) for x in (arm1_nodes if selected_arm_i == 1 else arm2_nodes)],
             })
 
-            if SAVE_UNSELECTED_DONUT_ARM_SKELETON and centerline_dir:
+            if _cfg.SAVE_UNSELECTED_DONUT_ARM_SKELETON and centerline_dir:
                 sidecar_id = make_loop_region_path_id(label, vessel_info.name, component_id, loop_i, "alternate_arm")
                 sidecar_saved = False
                 if sidecar_id in saved_unselected_sidecars:
@@ -536,7 +511,7 @@ def process_donut_loop_component_vmtk(
                     sidecar_len = np.nan
                     sidecar_n = 0
                     sidecar_metrics = {}
-                    if not RUN_VMTK_ON_ISOLATED_DONUT_ARM:
+                    if not _cfg.RUN_VMTK_ON_ISOLATED_DONUT_ARM:
                         sidecar_method = "isolated_arm_vmtk_disabled"
                     else:
                         try:
@@ -670,7 +645,7 @@ def process_donut_loop_component_vmtk(
         centerline_radius_dir=centerline_radius_dir,
     )
     point_sheets = {
-        safe_sheet_name(res["path_id"]): build_vessel_points_dataframe("", label, vessel_info, res)
+        str(res["path_id"]): build_vessel_points_dataframe("", label, vessel_info, res)
         for res in path_results
     }
 
@@ -679,13 +654,13 @@ def process_donut_loop_component_vmtk(
         "node_indices_json": json.dumps(row["node_indices"])
     } for row in loop_rows])
 
-    if SAVE_DONUT_LOOP_DEBUG and region_centerline_dir and loop_rows:
+    if _cfg.SAVE_DONUT_LOOP_DEBUG and region_centerline_dir and loop_rows:
         debug_poly = build_donut_loop_debug_polydata(loop_rows, tree, spacing)
         save_vtp(debug_poly, os.path.join(region_centerline_dir, safe_filename(f"{label}_{vessel_info.name}_comp{component_id:02d}_loop_debug_skeleton.vtp")))
 
     saved_anatomic = []
     split_results: List[dict] = []
-    if EXPORT_ANATOMIC_SPLIT_CENTERLINES and centerline_dir:
+    if _cfg.EXPORT_ANATOMIC_SPLIT_CENTERLINES and centerline_dir:
         expected_anatomic = int(len(path_results))
         saved_anatomic, split_results = save_anatomic_fallback_centerlines(
             vessel_info=vessel_info,

@@ -34,14 +34,18 @@ def detect_junctions_from_layer(
     label_id: int | None,
     min_degree = 3,
     reskeletonize = False,
+    method: str = "vmtk",
+    spacing=None,
 ) -> np.ndarray:
-    """Junction voxel coordinates from a 3D centerline mask."""
+    """Junction voxel coordinates from a 3D centerline mask (re-thinned with *method* if asked)."""
     arr = _require_centerline_volume(layer)
     return detect_junctions_from_centerline(
         arr,
         min_degree=min_degree,
         label_id=label_id,
         reskeletonize=reskeletonize,
+        method=method,
+        spacing=spacing,
     )
 
 
@@ -224,6 +228,8 @@ def centerline_polyline_for_label(
     label_id: int,
     *,
     reskeletonize = False,
+    method: str = "vmtk",
+    spacing=None,
 ) -> np.ndarray:
     """Longest-path polyline through one label on a centerline mask (for junction cuts)."""
     from nvitk.morphology.centerline import compute_centerlines
@@ -237,6 +243,8 @@ def centerline_polyline_for_label(
         centerline_mask=arr if not reskeletonize else None,
         labels=[lid],
         min_points=3,
+        method=method,
+        spacing=spacing,
     )
     if lid not in lines:
         coords = np.argwhere(arr == lid)
@@ -282,8 +290,13 @@ def centerline_mask_to_polylines(
     smooth_window: int = 5,
     prune_spur_points: int = 0,
     bridge_max_gap: int = 0,
+    method: str = "vmtk",
+    spacing=None,
 ) -> list[dict[str, Any]]:
     """Convert a labeled centerline mask into connected branch polylines.
+
+    When the mask is (re-)skeletonized, *method* picks the skeletonization
+    (``vmtk`` / ``native`` / ``raycast``, :mod:`nvitk.morphology.skeleton_methods`).
 
     Uses :func:`~nvitk.morphology.centerline.compute_connected_centerline_tree`
     so each label keeps its main path plus every unique junction-split branch
@@ -347,6 +360,8 @@ def centerline_mask_to_polylines(
         prune_short_spurs=spur > 0,
         prune_spur_points=max(spur, 2),
         bridge_max_gap=bridge,
+        method=method,
+        spacing=spacing,
     )
 
     out: list[dict[str, Any]] = []

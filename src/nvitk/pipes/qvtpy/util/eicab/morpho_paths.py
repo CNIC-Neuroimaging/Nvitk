@@ -38,7 +38,7 @@ def resolve_stage7_seg_mask(
     output_root: Path,
     subject: str,
     *,
-    preference: EicabMaskPreference = "wb",
+    preference: EicabMaskPreference = "cw",
     prefer_postprocessed: bool = True,
 ) -> EicabMaskResolution:
     """Return the eICAB multilabel mask used as stage-7 morphometrics input."""

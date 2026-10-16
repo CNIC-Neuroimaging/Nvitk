@@ -559,8 +559,20 @@ def run_gui_tool(
         _run_viz_flowshow_napari(viewer, layer, params, label_ids=label_ids)
         return None
 
-    if tool_id == "viz_flow_streamlines":
-        _run_viz_flow_streamlines_napari(viewer, layer, params, label_ids=label_ids)
+    if tool_id == "viz_flow_traces":
+        _run_viz_flow_traces(viewer, layer, params, label_ids=label_ids)
+        return None
+
+    if tool_id == "vmtk_vessel_enhancement":
+        _run_vmtk_vessel_enhancement(viewer, layer, params)
+        return None
+
+    if tool_id == "vmtk_centerline_network":
+        _run_vmtk_centerline_network(viewer, layer, label_ids, params)
+        return None
+
+    if tool_id == "centerline_center":
+        _run_centerline_center(viewer, layer, label_ids, params)
         return None
 
     if tool_id in {"viz_vessel_hemo", "viz_pitc", "viz_pwv"}:
@@ -768,7 +780,10 @@ def run_gui_tool(
             # ``skeletonize_labeled`` already paints the ids back, so this is a label map and must
             # keep its integer dtype rather than being cast to float like an intensity result.
             return coerce_label_output(
-                skeletonize_labeled(work, labels=labels, min_points=1)
+                skeletonize_labeled(
+                    work, labels=labels, min_points=1,
+                    method=_skeleton_method(params), spacing=_layer_spacing(layer),
+                )
             )
 
     # ---- Per-label routing --------------------------------------------------------------------
@@ -2051,6 +2066,13 @@ def _layer_spacing(layer: Any) -> tuple[float, float, float]:
     return (1.0, 1.0, 1.0)
 
 
+def _skeleton_method(params: dict[str, Any]) -> str:
+    """The tool's skeletonization method (``vmtk`` / ``native`` / ``raycast``; GUI default VMTK)."""
+    from nvitk.morphology.skeleton_methods import DEFAULT_GUI_METHOD, normalize_skeleton_method
+
+    return normalize_skeleton_method(params.get("skeleton_method"), default=DEFAULT_GUI_METHOD)
+
+
 def _phase_arrays_from_layers_or_disk(
     viewer: Any,
     params: dict[str, Any],
@@ -2238,6 +2260,8 @@ def _run_centerline_detect_junctions(
         label_id=lid,
         min_degree=int(params.get("min_junction_degree") or 3),
         reskeletonize=bool(params.get("reskeletonize", False)),
+        method=_skeleton_method(params),
+        spacing=_layer_spacing(layer),
     )
     add_junction_points_layer(
         viewer,
@@ -2310,6 +2334,8 @@ def _run_centerline_to_polyline(
         smooth_window=smooth_window,
         prune_spur_points=int(params.get("prune_spur_points") or 0),
         bridge_max_gap=int(params.get("bridge_max_gap") or 0),
+        method=_skeleton_method(params),
+        spacing=_layer_spacing(layer),
     )
     if not polylines:
         hint = (
@@ -2389,6 +2415,8 @@ def _run_centerline_cut_junctions(
         centerline_layer,
         src_lid,
         reskeletonize=bool(params.get("reskeletonize", False)),
+        method=_skeleton_method(params),
+        spacing=_layer_spacing(centerline_layer),
     )
     start_raw = int(params.get("new_label_start") or 0)
     new_start = None if start_raw <= 0 else start_raw
@@ -2489,6 +2517,7 @@ def _run_measure_centerline_arc_length(
         sx = sy = sz = 1.0
 
     reskel = bool(params.get("reskeletonize", False))
+    method, spacing = _skeleton_method(params), _layer_spacing(layer)
     lid_raw = int(params.get("label_id") or 0)
     targets = [int(x) for x in (label_ids or [])]
     if lid_raw > 0:
@@ -2503,6 +2532,8 @@ def _run_measure_centerline_arc_length(
             mode="junction_split",
             reskeletonize=reskel,
             per_connected_component=True,
+            method=method,
+            spacing=spacing,
         )
         for i, poly in enumerate(polys):
             cum = polyline_cumulative_arc_length(poly)
@@ -2520,7 +2551,7 @@ def _run_measure_centerline_arc_length(
         for lid in targets:
             try:
                 poly = centerline_polyline_for_label(
-                    layer, lid, reskeletonize=reskel
+                    layer, lid, reskeletonize=reskel, method=method, spacing=spacing
                 )
             except ValueError:
                 polys = extract_polylines_from_centerline(
@@ -2528,6 +2559,8 @@ def _run_measure_centerline_arc_length(
                     label_id=lid,
                     mode="junction_split",
                     reskeletonize=reskel,
+                    method=method,
+                    spacing=spacing,
                 )
                 if not polys:
                     rows[_label_display(viewer, layer, lid)] = {
@@ -3347,6 +3380,7 @@ def _run_viz_vessel_cpr(
         step_mm=float(params.get("step_mm") or 0.5),
         join_gap_vox=int(params.get("join_gap_vox", 8) or 0),
         schema_key=_label_schema_for(layer, params),
+        skeleton_method=_skeleton_method(params),
     )
     failed = panel.failure_reasons()
     if failed:
@@ -3481,6 +3515,7 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
     from nvitk.measure.morphometrics import run_morphometrics_case
     from nvitk.measure.morpho.anatomy_axes import SPECIES_AUTO
     from nvitk.measure.morpho.topology_io import TOPOLOGY_NONE
+    from nvitk.morphology.skeleton_methods import normalize_skeleton_method
 
     if layer is None:
         raise ValueError("Select a multilabel segmentation layer first.")
@@ -3498,7 +3533,12 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
     import numpy as numpy
 
     seg = numpy.asarray(to_numpy(layer.data), dtype=numpy.int32)
-    bridged = numpy.asarray(_bridge_same_label_components(seg, max_gap=24), dtype=numpy.int32)
+    # Off by default: the eicab_cw profile (cow_morpho parity) measures the mask as segmented.
+    bridge_gap = int(params.get("bridge_gaps_vox") or 0)
+    bridged = (
+        numpy.asarray(_bridge_same_label_components(seg, max_gap=bridge_gap), dtype=numpy.int32)
+        if bridge_gap > 0 else seg
+    )
     n_bridged = int(numpy.count_nonzero(bridged != seg))
     if n_bridged:
         notify(f"Bridged {n_bridged} voxel(s) to reconnect same-label vessel fragments.")
@@ -3522,6 +3562,8 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
     excel = run_morphometrics_case(
         seg_path,
         out_dir,
+        profile=str(params.get("profile") or "") or None,
+        centerline_backend=normalize_skeleton_method(params.get("centerline_backend"), default="vmtk"),
         mapping_json=topology,
         case_out_dir_override=out_dir,
         n_workers=n_workers,
@@ -3712,7 +3754,9 @@ def _run_cross_sections_generic(viewer: Any, layer: Any, params: dict[str, Any])
 
         with using("cpu"):
             centerline_arr = np.zeros(seg_arr.shape, dtype=np.int32)
-            found = compute_centerlines(seg_arr, min_points=5)
+            found = compute_centerlines(
+                seg_arr, min_points=5, method=_skeleton_method(params), spacing=_layer_spacing(layer)
+            )
             for label, points in (found or {}).items():
                 idx = np.rint(to_numpy(points)).astype(int)
                 for axis in range(3):
@@ -3985,19 +4029,232 @@ def _run_viz_flowshow_napari(
     )
 
 
-def _run_viz_flow_streamlines_napari(
+def _run_vmtk_vessel_enhancement(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
+    """VMTK multiscale vessel enhancement (Frangi / Sato / VED) of the active 3D image."""
+    from nvitk.gui.core.spatial import layer_spatial_kwargs
+    from nvitk.vmtk.image import vessel_enhancement
+
+    data = to_numpy(layer.data)
+    if data.ndim != 3:
+        raise ValueError("VMTK vessel enhancement needs a 3D intensity image as the active layer.")
+    method = str(params.get("vmtk_method") or "frangi")
+    notify(f"VMTK {method} vessel enhancement of '{layer.name}'…")
+    out = vessel_enhancement(
+        data.astype("float32"),
+        spacing=_layer_spacing(layer),
+        method=method,
+        sigma_min=float(params.get("sigma_min") or 0.5),
+        sigma_max=float(params.get("sigma_max") or 3.0),
+        sigma_steps=int(params.get("sigma_steps") or 5),
+        bright_vessels=bool(params.get("bright_vessels", True)),
+        iterations=int(params.get("ved_iterations") or 1),
+    )
+    viewer.add_image(out, name=f"{layer.name}_vmtk_{method}", **layer_spatial_kwargs(layer))
+    notify(f"Added '{layer.name}_vmtk_{method}' (range {float(out.min()):.3g}…{float(out.max()):.3g}).")
+
+
+def _run_vmtk_centerline_network(
+    viewer: Any,
+    layer: Any,
+    label_ids: list[int] | None,
+    params: dict[str, Any],
+) -> None:
+    """Sub-voxel centerline network of the selected labels (VMTK by default), drawn as paths with
+    inscribed-radius points and a per-label summary.
+
+    By default the labels form one network, so the bifurcations between vessels (which sit on
+    label boundaries) are traced too; each branch and point is then tagged with the label it runs
+    through. *network_scope* "each label" builds one network per label instead.
+    """
+    import numpy as numpy_host  # module ``np`` may be a CuPy proxy via ``setup(globals())``
+
+    from nvitk.gui.core.spatial import layer_spatial_kwargs
+    from nvitk.gui.viz.centerline import add_centerline_polylines_shapes
+    from nvitk.morphology.skeleton_methods import centerline_network, normalize_vmtk_coverage
+
+    arr = numpy_host.asarray(to_numpy(layer.data))
+    if arr.ndim != 3:
+        raise ValueError("Centerline network needs a 3D labels layer.")
+    labels = [int(x) for x in (label_ids or [])] or _unique_labels(arr)
+    if not labels:
+        raise ValueError("The layer has no non-zero labels.")
+    method = _skeleton_method(params)
+    coverage = normalize_vmtk_coverage(params.get("vmtk_coverage"))
+    together = not str(params.get("network_scope") or "").strip().lower().startswith("each")
+    spacing = _layer_spacing(layer)
+    sp = numpy_host.asarray(spacing, dtype=float)
+    hi = numpy_host.asarray(arr.shape) - 1
+    groups = [labels] if together else [[lid] for lid in labels]
+    what = f"{method}" + (f", {coverage} coverage" if method == "vmtk" else "")
+    notify(f"Centerline network ({what}) of {len(labels)} label(s)"
+           + (" as one network…" if together and len(labels) > 1 else "…"))
+
+    def point_labels(points: Any) -> Any:
+        idx = numpy_host.clip(numpy_host.round(points).astype(int), 0, hi)
+        return arr[tuple(idx.T)]
+
+    polylines: list[dict[str, Any]] = []
+    pts_all, radius_all, label_all, branch_all, source_all = [], [], [], [], []
+    length_by_label: dict[int, float] = {lid: 0.0 for lid in labels}
+    branches_by_label: dict[int, int] = {lid: 0 for lid in labels}
+    radii_by_label: dict[int, list[Any]] = {lid: [] for lid in labels}
+    n_junctions, source_count = 0, {}
+    for group in groups:
+        mask = numpy_host.isin(arr, numpy_host.asarray(group))
+        net = centerline_network(mask, method=method, spacing=spacing, vmtk_coverage=coverage)
+        n_junctions += int(len(net.junctions))
+        for bi, (branch, radius) in enumerate(zip(net.branches, net.radii)):
+            branch = numpy_host.asarray(branch, dtype=float)
+            radius = numpy_host.asarray(radius, dtype=float)
+            if len(branch) < 2:
+                continue
+            labs = point_labels(branch)
+            inside = labs[numpy_host.isin(labs, numpy_host.asarray(group))]
+            # VMTK appends the seed points on the wall, where the voxel may be background.
+            owner = int(numpy_host.bincount(inside).argmax()) if len(inside) else int(group[0])
+            source = net.sources[bi] if bi < len(net.sources) else ""
+            source_count[source or method] = source_count.get(source or method, 0) + 1
+            gid = len(polylines)
+            polylines.append({"label": owner, "branch_index": gid, "role": "main" if gid == 0 else f"branch{gid}",
+                              "points": branch.astype(numpy_host.float32)})
+            branches_by_label[owner] = branches_by_label.get(owner, 0) + 1
+            seg = numpy_host.linalg.norm(numpy_host.diff(branch * sp, axis=0), axis=1)
+            seg_labs = point_labels(0.5 * (branch[1:] + branch[:-1]))
+            for lid in numpy_host.unique(seg_labs):
+                if int(lid) in length_by_label:
+                    length_by_label[int(lid)] += float(seg[seg_labs == lid].sum())
+            for lid in numpy_host.unique(labs):
+                if int(lid) in radii_by_label:
+                    radii_by_label[int(lid)].append(radius[labs == lid])
+            pts_all.append(branch.astype(numpy_host.float32))
+            radius_all.append(radius.astype(numpy_host.float32))
+            label_all.append(labs.astype(numpy_host.int32))
+            branch_all.append(numpy_host.full(len(branch), gid, dtype=numpy_host.int32))
+            source_all.append(numpy_host.full(len(branch), source or method, dtype=object))
+    rows: dict[str, dict[str, Any]] = {}
+    for lid in labels:
+        rr = numpy_host.concatenate(radii_by_label[lid]) if radii_by_label[lid] else numpy_host.array([numpy_host.nan])
+        rows[_label_display(viewer, layer, lid)] = {
+            "branches": branches_by_label.get(lid, 0),
+            "length (mm)": round(length_by_label.get(lid, 0.0), 2),
+            "median Ø (mm)": round(float(2.0 * numpy_host.nanmedian(rr)), 3) if numpy_host.isfinite(rr).any() else float("nan"),
+        }
+    add_centerline_polylines_shapes(
+        viewer, polylines, reference_layer=layer,
+        layer_name=f"{layer.name} centerlines ({method})",
+        edge_width=float(params.get("edge_width") or 0.35),
+    )
+    if pts_all:
+        viewer.add_points(
+            numpy_host.vstack(pts_all), name=f"{layer.name} centerline radius ({method})",
+            features={
+                "radius_mm": numpy_host.concatenate(radius_all),
+                "label": numpy_host.concatenate(label_all),
+                "branch": numpy_host.concatenate(branch_all),
+                "source": numpy_host.concatenate(source_all),
+            },
+            face_color="radius_mm", face_colormap="turbo", size=float(params.get("point_size") or 0.6),
+            **layer_spatial_kwargs(layer),
+        )
+    total = sum(length_by_label.values())
+    sources = ", ".join(f"{k} {v}" for k, v in source_count.items())
+    per_label = "; ".join(f"{k}: {v['branches']} br, {v['length (mm)']} mm, Ø {v['median Ø (mm)']} mm"
+                          for k, v in rows.items())
+    notify(f"Centerline network ({what}) — {len(polylines)} branches ({sources}), {n_junctions} junctions, "
+           f"{total:.1f} mm. {per_label}")
+
+
+def _run_centerline_center(
+    viewer: Any,
+    layer: Any,
+    label_ids: list[int] | None,
+    params: dict[str, Any],
+) -> None:
+    """Centre a centerline layer (or the mask's own skeleton) on the lumen of the active vessel
+    mask; adds the centred paths and radius-coloured points."""
+    import numpy as numpy_host  # module ``np`` may be a CuPy proxy via ``setup(globals())``
+
+    from nvitk.gui.core.spatial import layer_spatial_kwargs
+    from nvitk.gui.viz.centerline_centering import (
+        center_lines,
+        layer_polylines_world,
+        summary,
+        world_to_data,
+    )
+    from nvitk.morphology.centering import mask_surface
+
+    arr = numpy_host.asarray(to_numpy(layer.data))
+    if arr.ndim != 3:
+        raise ValueError("Select the 3D vessel mask (labels) as the active layer.")
+    labels = [int(x) for x in (label_ids or [])]
+    mask = numpy_host.isin(arr, numpy_host.asarray(labels)) if labels else arr > 0
+    if not mask.any():
+        raise ValueError("The vessel mask is empty (for the selected labels).")
+    sp = numpy_host.asarray(_layer_spacing(layer), dtype=float)
+    step = float(params.get("center_step_mm") or 0.0) or 0.5 * float(sp.min())
+
+    src_name = _layer_param(params, "centerline_layer")
+    if src_name:
+        src = _resolve_layer(viewer, src_name)
+        if src is layer:
+            raise ValueError("Pick the centerline layer, not the vessel mask itself.")
+        lines_vox = [world_to_data(layer, p) for p in layer_polylines_world(src)]
+        src_desc = f"'{src.name}'"
+    else:
+        from nvitk.core.backend import using
+        from nvitk.morphology.centerline import skeletonize_binary
+        from nvitk.morphology.polyline_graph import branch_polylines_from_skeleton
+
+        with using("cpu"):
+            skel = numpy_host.asarray(to_numpy(skeletonize_binary(mask))).astype(bool)
+            lines_vox = [numpy_host.asarray(to_numpy(c), dtype=float)
+                         for c in branch_polylines_from_skeleton(numpy_host.argwhere(skel).astype(numpy_host.float32),
+                                                                 min_points=3)]
+        src_desc = f"the skeleton of '{layer.name}'"
+    lines_vox = [p for p in lines_vox if len(p) >= 2]
+    if not lines_vox:
+        raise ValueError(f"No centerline found in {src_desc}.")
+    notify(f"Centring {len(lines_vox)} centerline(s) from {src_desc} on '{layer.name}'…")
+    centred = center_lines(
+        [p * sp for p in lines_vox], mask_surface(mask, sp),
+        iterations=int(params.get("center_iterations") or 5),
+        smooth_mm=float(params.get("center_smooth_mm") if params.get("center_smooth_mm") is not None else 0.3),
+        step_mm=step,
+    )
+    paths = [c.points / sp for c in centred]
+    base = src_name or layer.name
+    viewer.add_shapes(
+        [p.astype(numpy_host.float32) for p in paths], shape_type="path", name=f"{base} centred",
+        edge_width=float(params.get("edge_width") or 0.35), edge_color="#ffd34d", opacity=0.95,
+        metadata={"nvitk_centred_centerline": True, "source_layer": str(base)},
+        **layer_spatial_kwargs(layer),
+    )
+    viewer.add_points(
+        numpy_host.vstack(paths).astype(numpy_host.float32), name=f"{base} centred radius",
+        features={
+            "radius_mm": numpy_host.concatenate([c.radius for c in centred]),
+            "shift_mm": numpy_host.concatenate([c.shift for c in centred]),
+            "branch": numpy_host.concatenate([numpy_host.full(len(c.points), i) for i, c in enumerate(centred)]),
+        },
+        face_color="radius_mm", face_colormap="turbo", size=float(params.get("point_size") or 0.6),
+        **layer_spatial_kwargs(layer),
+    )
+    notify(f"Centred {src_desc} on '{layer.name}': {summary(centred)}.")
+
+
+def _run_viz_flow_traces(
     viewer: Any,
     mask_layer: Any,
     params: dict[str, Any],
     *,
     label_ids: list[int] | None,
 ) -> None:
-    """Add an animated, dims-synced streamline/pathline overlay for the mask/label ids, precomputing
-    every cardiac phase up front so scrubbing is instant."""
-    from nvitk.gui.viz.flow_streamlines import (
-        add_animated_flow_streamlines_layer,
-        build_flow_streamline_cache,
-        precompute_flow_streamline_frames,
+    """Add an animated, dims-synced VMTK streamline/pathline overlay for the mask/label ids,
+    tracing every cardiac phase up front so scrubbing is instant."""
+    from nvitk.gui.viz.flow_traces import (
+        add_animated_flow_traces_layer,
+        build_flow_trace_cache,
+        precompute_flow_trace_frames,
     )
 
     mask_data = to_numpy(mask_layer.data)
@@ -4027,7 +4284,6 @@ def _run_viz_flow_streamlines_napari(
         mask_arr = to_numpy(mask_on_ref.data)
         spatial_ref = ref_layer if int(getattr(ref_layer.data, "ndim", 0)) <= 3 else ap_layer
     else:
-        ref_layer = ap_layer
         _, mask_on_ref, _ = align_mask_to_reference_layer(
             mask_layer, ap_layer, to_numpy(mask_layer.data), order=0
         )
@@ -4035,14 +4291,11 @@ def _run_viz_flow_streamlines_napari(
         spatial_ref = ap_layer
 
     if not bool((mask_arr > 0).any()):
-        notify("No voxels in mask for flow streamlines.", error=True)
+        notify("No voxels in mask for flow traces.", error=True)
         return
 
-    notify(
-        f"Precomputing streamlines for {_n_labels(mask_arr)} "
-        f"label(s) across cardiac phases…"
-    )
-    cache = build_flow_streamline_cache(
+    notify(f"Tracing (VMTK) {_n_labels(mask_arr)} label(s) across cardiac phases…")
+    cache = build_flow_trace_cache(
         ap_layer.data,
         rl_layer.data,
         fh_layer.data,
@@ -4058,33 +4311,30 @@ def _run_viz_flow_streamlines_napari(
         seed_plane_axis=int(params.get("seed_plane_axis") or 2),
         seed_plane_side=str(params.get("seed_plane_side") or "min"),
         dt_seconds=float(params.get("dt_seconds") or 1.0),
+        min_speed=float(params.get("min_speed") if params.get("min_speed") is not None else 1.0),
         resample_paths=bool(params.get("resample_paths", False)),
         resample_spacing_vox=float(params.get("resample_spacing_vox") or 0.5),
         edge_width=float(params.get("edge_width") or 0.25),
         opacity=float(params.get("opacity") or 0.55),
-        colormap=str(params.get("cmap") or params.get("colormap") or "turbo"),
+        colormap=str(params.get("cmap") or "turbo"),
         color_metric=str(params.get("color_metric") or "speed"),
         per_vertex_color=bool(params.get("per_vertex_color", True)),
     )
-    precompute_flow_streamline_frames(cache)
+    precompute_flow_trace_frames(cache)
 
-    t0 = int(params.get("time_index") or 0)
-    sync_dims = bool(params.get("sync_dims", True))
-    colormap = str(params.get("cmap") or params.get("colormap") or "turbo")
-
-    playback = add_animated_flow_streamlines_layer(
+    playback = add_animated_flow_traces_layer(
         viewer,
         cache,
         phase_layer=ap_layer,
         spatial_reference_layer=spatial_ref,
-        initial_time=t0,
-        sync_dims=sync_dims,
+        initial_time=int(params.get("time_index") or 0),
+        sync_dims=bool(params.get("sync_dims", True)),
     )
-    layer_name = str(getattr(playback.layer, "name", "Flow streamlines"))
+    layer_name = str(getattr(playback.layer, "name", "Flow traces"))
     notify(
-        f"Added layer {layer_name!r}: {cache.params.trace_mode} "
+        f"Added layer {layer_name!r}: VMTK {cache.params.trace_mode} "
         f"({cache.params.n_seeds} seeds × {cache.n_time} phases). "
-        f"Color: {cache.color_metric} / {colormap!r}"
+        f"Color: {cache.color_metric} / {cache.colormap!r}"
         + (
             f" ({cache.speed_lo:.2f}–{cache.speed_hi:.2f} mm/s for speed)"
             if cache.color_metric == "speed"

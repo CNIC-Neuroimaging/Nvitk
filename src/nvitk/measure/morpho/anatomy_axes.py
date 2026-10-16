@@ -38,7 +38,7 @@ Slicer ``MouseTOFMorphometrics`` module relies on that.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 import numpy as np
 
@@ -284,6 +284,11 @@ class MorphoContext:
 
     axes: AnatomicalAxes = AnatomicalAxes()
     length_scale: float = 1.0
+    #: The run's :class:`~nvitk.measure.morphometrics_config.MorphometricsConfig` (re-applied in
+    #: each spawned worker; ``None`` keeps whatever is installed).
+    config: Optional[Any] = None
+    #: NIfTI voxel → RAS-mm affine of the input mask (VTPs are written in that frame).
+    affine: Optional[tuple] = None
 
     def scaled(self, value_mm: float) -> float:
         """Scale a human-calibrated millimetre threshold to this case's anatomy."""

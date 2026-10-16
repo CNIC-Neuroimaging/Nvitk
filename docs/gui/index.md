@@ -556,25 +556,46 @@ window expressed in intensity units, and the live preview is reverted if the dia
 
 `nvitk.gui.tools.registry` defines every tool as a `GuiToolSpec` (id, category, parameter
 spec, whether it needs a reference layer or 3D data, and its run mode), merged with the
-pipeline shortcuts from `nvitk.gui.pipeline.catalog`. **122 tools across 14 categories**,
+pipeline shortcuts from `nvitk.gui.pipeline.catalog`. **124 tools across 14 categories**,
 each backed by the same functions documented in the {doc}`Main API Reference <../api/index>`:
 
 | Category | Count | Examples |
 |---|---|---|
 | Restoration | 3 | Bilateral filter, N4 bias correction, MRI super-resolution |
 | Reconstruction | 1 | Background phase correction (qvtpy's polynomial correction of the complex difference; 3D and 3D+t) |
-| Filters | 17 | Sliding threshold, Hessian, Jerman vesselness, snakes, skimage thresholds and filters |
+| Filters | 18 | Sliding threshold, Hessian, Jerman vesselness, VMTK vessel enhancement (Frangi / Sato / VED), snakes, skimage thresholds and filters |
 | Morphology | 11 | Dilate/erode/open/close, fill holes, connected components, ICA siphon correction, mask genus |
-| Centerline | 3 | Detect/cut junctions, convert to polyline |
+| Centerline | 4 | Detect/cut junctions, convert to polyline, centerline network (branches with inscribed radius) |
 | Segmentation | 26 | Label ops, mask boolean algebra, mask image (keep / remove regions), region growing, blood flood, ANTsPyNet brain/vessel/DKT, TotalSegmentator, eICAB |
 | Registration | 6 | FLIRT register (6/7/9/12 DOF, cost, search range) / apply; ANTsPy register (every `type_of_transform`, stage metrics, iteration schedules, masks) / apply; FireANTs register (moments → rigid → affine → greedy / SyN chains on the GPU) / apply. Each can also warp further layers with the new transform. |
-| Visualization | 12 | PET/SUV hotspots, 4D-flow vectors/streamlines, vessel cross-sections, hemodynamics, TOF morphometrics |
+| Visualization | 12 | PET/SUV hotspots, 4D-flow vectors, 4D-flow particle tracing (VMTK streamlines / pathlines), vessel cross-sections, hemodynamics, TOF morphometrics |
 | Transform | 8 | Volume projection, reorient, rotate, swap axes, isotropy, resample, oblique slice |
 | Interpolation | 4 | Up/down-sample selected axes (factor, spacing or size; shape-based for masks), block downsampling, interpolate masks between annotated slices, fill missing slices |
 | Time & frequency | 8 | 3D+t frame / projection / time curve / stacking / frame interpolation, k-space FFT, inverse FFT, k-space filter |
 | Measure | 19 | QVTPy LOCs, LOC/mask hemodynamics, volume, morphometrics, Dice/Jaccard, SUV stats |
 | Lab | 1 | Mouse TOF Circle-of-Willis interactive session |
 | Pipelines | 3 | Pipeline CLI shortcuts |
+
+**Skeletonization method.** Every tool that skeletonizes or traces centerlines has a
+*Skeletonization method* choice: Skeletonize, Detect / cut junctions, Convert to polyline,
+Centerline arc length, Centerline network, Vessel CPR and Generic cross-sections. The Mesh panel's
+*Centerlines* operation has the same choice, and TOF morphometrics has it as its centerline backend.
+
+| Method | What it does |
+|---|---|
+| `vmtk` (default) | VMTK Voronoi centerlines on the label's surface, between its skeleton end points: sub-voxel, centred, with the maximum inscribed sphere radius |
+| `native (skimage)` | scikit-image 3D thinning, the historical behaviour; networks are re-centred on the lumen |
+| `raycast (experimental)` | EXPIGEO ray probing of the surface (inverted normals → centres → MST skeleton) |
+
+Tools that work on a voxel skeleton receive the VMTK or ray-cast network rasterized to a 1-voxel
+skeleton, so junction detection and cutting behave the same with every method.
+
+**4D-flow particle tracing (VMTK)** replaces the former PyVista streamline tool. It traces
+**streamlines** (one phase, steady) or **pathlines** (released at a phase, integrated periodically
+through the cycle) with VMTK's temporal stream tracer, in physical units. Seeds are planar or
+volume seeds inside the mask; colour is by speed, integration time or arc length. Every phase is
+traced up front, so scrubbing the cardiac phase is instant. The standalone `nvitk-qvtpy-flowshow`
+viewer uses the same tracer.
 
 Tools that act on labels run on the labels currently **shown** on a label layer — the
 selection made in the **Labels** panel or from the layer's ▾ in the layer list — or on the
@@ -678,16 +699,33 @@ an image / labels layer, or a mesh time series.
 | Create | Surfaces from labels / mask, isosurface of an image, convex hull |
 | Edit (click on the surface) | Erase around a click (or keep only inside), keep / delete the piece under a click, push / pull the surface, smooth around a click |
 | Select (on the surface) | Brush, screen box, piece under a click; grow / shrink, invert, all, clear; delete, keep or copy the selection |
-| Clean & repair | Merge duplicates and drop degenerate faces, keep largest / drop small / split pieces, fill holes, orient faces |
-| Smooth | Taubin (volume-preserving) or Laplacian |
-| Remesh | Decimate, subdivide (Loop / butterfly), isotropic remesh (even triangles), remesh through voxels (watertight), clip at a click |
+| Clean & repair | Merge duplicates and drop degenerate faces, keep largest / drop small / split pieces, fill holes, orient faces; VMTK: cap open ends, remove marching-cubes kites |
+| Smooth | Taubin (volume-preserving) or Laplacian; VMTK Taubin / Laplace |
+| Remesh | Decimate, subdivide (Loop / butterfly), isotropic remesh (even triangles), remesh through voxels (watertight), clip at a click; VMTK isotropic remesh, decimate, subdivide |
 | Transform & align | Translate / rotate / scale, ICP onto another surface or cloud, principal axes |
-| Measure | Area, volume, sphericity, topology (holes, genus), curvature maps, cross-section at a click |
-| Vessels & tubes | Centerlines and diameter profile (per-branch length, tortuosity, curvature, min / max diameter, stenosis; bifurcation angles — click a row of the table to see that branch or junction), vessel cross-section at a click, local thickness map |
+| Measure | Area, volume, sphericity, topology (holes, genus), curvature maps, cross-section at a click; VMTK surface curvature, area / volume / shape index |
+| Vessels & tubes | Centerlines and diameter profile with the VMTK / native / ray-cast method (per-branch length, tortuosity, curvature, min / max diameter, stenosis; bifurcation angles — click a row of the table to see that branch or junction), vessel cross-section at a click, local thickness map; VMTK branches & bifurcation angles (surface coloured by branch), centerline sections, distance to centerlines, flow extensions; ray-cast skeleton + EXPIGEO descriptors (experimental) |
 | Compare | Distance maps and ASSD / Hausdorff |
 | Convert (image ↔ mesh ↔ points) | Mesh → mask or signed-distance image on any grid, mesh → points (vertices or uniform samples), mask → points, points → mask (dots or filled), points → mesh, sample an image onto a surface or cloud |
 | Point cloud | Surface reconstruction (Poisson, MeshLab's screened Poisson and ball pivoting, IMLS, implicit, alpha shape, hull), voxel / random downsampling, outlier removal, normals |
 | Time (3D+t) | Area and volume over time (plot, ejection fraction), track a surface through time, displacement / speed maps, temporal smoothing, frame interpolation, extract a frame |
+
+**Ray-cast skeleton + EXPIGEO descriptors (experimental).** This implements the base method of
+Layachi et al. (MICCAI 2026):
+1. Each surface vertex casts a cone of rays along its inverted normal.
+2. The ray hits give a centre and a radius (spatial medians).
+3. The centres are voxelized into skeleton vertices, joined by a minimum spanning tree, pruned of
+   spurs, and close vertices are merged.
+
+The skeleton is added as lines plus a radius-coloured point cloud. The surface gets one field per
+descriptor:
+- the radius gradient ‖∇R‖ (aneurysm necks, stenoses);
+- termination likelihood (closeness to a branch end);
+- blockage at the leaves (whether the end is closed);
+- geometric sphericity (sphere-like vs tube-like: high on bulbs and aneurysms);
+- projected flow.
+
+It is offered for experimentation and used by default nowhere.
 
 **Surfaces from labels.** The labels of the active layer are listed with their names and
 colours; tick the ones to mesh (filter, *All*, *None*). The output can be one layer per

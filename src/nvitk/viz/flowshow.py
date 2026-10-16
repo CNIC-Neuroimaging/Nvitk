@@ -3,7 +3,7 @@
 This is an initial interactive viewer for 4DFlow phase volumes:
 - render vessel masks (multi-label supported) as surfaces
 - show velocity glyphs inside mask region(s) with configurable **vector styling**
-- optionally show simple streamlines (seeded in-label)
+- optionally show streamlines / pathlines traced by VMTK (seeded in-label; nvitk.vmtk.flow)
 - **animate** over cardiac phases with optional precomputed glyph sample sites
 
 By default **all nonzero labels** are shown together (distinct colors). Pass
@@ -714,6 +714,51 @@ def _add_glyph_actor(plotter: Any, built: tuple[Any, dict[str, Any]] | None) -> 
     return plotter.add_mesh(mesh, **kw)
 
 
+
+def _vmtk_trace_tube(
+    pv: Any,
+    vel: np.ndarray,
+    roi: np.ndarray,
+    *,
+    trace_mode: str,
+    tt: int,
+    n_seeds: int,
+    max_length: float,
+    seed: int | None,
+    radius: float,
+    dt: float = 1.0,
+) -> Any | None:
+    """VMTK particle traces (:func:`nvitk.vmtk.flow.trace_flow`) as a PyVista tube mesh.
+
+    Integration is in this viewer's voxel frame (unit spacing), so *max_length* keeps its meaning:
+    voxels for streamlines of frame *tt*, seconds of advection for pathlines released at *tt*.
+    """
+    from nvitk.vmtk.flow import FlowTraceParams, trace_flow
+
+    params = FlowTraceParams(
+        n_seeds=int(n_seeds),
+        max_length=float(max_length),
+        stream_seed=seed,
+        trace_mode="pathlines" if trace_mode == "pathlines" else "streamlines",
+        integration_direction="both",
+        seed_mode="volume",
+        dt_seconds=float(dt) if float(dt) > 0 else 1.0,
+        min_speed=0.0,
+    )
+    field = vel if params.trace_mode == "pathlines" else vel[..., int(tt), :]
+    traces = trace_flow(field, roi.astype(np.uint8), params, spacing=(1.0, 1.0, 1.0), time_start=int(tt))
+    if not traces:
+        return None
+    pts_all, lines, offset = [], [], 0
+    for tr in traces:
+        n = int(len(tr.points))
+        pts_all.append(np.asarray(tr.points, dtype=np.float32))
+        lines.extend([n, *range(offset, offset + n)])
+        offset += n
+    poly = pv.PolyData(np.vstack(pts_all))
+    poly.lines = np.asarray(lines, dtype=np.int64)
+    return poly.tube(radius=float(radius))
+
 def _add_flow_scene_single(
     pv: Any,
     plotter: Any,
@@ -759,35 +804,18 @@ def _add_flow_scene_single(
             actors.append(act)
 
     if show_stream:
-        vec_f = vel[..., tt, :]
-        grid = pv.ImageData(dimensions=(x, y, z), spacing=(1, 1, 1), origin=(0, 0, 0))
-        grid.point_data["v"] = vec_f.reshape(-1, 3, order="F")
-        coords = np.argwhere(roi)
-        nseed = min(vec.streamline_n_seeds, coords.shape[0]) if coords.shape[0] > 0 else 0
-        if nseed > 0:
-            rng = np.random.default_rng(stream_seed)
-            pick = rng.choice(coords.shape[0], size=nseed, replace=False)
-            seed_cloud = pv.PolyData(coords[pick].astype(np.float32))
-            try:
-                stream = grid.streamlines_from_source(
-                    seed_cloud,
-                    vectors="v",
-                    max_length=vec.streamline_max_time,
-                    integration_direction="both",
+        try:
+            tube = _vmtk_trace_tube(
+                pv, vel, roi, trace_mode="streamlines", tt=tt, n_seeds=vec.streamline_n_seeds,
+                max_length=vec.streamline_max_time, seed=stream_seed, radius=vec.streamline_radius,
+            )
+            if tube is not None:
+                actors.append(
+                    plotter.add_mesh(tube, color=vec.streamline_fixed_color, opacity=vec.streamline_opacity)
                 )
-                if stream.n_points > 0:
-                    tube = stream.tube(radius=vec.streamline_radius)
-                    actors.append(
-                        plotter.add_mesh(
-                            tube,
-                            color=vec.streamline_fixed_color,
-                            opacity=vec.streamline_opacity,
-                        )
-                    )
-            except Exception as e:
-                log.error(traceback.format_exc())
-                log.exception(e)
-                pass
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
 
     actors.append(plotter.add_text(f"Label={lbl}  T={tt}", position="upper_left", font_size=12))
     return actors
@@ -850,36 +878,18 @@ def _add_flow_scene_all_labels(
                 actors.append(act)
 
     if show_stream:
-        roi_u = mask > 0
-        vec_f = vel[..., tt, :]
-        grid = pv.ImageData(dimensions=(x, y, z), spacing=(1, 1, 1), origin=(0, 0, 0))
-        grid.point_data["v"] = vec_f.reshape(-1, 3, order="F")
-        coords = np.argwhere(roi_u)
-        nseed = min(vec.streamline_n_seeds, coords.shape[0]) if coords.shape[0] > 0 else 0
-        if nseed > 0:
-            rng = np.random.default_rng(stream_seed)
-            pick = rng.choice(coords.shape[0], size=nseed, replace=False)
-            seed_cloud = pv.PolyData(coords[pick].astype(np.float32))
-            try:
-                stream = grid.streamlines_from_source(
-                    seed_cloud,
-                    vectors="v",
-                    max_length=vec.streamline_max_time,
-                    integration_direction="both",
+        try:
+            tube = _vmtk_trace_tube(
+                pv, vel, mask > 0, trace_mode="streamlines", tt=tt, n_seeds=vec.streamline_n_seeds,
+                max_length=vec.streamline_max_time, seed=stream_seed, radius=vec.streamline_radius,
+            )
+            if tube is not None:
+                actors.append(
+                    plotter.add_mesh(tube, color=vec.streamline_fixed_color, opacity=vec.streamline_opacity)
                 )
-                if stream.n_points > 0:
-                    tube = stream.tube(radius=vec.streamline_radius)
-                    actors.append(
-                        plotter.add_mesh(
-                            tube,
-                            color=vec.streamline_fixed_color,
-                            opacity=vec.streamline_opacity,
-                        )
-                    )
-            except Exception as e:
-                log.error(traceback.format_exc())
-                log.exception(e)
-                pass
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
 
     actors.append(
         plotter.add_text(
@@ -2100,7 +2110,6 @@ def _flowshow_desktop(
     stream_cache: dict[tuple[int, int, float, float, int | None], Any] = {}
     stream_cache_order: list[tuple[int, int, float, float, int | None]] = []
     stream_last_key: dict[str, Any] = {"key": None}
-    stream_seeds_cache: dict[tuple[int, int | None], Any] = {}
     stream_cache_max = 8
 
     def _clear_streamlines() -> None:
@@ -2113,24 +2122,6 @@ def _flowshow_desktop(
                 log.exception(e)
                 pass
         stream_actors.clear()
-
-    def _get_stream_seed_cloud(*, nseed: int, seed: int | None) -> Any | None:
-        """Stable seed cloud so animated streamlines don't jump between frames."""
-        if nseed <= 0:
-            return None
-        key = (int(nseed), int(seed) if seed is not None else None)
-        if key in stream_seeds_cache:
-            return stream_seeds_cache[key]
-        roi_u = (mask > 0)
-        coords = np.argwhere(roi_u)
-        nseed_eff = min(int(nseed), int(coords.shape[0])) if coords.shape[0] > 0 else 0
-        if nseed_eff <= 0:
-            return None
-        rng = np.random.default_rng(seed)
-        pick = rng.choice(coords.shape[0], size=nseed_eff, replace=False)
-        seed_cloud = pv.PolyData(coords[pick].astype(np.float32))
-        stream_seeds_cache[key] = seed_cloud
-        return seed_cloud
 
     def _cache_put_stream(key: tuple[int, int, float, float, int | None], tube: Any) -> None:
         """Insert a built streamline tube mesh into the FIFO-capped cache."""
@@ -2154,10 +2145,6 @@ def _flowshow_desktop(
                 log.error(traceback.format_exc())
                 log.exception(e)
                 pass
-            x, y, z, _, _ = vel.shape
-            vec_f = vel[..., int(tt0), :]
-            grid = pv.ImageData(dimensions=(x, y, z), spacing=(1, 1, 1), origin=(0, 0, 0))
-            grid.point_data["v"] = vec_f.reshape(-1, 3, order="F")
             key = (
                 int(tt0),
                 int(vec.streamline_n_seeds),
@@ -2168,18 +2155,14 @@ def _flowshow_desktop(
             if key in stream_cache:
                 tube = stream_cache[key]
             else:
-                seed_cloud = _get_stream_seed_cloud(nseed=int(vec.streamline_n_seeds), seed=stream_seed)
-                if seed_cloud is None:
-                    return
-                stream = grid.streamlines_from_source(
-                    seed_cloud,
-                    vectors="v",
-                    max_length=vec.streamline_max_time,
-                    integration_direction="both",
+                # Same seed (stream_seed) every frame, so animated streamlines do not jump.
+                tube = _vmtk_trace_tube(
+                    pv, vel, mask > 0, trace_mode="streamlines", tt=int(tt0),
+                    n_seeds=int(vec.streamline_n_seeds), max_length=vec.streamline_max_time,
+                    seed=stream_seed, radius=vec.streamline_radius,
                 )
-                if stream.n_points <= 0:
+                if tube is None:
                     return
-                tube = stream.tube(radius=vec.streamline_radius)
                 _cache_put_stream(key, tube)
             stream_last_key["key"] = key
             stream_actors.append(
@@ -2740,89 +2723,20 @@ def _flowshow_desktop(
                 pass
         path_actors.clear()
 
-    def _sample_vel_trilinear(frame: np.ndarray, pos: np.ndarray) -> np.ndarray:
-        """Trilinear sample of a (X,Y,Z,3) frame at fractional voxel position."""
-        x, y, z = float(pos[0]), float(pos[1]), float(pos[2])
-        nx, ny, nz, _ = frame.shape
-        # clamp inside valid range for interpolation
-        x = float(np.clip(x, 0.0, nx - 1.001))
-        y = float(np.clip(y, 0.0, ny - 1.001))
-        z = float(np.clip(z, 0.0, nz - 1.001))
-        x0, y0, z0 = int(np.floor(x)), int(np.floor(y)), int(np.floor(z))
-        x1, y1, z1 = min(x0 + 1, nx - 1), min(y0 + 1, ny - 1), min(z0 + 1, nz - 1)
-        fx, fy, fz = x - x0, y - y0, z - z0
-
-        c000 = frame[x0, y0, z0, :]
-        c100 = frame[x1, y0, z0, :]
-        c010 = frame[x0, y1, z0, :]
-        c110 = frame[x1, y1, z0, :]
-        c001 = frame[x0, y0, z1, :]
-        c101 = frame[x1, y0, z1, :]
-        c011 = frame[x0, y1, z1, :]
-        c111 = frame[x1, y1, z1, :]
-
-        c00 = c000 * (1 - fx) + c100 * fx
-        c10 = c010 * (1 - fx) + c110 * fx
-        c01 = c001 * (1 - fx) + c101 * fx
-        c11 = c011 * (1 - fx) + c111 * fx
-        c0 = c00 * (1 - fy) + c10 * fy
-        c1 = c01 * (1 - fy) + c11 * fy
-        c = c0 * (1 - fz) + c1 * fz
-        return to_numpy(c, dtype=np.float32)
-
     def _build_pathlines(tt_start: int, *, dt: float) -> Any | None:
-        """Integrate pathlines forward through time-varying vel field."""
-        seed_cloud = _get_stream_seed_cloud(nseed=int(vec.streamline_n_seeds), seed=stream_seed)
-        if seed_cloud is None:
-            return None
-        seeds = to_numpy(seed_cloud.points, dtype=np.float32)
-        if seeds.ndim != 2 or seeds.shape[0] == 0:
-            return None
-        _, _, _, nt, _ = vel.shape
-        if nt <= 1:
-            return None
-        dt_eff = float(dt) if float(dt) > 0 else 1.0
-        # Use streamline_max_time as a time horizon in seconds for pathlines.
-        n_steps = int(max(1, min(nt - 1, np.ceil(float(vec.streamline_max_time) / dt_eff))))
-
-        pts_all: list[np.ndarray] = []
-        lines: list[int] = []
-        idx0 = 0
-
-        for s in seeds:
-            p = s.astype(np.float32, copy=True)
-            seg: list[np.ndarray] = [p.copy()]
-            tt = int(np.clip(tt_start, 0, nt - 1))
-            for k in range(n_steps):
-                if tt >= nt:
-                    break
-                # Sample velocity at current time frame, at current position.
-                v0 = _sample_vel_trilinear(vel[..., tt, :], p)
-                # Heun / RK2: predictor then corrector
-                p1 = p + v0 * dt_eff
-                tt1 = min(tt + 1, nt - 1)
-                v1 = _sample_vel_trilinear(vel[..., tt1, :], p1)
-                v = 0.5 * (v0 + v1)
-                p = p + v * dt_eff
-                seg.append(p.copy())
-                tt = tt1
-            seg_arr = np.vstack(seg).astype(np.float32, copy=False)
-            pts_all.append(seg_arr)
-            n = int(seg_arr.shape[0])
-            lines.extend([n] + list(range(idx0, idx0 + n)))
-            idx0 += n
-
-        if not pts_all:
-            return None
-        points = np.vstack(pts_all).astype(np.float32, copy=False)
-        if points.shape[0] < 2:
+        """VMTK pathlines released at frame *tt_start*, advected periodically through the cycle for
+        ``streamline_max_time`` seconds (*dt* = seconds between frames)."""
+        if vel.shape[3] <= 1:
             return None
         try:
-            poly = pv.PolyData(points)
-            poly.lines = to_numpy(lines, dtype=np.int64)
-            tube = poly.tube(radius=vec.streamline_radius)
-            return tube
-        except Exception:
+            return _vmtk_trace_tube(
+                pv, vel, mask > 0, trace_mode="pathlines", tt=int(tt_start),
+                n_seeds=int(vec.streamline_n_seeds), max_length=vec.streamline_max_time,
+                seed=stream_seed, radius=vec.streamline_radius, dt=dt,
+            )
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
             return None
 
     def _cb_pathlines(val: bool):

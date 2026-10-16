@@ -11,7 +11,11 @@ from typing import Any
 
 import numpy as np
 
+import logging
+
 from . import deps
+
+log = logging.getLogger(__name__)
 
 
 def _api() -> dict[str, Any]:
@@ -63,8 +67,28 @@ def none_topology() -> str:
     return _api()["TOPOLOGY_NONE"]
 
 
+def centerline_backend() -> str:
+    """``"vmtk"`` when VMTK imports in this Python (e.g. via SlicerVMTK), else ``"native"``."""
+    deps.ensure()
+    from nvitk_vendor.vmtk import vmtk_available
+
+    return "vmtk" if vmtk_available() else "native"
+
+
 def run_case(seg_path: str, out_dir: str, **kwargs: Any):
-    """Run the vendored ``run_morphometrics_case``; returns the workbook path."""
+    """Run the vendored ``run_morphometrics_case``; returns the workbook path.
+
+    The profiles default to VMTK centerlines; without VMTK in Slicer's Python the run uses the
+    native (re-centred skeleton) backend instead, and says so in the log.
+    """
+    if "centerline_backend" not in kwargs:
+        backend = centerline_backend()
+        if backend != "vmtk":
+            log.warning(
+                "VMTK is not importable in Slicer's Python; using the native centerline backend "
+                "(re-centred voxel skeleton). Install SlicerVMTK for VMTK centerlines."
+            )
+        kwargs["centerline_backend"] = backend
     return _api()["run_morphometrics_case"](seg_path, out_dir, **kwargs)
 
 
@@ -96,6 +120,7 @@ def bridge_same_label_components(seg: Any, max_gap: int = 24) -> np.ndarray:
 
 __all__ = [
     "bridge_same_label_components",
+    "centerline_backend",
     "default_topology",
     "none_topology",
     "run_case",

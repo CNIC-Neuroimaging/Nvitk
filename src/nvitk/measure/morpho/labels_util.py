@@ -8,7 +8,7 @@ from typing import Any, List
 import numpy as np
 from scipy import ndimage as ndi
 
-from nvitk.measure.morphometrics_config import LABELS, PROCESS_SELECTED_TAGS_ONLY, SELECTED_TAGS
+from nvitk.measure import morphometrics_config as _cfg
 from .models import VesselInfo
 
 def normalized_vessel_token(value: Any) -> str:
@@ -41,7 +41,7 @@ def resolve_labels_to_process(labels_all: List[int]) -> List[int]:
     if the resulting intersection is empty.
     """
     labels_present = set(int(x) for x in labels_all)
-    requested = [int(x) for x in SELECTED_TAGS] if PROCESS_SELECTED_TAGS_ONLY else (labels_all if LABELS == "auto" else [int(x) for x in LABELS])
+    requested = [int(x) for x in _cfg.SELECTED_TAGS] if _cfg.PROCESS_SELECTED_TAGS_ONLY else (labels_all if _cfg.LABELS == "auto" else [int(x) for x in _cfg.LABELS])
     missing = [label for label in requested if label not in labels_present]
     if missing:
         print(f"Warning : requested tags not present in segmentation: {missing}")

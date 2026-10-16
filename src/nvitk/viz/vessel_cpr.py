@@ -185,10 +185,18 @@ def _join_components(region: Any, *, max_gap: int) -> Any:
     return (joined > 0).astype(np.int32)
 
 
-def _skeleton_points(binary: Any, label: int, *, centerline_mask: Any = None) -> Any:
+def _skeleton_points(
+    binary: Any,
+    label: int,
+    *,
+    centerline_mask: Any = None,
+    method: str = "native",
+    spacing: Any = None,
+) -> Any:
     """Ordered centerline voxels for a 0/1 *binary* volume, or raise ``CenterlineUnavailable``.
 
-    Host-side: skeletonisation is skimage. Callers are already inside ``using("cpu")``.
+    Host-side (*method*: ``native`` skimage / ``vmtk`` / ``raycast``, see
+    :mod:`nvitk.morphology.skeleton_methods`). Callers are already inside ``using("cpu")``.
     """
     from nvitk.morphology.centerline import compute_centerlines
 
@@ -198,6 +206,8 @@ def _skeleton_points(binary: Any, label: int, *, centerline_mask: Any = None) ->
             centerline_mask=centerline_mask,
             labels=[1],
             min_points=MIN_CENTERLINE_POINTS,
+            method=method,
+            spacing=spacing,
         )
     except Exception as exc:  # noqa: BLE001 — surfaced verbatim as the reason
         raise CenterlineUnavailable(label, f"skeletonisation failed ({exc})") from exc
@@ -257,6 +267,7 @@ def centerline_for_label(
     smooth: float = 0.35,
     seed_normal: Any = None,
     join_gap_vox: int = DEFAULT_JOIN_GAP_VOX,
+    skeleton_method: str = "native",
 ) -> CenterlineSamples:
     """The centerline of one vessel, resampled and framed.
 
@@ -322,7 +333,9 @@ def centerline_for_label(
                     # The join has to be visible on both, or the threads that
                     # connect the pieces are intersected straight back out.
                     supplied = region > 0
-            points = _skeleton_points(region, label, centerline_mask=supplied)
+            points = _skeleton_points(
+                region, label, centerline_mask=supplied, method=skeleton_method, spacing=spacing
+            )
         except CenterlineUnavailable as exc:
             if centerline_mask is not None and supplied is None:
                 raise CenterlineUnavailable(
@@ -354,6 +367,7 @@ def centerlines_for_labels(
     smooth: float = 0.35,
     reasons: dict[int, str] | None = None,
     join_gap_vox: int = DEFAULT_JOIN_GAP_VOX,
+    skeleton_method: str = "native",
 ) -> dict[int, CenterlineSamples]:
     """A framed centerline per requested label.
 
@@ -377,6 +391,7 @@ def centerlines_for_labels(
                 step_mm=step_mm,
                 smooth=smooth,
                 join_gap_vox=join_gap_vox,
+                skeleton_method=skeleton_method,
             )
         except CenterlineUnavailable as exc:
             if reasons is not None:

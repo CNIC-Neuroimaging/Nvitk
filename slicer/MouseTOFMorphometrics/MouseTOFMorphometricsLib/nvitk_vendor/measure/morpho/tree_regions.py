@@ -18,17 +18,7 @@ from scipy.spatial import cKDTree
 
 from .anatomy import make_tree_region_id, tree_region_metadata
 from .centerlines import centerline_points_from_result
-from nvitk_vendor.measure.morphometrics_config import (
-    CENTERLINE_OVERLAP_MAX_GAP_POINTS,
-    CENTERLINE_OVERLAP_TOL_MM,
-    DISCARD_SHORT_TREE_ARMS,
-    MIN_COMMON_BASE_POINTS,
-    MIN_TREE_ARM_LENGTH_MM,
-    SPLIT_BIFURCATING_TREE_REGIONS,
-    TREE_REGION_CODES,
-    TREE_REGION_ROLE_CODES,
-    VESSEL_SPECIFIC_MIN_TREE_ARM_LENGTH_MM,
-)
+from nvitk_vendor.measure import morphometrics_config as _cfg
 from .geometry import arc_length
 from .io_utils import safe_filename, safe_sheet_name
 from .models import SkeletonTree, VesselInfo
@@ -71,9 +61,9 @@ def min_tree_arm_length_for_vessel(vessel_info: VesselInfo, length_scale: float 
     pair = str(getattr(vessel_info, "pair", "") or "")
     candidates = [name, pair]
     for key in candidates:
-        if key in VESSEL_SPECIFIC_MIN_TREE_ARM_LENGTH_MM:
-            return float(VESSEL_SPECIFIC_MIN_TREE_ARM_LENGTH_MM[key]) * float(length_scale)
-    return float(MIN_TREE_ARM_LENGTH_MM) * float(length_scale)
+        if key in _cfg.VESSEL_SPECIFIC_MIN_TREE_ARM_LENGTH_MM:
+            return float(_cfg.VESSEL_SPECIFIC_MIN_TREE_ARM_LENGTH_MM[key]) * float(length_scale)
+    return float(_cfg.MIN_TREE_ARM_LENGTH_MM) * float(length_scale)
 
 
 def ordered_terminal_path_records(tree: SkeletonTree, root_idx: int, terminal_indices: List[int], spacing) -> List[dict]:
@@ -179,13 +169,13 @@ def split_bifurcating_tree_centerlines(
     arm as separate labeled regions. Only applies to exactly 2 paths — non-bifurcating
     trees (>2 terminals) are left to the recursive tree-segment splitter instead.
     """
-    if not SPLIT_BIFURCATING_TREE_REGIONS or len(path_results) != 2:
-        if SPLIT_BIFURCATING_TREE_REGIONS and len(path_results) > 2:
+    if not _cfg.SPLIT_BIFURCATING_TREE_REGIONS or len(path_results) != 2:
+        if _cfg.SPLIT_BIFURCATING_TREE_REGIONS and len(path_results) > 2:
             print(f"    [tree regions] Expected 2 paths, found {len(path_results)}; skipping base/arm split.")
         return [], {}, []
 
     spacing = np.asarray(spacing, dtype=float)
-    overlap_tol = CENTERLINE_OVERLAP_TOL_MM if CENTERLINE_OVERLAP_TOL_MM is not None else max(0.5, 1.5 * float(np.min(spacing)))
+    overlap_tol = _cfg.CENTERLINE_OVERLAP_TOL_MM if _cfg.CENTERLINE_OVERLAP_TOL_MM is not None else max(0.5, 1.5 * float(np.min(spacing)))
 
     res1, res2 = sorted(path_results, key=lambda r: int(r.get("path_index", 0)))
     pts1 = centerline_points_from_result(res1)
@@ -210,10 +200,10 @@ def split_bifurcating_tree_centerlines(
                     break
         return last_overlap + 1
 
-    common_n1 = overlapping_prefix_len(dist12, overlap_tol, CENTERLINE_OVERLAP_MAX_GAP_POINTS)
-    common_n2 = overlapping_prefix_len(dist21, overlap_tol, CENTERLINE_OVERLAP_MAX_GAP_POINTS)
+    common_n1 = overlapping_prefix_len(dist12, overlap_tol, _cfg.CENTERLINE_OVERLAP_MAX_GAP_POINTS)
+    common_n2 = overlapping_prefix_len(dist21, overlap_tol, _cfg.CENTERLINE_OVERLAP_MAX_GAP_POINTS)
 
-    if common_n1 < MIN_COMMON_BASE_POINTS or common_n2 < MIN_COMMON_BASE_POINTS:
+    if common_n1 < _cfg.MIN_COMMON_BASE_POINTS or common_n2 < _cfg.MIN_COMMON_BASE_POINTS:
         head_n1 = min(10, len(dist12))
         head_n2 = min(10, len(dist21))
         print(
@@ -255,7 +245,7 @@ def split_bifurcating_tree_centerlines(
     arm2_length_mm = arc_length(arm2_points)
     min_tree_arm_length_mm = min_tree_arm_length_for_vessel(vessel_info, length_scale)
 
-    if DISCARD_SHORT_TREE_ARMS:
+    if _cfg.DISCARD_SHORT_TREE_ARMS:
         arm1_short = np.isfinite(arm1_length_mm) and arm1_length_mm < min_tree_arm_length_mm
         arm2_short = np.isfinite(arm2_length_mm) and arm2_length_mm < min_tree_arm_length_mm
         if arm1_short ^ arm2_short:
@@ -428,7 +418,7 @@ def save_labeled_tree_path_centerlines(path_results: List[dict], regions: List[d
     for res in path_results:
         n = len(res["x_mm"])
         labels = np.array(["unassigned"] * n, dtype=object)
-        codes = np.full(n, TREE_REGION_CODES["unassigned"], dtype=float)
+        codes = np.full(n, _cfg.TREE_REGION_CODES["unassigned"], dtype=float)
         branch_depths = np.zeros(n, dtype=float)
         branch_paths = np.array([""] * n, dtype=object)
         path_id = res.get("path_id", "")
@@ -436,7 +426,7 @@ def save_labeled_tree_path_centerlines(path_results: List[dict], regions: List[d
         for region in regions:
             region_name = str(region["region"])
             meta = tree_region_metadata(region_name)
-            code = float(TREE_REGION_CODES.get(region_name, TREE_REGION_CODES["unassigned"]))
+            code = float(_cfg.TREE_REGION_CODES.get(region_name, _cfg.TREE_REGION_CODES["unassigned"]))
             if region.get("source_path_id") == path_id:
                 idx = np.asarray(region["source_idx"], dtype=int)
                 idx = idx[(idx >= 0) & (idx < n)]
@@ -479,5 +469,5 @@ def save_labeled_tree_path_centerlines(path_results: List[dict], regions: List[d
         add_string_point_array(poly, labels.tolist(), "TreeLabel")
         add_string_point_array(poly, branch_paths.tolist(), "TreePath")
         save_vtp(poly, os.path.join(centerline_dir, path_id + ".vtp"))
-        assigned_n = int(np.sum(codes != TREE_REGION_CODES["unassigned"]))
+        assigned_n = int(np.sum(codes != _cfg.TREE_REGION_CODES["unassigned"]))
         print(f"    [tree regions] Labeled {path_id}.vtp: {assigned_n}/{n} points assigned.")

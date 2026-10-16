@@ -6,8 +6,14 @@
 # ─────────────────────────────────────────────────────────────────────────
 """Centerline utilities (skeletonize + polyline ordering).
 
-These helpers are **not** GPU-native: scikit-image's 3D skeletonization is CPU
-only. We accept CuPy arrays by converting to NumPy via :func:`nvitk_vendor.core.array.to_numpy`.
+Skeletonization takes a ``method`` (:mod:`nvitk_vendor.morphology.skeleton_methods`): ``"native"``
+(scikit-image thinning; the default here, so library callers such as the 4D-flow qvtpy stages keep
+their validated behaviour), ``"vmtk"`` (VMTK centerlines rasterized to a voxel skeleton; the GUI
+default) or ``"raycast"`` (EXPIGEO, experimental). ``spacing`` (mm) lets VMTK / ray casting work
+in physical units; the voxel graphs downstream are unchanged.
+
+These helpers are **not** GPU-native: skeletonization is CPU only. We accept CuPy arrays by
+converting to NumPy via :func:`nvitk_vendor.core.array.to_numpy`.
 """
 
 from __future__ import annotations
@@ -28,14 +34,27 @@ import numpy as _np
 log = Logger()
 
 
-def skeletonize_binary(mask) -> Any:
-    """3D/2D skeletonization (CPU skimage; returns backend array of bool)."""
-    skeletonize = _require_skeletonize()
+def skeletonize_binary(mask, *, method: str = "native", spacing: Sequence[float] | None = None) -> Any:
+    """2D/3D skeletonization (CPU; returns backend array of bool).
+
+    *method*: ``"native"`` (scikit-image, 2D or 3D), ``"vmtk"`` or ``"raycast"`` (3D only).
+    """
     m = to_numpy(mask)
     if m.ndim not in (2, 3):
         raise ValidationError("skeletonize_binary expects a 2D or 3D mask.")
-    sk = skeletonize(m.astype(np.uint8, copy=False))
-    return as_backend_array(sk).astype(bool)
+    return as_backend_array(_skeleton_host(m, method=method, spacing=spacing)).astype(bool)
+
+
+def _skeleton_host(mask, *, method: str = "native", spacing: Sequence[float] | None = None) -> _np.ndarray:
+    """Host skeleton of a binary mask with *method* (the one place every function here thins)."""
+    from nvitk_vendor.morphology.skeleton_methods import method_skeleton, normalize_skeleton_method
+
+    m = _np.asarray(to_numpy(mask))
+    meth = normalize_skeleton_method(method)
+    if meth == "native" or m.ndim != 3:
+        skeletonize = _require_skeletonize()
+        return _np.asarray(skeletonize(m.astype(_np.uint8, copy=False))).astype(bool)
+    return method_skeleton(m.astype(bool), method=meth, spacing=spacing)
 
 
 def skeletonize_labeled(
@@ -43,8 +62,11 @@ def skeletonize_labeled(
     *,
     labels: Sequence[int] | None = None,
     min_points: int = 1,
+    method: str = "native",
+    spacing: Sequence[float] | None = None,
 ) -> Any:
-    """Skeletonize each label region independently; output keeps original label ids.
+    """Skeletonize each label region independently (*method*, see :func:`skeletonize_binary`);
+    output keeps original label ids.
 
     For a binary mask (labels ``[1]``), skeleton voxels are written as ``1``.
     For multilabel masks, each label's skeleton voxels carry that label's id.
@@ -52,27 +74,30 @@ def skeletonize_labeled(
     arr = as_backend_array(mask)
     if arr.ndim not in (2, 3):
         raise ValidationError("skeletonize_labeled expects a 2D or 3D mask.")
+    # Everything below works on host arrays (``arr_np`` and the skimage skeleton), so it uses the
+    # ``_np`` alias throughout: under the CuPy backend the module-level ``np`` is the CuPy proxy,
+    # and handing it a NumPy array raises rather than falling back.
     arr_np = to_numpy(arr)
-    labs = labels or sorted(int(v) for v in np.unique(arr_np) if int(v) != 0)
+    labs = labels or sorted(int(v) for v in _np.unique(arr_np) if int(v) != 0)
     if not labs:
         raise ValidationError("skeletonize_labeled: mask has no non-zero labels.")
 
-    if np.issubdtype(arr_np.dtype, np.integer):
+    if _np.issubdtype(arr_np.dtype, _np.integer):
         out_dtype = arr_np.dtype
     else:
         max_lab = max(labs)
-        out_dtype = np.uint8 if max_lab <= 255 else (np.uint16 if max_lab <= 65535 else np.int32)
+        out_dtype = _np.uint8 if max_lab <= 255 else (_np.uint16 if max_lab <= 65535 else _np.int32)
 
-    out = np.zeros(arr_np.shape, dtype=out_dtype)
+    out = _np.zeros(arr_np.shape, dtype=out_dtype)
     for lbl in labs:
         roi = arr_np == int(lbl)
-        if not np.any(roi):
+        if not _np.any(roi):
             continue
-        sk = to_numpy(skeletonize_binary(roi)) > 0
+        sk = to_numpy(skeletonize_binary(roi, method=method, spacing=spacing)) > 0
         if int(sk.sum()) < int(min_points):
             continue
         out[sk] = int(lbl)
-    if not bool(np.any(out)):
+    if not bool(_np.any(out)):
         raise ValidationError("skeletonize_labeled: no skeleton voxels produced.")
     return as_backend_array(out)
 
@@ -240,12 +265,17 @@ def _prefer_coverage_cost(
     """Mean squared distance from each prefer point to the nearest path voxel."""
     if not path or prefer_points.size == 0:
         return float("inf")
-    path_arr = to_numpy(path).astype(np.float64)
-    prefs = to_numpy(prefer_points).astype(np.float64).reshape(-1, 3)
+    # ``to_numpy`` gives host arrays, so the reductions below go through the ``_np`` alias rather
+    # than the module-level ``np`` (a CuPy proxy under the GPU backend). CuPy's handling of a NumPy
+    # argument is not uniform — ``sum``/``min`` fall back to NumPy, ``any``/``argwhere`` raise, and
+    # ``unique``/``zeros_like`` silently return a *device* array — so which functions happen to be
+    # safe is not something to encode by omission. Host data, host namespace.
+    path_arr = to_numpy(path).astype(_np.float64)
+    prefs = to_numpy(prefer_points).astype(_np.float64).reshape(-1, 3)
     total = 0.0
     for p in prefs:
-        d2 = np.sum((path_arr - p.reshape(1, 3)) ** 2, axis=1)
-        total += float(np.min(d2))
+        d2 = _np.sum((path_arr - p.reshape(1, 3)) ** 2, axis=1)
+        total += float(_np.min(d2))
     return total / float(prefs.shape[0])
 
 
@@ -497,6 +527,8 @@ def compute_connected_centerline_tree(
     bridge_tube_radius: int = 1,
     prune_short_spurs: bool = True,
     prune_spur_points: int = 3,
+    method: str = "native",
+    spacing: Sequence[float] | None = None,
 ) -> dict[int, list[np.ndarray]]:
     """Per-label connected centerline tree as unique skeleton-edge polylines.
 
@@ -555,7 +587,6 @@ def compute_connected_centerline_tree(
                 out[int(lbl)] = edges
         return out
 
-    skeletonize = _require_skeletonize()
     for lbl in labs:
         roi = arr_np == int(lbl)
         if not bool(roi.any()):
@@ -569,7 +600,7 @@ def compute_connected_centerline_tree(
                 max_gap=bridge_gap,
                 tube_radius=max(0, int(bridge_tube_radius)),
             )
-        sk = skeletonize(_np.asarray(working, dtype=_np.uint8))
+        sk = _skeleton_host(working, method=method, spacing=spacing)
         coords = _np.argwhere(_np.asarray(sk) > 0).astype(_np.float32)
         edges = _edges_for_coords(coords)
         if edges:
@@ -589,6 +620,8 @@ def compute_centerline_branches(
     bridge_max_gap: int = 0,
     bridge_tube_radius: int = 1,
     connected_edges: bool = False,
+    method: str = "native",
+    spacing: Sequence[float] | None = None,
 ) -> dict[int, list[np.ndarray]]:
     """Per-label list of branch polylines.
 
@@ -644,7 +677,6 @@ def compute_centerline_branches(
             _branches_for(coords, int(lbl))
         return out
 
-    skeletonize = _require_skeletonize()
     for lbl in labs:
         roi = arr_np == int(lbl)
         if not bool(roi.any()):
@@ -658,7 +690,7 @@ def compute_centerline_branches(
                 max_gap=bridge_gap,
                 tube_radius=max(0, int(bridge_tube_radius)),
             )
-        sk = skeletonize(_np.asarray(working, dtype=_np.uint8))
+        sk = _skeleton_host(working, method=method, spacing=spacing)
         coords = _np.argwhere(_np.asarray(sk) > 0)
         _branches_for(coords, int(lbl))
     return out
@@ -674,6 +706,8 @@ def compute_centerlines(
     keep_all_components: bool = False,
     bridge_max_gap: int = 0,
     bridge_tube_radius: int = 1,
+    method: str = "native",
+    spacing: Sequence[float] | None = None,
 ) -> dict[int, np.ndarray]:
     """Return per-label ordered centerline points in voxel coordinates.
 
@@ -739,7 +773,6 @@ def compute_centerlines(
                 out[int(lbl)] = path
         return out
 
-    skeletonize = _require_skeletonize()
     for lbl in labs:
         roi = arr_np == int(lbl)
         if not bool(roi.any()):
@@ -753,7 +786,7 @@ def compute_centerlines(
                 max_gap=bridge_gap,
                 tube_radius=max(0, int(bridge_tube_radius)),
             )
-        sk = skeletonize(_np.asarray(working, dtype=_np.uint8))
+        sk = _skeleton_host(working, method=method, spacing=spacing)
         coords = _np.argwhere(_np.asarray(sk) > 0)
         path = _path_for(coords, int(lbl))
         if path is not None:

@@ -12,7 +12,7 @@
 # `version` is kept in manual sync with [project].version in ../pyproject.toml (that
 # field is static there, not setuptools_scm-driven).
 context:
-  version: "0.1.0"
+  version: "0.2.0"
 
 package:
   name: nvitk
@@ -34,6 +34,11 @@ build:
     - cp "$RECIPE_DIR/post-link.sh" "$PREFIX/bin/.nvitk-post-link.sh"
     - cp "$RECIPE_DIR/pre-unlink.sh" "$PREFIX/bin/.nvitk-pre-unlink.sh"
     - chmod +x "$PREFIX/bin/.nvitk-post-link.sh" "$PREFIX/bin/.nvitk-pre-unlink.sh"
+    # VMTK is pip-only (see recipe/vmtk/build_wheel.sh for why there is no conda run-dep): post-link
+    # installs nvitk's cp311 wheel and falls back to building it with this script.
+    - mkdir -p "$PREFIX/share/nvitk/vmtk"
+    - cp "$RECIPE_DIR/vmtk/build_wheel.sh" "$PREFIX/share/nvitk/vmtk/build_wheel.sh"
+    - chmod +x "$PREFIX/share/nvitk/vmtk/build_wheel.sh"
     # Activation hooks: prepend $CONDA_PREFIX/lib to LD_LIBRARY_PATH so conda Qt/font
     # libraries win over HPC module paths (see activate.d/nvitk-gui.sh).
     - mkdir -p "$PREFIX/etc/conda/activate.d" "$PREFIX/etc/conda/deactivate.d"

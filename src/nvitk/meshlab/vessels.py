@@ -3,11 +3,17 @@
 VMTK-style measurements on any vessel-like surface (a segmented artery, an
 airway, a colon):
 
-- :func:`mesh_centerlines` — the surface is filled into voxels, thinned to a
-  skeleton (:func:`nvitk.morphology.centerline.skeletonize_binary`) and split
-  into branches between endpoints and junctions
-  (:func:`nvitk.morphology.polyline_graph.branch_polylines_from_skeleton`); each
-  branch is smoothed and resampled in millimetres.
+- :func:`mesh_centerlines` — centerline branches by one of three methods: ``vmtk``
+  (VMTK Voronoi centerlines on the surface itself, seeded at the end points of a
+  voxelised skeleton: by default the full network with every loop and separate piece,
+  :func:`mesh_vmtk_network_full`; or the single tree split with ``vmtkbranchextractor``,
+  :func:`mesh_vmtk_network`), ``native`` (the surface
+  filled into voxels, thinned (:func:`nvitk.morphology.centerline.skeletonize_binary`)
+  and split between endpoints and junctions
+  (:func:`nvitk.morphology.polyline_graph.branch_polylines_from_skeleton`)) or
+  ``raycast`` (EXPIGEO ray probing, experimental). Each branch is smoothed and
+  resampled in millimetres; ``native`` and ``raycast`` branches can be re-centred on the
+  lumen (:func:`nvitk.morphology.centering.center_polyline`).
 - :func:`branch_profiles` — at stations along each branch the surface is cut
   perpendicular to the centerline: lumen area, perimeter, equivalent / min / max
   diameter, circularity, and the inscribed radius (distance to the wall).
@@ -115,14 +121,29 @@ def mesh_centerlines(
     step: float = 0.0,
     smooth: float = 0.5,
     prune: bool = True,
+    method: str = "native",
+    vmtk_coverage: str = "full",
+    center: bool = False,
 ) -> list[VesselBranch]:
     """Centerline branches of a closed tubular surface (world mm).
 
-    *voxel_size* (mm, 0 = :func:`auto_voxel_size`) is the skeletonisation grid;
-    branches shorter than *min_branch_length* (mm, 0 = 4 voxels) are dropped,
-    tiny loops and short spurs pruned. Branches are resampled every *step* mm
-    (0 = the voxel size) after spline smoothing (*smooth*, 0 = off).
+    *method*: ``native`` / ``vmtk`` / ``raycast`` (module docstring); *vmtk_coverage*
+    (``full`` / ``tree``) picks the VMTK network; *center* re-centres ``native`` / ``raycast``
+    branches on the lumen (VMTK's already are). *voxel_size*
+    (mm, 0 = :func:`auto_voxel_size`) is the skeletonisation grid (also used to
+    seed VMTK); branches shorter than *min_branch_length* (mm, 0 = 4 voxels) are
+    dropped, tiny loops and short spurs pruned. Branches are resampled every *step*
+    mm (0 = the voxel size) after spline smoothing (*smooth*, 0 = off).
     """
+    from nvitk.morphology.skeleton_methods import normalize_skeleton_method
+
+    meth = normalize_skeleton_method(method)
+    if meth != "native":
+        branches = _mesh_centerlines_other(
+            mesh, meth, voxel_size=voxel_size, min_branch_length=min_branch_length, step=step, smooth=smooth,
+            vmtk_coverage=vmtk_coverage,
+        )
+        return _centred(mesh, branches) if center and meth == "raycast" else branches
     from nvitk.core.backend import using
     from nvitk.core.array import to_numpy
     from nvitk.meshlab.voxelize import voxelize_to_grid
@@ -154,6 +175,103 @@ def mesh_centerlines(
         # Smoothing in mm²: scaled by the voxel size, or a small vessel's
         # centerline would be pulled off its axis.
         pts = _smooth_resample(world, step=step, smooth=float(smooth) * vs * vs)
+        if len(pts) < 2 or _arc(pts)[-1] < min_len:
+            continue
+        branches.append(VesselBranch(id=len(branches) + 1, points=pts, tangents=_tangents(pts), arc_length=_arc(pts)))
+    branches.sort(key=lambda b: -b.length)
+    for i, b in enumerate(branches, 1):
+        b.id = i
+    return _centred(mesh, branches) if center else branches
+
+
+def _centred(mesh: Mesh, branches: list[VesselBranch]) -> list[VesselBranch]:
+    """*branches* moved onto the lumen centre line of *mesh* (same sampling step)."""
+    from nvitk.meshlab.convert import to_pyvista
+    from nvitk.morphology.centering import center_polyline
+
+    surface = to_pyvista(mesh)
+    for b in branches:
+        if len(b.points) < 3:
+            continue
+        step = float(np.median(np.diff(b.arc_length))) if len(b.arc_length) > 1 else 0.25
+        pts = center_polyline(b.points, surface, sample_step_mm=max(step, 1e-3))
+        b.points, b.tangents, b.arc_length = pts, _tangents(pts), _arc(pts)
+    return branches
+
+
+def mesh_vmtk_network_full(mesh: Mesh, *, voxel_size: float = 0.0, resampling_step: float = 0.0) -> Any:
+    """Every VMTK centerline of a surface (world mm) — all branches, loops and separate pieces
+    (:func:`nvitk.vmtk.centerlines.full_centerline_network`), seeded from the voxelised surface's
+    skeleton."""
+    from nvitk.meshlab.convert import to_pyvista
+    from nvitk.meshlab.voxelize import voxelize_to_grid
+    from nvitk.vmtk.centerlines import full_centerline_network
+
+    vs = float(voxel_size) if voxel_size and voxel_size > 0 else auto_voxel_size(mesh)
+    mask, affine = voxelize_to_grid(mesh, spacing=vs, margin=2)
+    if not mask.any():
+        raise ValueError("The surface encloses nothing at that voxel size — is it closed?")
+    step = float(resampling_step) if resampling_step and resampling_step > 0 else 0.5 * vs
+    return full_centerline_network(to_pyvista(mesh), mask, (vs, vs, vs), voxel_to_surface=affine,
+                                   resampling_step=step)
+
+
+def mesh_vmtk_network(mesh: Mesh, *, voxel_size: float = 0.0, resampling_step: float = 0.0) -> Any:
+    """VMTK centerline network of a closed surface (world mm), seeded at the end points of the
+    voxelised surface's skeleton (:func:`nvitk.vmtk.centerlines.centerline_network`)."""
+    from nvitk.meshlab.convert import to_pyvista
+    from nvitk.meshlab.voxelize import voxelize_to_grid
+    from nvitk.vmtk.centerlines import centerline_network, mask_endpoints
+
+    vs = float(voxel_size) if voxel_size and voxel_size > 0 else auto_voxel_size(mesh)
+    mask, affine = voxelize_to_grid(mesh, spacing=vs, margin=2)
+    if not mask.any():
+        raise ValueError("The surface encloses nothing at that voxel size — is it closed?")
+    ends_mm, radii = mask_endpoints(mask, (vs, vs, vs))
+    if len(ends_mm) < 2:
+        raise ValueError("The skeleton has fewer than two end points — nothing to trace a centerline between.")
+    ends = ends_mm / vs @ affine[:3, :3].T + affine[:3, 3]
+    step = float(resampling_step) if resampling_step and resampling_step > 0 else 0.5 * vs
+    return centerline_network(to_pyvista(mesh), ends, endpoint_radii=radii, resampling_step=step)
+
+
+def _mesh_centerlines_other(
+    mesh: Mesh, method: str, *, voxel_size: float, min_branch_length: float, step: float, smooth: float,
+    vmtk_coverage: str = "full",
+) -> list[VesselBranch]:
+    """:func:`mesh_centerlines` with the ``vmtk`` or ``raycast`` method (world mm)."""
+    from nvitk.meshlab.convert import to_pyvista
+
+    vs = float(voxel_size) if voxel_size and voxel_size > 0 else auto_voxel_size(mesh)
+    min_len = float(min_branch_length) if min_branch_length and min_branch_length > 0 else 4 * vs
+    surface = to_pyvista(mesh)
+    if method == "vmtk":
+        from nvitk.morphology.skeleton_methods import normalize_vmtk_coverage
+
+        if normalize_vmtk_coverage(vmtk_coverage) == "full":
+            polys = mesh_vmtk_network_full(mesh, voxel_size=vs).branches
+        else:
+            polys = [pts for pts, _ in mesh_vmtk_network(mesh, voxel_size=vs).joined_branches()]
+    else:
+        import vtk
+
+        from nvitk.morphology.raycast_skeleton import raycast_skeleton_from_surface
+
+        # Ray probing needs smooth normals; faceted marching-cubes meshes scatter the hits.
+        smoother = vtk.vtkWindowedSincPolyDataFilter()
+        smoother.SetInputData(surface)
+        smoother.SetNumberOfIterations(15)
+        smoother.SetPassBand(0.1)
+        smoother.NormalizeCoordinatesOn()
+        smoother.Update()
+        polys = raycast_skeleton_from_surface(smoother.GetOutput()).polylines()
+    step = float(step) if step and step > 0 else vs
+    branches: list[VesselBranch] = []
+    for poly in polys:
+        pts = np.asarray(poly, dtype=float)
+        if len(pts) < 2:
+            continue
+        pts = _smooth_resample(pts, step=step, smooth=float(smooth) * vs * vs)
         if len(pts) < 2 or _arc(pts)[-1] < min_len:
             continue
         branches.append(VesselBranch(id=len(branches) + 1, points=pts, tangents=_tangents(pts), arc_length=_arc(pts)))
@@ -548,6 +666,8 @@ __all__ = [
     "branch_metrics",
     "branch_profiles",
     "mesh_centerlines",
+    "mesh_vmtk_network",
+    "mesh_vmtk_network_full",
     "radius_map",
     "section_of_loop",
     "thickness_map",

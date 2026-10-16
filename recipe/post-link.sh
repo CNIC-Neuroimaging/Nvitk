@@ -71,8 +71,11 @@ log "installing image IO..."
 
 log "installing general image processing (simpleitk/antspyx: see recipe.yaml for why these can't be conda run-deps)..."
 "$PIP" install --no-cache-dir \
-  "scikit-image>=0.25.2" "opencv-python>=4.13.0.92" "vtk>=9.6.1" "SimpleITK==2.2.1" "antspyx>=0.6.3" \
+  "scikit-image>=0.25.2" "opencv-python>=4.13.0.92" "vtk==9.6.2" "SimpleITK==2.2.1" "antspyx>=0.6.3" \
   >>"$LOG" 2>&1
+# VMTK (installed last, below) is compiled against exactly this VTK wheel: hold it for every later
+# step so no dependency can move it.
+echo "vtk==9.6.2" >>"$CONSTRAINTS"
 
 log "installing neuroimaging/segmentation tools..."
 "$PIP" install --no-cache-dir \
@@ -128,5 +131,45 @@ log "installing pyvista deps (no-build-isolation)..."
 log "installing mesh processing deps (no-build-isolation)..."
 "$PIP" install --no-cache-dir --no-build-isolation 'pymeshlab>=2025.7.post1' \
   >>"$LOG" 2>&1
+
+# VMTK 1.5.2 for CPython 3.11 (centerlines, surface tools, 4D-flow particle tracing). Upstream
+# publishes cp312+ wheels only and conda-forge's py311 VMTK pins numpy<2, so nvitk ships its own
+# cp311 build of the upstream sdist (recipe/vmtk/build_wheel.sh, manylinux_2_28) as a release
+# asset. NVITK_VMTK_WHEEL_URL / NVITK_VMTK_WHEEL_SHA256 override the asset (a local path works
+# too; set NVITK_VMTK_WHEEL_SHA256="" to skip the check for a self-built wheel). If it cannot be
+# fetched, the wheel is built here from the sdist (~15-45 min: ITK compile).
+VMTK_WHEEL_NAME="vmtk-1.5.2-cp311-cp311-manylinux_2_28_x86_64.whl"
+VMTK_WHEEL_URL="${NVITK_VMTK_WHEEL_URL:-https://github.com/ignacio-ms/Nvitk/releases/download/vmtk-1.5.2-cp311/$VMTK_WHEEL_NAME}"
+VMTK_WHEEL_SHA256="${NVITK_VMTK_WHEEL_SHA256:-91763226d87654bb9b58eae4279761fd64fad397c4ed92dc061420fed8467651}"
+VMTK_BUILD_SCRIPT=""
+for cand in "$PREFIX/share/nvitk/vmtk/build_wheel.sh" "${RECIPE_DIR:-}/vmtk/build_wheel.sh" \
+            "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vmtk/build_wheel.sh"; do
+  if [[ -n "$cand" && -f "$cand" ]]; then VMTK_BUILD_SCRIPT="$cand"; break; fi
+done
+log "installing VMTK 1.5.2 (cp311 wheel)..."
+VMTK_TMP="$(mktemp -d)"
+VMTK_WHEEL="$VMTK_TMP/$VMTK_WHEEL_NAME"
+vmtk_fetched=0
+if [[ -f "$VMTK_WHEEL_URL" ]]; then
+  cp "$VMTK_WHEEL_URL" "$VMTK_WHEEL" && vmtk_fetched=1
+elif curl -fsSL -o "$VMTK_WHEEL" "$VMTK_WHEEL_URL" >>"$LOG" 2>&1; then
+  vmtk_fetched=1
+fi
+if [[ "$vmtk_fetched" == 1 && -n "$VMTK_WHEEL_SHA256" ]]; then
+  if ! echo "$VMTK_WHEEL_SHA256  $VMTK_WHEEL" | sha256sum -c - >>"$LOG" 2>&1; then
+    log "VMTK wheel checksum mismatch — discarding it"
+    vmtk_fetched=0
+  fi
+fi
+if [[ "$vmtk_fetched" != 1 ]]; then
+  [[ -n "$VMTK_BUILD_SCRIPT" ]] || { log "VMTK wheel unavailable and build_wheel.sh not found"; exit 1; }
+  log "VMTK wheel not downloadable; building it from the sdist (this takes a while)..."
+  PYTHON="$PREFIX/bin/python" bash "$VMTK_BUILD_SCRIPT" native "$VMTK_TMP/built" >>"$LOG" 2>&1
+  VMTK_WHEEL="$(ls "$VMTK_TMP"/built/vmtk-1.5.2-*.whl)"
+fi
+"$PIP" install --no-cache-dir --no-deps "$VMTK_WHEEL" >>"$LOG" 2>&1
+rm -rf "$VMTK_TMP"
+"$PREFIX/bin/python" -c 'import vtk, vmtk; from vmtk import vmtkscripts, vtkvmtk; print("vtk", vtk.vtkVersion.GetVTKVersion(), "| vmtk ok")' \
+  | tee -a "$LOG"
 
 log "done."

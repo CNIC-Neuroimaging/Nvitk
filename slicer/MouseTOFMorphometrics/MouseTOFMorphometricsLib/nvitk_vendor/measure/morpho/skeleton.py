@@ -14,7 +14,7 @@ from typing import List
 import numpy as np
 from skimage.morphology import skeletonize
 
-from nvitk_vendor.measure.morphometrics_config import PRUNE_SPUR_LENGTH_MM, PRUNE_TERMINAL_SPURS
+from nvitk_vendor.measure import morphometrics_config as _cfg
 from .models import SkeletonTree
 
 _NEI26 = [
@@ -52,9 +52,9 @@ def skeleton_tree_from_mask(mask_bool: np.ndarray, spacing=None, length_scale: f
     species (see ``_meta.length_scale`` in the topology JSON).
     """
     skel = skeletonize_mask(mask_bool)
-    if PRUNE_TERMINAL_SPURS:
+    if _cfg.PRUNE_TERMINAL_SPURS:
         skel = prune_short_terminal_spurs(
-            skel, float(PRUNE_SPUR_LENGTH_MM) * float(length_scale), spacing=spacing
+            skel, float(_cfg.PRUNE_SPUR_LENGTH_MM) * float(length_scale), spacing=spacing
         )
     pts, neighbors, degree = skeleton_graph(skel)
     endpoints = list(np.where(degree == 1)[0])

@@ -124,15 +124,26 @@ def find_case_nifti(case_dir: str) -> Optional[str]:
     return None
 
 
+def _written_in_ras(poly) -> bool:
+    """Whether the pipeline already wrote this VTP in scanner RAS (``NVITK_COORDINATE_FRAME``)."""
+    fd = poly.GetFieldData()
+    tag = fd.GetAbstractArray("NVITK_COORDINATE_FRAME") if fd is not None else None
+    return tag is not None and str(tag.GetValue(0)).upper() == "RAS"
+
+
 def _transformed_polydata(path: str, matrix: Optional[np.ndarray]):
-    """Read a VTP and map it into RAS with *matrix* (identity when ``None``)."""
+    """Read a VTP and map it into RAS with *matrix* (identity when ``None``).
+
+    VTPs written in RAS by newer pipelines (field data ``NVITK_COORDINATE_FRAME="RAS"``) are
+    returned as-is; *matrix* applies to the legacy ``voxel_index × spacing`` files.
+    """
     reader = vtk.vtkXMLPolyDataReader()
     reader.SetFileName(path)
     reader.Update()
     poly = reader.GetOutput()
     if poly is None or poly.GetNumberOfPoints() == 0:
         return None
-    if matrix is None:
+    if matrix is None or _written_in_ras(poly):
         return poly
 
     vtk_matrix = vtk.vtkMatrix4x4()

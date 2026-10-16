@@ -13,6 +13,7 @@ core-backend
 io
 types-transform
 morphology-filters-restoration
+vmtk
 registration
 segmentation
 nn
@@ -56,6 +57,13 @@ Binary/label morphology, centerline extraction, vesselness/threshold filters, de
 bias-field correction.
 :::
 
+:::{grid-item-card} {octicon}`git-branch` VMTK
+:link: vmtk
+:link-type: doc
+Vascular Modeling Toolkit wrappers: centerlines and branch splitting, surface processing, vessel
+enhancement and 4D-flow particle tracing.
+:::
+
 :::{grid-item-card} {octicon}`git-compare` Registration
 :link: registration
 :link-type: doc
@@ -85,7 +93,7 @@ Mixed models, mediation, SEM, and the Python/R statistical engines behind the St
 :::{grid-item-card} {octicon}`eye` Visualization
 :link: viz
 :link-type: doc
-Brain/vascular atlas rendering, flow streamlines, and PET hotspot visualization helpers.
+Brain/vascular atlas rendering, the 4D-flow viewer, and PET hotspot visualization helpers.
 :::
 
 :::{grid-item-card} {octicon}`database` Database & XNAT

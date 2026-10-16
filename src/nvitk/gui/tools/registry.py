@@ -8,6 +8,16 @@ from typing import Any, Literal
 from nvitk.gui.pipeline.catalog import PIPELINE_TOOLS
 from nvitk.measure.morpho.anatomy_axes import SPECIES_AUTO, SPECIES_CHOICES
 from nvitk.measure.morpho.topology_io import topology_choices as _morpho_topology_choices
+from nvitk.measure.morphometrics_config import DEFAULT_PROFILE as _MORPHO_DEFAULT_PROFILE
+from nvitk.measure.morphometrics_config import PROFILES as _MORPHO_PROFILE_MAP
+from nvitk.morphology.skeleton_methods import (
+    SKELETON_METHOD_CHOICES,
+    SKELETON_METHOD_LABELS,
+    VMTK_COVERAGE_CHOICES,
+    VMTK_COVERAGE_LABELS,
+)
+
+_MORPHO_PROFILES: tuple[str, ...] = tuple(sorted(_MORPHO_PROFILE_MAP))
 
 ParamKind = Literal[
     "int",
@@ -89,12 +99,14 @@ TOOL_IDS_USING_LABEL_PICKER: frozenset[str] = frozenset({
     "centerline_detect_junctions",
     "centerline_cut_junctions",
     "centerline_to_polyline",
+    "vmtk_centerline_network",
+    "centerline_center",
     "viz_pet_hotspots",
     "viz_vessel_cpr",
     "viz_cross_sections_generic",
     "viz_ortho_views",
     "viz_flowshow",
-    "viz_flow_streamlines",
+    "viz_flow_traces",
 })
 
 _CATEGORY_ORDER = (
@@ -119,6 +131,23 @@ _LABEL_IDS = ParamSpec("label_ids", "Label id(s) comma-separated", "str", "1")
 _NEW_ID = ParamSpec("new_id", "Output label id", "int", 1, min=0, max=9999)
 _OUTPUT_DIR = ParamSpec("output_dir", "Output directory", "str", "")
 _WORKING_DIR = ParamSpec("working_dir", "Working directory", "str", "")
+#: Shared by every tool that skeletonizes a mask: VMTK (default), the native scikit-image
+#: thinning, or EXPIGEO ray casting (experimental). See nvitk.morphology.skeleton_methods.
+_SKELETON_METHOD = ParamSpec(
+    "skeleton_method",
+    "Skeletonization method",
+    "choice",
+    SKELETON_METHOD_LABELS["vmtk"],
+    choices=SKELETON_METHOD_CHOICES,
+)
+#: VMTK centerlines: every branch, loop and fragment, or one tree from the widest end point.
+_VMTK_COVERAGE = ParamSpec(
+    "vmtk_coverage",
+    "VMTK centerlines",
+    "choice",
+    VMTK_COVERAGE_LABELS["full"],
+    choices=VMTK_COVERAGE_CHOICES,
+)
 
 
 def _sk(name: str) -> tuple[str, ...]:
@@ -367,6 +396,26 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         ),
     ),
     GuiToolSpec(
+        "vmtk_vessel_enhancement",
+        "Filters",
+        "Vessel enhancement (VMTK)",
+        (
+            ParamSpec("vmtk_method", "Method", "choice", "frangi", choices=("frangi", "sato", "ved", "vedm")),
+            ParamSpec("sigma_min", "Smallest scale σ (mm)", "float", 0.5, min=0.05, max=20.0),
+            ParamSpec("sigma_max", "Largest scale σ (mm)", "float", 3.0, min=0.05, max=50.0),
+            ParamSpec("sigma_steps", "Scales", "int", 5, min=1, max=20),
+            ParamSpec("bright_vessels", "Bright vessels (TOF / CTA)", "bool", True),
+            ParamSpec("ved_iterations", "VED iterations", "int", 1, min=1, max=20),
+        ),
+        needs_3d=True,
+        run_mode="notify",
+        description=(
+            "vmtkimagevesselenhancement: multiscale Frangi or Sato vesselness, or vesselness-"
+            "enhancing diffusion (VED / VED-M, Manniesing 2006) that smooths along the vessels "
+            "and keeps their edges. Scales are in millimetres. Adds a new image layer."
+        ),
+    ),
+    GuiToolSpec(
         "sk_edge", "Filters", "Edges (skimage)",
         (
             ParamSpec("sk_method", "Operator", "choice", "sobel", choices=_sk("EDGE_METHODS")),
@@ -529,8 +578,15 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         "skeletonize",
         "Morphology",
         "Skeletonize / centerline",
+        (_SKELETON_METHOD,),
         needs_3d=True,
         multilabel=True,
+        description=(
+            "1-voxel centerline skeleton of each label. VMTK (default) traces Voronoi "
+            "centerlines on the label surface between its skeleton end points and draws them "
+            "into the volume; native is scikit-image thinning; raycast (experimental) is "
+            "EXPIGEO ray probing of the surface."
+        ),
     ),
     GuiToolSpec(
         "centerline_detect_junctions",
@@ -539,6 +595,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         (
             ParamSpec("min_junction_degree", "Min skeleton degree", "int", 3, min=2, max=26),
             ParamSpec("reskeletonize", "Re-skeletonize mask (thick masks only)", "bool", False),
+            _SKELETON_METHOD,
         ),
         needs_3d=True,
         run_mode="notify",
@@ -570,6 +627,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("bridge_max_gap", "Bridge gaps up to N voxels (0 = off)", "int", 0, min=0, max=50),
             ParamSpec("smooth_window", "Smoothing window (1 = off)", "int", 5, min=1, max=20),
             ParamSpec("edge_width", "Path line width", "float", 0.35, min=0.05, max=5.0),
+            _SKELETON_METHOD,
         ),
         needs_3d=True,
         run_mode="notify",
@@ -584,12 +642,64 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         ),
     ),
     GuiToolSpec(
+        "vmtk_centerline_network",
+        "Centerline",
+        "Centerline network (VMTK)",
+        (
+            _SKELETON_METHOD,
+            _VMTK_COVERAGE,
+            ParamSpec("network_scope", "Network of", "choice", "all selected labels together",
+                      choices=("all selected labels together", "each label separately")),
+            ParamSpec("edge_width", "Path line width", "float", 0.35, min=0.05, max=5.0),
+            ParamSpec("point_size", "Radius point size", "float", 0.6, min=0.05, max=10.0),
+        ),
+        needs_3d=True,
+        run_mode="notify",
+        description=(
+            "Sub-voxel centerlines of each selected label, split into branches, with the "
+            "maximum-inscribed-sphere radius. VMTK: all branches (default) traces every branch, "
+            "loop and separate piece, adding VMTK runs from further end points and between the ends "
+            "of any skeleton branch still missed; the tree option is one run from the widest end "
+            "to every other end, which skips one segment of each loop and other pieces. Native: "
+            "re-centred scikit-image skeleton; raycast: EXPIGEO, experimental. The selected labels "
+            "form one network by default, so the bifurcations between vessels (on label boundaries) "
+            "are traced; each branch and point is tagged with its label. Draws the branch paths and "
+            "radius-coloured points and reports branches, junctions, length and median diameter "
+            "per label."
+        ),
+    ),
+    GuiToolSpec(
+        "centerline_center",
+        "Centerline",
+        "Centre centerline on the lumen",
+        (
+            ParamSpec("centerline_layer", "Centerline layer (none = skeleton of the mask)", "layer", ""),
+            ParamSpec("center_iterations", "Centring iterations", "int", 5, min=1, max=50),
+            ParamSpec("center_smooth_mm", "Smoothing along the line (mm)", "float", 0.3, min=0.0, max=10.0),
+            ParamSpec("center_step_mm", "Sample step (mm, 0 = half a voxel)", "float", 0.0, min=0.0, max=5.0),
+            ParamSpec("edge_width", "Path line width", "float", 0.35, min=0.05, max=5.0),
+            ParamSpec("point_size", "Radius point size", "float", 0.6, min=0.05, max=10.0),
+        ),
+        needs_3d=True,
+        run_mode="notify",
+        description=(
+            "Moves a centerline onto the lumen centre of the active vessel mask (the selected "
+            "labels, else every label): along the line, each point goes to the centroid of the "
+            "lumen cross-section, then up the inscribed-radius ridge, where VMTK's centerlines "
+            "run. The centerline can be any Shapes path (To polyline, CPR, centerline network), "
+            "Mesh-panel centerline lines or points, or a skeleton mask; with none, the mask's own "
+            "skeleton is centred. Adds the centred paths and radius-coloured points, and reports "
+            "the shift and the inscribed radius before and after."
+        ),
+    ),
+    GuiToolSpec(
         "centerline_cut_junctions",
         "Centerline",
         "Cut centerline at junction points",
         (
             ParamSpec("new_label_start", "First new label id (0=auto)", "int", 0, min=0, max=9999),
             ParamSpec("reskeletonize", "Re-skeletonize mask (thick masks only)", "bool", False),
+            _SKELETON_METHOD,
         ),
         needs_3d=True,
         run_mode="layer",
@@ -1052,6 +1162,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("step_mm", "Station spacing (mm)", "float", 0.5, min=0.1, max=5.0),
             ParamSpec("upsample", "Upsample image + mask (1 = off)", "float", 1.0, min=1.0, max=4.0),
             ParamSpec("join_gap_vox", "Join vessel pieces up to N voxels (0 = off)", "int", 8, min=0, max=50),
+            _SKELETON_METHOD,
         ),
         needs_3d=True,
         run_mode="notify",
@@ -1135,36 +1246,27 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         run_mode="notify",
     ),
     GuiToolSpec(
-        "viz_flow_streamlines",
+        "viz_flow_traces",
         "Visualization",
-        "4DFlow Streamlines",
+        "4D Flow particle tracing (VMTK)",
         (
             ParamSpec("ap_layer", "AP phase layer", "layer", ""),
             ParamSpec("rl_layer", "RL phase layer", "layer", ""),
             ParamSpec("fh_layer", "FH phase layer", "layer", ""),
-            ParamSpec(
-                "reference_layer",
-                "Spatial reference layer (optional)",
-                "layer",
-                "",
-            ),
+            ParamSpec("reference_layer", "Spatial reference layer (optional)", "layer", ""),
             ParamSpec("time_index", "Initial cardiac phase", "int", 0, min=0, max=64),
-            ParamSpec(
-                "trace_mode",
-                "Trace mode",
-                "choice",
-                "streamlines",
-                choices=("streamlines", "pathlines"),
-            ),
+            ParamSpec("trace_mode", "Trace mode", "choice", "streamlines", choices=("streamlines", "pathlines")),
             ParamSpec("n_seeds", "Seed count", "int", 64, min=1, max=10000),
             ParamSpec(
                 "max_length",
-                "Max length (vox; pathline horizon in seconds if pathlines)",
+                "Max length (mm; pathline horizon in seconds if pathlines)",
                 "float",
                 35.0,
-                min=1.0,
+                min=0.01,
                 max=500.0,
             ),
+            ParamSpec("dt_seconds", "Time between phases (s)", "float", 1.0, min=0.001, max=60.0),
+            ParamSpec("min_speed", "Drop seeds slower than (mm/s)", "float", 1.0, min=0.0, max=10000.0),
             ParamSpec("stream_seed", "Random seed", "int", 42, min=0, max=999999),
             ParamSpec(
                 "integration_direction",
@@ -1173,22 +1275,9 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
                 "forward",
                 choices=("forward", "backward", "both"),
             ),
-            ParamSpec(
-                "seed_mode",
-                "Seed placement",
-                "choice",
-                "planar",
-                choices=("planar", "volume"),
-            ),
+            ParamSpec("seed_mode", "Seed placement", "choice", "planar", choices=("planar", "volume")),
             ParamSpec("seed_plane_axis", "Planar seed axis (0/1/2)", "int", 2, min=0, max=2),
-            ParamSpec(
-                "seed_plane_side",
-                "Planar seed side",
-                "choice",
-                "min",
-                choices=("min", "max"),
-            ),
-            ParamSpec("dt_seconds", "Pathline dt (seconds)", "float", 1.0, min=0.01, max=60.0),
+            ParamSpec("seed_plane_side", "Planar seed side", "choice", "min", choices=("min", "max")),
             ParamSpec(
                 "color_metric",
                 "Color by",
@@ -1208,16 +1297,19 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("resample_spacing_vox", "Resample spacing (vox)", "float", 0.5, min=0.1, max=5.0),
             ParamSpec("edge_width", "Path line width (vox)", "float", 0.25, min=0.05, max=10.0),
             ParamSpec("opacity", "Trace opacity", "float", 0.55, min=0.05, max=1.0),
-            ParamSpec(
-                "sync_dims",
-                "Update traces when dims slider moves",
-                "bool",
-                True,
-            ),
+            ParamSpec("sync_dims", "Update traces when dims slider moves", "bool", True),
         ),
         needs_reference_layer=True,
         needs_3d=True,
         run_mode="notify",
+        description=(
+            "Particle traces through the 4D-flow velocity field with VMTK's temporal stream "
+            "tracer (vmtkparticletracer), in millimetres and seconds. Streamlines follow the "
+            "frozen phase under the dims slider; pathlines are released at that phase and "
+            "advected through the cardiac cycle (periodic) for 'max length' seconds. Seeds are "
+            "random mask voxels (planar: the min/max slab along an axis). Every phase is traced "
+            "up front, so scrubbing and playback are instant."
+        ),
     ),
     GuiToolSpec(
         "viz_cross_sections_generic",
@@ -1236,6 +1328,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
                       choices=("lsthr", "otsu", "lthr")),
             ParamSpec("centerline_window", "Tangent window", "choice", "5", choices=("5", "3")),
             ParamSpec("show_segmentation_3d", "Show segmentation in 3D", "bool", True),
+            _SKELETON_METHOD,
         ),
         needs_3d=True,
         run_mode="notify",
@@ -1981,6 +2074,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         (
             ParamSpec("label_id", "Label id (0 = all / longest)", "int", 0, min=0, max=9999),
             ParamSpec("reskeletonize", "Re-skeletonize mask (thick masks only)", "bool", False),
+            _SKELETON_METHOD,
         ),
         needs_3d=True,
         run_mode="notify",
@@ -2006,6 +2100,22 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
                 SPECIES_AUTO,
                 choices=SPECIES_CHOICES,
             ),
+            ParamSpec(
+                "profile",
+                "Parameter profile",
+                "choice",
+                _MORPHO_DEFAULT_PROFILE,
+                choices=_MORPHO_PROFILES,
+            ),
+            ParamSpec(
+                "centerline_backend",
+                "Centerline method",
+                "choice",
+                SKELETON_METHOD_LABELS["vmtk"],
+                choices=SKELETON_METHOD_CHOICES,
+            ),
+            ParamSpec("bridge_gaps_vox", "Bridge same-label gaps up to N voxels (0 = off)", "int", 0,
+                      min=0, max=50),
             ParamSpec("n_workers", "Workers", "int", 1, min=1, max=64),
             ParamSpec("skip_existing", "Skip if Excel exists", "bool", False),
             ParamSpec(
@@ -2023,8 +2133,12 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "(eicab_topology.json for TOF/eICAB; mouse_root_topology.json for the "
             "Mouse TOF CoW labels; qvtpy_topology.json is the 4D-flow label "
             "reference), or 'none' for topology-agnostic per-label metrics. "
-            "Species 'auto' reads the topology's _meta block. Leave Output "
-            "directory empty to show results in the GUI only."
+            "Species 'auto' reads the topology's _meta block. The profile 'eicab_cw' "
+            "is tuned for eICAB Circle-of-Willis masks (cow_morpho parity, VMTK "
+            "centerlines); bridging same-label gaps departs from that tuning. Results: "
+            "one row per vessel (vessel_summary.csv), per segment, per lesion (with "
+            "severity and confidence) and per subject. Leave Output directory empty to "
+            "show results in the GUI only."
         ),
     ),
     GuiToolSpec(
@@ -2270,6 +2384,9 @@ SGE_BLOCKLIST: frozenset[str] = frozenset({
     "centerline_detect_junctions",
     "centerline_cut_junctions",
     "centerline_to_polyline",
+    "vmtk_centerline_network",
+    "centerline_center",
+    "vmtk_vessel_enhancement",
     "measure_generate_suv",
     "measure_centerline_arc_length",
     "measure_morphometrics",
@@ -2288,7 +2405,7 @@ SGE_BLOCKLIST: frozenset[str] = frozenset({
     "surface_metrics",
     "qvtpy_locs",
     "viz_flowshow",
-    "viz_flow_streamlines",
+    "viz_flow_traces",
     "viz_pet_hotspots",
     "viz_vessel_hemo",
     "viz_pitc",

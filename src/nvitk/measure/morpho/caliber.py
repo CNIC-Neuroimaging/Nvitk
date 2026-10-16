@@ -8,34 +8,8 @@ from typing import List, Optional, Tuple
 import numpy as np
 from scipy import ndimage as ndi
 
-from nvitk.measure.morphometrics_config import (
-    ENLARGEMENT_MAX_INTERNAL_GAP_MM,
-    ENLARGEMENT_MIN_LEN_MM,
-    ENLARGEMENT_MIN_SUPPORT_LENGTH_MM,
-    ENLARGEMENT_SUPPORT_THRESHOLD_PCT,
-    ENLARGEMENT_TAPER_FIT_EXCLUDE_END_MM,
-    ENLARGEMENT_THRESHOLD_PCT,
-    INFLECT_SMOOTH_WIN,
-    RADIUS_SOURCE_FOR_CALIBER_DETECTION,
-    SIPHON_DILATION_MM,
-    SIPHON_KAPPA_THRESHOLD,
-    SIPHON_SUPPRESSES_ENLARGEMENT_DETECTION,
-    STENOSIS_MAX_INTERNAL_GAP_MM,
-    STENOSIS_SEGMENT_REFERENCE_MARGIN_MM,
-    STENOSIS_SUPPORT_THRESHOLD_PCT,
-    STENOSIS_TAPER_FIT_EXCLUDE_END_MM,
-    STENOSIS_THRESHOLD_PCT,
-    TAPER_FIT_ENFORCE_NONINCREASING,
-    TAPER_FIT_MAX_ITERATIONS,
-    TAPER_FIT_MIN_HEALTHY_FRACTION,
-    TAPER_FIT_OUTLIER_FRACTION,
-    TAPER_REFERENCE_PERCENTILE,
-    TAPER_REFERENCE_SMOOTH_MM,
-    TAPER_REFERENCE_WINDOW_MM,
-    TAPER_TWO_PASS,
-    TAPER_TWO_PASS_MAX_ITERATIONS,
-)
-from .metrics import discrete_curvature, smooth_1d
+from nvitk.measure import morphometrics_config as _cfg
+from .metrics import discrete_curvature, smooth_1d, smoothed_curvature
 from .models import EnlargementResult, StenosisResult
 
 def stenosis_valid_mask_from_ends(s, exclude_end_mm) -> np.ndarray:
@@ -52,11 +26,26 @@ def compute_siphon_mask(
     kappa_threshold: Optional[float] = None,
     dilation_mm: Optional[float] = None,
 ) -> np.ndarray:
-    """Boolean mask of high-curvature (siphon) regions, dilated by dilation_mm."""
-    kappa_threshold = SIPHON_KAPPA_THRESHOLD if kappa_threshold is None else kappa_threshold
-    dilation_mm = SIPHON_DILATION_MM if dilation_mm is None else dilation_mm
-    kappa = discrete_curvature(np.asarray(pts, dtype=float))
-    kappa_sm = smooth_1d(np.where(np.isfinite(kappa), kappa, 0.0), win=INFLECT_SMOOTH_WIN)
+    """Boolean mask of high-curvature (siphon) regions, dilated by dilation_mm.
+
+    Curvature is measured on the centerline smoothed at ``SIPHON_CURVATURE_SMOOTH_MM`` (anatomical
+    scale). ``SIPHON_LEGACY_MASK`` restores cow_morpho's measurement (0.1 mm Menger curvature,
+    ``INFLECT_SMOOTH_WIN``-point moving average), whose sampling noise exceeds the 0.10 mm⁻¹
+    threshold almost everywhere — the mask then covers whole vessels and the taper fit collapses
+    to a flat median reference.
+    """
+    if kappa_threshold is None:
+        kappa_threshold = (
+            _cfg.SIPHON_LEGACY_KAPPA_THRESHOLD if _cfg.SIPHON_LEGACY_MASK else _cfg.SIPHON_KAPPA_THRESHOLD
+        )
+    dilation_mm = _cfg.SIPHON_DILATION_MM if dilation_mm is None else dilation_mm
+    pts = np.asarray(pts, dtype=float)
+    if _cfg.SIPHON_LEGACY_MASK:
+        kappa = discrete_curvature(pts)
+        kappa_sm = smooth_1d(np.where(np.isfinite(kappa), kappa, 0.0), win=_cfg.INFLECT_SMOOTH_WIN)
+    else:
+        kappa = smoothed_curvature(pts, float(_cfg.SIPHON_CURVATURE_SMOOTH_MM))
+        kappa_sm = np.where(np.isfinite(kappa), kappa, 0.0)
     high_k = kappa_sm >= kappa_threshold
     if not high_k.any() or dilation_mm <= 0.0:
         return high_k
@@ -66,9 +55,6 @@ def compute_siphon_mask(
     radius = max(1, int(np.round(dilation_mm / ds)))
     struct = np.ones(2 * radius + 1, dtype=bool)
     return ndi.binary_dilation(high_k, structure=struct)
-
-
-_siphon_mask = compute_siphon_mask
 
 
 def _pava_nondecreasing(y: np.ndarray, w: Optional[np.ndarray] = None) -> np.ndarray:
@@ -134,23 +120,23 @@ def _healthy_radius_envelope(
         out[valid_mask] = med
         return out
 
-    half_window = max(float(TAPER_REFERENCE_WINDOW_MM) * 0.5, 1e-6)
+    half_window = max(float(_cfg.TAPER_REFERENCE_WINDOW_MM) * 0.5, 1e-6)
     fit_s = s[fit_mask]
     fit_r = r[fit_mask]
-    whole_fit_percentile = float(np.nanpercentile(fit_r, TAPER_REFERENCE_PERCENTILE))
+    whole_fit_percentile = float(np.nanpercentile(fit_r, _cfg.TAPER_REFERENCE_PERCENTILE))
 
     for i in np.flatnonzero(valid_mask & np.isfinite(s)):
         local = np.abs(fit_s - s[i]) <= half_window
         if local.sum() >= 3:
-            out[i] = float(np.nanpercentile(fit_r[local], TAPER_REFERENCE_PERCENTILE))
+            out[i] = float(np.nanpercentile(fit_r[local], _cfg.TAPER_REFERENCE_PERCENTILE))
         else:
             out[i] = whole_fit_percentile
 
-    if TAPER_REFERENCE_SMOOTH_MM > 0 and len(out) >= 3:
+    if _cfg.TAPER_REFERENCE_SMOOTH_MM > 0 and len(out) >= 3:
         ds = float(np.nanmedian(np.diff(s))) if len(s) > 1 else 1.0
         if not np.isfinite(ds) or ds <= 1e-6:
             ds = 1.0
-        win = max(3, int(round(float(TAPER_REFERENCE_SMOOTH_MM) / ds)))
+        win = max(3, int(round(float(_cfg.TAPER_REFERENCE_SMOOTH_MM) / ds)))
         win = win | 1
         filled = out.copy()
         idx = np.flatnonzero(np.isfinite(filled))
@@ -158,7 +144,7 @@ def _healthy_radius_envelope(
             filled = np.interp(np.arange(len(out)), idx, filled[idx])
             out[valid_mask] = smooth_1d(filled, win=win)[valid_mask]
 
-    if TAPER_FIT_ENFORCE_NONINCREASING:
+    if _cfg.TAPER_FIT_ENFORCE_NONINCREASING:
         out = _enforce_nonincreasing_reference(out, valid_mask)
     return np.where(valid_mask, np.clip(out, 1e-6, None), np.nan).astype(float)
 
@@ -184,7 +170,7 @@ def _linear_taper_reference(
     slope, intercept = np.polyfit(s[fit_mask], r[fit_mask], 1)
     slope = float(slope)
     intercept = float(intercept)
-    if TAPER_FIT_ENFORCE_NONINCREASING and slope > 0:
+    if _cfg.TAPER_FIT_ENFORCE_NONINCREASING and slope > 0:
         slope = 0.0
         intercept = float(np.nanmedian(vals))
     out[valid_mask] = intercept + slope * s[valid_mask]
@@ -234,9 +220,9 @@ def _compute_vessel_taper(
     if fit_mask.sum() < 3:
         return _constant_ref()
 
-    low_cut = None if low_outlier_pct is None else float(low_outlier_pct) * float(TAPER_FIT_OUTLIER_FRACTION)
-    high_cut = None if high_outlier_pct is None else float(high_outlier_pct) * float(TAPER_FIT_OUTLIER_FRACTION)
-    min_fit_points = max(3, int(np.ceil(float(TAPER_FIT_MIN_HEALTHY_FRACTION) * float(original_fit_mask.sum()))))
+    low_cut = None if low_outlier_pct is None else float(low_outlier_pct) * float(_cfg.TAPER_FIT_OUTLIER_FRACTION)
+    high_cut = None if high_outlier_pct is None else float(high_outlier_pct) * float(_cfg.TAPER_FIT_OUTLIER_FRACTION)
+    min_fit_points = max(3, int(np.ceil(float(_cfg.TAPER_FIT_MIN_HEALTHY_FRACTION) * float(original_fit_mask.sum()))))
 
     pre_ref = _linear_taper_reference(s, r, valid_mask, fit_mask)
     pre_deviation_pct = (r / pre_ref - 1.0) * 100.0
@@ -249,7 +235,7 @@ def _compute_vessel_taper(
         fit_mask = prehealthy
 
     ref = _healthy_radius_envelope(s, r, valid_mask, fit_mask)
-    for _ in range(max(1, int(TAPER_FIT_MAX_ITERATIONS))):
+    for _ in range(max(1, int(_cfg.TAPER_FIT_MAX_ITERATIONS))):
         if fit_mask.sum() < min_fit_points:
             fit_mask = original_fit_mask.copy()
         if fit_mask.sum() < 3:
@@ -290,7 +276,7 @@ def stenosis_segment_percent(
     pct = np.zeros_like(r, dtype=float)
     if len(r) == 0:
         return pct
-    margin = STENOSIS_SEGMENT_REFERENCE_MARGIN_MM if margin_mm is None else float(margin_mm)
+    margin = _cfg.STENOSIS_SEGMENT_REFERENCE_MARGIN_MM if margin_mm is None else float(margin_mm)
     for start, end in segments:
         start = max(0, int(start))
         end = min(len(r) - 1, int(end))
@@ -383,7 +369,7 @@ def detect_stenosis_segments(
 
     # Idea A: use a larger end-zone exclusion for the fit so end-zone lesions
     # cannot pull the local percentile envelope down toward the lesion radius.
-    fit_excl = float(STENOSIS_TAPER_FIT_EXCLUDE_END_MM) if taper_fit_exclude_end_mm is None else float(taper_fit_exclude_end_mm)
+    fit_excl = float(_cfg.STENOSIS_TAPER_FIT_EXCLUDE_END_MM) if taper_fit_exclude_end_mm is None else float(taper_fit_exclude_end_mm)
     fit_core = stenosis_valid_mask_from_ends(s, fit_excl) if fit_excl > float(exclude_end_mm) else valid_core
 
     r_ref_per_point = _compute_vessel_taper(
@@ -391,22 +377,22 @@ def detect_stenosis_segments(
         exclude_mask=siphon,
         fit_basis=fit_core,
         low_outlier_pct=threshold_pct,
-        high_outlier_pct=ENLARGEMENT_THRESHOLD_PCT,
+        high_outlier_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT,
     )
     r_ref_per_point = fill_reference_gaps(r_ref_per_point)
 
-    max_gap = STENOSIS_MAX_INTERNAL_GAP_MM if max_internal_gap_mm is None else float(max_internal_gap_mm)
+    max_gap = _cfg.STENOSIS_MAX_INTERNAL_GAP_MM if max_internal_gap_mm is None else float(max_internal_gap_mm)
 
     # Idea B: iterative re-fit — exclude detected lesion points from the
     # reference fit, recompute, re-detect.  Repeat until the lesion mask
     # stabilises (convergence) or TAPER_TWO_PASS_MAX_ITERATIONS is reached.
-    if TAPER_TWO_PASS:
+    if _cfg.TAPER_TWO_PASS:
         lesion_mask = np.zeros(len(r), dtype=bool)
-        for _ in range(int(TAPER_TWO_PASS_MAX_ITERATIONS)):
+        for _ in range(int(_cfg.TAPER_TWO_PASS_MAX_ITERATIONS)):
             pct_iter = stenosis_raw_percent(s, r, r_ref_per_point, exclude_end_mm=0.0)
             core_iter = (pct_iter >= float(threshold_pct)) & np.isfinite(pct_iter) & valid_core
             support_iter = (
-                (pct_iter >= min(float(STENOSIS_SUPPORT_THRESHOLD_PCT), float(threshold_pct)))
+                (pct_iter >= min(float(_cfg.STENOSIS_SUPPORT_THRESHOLD_PCT), float(threshold_pct)))
                 & np.isfinite(pct_iter) & valid_core
             )
             segs_iter = hysteresis_segments_from_min_length(s, core_iter, support_iter, min_segment_mm, max_gap_mm=max_gap)
@@ -422,7 +408,7 @@ def detect_stenosis_segments(
                 exclude_mask=excl_iter,
                 fit_basis=fit_core & ~lesion_mask,
                 low_outlier_pct=threshold_pct,
-                high_outlier_pct=ENLARGEMENT_THRESHOLD_PCT,
+                high_outlier_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT,
             )
             r_ref_per_point = fill_reference_gaps(r_ref_per_point)
 
@@ -432,19 +418,14 @@ def detect_stenosis_segments(
     core = (pct_per_point >= float(threshold_pct)) & np.isfinite(pct_per_point) & valid_core
     support_domain = stenosis_valid_mask_from_ends(s, float(exclude_end_mm))
     support = (
-        (pct_per_point >= min(float(STENOSIS_SUPPORT_THRESHOLD_PCT), float(threshold_pct)))
+        (pct_per_point >= min(float(_cfg.STENOSIS_SUPPORT_THRESHOLD_PCT), float(threshold_pct)))
         & np.isfinite(pct_per_point)
         & support_domain
     )
-    # Accept on the support contour (so a short severe lesion is not lost to the length rule),
-    # then report on the core contour.
-    segments_point_idx = clip_segments_to_core(
-        hysteresis_segments_from_min_length(
-            s, core, support, min_segment_mm, max_gap_mm=max_gap,
-        ),
-        core,
+    segments_point_idx = hysteresis_segments_from_min_length(
+        s, core, support, min_segment_mm, max_gap_mm=max_gap,
     )
-    accepted = core & mask_from_segments(len(r), segments_point_idx)
+    accepted = support & mask_from_segments(len(r), segments_point_idx)
     segments_s_mm = [(float(s[a]), float(s[b])) for a, b in segments_point_idx]
     reported_pct = stenosis_segment_percent(s, r, r_ref_per_point, segments_point_idx)
     pct_values = reported_pct[accepted & np.isfinite(reported_pct)]
@@ -478,25 +459,21 @@ def stenosis_pointwise(
     pct = stenosis_raw_percent(s, r, r_ref_per_point, exclude_end_mm=0.0)
     is_stenotic = ((pct >= float(threshold_pct)) & np.isfinite(pct) & valid_core).astype(int)
     if min_segment_mm is not None:
-        max_gap = STENOSIS_MAX_INTERNAL_GAP_MM if max_internal_gap_mm is None else float(max_internal_gap_mm)
+        max_gap = _cfg.STENOSIS_MAX_INTERNAL_GAP_MM if max_internal_gap_mm is None else float(max_internal_gap_mm)
         support_domain = stenosis_valid_mask_from_ends(s, float(exclude_end_mm))
         support = (
-            (pct >= min(float(STENOSIS_SUPPORT_THRESHOLD_PCT), float(threshold_pct)))
+            (pct >= min(float(_cfg.STENOSIS_SUPPORT_THRESHOLD_PCT), float(threshold_pct)))
             & np.isfinite(pct)
             & support_domain
         )
-        core = is_stenotic == 1
-        segments = clip_segments_to_core(
-            hysteresis_segments_from_min_length(
-                s,
-                core,
-                support,
-                float(min_segment_mm),
-                max_gap_mm=max_gap,
-            ),
-            core,
+        segments = hysteresis_segments_from_min_length(
+            s,
+            is_stenotic == 1,
+            support,
+            float(min_segment_mm),
+            max_gap_mm=max_gap,
         )
-        is_stenotic = (core & mask_from_segments(len(r), segments)).astype(int)
+        is_stenotic = (support & mask_from_segments(len(r), segments)).astype(int)
         pct_reported = stenosis_segment_percent(s, r, r_ref_per_point, segments)
         pct_reported[is_stenotic != 1] = 0.0
         return pct_reported, is_stenotic
@@ -536,42 +513,42 @@ def detect_enlargement_segments(
 
     # Idea A: larger end-zone exclusion for the fit so end-zone aneurysms
     # cannot pull the local percentile envelope up toward the lesion radius.
-    fit_excl = float(ENLARGEMENT_TAPER_FIT_EXCLUDE_END_MM) if taper_fit_exclude_end_mm is None else float(taper_fit_exclude_end_mm)
+    fit_excl = float(_cfg.ENLARGEMENT_TAPER_FIT_EXCLUDE_END_MM) if taper_fit_exclude_end_mm is None else float(taper_fit_exclude_end_mm)
     fit_core = stenosis_valid_mask_from_ends(s, fit_excl) if fit_excl > float(exclude_end_mm) else valid_core
 
     r_ref_per_point = _compute_vessel_taper(
         s, r, valid_core,
         exclude_mask=siphon,
         fit_basis=fit_core,
-        low_outlier_pct=STENOSIS_THRESHOLD_PCT,
+        low_outlier_pct=_cfg.STENOSIS_THRESHOLD_PCT,
         high_outlier_pct=threshold_pct,
     )
     r_ref_per_point = fill_reference_gaps(r_ref_per_point)
     detect_core = (
         valid_core
-        if (siphon is None or not SIPHON_SUPPRESSES_ENLARGEMENT_DETECTION)
+        if (siphon is None or not _cfg.SIPHON_SUPPRESSES_ENLARGEMENT_DETECTION)
         else (valid_core & ~siphon)
     )
 
-    max_gap = ENLARGEMENT_MAX_INTERNAL_GAP_MM if max_internal_gap_mm is None else float(max_internal_gap_mm)
+    max_gap = _cfg.ENLARGEMENT_MAX_INTERNAL_GAP_MM if max_internal_gap_mm is None else float(max_internal_gap_mm)
 
     # Idea B: iterative re-fit — exclude detected lesion points from the
     # reference fit, recompute, re-detect.  Repeat until the lesion mask
     # stabilises (convergence) or TAPER_TWO_PASS_MAX_ITERATIONS is reached.
-    if TAPER_TWO_PASS:
+    if _cfg.TAPER_TWO_PASS:
         lesion_mask = np.zeros(len(r), dtype=bool)
-        for _ in range(int(TAPER_TWO_PASS_MAX_ITERATIONS)):
+        for _ in range(int(_cfg.TAPER_TWO_PASS_MAX_ITERATIONS)):
             pct_iter = np.full_like(r, np.nan, dtype=float)
             pct_valid_iter = detect_core & np.isfinite(r) & np.isfinite(r_ref_per_point) & (r_ref_per_point > 1e-8)
             pct_iter[pct_valid_iter] = (r[pct_valid_iter] / r_ref_per_point[pct_valid_iter] - 1.0) * 100.0
             core_iter = (pct_iter >= float(threshold_pct)) & np.isfinite(pct_iter) & detect_core
             support_iter = (
-                (pct_iter >= min(float(ENLARGEMENT_SUPPORT_THRESHOLD_PCT), float(threshold_pct)))
+                (pct_iter >= min(float(_cfg.ENLARGEMENT_SUPPORT_THRESHOLD_PCT), float(threshold_pct)))
                 & np.isfinite(pct_iter) & detect_core
             )
             segs_iter = hysteresis_segments_from_min_length(
                 s, core_iter, support_iter, min_segment_mm, max_gap_mm=max_gap,
-                min_points=points_for_length(s, ENLARGEMENT_MIN_SUPPORT_LENGTH_MM),
+                min_points=_cfg.ENLARGEMENT_MIN_CONSECUTIVE_SUPPORT_POINTS,
             )
             new_mask = mask_from_segments(len(r), segs_iter) if segs_iter else np.zeros(len(r), dtype=bool)
             if np.array_equal(new_mask, lesion_mask):
@@ -584,7 +561,7 @@ def detect_enlargement_segments(
                 s, r, valid_core,
                 exclude_mask=excl_iter,
                 fit_basis=fit_core & ~lesion_mask,
-                low_outlier_pct=STENOSIS_THRESHOLD_PCT,
+                low_outlier_pct=_cfg.STENOSIS_THRESHOLD_PCT,
                 high_outlier_pct=threshold_pct,
             )
             r_ref_per_point = fill_reference_gaps(r_ref_per_point)
@@ -596,19 +573,15 @@ def detect_enlargement_segments(
 
     core = (pct_per_point >= float(threshold_pct)) & np.isfinite(pct_per_point) & detect_core
     support = (
-        (pct_per_point >= min(float(ENLARGEMENT_SUPPORT_THRESHOLD_PCT), float(threshold_pct)))
+        (pct_per_point >= min(float(_cfg.ENLARGEMENT_SUPPORT_THRESHOLD_PCT), float(threshold_pct)))
         & np.isfinite(pct_per_point)
         & detect_core
     )
-    # Accept on the support contour, report on the core contour (mirrors the stenosis path).
-    segments_point_idx = clip_segments_to_core(
-        hysteresis_segments_from_min_length(
-            s, core, support, min_segment_mm, max_gap_mm=max_gap,
-            min_points=points_for_length(s, ENLARGEMENT_MIN_SUPPORT_LENGTH_MM),
-        ),
-        core,
+    segments_point_idx = hysteresis_segments_from_min_length(
+        s, core, support, min_segment_mm, max_gap_mm=max_gap,
+        min_points=_cfg.ENLARGEMENT_MIN_CONSECUTIVE_SUPPORT_POINTS,
     )
-    accepted = core & mask_from_segments(len(r), segments_point_idx)
+    accepted = support & mask_from_segments(len(r), segments_point_idx)
     segments_s_mm = [(float(s[a]), float(s[b])) for a, b in segments_point_idx]
     pct_values = pct_per_point[accepted & np.isfinite(pct_per_point)]
     pct = float(np.nanmax(pct_values)) if len(pct_values) else 0.0
@@ -644,7 +617,7 @@ def enlargement_pointwise(
     )
     detect_core = (
         valid_core
-        if (siphon is None or not SIPHON_SUPPRESSES_ENLARGEMENT_DETECTION)
+        if (siphon is None or not _cfg.SIPHON_SUPPRESSES_ENLARGEMENT_DETECTION)
         else (valid_core & ~siphon)
     )
     # Compute pct over all valid_core so siphon-region points are not NaN in the output
@@ -654,25 +627,21 @@ def enlargement_pointwise(
     pct[pct_valid] = (r[pct_valid] / r_ref_per_point[pct_valid] - 1.0) * 100.0
     is_enlarged = ((pct >= float(threshold_pct)) & np.isfinite(pct) & detect_core).astype(int)
     if min_segment_mm is not None:
-        max_gap = ENLARGEMENT_MAX_INTERNAL_GAP_MM if max_internal_gap_mm is None else float(max_internal_gap_mm)
+        max_gap = _cfg.ENLARGEMENT_MAX_INTERNAL_GAP_MM if max_internal_gap_mm is None else float(max_internal_gap_mm)
         support = (
-            (pct >= min(float(ENLARGEMENT_SUPPORT_THRESHOLD_PCT), float(threshold_pct)))
+            (pct >= min(float(_cfg.ENLARGEMENT_SUPPORT_THRESHOLD_PCT), float(threshold_pct)))
             & np.isfinite(pct)
             & detect_core
         )
-        core = is_enlarged == 1
-        segments = clip_segments_to_core(
-            hysteresis_segments_from_min_length(
-                s,
-                core,
-                support,
-                float(min_segment_mm),
-                max_gap_mm=max_gap,
-                min_points=points_for_length(s, ENLARGEMENT_MIN_SUPPORT_LENGTH_MM),
-            ),
-            core,
+        segments = hysteresis_segments_from_min_length(
+            s,
+            is_enlarged == 1,
+            support,
+            float(min_segment_mm),
+            max_gap_mm=max_gap,
+            min_points=_cfg.ENLARGEMENT_MIN_CONSECUTIVE_SUPPORT_POINTS,
         )
-        is_enlarged = (core & mask_from_segments(len(r), segments)).astype(int)
+        is_enlarged = (support & mask_from_segments(len(r), segments)).astype(int)
         # Return 0 outside enlarged segments (mirrors stenosis_pointwise behaviour so
         # downstream interpolation in anatomic-split VTPs never sees all-NaN slices).
         pct_reported = np.zeros_like(r, dtype=float)
@@ -790,52 +759,6 @@ def mask_from_segments(n_points: int, segments: List[Tuple[int, int]]) -> np.nda
     return keep
 
 
-def points_for_length(s: np.ndarray, length_mm: Optional[float]) -> Optional[int]:
-    """Point count spanning *length_mm* at this path's own sampling step, or ``None``.
-
-    Lets a policy be stated in mm while :func:`flag_segments_from_min_length` still counts points,
-    so changing ``CENTERLINE_RESAMPLE_STEP_MM`` cannot silently retune a detection rule.
-    """
-    if length_mm is None:
-        return None
-    s = np.asarray(s, dtype=float)
-    if s.size < 2:
-        return None
-    step = float(np.nanmedian(np.diff(s)))
-    if not np.isfinite(step) or step <= 1e-9:
-        return None
-    # A run of n points spans (n-1) steps. The epsilon absorbs the float error in the median step
-    # (an arange at 0.1 mm medians to 0.0999…, which would otherwise round the count up by one).
-    n_intervals = int(np.ceil(float(length_mm) / step - 1e-6))
-    return max(2, n_intervals + 1)
-
-
-def clip_segments_to_core(
-    segments: List[Tuple[int, int]], core_flag: np.ndarray
-) -> List[Tuple[int, int]]:
-    """Trim each accepted segment to the span between its first and last core point.
-
-    The support contour decides *whether* a lesion is real and merges runs across small internal
-    dips; it should not widen what gets **reported**. Reporting the halo would inflate
-    ``*_length_total_mm`` and make "stenosis length" mean something other than "length narrowed by
-    at least the core threshold". Trimming keeps the merge (an internal sub-core dip stays inside
-    one segment) while pinning both ends to the core contour.
-
-    Segments holding no core point are dropped — they cannot occur via
-    :func:`hysteresis_segments_from_min_length`, which already requires one, but the guard keeps
-    this usable on any segment list.
-    """
-    core_flag = np.asarray(core_flag, dtype=bool)
-    out: List[Tuple[int, int]] = []
-    for start, end in segments:
-        start, end = int(start), int(end)
-        local = np.flatnonzero(core_flag[start:end + 1])
-        if local.size == 0:
-            continue
-        out.append((start + int(local[0]), start + int(local[-1])))
-    return out
-
-
 def filter_flag_by_min_length(
     s: np.ndarray,
     flag: np.ndarray,
@@ -877,7 +800,7 @@ def select_caliber_detection_radius(cross_section_radius: np.ndarray, mis_radius
     (VMTK MIS) radius is unavailable or non-finite.
     """
     cross_section_radius = np.asarray(cross_section_radius, dtype=float)
-    if str(RADIUS_SOURCE_FOR_CALIBER_DETECTION).lower() in {"maximum_inscribed_sphere", "mis", "vmtk"}:
+    if str(_cfg.RADIUS_SOURCE_FOR_CALIBER_DETECTION).lower() in {"maximum_inscribed_sphere", "mis", "vmtk"}:
         if mis_radius is not None:
             mis_radius = np.asarray(mis_radius, dtype=float)
             valid = np.isfinite(mis_radius) & (mis_radius > 1e-6)
@@ -900,9 +823,9 @@ def refresh_enlargement_summary_from_flags(res: dict) -> None:
     segments = flag_segments_from_min_length(
         s,
         flag == 1,
-        ENLARGEMENT_MIN_LEN_MM,
-        max_gap_mm=ENLARGEMENT_MAX_INTERNAL_GAP_MM,
-        min_points=points_for_length(s, ENLARGEMENT_MIN_SUPPORT_LENGTH_MM),
+        _cfg.ENLARGEMENT_MIN_LEN_MM,
+        max_gap_mm=_cfg.ENLARGEMENT_MAX_INTERNAL_GAP_MM,
+        min_points=_cfg.ENLARGEMENT_MIN_CONSECUTIVE_SUPPORT_POINTS,
     )
     if segments:
         keep = np.zeros(len(flag), dtype=bool)

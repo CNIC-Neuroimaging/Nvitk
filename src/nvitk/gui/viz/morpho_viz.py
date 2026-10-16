@@ -28,7 +28,10 @@ _COLOR_BY_ARRAYS: dict[str, tuple[str, ...]] = {
     "area": ("CrossSectionArea", "cross_section_area_mm2", "EffectiveRadius", "CrossSectionRadius"),
 }
 
-# Morphometrics VTPs store points as voxel_index * spacing (origin 0), not scanner world.
+# Morphometrics VTPs are written in scanner RAS (field data NVITK_COORDINATE_FRAME="RAS" plus the
+# NVITK_AFFINE they were mapped with); older outputs are voxel_index * spacing (origin 0). The
+# loaders bring both to the latter frame (_vtp_points_in_index_mm), which _vtp_mm_to_data maps
+# to layer data indices.
 # Napari's layer-controls size slider is an *integer* with minimum 1, so sub-voxel
 # defaults must be driven from our dock spinbox (see _attach_summary_dock).
 DEFAULT_MORPHO_POINT_SIZE = 0.35
@@ -95,9 +98,9 @@ def clear_morpho_layers(viewer: Any) -> None:
 def _vtp_mm_to_data(points_mm: np.ndarray, reference_layer: Any | None) -> np.ndarray:
     """Map morphometrics VTP points (voxel × spacing, origin 0) → layer data indices.
 
-    Morphometrics writes VTK points as ``ijk * spacing`` with origin ``(0,0,0)``,
-    not full NIfTI world. Dividing by spacing recovers voxel indices that match
-    the Labels layer when the overlay affine is set from that layer.
+    The loaders return that frame for both RAS-tagged and legacy files
+    (:func:`_vtp_points_in_index_mm`). Dividing by spacing recovers voxel indices that
+    match the Labels layer when the overlay affine is set from that layer.
     """
     pts = np.asarray(points_mm, dtype=np.float64)
     if pts.ndim != 2 or pts.shape[1] < 3:
@@ -112,8 +115,23 @@ def _vtp_mm_to_data(points_mm: np.ndarray, reference_layer: Any | None) -> np.nd
     return xyz / scale
 
 
-# Back-compat alias (previous incorrect name suggested scanner world).
-_world_mm_to_data = _vtp_mm_to_data
+
+def _vtp_points_in_index_mm(poly: Any, points: np.ndarray) -> np.ndarray:
+    """VTP points in the ``voxel_index × spacing`` frame, whatever frame the file was written in.
+
+    RAS-tagged files carry the voxel→RAS affine they were mapped with; it is inverted here, so
+    the overlay lines up with the mask without trusting any layer metadata.
+    """
+    from vtk.util import numpy_support
+
+    fd = poly.GetFieldData()
+    tag = fd.GetAbstractArray("NVITK_COORDINATE_FRAME") if fd is not None else None
+    aff_arr = fd.GetArray("NVITK_AFFINE") if fd is not None else None
+    if tag is None or aff_arr is None or str(tag.GetValue(0)).upper() != "RAS":
+        return points
+    aff = numpy_support.vtk_to_numpy(aff_arr).astype(np.float64).reshape(4, 4)
+    ijk = (np.linalg.inv(aff) @ np.c_[points, np.ones(len(points))].T).T[:, :3]
+    return ijk * np.linalg.norm(aff[:3, :3], axis=0)
 
 
 def _load_vtp_polyline_with_arrays(path: Path) -> tuple[np.ndarray, dict[str, np.ndarray]]:
@@ -131,7 +149,9 @@ def _load_vtp_polyline_with_arrays(path: Path) -> tuple[np.ndarray, dict[str, np
     if poly is None or poly.GetNumberOfPoints() == 0:
         return np.empty((0, 3), dtype=np.float64), {}
 
-    all_points = numpy_support.vtk_to_numpy(poly.GetPoints().GetData()).astype(np.float64)
+    all_points = _vtp_points_in_index_mm(
+        poly, numpy_support.vtk_to_numpy(poly.GetPoints().GetData()).astype(np.float64)
+    )
     lines = poly.GetLines()
     ids: list[int] = []
     if lines is not None and poly.GetNumberOfLines() > 0:
@@ -336,7 +356,9 @@ def _load_vtp_surface(path: Path) -> tuple[np.ndarray, np.ndarray]:
     if poly is None or poly.GetNumberOfPoints() == 0:
         return np.empty((0, 3), dtype=np.float64), np.empty((0, 3), dtype=np.int64)
 
-    verts = numpy_support.vtk_to_numpy(poly.GetPoints().GetData()).astype(np.float64)
+    verts = _vtp_points_in_index_mm(
+        poly, numpy_support.vtk_to_numpy(poly.GetPoints().GetData()).astype(np.float64)
+    )
     tri = vtk.vtkTriangleFilter()
     tri.SetInputData(poly)
     tri.Update()

@@ -126,7 +126,7 @@ _LIBRARY_TOOLS: dict[str, list[ToolEntry]] = {
     ],
     "viz": [
         ToolEntry("", "nvitk.viz.flowshow", label="4D-flow visualization (PyVista)", library_only=True),
-        ToolEntry("", "nvitk.viz.streamlines", label="headless streamlines / pathlines", library_only=True),
+        ToolEntry("", "nvitk.vmtk.flow", label="4D-flow particle tracing (VMTK streamlines / pathlines)", library_only=True),
         ToolEntry("", "nvitk.viz.brainshow", label="atlas brain views (Nilearn)", library_only=True),
         ToolEntry("", "nvitk.viz.pet_hotspots", label="SUV hotspot 3D visualization", library_only=True),
         ToolEntry("", "nvitk.viz.centerline_pick", label="centerline picking / plane frames", requires_mask=True, library_only=True),

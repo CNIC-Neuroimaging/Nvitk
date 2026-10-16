@@ -17,13 +17,7 @@ from .centerlines import (
     save_centerline_result_vtps,
     summarize_segment_result,
 )
-from nvitk.measure.morphometrics_config import (
-    ANATOMIC_BRANCH_Z_LOOKAHEAD_POINTS,
-    EXPORT_ANATOMIC_SPLIT_CENTERLINES,
-    REMOVE_ROOT_TO_TERMINAL_CENTERLINE_VTPS_AFTER_SPLIT,
-    TREE_REGION_ROLE_CODES,
-    TREE_SEGMENT_ASSIGN_TOL_MM,
-)
+from nvitk.measure import morphometrics_config as _cfg
 from .geometry import arc_length, resample_generated_centerline_points
 from .io_utils import safe_filename
 from .metrics import discrete_curvature, discrete_torsion, radius_from_edt
@@ -230,7 +224,7 @@ def build_recursive_tree_segments(tree: SkeletonTree, spacing) -> List[dict]:
                 "segment_name": segment_name,
                 "region_label": region_label,
                 "tree_region_role": "branch",
-                "tree_region_role_code": TREE_REGION_ROLE_CODES["branch"],
+                "tree_region_role_code": _cfg.TREE_REGION_ROLE_CODES["branch"],
                 "tree_branch_path": branch_path,
                 "parent_tree_branch_path": parent_branch_path,
                 "tree_branch_index": int(branch_index),
@@ -355,7 +349,7 @@ def build_connected_skeleton_edge_segments(tree: SkeletonTree, spacing) -> List[
             "segment_name": segment_name,
             "region_label": region_label,
             "tree_region_role": "branch",
-            "tree_region_role_code": TREE_REGION_ROLE_CODES["branch"],
+            "tree_region_role_code": _cfg.TREE_REGION_ROLE_CODES["branch"],
             "tree_branch_path": branch_path,
             "parent_tree_branch_path": parent_branch_path,
             "tree_branch_index": int(branch_index),
@@ -387,7 +381,7 @@ def superior_axis(axes: Optional[AnatomicalAxes] = None) -> Tuple[int, int]:
 
 def segment_child_z_score(
     segment: dict,
-    lookahead_points: int = ANATOMIC_BRANCH_Z_LOOKAHEAD_POINTS,
+    lookahead_points: Optional[int] = None,
     axes: Optional[AnatomicalAxes] = None,
 ) -> float:
     """Mean superior-inferior coordinate over the segment's first few points, for sibling ordering.
@@ -399,6 +393,8 @@ def segment_child_z_score(
     if len(pts) == 0:
         return np.nan
     axis, sign = superior_axis(axes)
+    if lookahead_points is None:
+        lookahead_points = _cfg.ANATOMIC_BRANCH_Z_LOOKAHEAD_POINTS
     start = 1 if len(pts) > 1 else 0
     stop = min(len(pts), start + int(max(1, lookahead_points)))
     vals = sign * pts[start:stop, axis]
@@ -526,7 +522,7 @@ def assign_points_to_recursive_segments(points: np.ndarray, segments: List[dict]
         "tree_segment_label": np.array(["unassigned"] * n, dtype=object),
         "tree_segment_id": np.zeros(n, dtype=float),
         "tree_region_role": np.array(["unassigned"] * n, dtype=object),
-        "tree_region_role_code": np.full(n, TREE_REGION_ROLE_CODES["unassigned"], dtype=float),
+        "tree_region_role_code": np.full(n, _cfg.TREE_REGION_ROLE_CODES["unassigned"], dtype=float),
         "tree_branch_depth": np.zeros(n, dtype=float),
         "tree_branch_index": np.zeros(n, dtype=float),
         "tree_branch_path": np.array([""] * n, dtype=object),
@@ -577,7 +573,7 @@ def save_recursive_labeled_tree_path_centerlines(
         return
     skip_path_ids = skip_path_ids or set()
     spacing = np.asarray(spacing, dtype=float)
-    assign_tol = TREE_SEGMENT_ASSIGN_TOL_MM if TREE_SEGMENT_ASSIGN_TOL_MM is not None else max(0.75, 2.0 * float(np.min(spacing)))
+    assign_tol = _cfg.TREE_SEGMENT_ASSIGN_TOL_MM if _cfg.TREE_SEGMENT_ASSIGN_TOL_MM is not None else max(0.75, 2.0 * float(np.min(spacing)))
     for res in path_results:
         if res.get("path_id", "") in skip_path_ids:
             continue
@@ -625,7 +621,7 @@ def remove_root_to_terminal_centerline_outputs(
     keep_path_ids: Optional[set] = None,
 ) -> None:
     """Delete the original root-to-terminal centerline VTPs once their content is superseded by tree-segment exports."""
-    if not REMOVE_ROOT_TO_TERMINAL_CENTERLINE_VTPS_AFTER_SPLIT:
+    if not _cfg.REMOVE_ROOT_TO_TERMINAL_CENTERLINE_VTPS_AFTER_SPLIT:
         return
     keep_path_ids = set(str(x) for x in (keep_path_ids or set()))
     for res in path_results:
@@ -739,6 +735,50 @@ def collapse_unary_supported_anatomic_segments(
     return export_segments
 
 
+def centerline_geometry_for_segment(
+    skeleton_pts: np.ndarray,
+    path_results: List[dict],
+    spacing,
+    *,
+    max_mean_offset_mm: Optional[float] = None,
+) -> Tuple[np.ndarray, str]:
+    """Geometry of one non-overlapping segment, cut from the measured centerline.
+
+    The segment's extent comes from the skeleton edge (junction to junction); its points are the
+    part of the root→terminal centerline that runs along that edge — the path with the smallest
+    mean distance to the skeleton points, between the projections of the edge's two ends. The
+    centerline (VMTK, or the re-centred native path) is what was measured; the voxel skeleton is
+    a staircase that lengthens the segment and inflates its curvature several-fold.
+
+    Falls back to the skeleton edge, smoothed at one voxel, when no path runs within
+    *max_mean_offset_mm* (default: 3 voxels) of it. Returns ``(points, "centerline" | "skeleton")``.
+    """
+    from .metrics import smooth_polyline
+
+    spacing = np.asarray(spacing, dtype=float)
+    skel = np.asarray(skeleton_pts, dtype=float)
+    tol = float(max_mean_offset_mm) if max_mean_offset_mm else 3.0 * float(np.max(spacing))
+    best = None
+    for res in path_results:
+        p = centerline_points_from_result(res)
+        if len(p) < 2:
+            continue
+        d, idx = cKDTree(p).query(skel)
+        mean_d = float(np.mean(d))
+        if best is None or mean_d < best[0]:
+            best = (mean_d, p, idx)
+    if best is not None and best[0] <= tol:
+        _mean_d, p, idx = best
+        i0, i1 = int(idx[0]), int(idx[-1])
+        if i1 < i0:
+            i0, i1 = i1, i0
+        sub = p[i0:i1 + 1]
+        if len(sub) >= 2:
+            return resample_generated_centerline_points(sub), "centerline"
+    smoothed = smooth_polyline(skel, float(np.min(spacing)))
+    return resample_generated_centerline_points(smoothed), "skeleton"
+
+
 def save_anatomic_split_tree_centerlines(
     label: int,
     component_id: int,
@@ -759,18 +799,19 @@ def save_anatomic_split_tree_centerlines(
     export layer can summarise each piece of vessel exactly once instead of
     once per root→terminal path that happens to traverse it.
 
-    Geometry comes from the recursive skeleton segments (exact shared junction
-    voxels). Caliber / stenosis attributes are transferred from the measured
-    root→terminal paths by nearest-neighbor lookup so junctions are never
-    dropped by overlap pruning or path-assignment gaps.
+    Segment *extents* come from the skeleton edges (exact shared junction voxels);
+    segment *geometry* is the measured centerline between the junctions
+    (:func:`centerline_geometry_for_segment`). Caliber / stenosis attributes are
+    transferred from the measured root→terminal paths by nearest-neighbor lookup so
+    junctions are never dropped by overlap pruning or path-assignment gaps.
     """
-    if not EXPORT_ANATOMIC_SPLIT_CENTERLINES or not centerline_dir or not path_results or not segments:
+    if not _cfg.EXPORT_ANATOMIC_SPLIT_CENTERLINES or not centerline_dir or not path_results or not segments:
         return [], []
 
     spacing = np.asarray(spacing, dtype=float)
     assign_tol = (
-        TREE_SEGMENT_ASSIGN_TOL_MM
-        if TREE_SEGMENT_ASSIGN_TOL_MM is not None
+        _cfg.TREE_SEGMENT_ASSIGN_TOL_MM
+        if _cfg.TREE_SEGMENT_ASSIGN_TOL_MM is not None
         else max(0.75, 2.0 * float(np.min(spacing)))
     )
     segment_by_id = {int(seg["segment_id"]): seg for seg in segments}
@@ -841,7 +882,7 @@ def save_anatomic_split_tree_centerlines(
             continue
 
         source_pts = np.vstack(source_parts)
-        pts = resample_generated_centerline_points(source_pts)
+        pts, geometry_source = centerline_geometry_for_segment(source_pts, path_results, spacing)
         n = len(pts)
         if n < 2:
             continue
@@ -908,6 +949,7 @@ def save_anatomic_split_tree_centerlines(
         # flags come from the measured root->terminal paths (their reference radius
         # is established over the whole vessel); geometry is recomputed locally.
         seg_res = {
+            "geometry_source": geometry_source,
             "x_mm": pts[:, 0], "y_mm": pts[:, 1], "z_mm": pts[:, 2],
             "radius_mm": radius,
             "maximum_inscribed_sphere_radius_mm": maximum_inscribed_sphere_radius,
@@ -1017,7 +1059,7 @@ def save_anatomic_fallback_centerlines(
 
     Returns ``(saved_path_ids, exported_results)``.
     """
-    if not EXPORT_ANATOMIC_SPLIT_CENTERLINES or not centerline_dir or not path_results:
+    if not _cfg.EXPORT_ANATOMIC_SPLIT_CENTERLINES or not centerline_dir or not path_results:
         return [], []
 
     vessel_token = safe_filename(str(vessel_info.name or "vessel"))
@@ -1042,7 +1084,7 @@ def save_anatomic_fallback_centerlines(
         scored = []
         for res in paths:
             pts = centerline_points_from_result(res)
-            lookahead = pts[1:min(len(pts), 1 + int(ANATOMIC_BRANCH_Z_LOOKAHEAD_POINTS))]
+            lookahead = pts[1:min(len(pts), 1 + int(_cfg.ANATOMIC_BRANCH_Z_LOOKAHEAD_POINTS))]
             z = float(si_sign * np.nanmean(lookahead[:, si_ax])) if len(lookahead) else -np.inf
             scored.append((z, res))
         scored.sort(key=lambda row: row[0])

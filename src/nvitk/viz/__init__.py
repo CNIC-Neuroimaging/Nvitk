@@ -30,18 +30,6 @@ from .flowshow import (
     VectorColorMode,
     flowshow,
 )
-from .streamlines import (
-    ColorMetric,
-    FlowTraceParams,
-    StreamlineParams,
-    compute_pathlines,
-    compute_streamlines,
-    resample_polyline,
-    sample_vel_trilinear,
-    stream_seed_cloud,
-    streamline_mean_speeds,
-    vertex_scalars_for_polylines,
-)
 
 __all__ = [
     "CT_WINDOWS",
@@ -67,14 +55,4 @@ __all__ = [
     "FlowshowVectorOptions",
     "FlowshowAnimationOptions",
     "VectorColorMode",
-    "ColorMetric",
-    "FlowTraceParams",
-    "StreamlineParams",
-    "compute_pathlines",
-    "compute_streamlines",
-    "resample_polyline",
-    "sample_vel_trilinear",
-    "stream_seed_cloud",
-    "streamline_mean_speeds",
-    "vertex_scalars_for_polylines",
 ]

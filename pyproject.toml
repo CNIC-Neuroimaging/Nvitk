@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nvitk"
-version = "0.1.0"
+version = "0.2.0"
 description = "Neuro-Vascular Imaging ToolKit"
 authors = [
   { name = "Ignacio Marcos Serrano", email = "imarcoss@cnic.es" }
@@ -80,7 +80,7 @@ dependencies = [
   # ─────────────────────────── General dependencies ────────────────────────────
   "scikit-image>=0.25.2",          # Scikit-image for image processing
   "opencv-python>=4.11",           # OpenCV for image processing
-  "vtk>=9.3.1",                    # VTK image processing
+  "vtk==9.6.2",                    # VTK image processing (exact: the VMTK wheel is built against it)
   "SimpleITK==2.2.1",              # SimpleITK for SimpleITK-based image processing
   
   # ────────────────────────── Neuroimaging tools ───────────────────────────────
@@ -148,6 +148,14 @@ gui = [
   "magicgui>=0.8.0",
   "superqt>=0.6.0",
   "PyQt6-WebEngine>=6.11.0",
+]
+
+# ──────────────────────── VMTK ──────────────────────────────────────────────────
+# Centerlines, surface tools and 4D-flow particle tracing (nvitk.vmtk). PyPI has cp312+ wheels
+# only: on CPython 3.11, recipe/post-link.sh installs nvitk's own cp311 build of this release
+# (recipe/vmtk/build_wheel.sh) instead.
+vmtk = [
+  "vmtk==1.5.2",
 ]
 
 # ──────────────────────── MATLAB dependencies ──────────────────────────────────

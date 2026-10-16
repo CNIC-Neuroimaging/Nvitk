@@ -29,6 +29,7 @@ import numpy as np
 import pandas as pd
 
 import nvitk_vendor.measure.morphometrics_config as _config
+from nvitk_vendor.measure.morphometrics_config import MorphometricsConfig, active_config, apply_config
 from nvitk_vendor.measure.morpho.anatomy_axes import MorphoContext, resolve_anatomical_axes
 from nvitk_vendor.measure.morpho.io_utils import (
     clean_generated_vtp_dir,
@@ -36,6 +37,7 @@ from nvitk_vendor.measure.morpho.io_utils import (
     ensure_dir,
     load_mapping,
     load_multilabel_nifti,
+    safe_filename,
     safe_sheet_name,
     vessel_sheet_sort_key,
 )
@@ -47,10 +49,11 @@ from nvitk_vendor.measure.morpho.labels_util import (
     resolve_labels_to_process,
 )
 from nvitk_vendor.measure.morpho.orchestration import process_component_tree_vmtk
+from nvitk_vendor.measure.morpho.surface import set_world_transform
+from nvitk_vendor.measure.morpho.export_utils.vessel_tables import component_tables, subject_summary, vessel_summary
 from nvitk_vendor.measure.morpho.export_utils.summaries import (
     branchpoint_export_dataframe,
     compute_volumetry_summary,
-    build_vessel_points_dataframe,
     compute_hemispheric_summary,
     compute_lr_asymmetry,
     compute_vessel_summary_row,
@@ -91,6 +94,10 @@ def _worker(args: Tuple[Any, ...]) -> Dict[str, Any]:
         multilabel, spacing, vessel_info, mapping,
         dirs, case_id, ctx,
     ) = args
+    # Spawned workers start from the module defaults: install this run's profile and output frame.
+    if ctx.config is not None:
+        apply_config(ctx.config)
+    set_world_transform(ctx.affine, spacing)
 
     try:
         print(f"\n=== Label {label} / component {component_id} ===")
@@ -137,6 +144,12 @@ def _worker(args: Tuple[Any, ...]) -> Dict[str, Any]:
             vessel_info=vessel_info, segments=recursive_segments,
         )
 
+        compact = component_tables(
+            case_id=case_id, label=label, component_id=component_id, vessel_info=vessel_info,
+            path_results=path_results, split_results=split_results, branch_df=branch_df,
+            tree_summary=tree_summary, axes=ctx.axes,
+        )
+
         if not branch_df.empty:
             branch_df.insert(0, "case_id", case_id)
         if not donut_loop_df.empty:
@@ -158,6 +171,7 @@ def _worker(args: Tuple[Any, ...]) -> Dict[str, Any]:
             "donut_loop_df": donut_loop_df,
             "point_sheets": point_sheets,
             "region_sheets": region_sheets,
+            "compact": compact,
         }
     except Exception as e:
         return {
@@ -257,6 +271,32 @@ def _make_jobs(
     return jobs
 
 
+def unique_sheet_names(keys: List[str], prefix: str = "P") -> Dict[str, str]:
+    """Map each key to a unique Excel sheet name (≤ 31 characters): ``P001_<key…>``.
+
+    Truncating long path ids to Excel's 31-character limit made different paths collide (and
+    overwrite one another's sheet); the numeric prefix keeps them apart, and the full ids are listed
+    in the ``Sheet_Index`` sheet.
+    """
+    out: Dict[str, str] = {}
+    used: set = set()
+    for i, key in enumerate(keys, start=1):
+        base = f"{prefix}{i:03d}_" + safe_sheet_name(str(key))
+        name = base[:31]
+        k = 2
+        while name.lower() in used:
+            suffix = f"~{k}"
+            name = base[:31 - len(suffix)] + suffix
+            k += 1
+        used.add(name.lower())
+        out[key] = name
+    return out
+
+
+def _first(df: pd.DataFrame, column: str):
+    return df[column].iloc[0] if column in df.columns and len(df) else None
+
+
 def _write_excel(
     case_out_dir: str,
     path_summaries: List[dict],
@@ -268,14 +308,20 @@ def _write_excel(
     input_volumetry: Optional[Dict[int, dict]] = None,
     tree_segment_summaries: Optional[List[dict]] = None,
     root_to_terminal_summaries: Optional[List[dict]] = None,
+    compact: Optional[Dict[str, pd.DataFrame]] = None,
 ) -> str:
-    """Assemble every result table into the multi-sheet ``case_metrics_donut_tree.xlsx`` workbook.
+    """Assemble every result table into ``case_metrics_donut_tree.xlsx`` (+ CSVs).
 
-    ``00_Path_Summary`` holds the **non-overlapping** vessel rows: each piece of
-    vessel is measured once. The raw root→terminal paths, which re-traverse every
-    shared trunk, are kept in ``07_Root_To_Terminal_Paths`` for traceability —
-    summing their lengths overestimates the vessel tree.
+    Sheet order: the compact tables first — ``Vessel_Summary`` (one row per vessel), ``Segments``,
+    ``Lesions``, ``Subject`` (also written as ``vessel_summary.csv``, ``segments.csv``,
+    ``lesions.csv``, ``subject_summary.csv``) — then the detailed cow_morpho-style sheets.
+    ``00_Path_Summary`` holds the **non-overlapping** segment rows: each piece of vessel is measured
+    once. The raw root→terminal paths, which re-traverse every shared trunk, are kept in
+    ``07_Root_To_Terminal_Paths`` for traceability — summing their lengths overestimates the
+    vessel tree. Point-wise tables follow as ``P###_…`` sheets (``Sheet_Index`` maps them to path
+    ids) and as ``points/<path_id>.csv``.
     """
+    compact = compact or {}
     path_summary_df = pd.DataFrame(path_summaries)
     tree_segment_df = pd.DataFrame(tree_segment_summaries or [])
     root_to_terminal_df = pd.DataFrame(root_to_terminal_summaries or [])
@@ -285,8 +331,17 @@ def _write_excel(
     hemisphere_df = compute_hemispheric_summary(path_summary_df)
     volumetry_df = compute_volumetry_summary(tree_summary_df, input_volumetry)
 
+    keys = sorted(vessel_sheets, key=vessel_sheet_sort_key)
+    sheet_names = unique_sheet_names(keys)
+    assert len(set(n.lower() for n in sheet_names.values())) == len(keys), "duplicate point-sheet names"
+
     out_xlsx = os.path.join(case_out_dir, "case_metrics_donut_tree.xlsx")
     with pd.ExcelWriter(out_xlsx, engine="openpyxl") as writer:
+        for sheet, key in (("Vessel_Summary", "vessels"), ("Segments", "segments"),
+                           ("Lesions", "lesions"), ("Subject", "subject")):
+            df = compact.get(key)
+            if df is not None and not df.empty:
+                df.to_excel(writer, sheet_name=sheet, index=False)
         path_summary_export_dataframe(path_summary_df).to_excel(writer, sheet_name="00_Path_Summary", index=False)
         if not tree_summary_df.empty:
             tree_summary_export_dataframe(tree_summary_df).to_excel(writer, sheet_name="01_Tree_Summary", index=False)
@@ -301,16 +356,32 @@ def _write_excel(
         if not volumetry_df.empty:
             volumetry_df.to_excel(writer, sheet_name="06_Volumetry", index=False)
         if not root_to_terminal_df.empty:
-            path_summary_export_dataframe(root_to_terminal_df).to_excel(
+            # path_id links each row to its Sheet_Index entry and points/*.csv.
+            path_summary_export_dataframe(root_to_terminal_df, keep=("path_id",)).to_excel(
                 writer, sheet_name="07_Root_To_Terminal_Paths", index=False
             )
-        for sheet_name in sorted(vessel_sheets, key=vessel_sheet_sort_key):
-            vessel_sheets[sheet_name].to_excel(writer, sheet_name=sheet_name[:31], index=False)
+        if keys:
+            pd.DataFrame({
+                "sheet": [sheet_names[k] for k in keys],
+                "path_id": keys,
+                "label": [_first(vessel_sheets[k], "label") for k in keys],
+                "vessel_name": [_first(vessel_sheets[k], "vessel_name") for k in keys],
+                "points_csv": [os.path.join("points", safe_filename(k) + ".csv") for k in keys],
+            }).to_excel(writer, sheet_name="Sheet_Index", index=False)
+        for key in keys:
+            vessel_sheets[key].to_excel(writer, sheet_name=sheet_names[key], index=False)
 
-    # Plain CSV alongside the workbook so consumers (Slicer UI, scripts) can read
-    # the volumetry without an openpyxl dependency.
-    if not volumetry_df.empty:
-        volumetry_df.to_csv(os.path.join(case_out_dir, "volumetry.csv"), index=False)
+    if keys:
+        points_dir = os.path.join(case_out_dir, "points")
+        ensure_dir(points_dir)
+        for key in keys:
+            vessel_sheets[key].to_csv(os.path.join(points_dir, safe_filename(key) + ".csv"), index=False)
+    # Plain CSVs alongside the workbook (no openpyxl needed downstream: Slicer UI, scripts, DB).
+    for name, df in (("vessel_summary.csv", compact.get("vessels")), ("segments.csv", compact.get("segments")),
+                     ("lesions.csv", compact.get("lesions")), ("subject_summary.csv", compact.get("subject")),
+                     ("volumetry.csv", volumetry_df)):
+        if df is not None and not df.empty:
+            df.to_csv(os.path.join(case_out_dir, name), index=False)
     return out_xlsx
 
 
@@ -328,15 +399,51 @@ def run_case(
     species: Optional[str] = None,
     axes_override: Optional[str] = None,
     length_scale: float = 1.0,
+    config: Optional[MorphometricsConfig] = None,
+    case_id: Optional[str] = None,
 ) -> str:
     """Process one segmentation file in parallel.  Returns the Excel path.
 
-    *species* / *axes_override* / *length_scale* describe the subject the label
-    ids belong to; they are normally taken from the topology JSON's ``_meta``
-    block by :func:`nvitk_vendor.measure.morphometrics.run_morphometrics_case`. They
-    control how ``no_upstream_start`` rules resolve onto array axes and how the
-    human-calibrated millimetre thresholds are rescaled.
+    *case_id* labels every output row (default: the segmentation's file stem — give the subject
+    id when several subjects share one file name, as stage 7's ``TOF_eICAB_CW.nii.gz`` do).
+
+    *config* (default: the ``eicab_cw`` profile) is installed for the run — here and in every
+    spawned worker — and the previous values are restored afterwards. *species* /
+    *axes_override* / *length_scale* describe the subject the label ids belong to; they are
+    normally taken from the topology JSON's ``_meta`` block by
+    :func:`nvitk_vendor.measure.morphometrics.run_morphometrics_case`. They control how
+    ``no_upstream_start`` rules resolve onto array axes and how the human-calibrated millimetre
+    thresholds are rescaled.
     """
+    from nvitk_vendor.measure.morphometrics_config import default_morphometrics_config
+
+    config = config or default_morphometrics_config()
+    with active_config(config):
+        try:
+            return _run_case(
+                seg_path, out_dir, mapping_json=mapping_json, mapping=mapping,
+                case_out_dir_override=case_out_dir_override, n_workers=n_workers, species=species,
+                axes_override=axes_override, length_scale=length_scale, config=config,
+                case_id=case_id,
+            )
+        finally:
+            set_world_transform(None, None)
+
+
+def _run_case(
+    seg_path: str,
+    out_dir: str,
+    *,
+    mapping_json: Optional[str],
+    mapping: Optional[dict],
+    case_out_dir_override: Optional[str],
+    n_workers: Optional[int],
+    species: Optional[str],
+    axes_override: Optional[str],
+    length_scale: float,
+    config: MorphometricsConfig,
+    case_id: Optional[str] = None,
+) -> str:
     _headless()
     n_workers = int(n_workers) if n_workers is not None else int(N_WORKERS)
 
@@ -347,20 +454,20 @@ def run_case(
     ctx = MorphoContext(
         axes=resolve_anatomical_axes(affine, species=species, axes_override=axes_override),
         length_scale=float(length_scale),
+        config=config,
+        affine=tuple(map(tuple, np.asarray(affine, dtype=float))),
     )
-    if bool(getattr(_config, "BRIDGE_LABEL_GAPS_BEFORE_CENTERLINES", False)):
+    set_world_transform(ctx.affine, spacing)
+    if _config.BRIDGE_LABEL_GAPS_BEFORE_CENTERLINES:
         from nvitk_vendor.morphology.mst_bridge import fill_multilabel_gaps_mst
 
         multilabel = fill_multilabel_gaps_mst(
             multilabel,
-            close_radius=int(getattr(_config, "BRIDGE_LABEL_CLOSE_RADIUS", 0)),
-            bridge_max_gap=int(getattr(_config, "BRIDGE_LABEL_MAX_GAP_VOXELS", 12)),
+            close_radius=int(_config.BRIDGE_LABEL_CLOSE_RADIUS),
+            bridge_max_gap=int(_config.BRIDGE_LABEL_MAX_GAP_VOXELS),
             bridge_radius=1,
         )
-        print(
-            "  Bridged nearby same-label gaps "
-            f"(max_gap={int(getattr(_config, 'BRIDGE_LABEL_MAX_GAP_VOXELS', 12))} vx)."
-        )
+        print(f"  Bridged nearby same-label gaps (max_gap={int(_config.BRIDGE_LABEL_MAX_GAP_VOXELS)} vx).")
     if not _config.PROCESS_ALL_CONNECTED_COMPONENTS:
         multilabel = keep_largest_component_per_label(multilabel)
 
@@ -378,15 +485,16 @@ def run_case(
 
         resolved_mapping = load_eicab_topology()
 
-    case_id = os.path.basename(seg_path).replace(".nii.gz", "").replace(".nii", "")
+    case_id = case_id or os.path.basename(seg_path).replace(".nii.gz", "").replace(".nii", "")
     case_out_dir = case_out_dir_override or os.path.join(out_dir, case_id)
     dirs = _setup_output_dirs(case_out_dir)
 
     input_volumetry = label_input_volumetry(multilabel, labels, spacing)
     jobs = _make_jobs(multilabel, labels, resolved_mapping, dirs, case_id, spacing, ctx)
 
-    print(f"Parallel pipeline")
+    print("Parallel pipeline")
     print(f"  Case    : {case_id}")
+    print(f"  Profile : {config.profile} (centerline backend: {config.centerline_backend})")
     print(f"  Labels  : {labels}")
     print(f"  Jobs    : {len(jobs)} label/component task(s)")
     print(f"  Workers : {n_workers}")
@@ -419,6 +527,7 @@ def run_case(
     root_to_terminal_summaries, tree_segment_summaries = [], []
     branch_dfs, donut_loop_dfs = [], []
     vessel_sheets: Dict[str, pd.DataFrame] = {}
+    vessel_rows, segment_rows, lesion_rows = [], [], []
     errors = []
 
     for result in results:
@@ -437,12 +546,26 @@ def run_case(
         if not result["donut_loop_df"].empty:
             donut_loop_dfs.append(result["donut_loop_df"])
         vessel_sheets.update(result["point_sheets"])
+        compact = result.get("compact") or {}
+        vessel_rows.extend(compact.get("vessels", []))
+        segment_rows.extend(compact.get("segments", []))
+        lesion_rows.extend(compact.get("lesions", []))
 
+    vessels_df = vessel_summary(vessel_rows, lesion_rows, mapping=resolved_mapping)
+    if not vessels_df.empty:
+        vessels_df["case_id"] = case_id
+    compact_tables = {
+        "vessels": vessels_df,
+        "segments": pd.DataFrame(segment_rows),
+        "lesions": _lesions_with_world_position(pd.DataFrame(lesion_rows)),
+        "subject": subject_summary(vessels_df),
+    }
     out_xlsx = _write_excel(
         case_out_dir, path_summaries, tree_summaries, tree_region_summaries,
         branch_dfs, donut_loop_dfs, vessel_sheets, input_volumetry,
         tree_segment_summaries=tree_segment_summaries,
         root_to_terminal_summaries=root_to_terminal_summaries,
+        compact=compact_tables,
     )
 
     if _config.SAVE_CENTERLINES:
@@ -456,6 +579,18 @@ def run_case(
         print(f"  Failed : {len(errors)}")
 
     return out_xlsx
+
+
+def _lesions_with_world_position(lesions: pd.DataFrame) -> pd.DataFrame:
+    """Add the lesion midpoint in scanner RAS (the frame of the VTPs) next to ``x/y/z_mm``."""
+    if lesions.empty or not {"x_mm", "y_mm", "z_mm"} <= set(lesions.columns):
+        return lesions
+    from nvitk_vendor.measure.morpho.surface import to_world
+
+    ras = to_world(lesions[["x_mm", "y_mm", "z_mm"]].to_numpy(dtype=float))
+    out = lesions.copy()
+    out["x_ras"], out["y_ras"], out["z_ras"] = ras[:, 0], ras[:, 1], ras[:, 2]
+    return out
 
 
 if __name__ == "__main__":

@@ -2,12 +2,16 @@
 
 **Inputs**
 
-- eICAB WB (or CW fallback) multilabel mask under ``<output_root>/<subject>/eicab/``.
+- eICAB **CW** (Circle-of-Willis; WB fallback with a warning) multilabel mask under
+  ``<output_root>/<subject>/eicab/``. The default ``eicab_cw`` morphometrics profile is tuned for
+  CW masks (cow_morpho); whole-brain masks need their own profile.
 
 **Outputs**
 
-- ``case_metrics_donut_tree.xlsx``, centerline/surface VTPs, tortuosity tables, and
-  radius histograms under ``<output_root>/<subject>/qvtpy/stage7_morphometrics/``.
+- ``vessel_summary.csv`` / ``segments.csv`` / ``lesions.csv`` / ``subject_summary.csv``,
+  ``case_metrics_donut_tree.xlsx``, centerline/surface VTPs (scanner RAS), tortuosity tables,
+  radius histograms and ``morphometrics_provenance.json`` under
+  ``<output_root>/<subject>/qvtpy/stage7_morphometrics/``.
 """
 
 from __future__ import annotations
@@ -29,7 +33,7 @@ from nvitk.cluster.sge import (
 from nvitk.core.click_backend import backend_click_option
 from nvitk.core.logger import Logger
 from nvitk.measure.morphometrics import run_morphometrics_case
-from nvitk.measure.morphometrics_config import MorphometricsConfig
+from nvitk.measure.morphometrics_config import CENTERLINE_BACKENDS, DEFAULT_PROFILE, PROFILES, MorphometricsConfig
 from nvitk.measure.morpho.topology_io import default_eicab_topology_path
 from nvitk.pipes.qvtpy import config as cfg
 from nvitk.pipes.qvtpy.util.eicab.morpho_paths import (
@@ -57,13 +61,15 @@ def run_subject(
     *,
     output_root: Path,
     skip_existing: bool = False,
-    eicab_mask_preference: str = "wb",
+    eicab_mask_preference: str = "cw",
     use_postprocessed_mask: bool = True,
     input_already_smoothed: bool = False,
     n_workers: int | None = None,
+    profile: str = DEFAULT_PROFILE,
+    centerline_backend: str | None = None,
     morpho_config: MorphometricsConfig | None = None,
 ) -> Path:
-    """Run stage-7 TOF morphometrics for one subject."""
+    """Run stage-7 TOF morphometrics for one subject (*morpho_config* overrides *profile*)."""
     out_dir = stage7_dir(output_root, subject)
     excel_path = out_dir / STAGE7_SKIP_MARKER
     if skip_existing and excel_path.is_file():
@@ -89,9 +95,12 @@ def run_subject(
         mapping_json=str(default_eicab_topology_path()),
         case_out_dir_override=out_dir,
         n_workers=n_workers,
+        profile=profile,
         config=morpho_config,
+        centerline_backend=centerline_backend,
         input_already_smoothed=input_already_smoothed,
         skip_if_excel_exists=skip_existing,
+        case_id=subject,
     )
     log.info(f"[{subject}] stage7 morphometrics -> {excel_path}")
 
@@ -112,10 +121,12 @@ def _subject_sge_spec(
     container: Path,
     src_dir: Path | None = None,
     skip_existing: bool = False,
-    eicab_mask_preference: str = "wb",
+    eicab_mask_preference: str = "cw",
     use_postprocessed_mask: bool = True,
     input_already_smoothed: bool = False,
     n_workers: int | None = None,
+    profile: str = DEFAULT_PROFILE,
+    centerline_backend: str | None = None,
     backend: str = "cpu",
 ) -> tuple[StageSpec, ClusterPaths]:
     """Build the SGE stage spec and cluster paths for running stage-7 morphometrics on *subject*."""
@@ -141,6 +152,9 @@ def _subject_sge_spec(
         parts.append("--skip-existing")
     if n_workers is not None:
         parts.extend(["--n-workers", str(int(n_workers))])
+    parts.extend(["--profile", shlex.quote(profile)])
+    if centerline_backend:
+        parts.extend(["--centerline-backend", shlex.quote(centerline_backend)])
     python_cmd = " ".join(parts)
     paths = ClusterPaths(
         src=src_p,
@@ -169,10 +183,12 @@ def build_subject_sge_command(
     container: Path,
     src_dir: Path | None = None,
     skip_existing: bool = False,
-    eicab_mask_preference: str = "wb",
+    eicab_mask_preference: str = "cw",
     use_postprocessed_mask: bool = True,
     input_already_smoothed: bool = False,
     n_workers: int | None = None,
+    profile: str = DEFAULT_PROFILE,
+    centerline_backend: str | None = None,
     backend: str = "cpu",
 ) -> str:
     """Return the host shell command for one stage7 array/SGE task."""
@@ -188,6 +204,8 @@ def build_subject_sge_command(
         use_postprocessed_mask=use_postprocessed_mask,
         input_already_smoothed=input_already_smoothed,
         n_workers=n_workers,
+        profile=profile,
+        centerline_backend=centerline_backend,
         backend=backend,
     )
     return build_singularity_command(spec, paths)
@@ -202,10 +220,12 @@ def submit_subject_sge(
     skip_existing: bool = False,
     hold_jid: str | None = None,
     emit: TextIO | None = None,
-    eicab_mask_preference: str = "wb",
+    eicab_mask_preference: str = "cw",
     use_postprocessed_mask: bool = True,
     input_already_smoothed: bool = False,
     n_workers: int | None = None,
+    profile: str = DEFAULT_PROFILE,
+    centerline_backend: str | None = None,
     backend: str = "cpu",
 ) -> str:
     """Emit or submit one stage-7 SGE job. Returns qsub job id."""
@@ -219,6 +239,8 @@ def submit_subject_sge(
         use_postprocessed_mask=use_postprocessed_mask,
         input_already_smoothed=input_already_smoothed,
         n_workers=n_workers,
+        profile=profile,
+        centerline_backend=centerline_backend,
         backend=backend,
     )
     return submit_stage(spec, paths, hold_jid=hold_jid, emit=emit)
@@ -232,8 +254,22 @@ def submit_subject_sge(
 @click.option(
     "--eicab-mask-preference",
     type=click.Choice(["cw", "wb"], case_sensitive=False),
-    default="wb",
+    default="cw",
     show_default=True,
+    help="eICAB mask to measure. The default profile is tuned for CW (Circle-of-Willis) masks.",
+)
+@click.option(
+    "--profile",
+    type=click.Choice(sorted(PROFILES), case_sensitive=False),
+    default=DEFAULT_PROFILE,
+    show_default=True,
+    help="Morphometrics parameter profile (nvitk.measure.morphometrics_config).",
+)
+@click.option(
+    "--centerline-backend",
+    type=click.Choice(CENTERLINE_BACKENDS, case_sensitive=False),
+    default=None,
+    help="Override the profile's centerline backend (vmtk / native / raycast — experimental).",
 )
 @click.option(
     "--use-postprocessed-mask/--no-use-postprocessed-mask",
@@ -257,6 +293,8 @@ def main(
     use_postprocessed_mask: bool,
     input_already_smoothed: bool,
     n_workers: int | None,
+    profile: str,
+    centerline_backend: str | None,
 ) -> None:
     """CLI entry point: run stage-7 TOF morphometrics for a single subject."""
     del backend
@@ -268,6 +306,8 @@ def main(
         use_postprocessed_mask=use_postprocessed_mask,
         input_already_smoothed=input_already_smoothed,
         n_workers=n_workers,
+        profile=profile,
+        centerline_backend=centerline_backend,
     )
 
 

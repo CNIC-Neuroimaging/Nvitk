@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from nvitk.measure.morpho.anatomy import tree_region_metadata
-from nvitk.measure.morphometrics_config import TREE_REGION_ROLE_CODES
+from nvitk.measure import morphometrics_config as _cfg
 from nvitk.measure.morpho.geometry import arc_length, chord_length, cumulative_s
 from nvitk.measure.morpho.metrics import tortuosity_dm
 from nvitk.measure.morpho.models import VesselInfo
@@ -137,11 +137,12 @@ def compute_vessel_summary_row(case_id: str, label: int, vessel_info: VesselInfo
     }
 
 
-def path_summary_export_dataframe(path_summary_df: pd.DataFrame) -> pd.DataFrame:
-    """Drop internal-only columns from the path summary table before writing to Excel."""
+def path_summary_export_dataframe(path_summary_df: pd.DataFrame, keep: tuple[str, ...] = ()) -> pd.DataFrame:
+    """Drop internal-only columns (except *keep*) from the path summary table before writing to Excel."""
     if path_summary_df.empty:
         return path_summary_df
-    return path_summary_df.drop(columns=PATH_SUMMARY_EXPORT_DROP_COLUMNS, errors="ignore")
+    drop = [c for c in PATH_SUMMARY_EXPORT_DROP_COLUMNS if c not in keep]
+    return path_summary_df.drop(columns=drop, errors="ignore")
 
 
 def tree_summary_export_dataframe(tree_summary_df: pd.DataFrame) -> pd.DataFrame:
@@ -289,7 +290,7 @@ def recursive_tree_segment_summary_rows(
             "anatomic_generation": int(seg.get("anatomic_generation", 0)),
             "anatomic_branch_suffix": seg.get("anatomic_branch_suffix", ""),
             "tree_region_role": seg.get("tree_region_role", "branch"),
-            "tree_region_role_code": int(seg.get("tree_region_role_code", TREE_REGION_ROLE_CODES["branch"])),
+            "tree_region_role_code": int(seg.get("tree_region_role_code", _cfg.TREE_REGION_ROLE_CODES["branch"])),
             "tree_branch_depth": int(seg.get("tree_branch_depth", seg.get("depth", 0))),
             "tree_branch_index": int(seg.get("tree_branch_index", 0)),
             "tree_branch_path": seg.get("tree_branch_path", ""),
@@ -329,6 +330,8 @@ def build_vessel_points_dataframe(case_id: str, label: int, vessel_info: VesselI
         dtype=float,
     )
     vessel_df = pd.DataFrame({
+        "label": int(label),
+        "vessel_name": vessel_info.name,
         "point_index": np.arange(len(res["s_mm"]), dtype=int),
         "x_mm": res["x_mm"], "y_mm": res["y_mm"], "z_mm": res["z_mm"], "s_mm": res["s_mm"],
         "radius_mm": res["radius_mm"], "diameter_mm": res["diameter_mm"],
@@ -342,7 +345,18 @@ def build_vessel_points_dataframe(case_id: str, label: int, vessel_info: VesselI
         "is_stenotic": is_stenotic,
         "enlargement_percent_point": enlargement_percent_point,
         "is_enlarged": is_enlarged,
+        "siphon_mask_point": np.asarray(
+            res.get("siphon_mask_point", np.zeros(len(res["s_mm"]))), dtype=float
+        ).astype(int),
     })
+    # Scanner RAS (the frame of the written VTPs) next to the computation frame (x/y/z_mm).
+    from nvitk.measure.morpho.surface import to_world
+
+    ras = to_world(np.column_stack([res["x_mm"], res["y_mm"], res["z_mm"]]))
+    at = vessel_df.columns.get_loc("z_mm") + 1
+    vessel_df.insert(at, "x_ras", ras[:, 0])
+    vessel_df.insert(at + 1, "y_ras", ras[:, 1])
+    vessel_df.insert(at + 2, "z_ras", ras[:, 2])
     return vessel_df
 
 
