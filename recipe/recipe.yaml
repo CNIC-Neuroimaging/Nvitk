@@ -1,13 +1,13 @@
 # rattler-build recipe for nvitk.
 #
-# Dependency split mirrors what pyproject.toml's own [tool.pixi.*] tables already prove
-# works in production: pixi treats [project.dependencies] and the `gui` extra as PyPI
-# dependencies by default, and only overrides a small set of names to conda-native
-# sourcing — mrtrix3/freeimage/libstdcxx-ng (`[tool.pixi.dependencies]`), python/numpy
-# (`[tool.pixi.feature.gpu.dependencies]`), the R stack + rpy2
-# (`[tool.pixi.feature.stats.dependencies]`), and the Qt/GUI stack (pyqt6/napari/qtpy
-# here; PyQt6-WebEngine alone stays pip-only in post-link.sh until conda-forge ships
-# it). Everything else stays pip-only.
+# Dependency split: requirements/run below holds the conda-native core — python/numpy, the R
+# stack + rpy2, freeimage/libstdcxx-ng, and the Qt/GUI stack (pyqt6/napari/qtpy; PyQt6-WebEngine
+# alone stays pip-only in post-link.sh until conda-forge ships it). Everything else in
+# pyproject.toml is pip-only and installed by post-link.sh.
+#
+# ../install.sh (development/wheel installs) reads requirements/run straight from this file and
+# runs post-link.sh as-is, so both install routes stay in lockstep. Keep each run requirement
+# on its own `- name ==version` line: install.sh parses that block line by line.
 #
 # `version` is kept in manual sync with [project].version in ../pyproject.toml (that
 # field is static there, not setuptools_scm-driven).
@@ -52,12 +52,11 @@ requirements:
     # pip itself must be present at runtime for post-link.sh / pre-unlink.sh to use.  
     # - conda-forge::pip
     - pip
-    # ── Conda-native core ([tool.pixi.feature.gpu.dependencies]) ────
+    # ── Conda-native core ──────────────────────────────────────────────────────
     - python ==3.11.15
     - numpy ==2.3.3
     - dvc ==3.67.1
-    # ── Stats / R ([tool.pixi.feature.stats.dependencies];
-    #    pymer4/great-tables/formulae stay pip-only, see post-link.sh) ───────
+    # ── Stats / R (pymer4/great-tables/formulae stay pip-only, see post-link.sh) ──
     - r-base ==4.5.3
     - rpy2 ==3.6.7
     - r-lme4 ==2.0_6
@@ -72,7 +71,7 @@ requirements:
     - r-broom.mixed ==0.2.9.7
     - r-insight ==1.5.2
     - r-robustbase ==0.99_7
-    # ── Conda-only extras ([tool.pixi.dependencies]) ────────
+    # ── Conda-only extras ──────────────────────────────────────────────────────
     # - mrtrix3::mrtrix3 ==3.0.8
     - freeimage ==3.18.0
     - libstdcxx-ng ==15.2.0

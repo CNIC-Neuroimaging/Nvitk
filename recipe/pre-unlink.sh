@@ -12,7 +12,7 @@ log() { echo "[nvitk pre-unlink] $*" | tee -a "$LOG"; }
 log "removing pip-only dependencies installed by post-link.sh..."
 "$PIP" uninstall -y \
   scipy pandas polars pyarrow click jupyter ipywidgets openpyxl lazy-loader \
-  matplotlib plotly kaleido pyvista seaborn rich trame trame-vtk \
+  matplotlib plotly kaleido pyvista seaborn rich tensorboard trame trame-vtk \
   imageio pillow nibabel tifffile nd2 dicom2nifti pylibjpeg h5py blosc2 \
   scikit-image opencv-python vtk SimpleITK antspyx \
   nilearn nipype gudhi antspynet totalsegmentator nnunetv2 fireants \

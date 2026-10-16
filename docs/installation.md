@@ -157,38 +157,42 @@ layer.
 Run {doc}`pyhelp <api/cli-catalog>` after activation for an interactive catalog of every
 CLI tool (`pyhelp --no-interactive` for CI/scripts).
 
-## Development install (pixi)
+## Development / wheel install (`install.sh`)
 
-Contributors working from a clone should use [pixi](https://pixi.sh), which
-`pyproject.toml` already configures for every environment below:
+Contributors working from a clone use `install.sh`, which builds the same environment as the
+conda package without going through Anaconda.org: it creates a conda environment from the
+recipe's conda-native requirements (`recipe/recipe.yaml`), installs the pip-only stack with the
+recipe's own `recipe/post-link.sh`, adds the activation hooks, and finally installs nvitk itself.
+A dependency change made in `recipe/` therefore applies to both install routes. It needs
+`conda` on `PATH` (e.g. [Miniforge](https://conda-forge.org/download/)).
 
 ```bash
 git clone https://github.com/ignacio-ms/Nvitk.git && cd Nvitk
-pixi install               # core only, CPU
-pixi install -e gui        # + Napari workbench
-pixi install -e gpu        # + gui, + CUDA 13 torch/cupy stack
-pixi install -e stats      # + gui, + R/rpy2/pymer4 stack
-pixi install -e all        # gui + gpu + stats
-pixi install -e dev        # + pytest, sphinx toolchain (for docs/testing)
-
-pixi shell -e gpu           # activate, like `conda activate`
-pixi run -e all pyhelp --no-interactive
+./install.sh                    # GPU build (default), editable, env "nvitk-dev"
+./install.sh --cpu              # CPU-only build: CPU torch wheels, no CUDA packages
+conda activate nvitk-dev
 ```
 
-| Environment | Includes |
+| Option | Effect |
 |---|---|
-| `default` | Core toolkit only — I/O, segmentation, registration, measurements, pipelines |
-| `gui` | + Napari, magicgui, superqt, PyQt6-WebEngine |
-| `gpu` | + `gui`, + CUDA 13 `torch`/`torchvision`/`cupy`/`cutensor`/`nccl` |
-| `stats` | + `gui`, + R/`rpy2`/`pymer4`/mixed-model tooling |
-| `all` | `gui` + `gpu` + `stats` |
-| `dev` | pytest, sphinx + autoapi + sphinx-click (docs/testing only) |
+| `--gpu` | CUDA 13 `torch`/`torchvision` + `cupy`/`cutensor`/`nccl` (default) |
+| `--cpu` | CPU-only `torch`/`torchvision`; no CUDA packages |
+| `-n NAME` / `-p DIR` | Target environment (default `nvitk-dev`, or `nvitk` with `--wheel`) |
+| `--force` | Remove and recreate the target environment if it already exists |
+| `--wheel [FILE]` | Install nvitk non-editably: from `FILE`, or from a wheel built into `dist/` |
+| `--dev-tools` / `--no-dev-tools` | Include the `[dev]` extra — pytest, sphinx toolchain (default: on for editable, off for `--wheel`) |
+| `--dry-run` | Print the variant, target and conda requirements without installing anything |
+
+Both variants include the GUI and R/statistics stacks; only the PyTorch build differs. The
+pip-only step logs to `$CONDA_PREFIX/.nvitk-post-link.log`. Run the tests with `pytest tests/`
+and build the docs with `sphinx-build -b html docs docs/_build/html`.
 
 ### GPU stack
 
-CUDA 13. `torch`/`torchvision` from the `cu130` PyPI wheel index, plus `cupy-cuda13x`,
-`cutensor-cu13`, `nvidia-nccl-cu13`. Requires **Python 3.11**. Conda channels needed for the
-pixi `gpu` feature: `nvidia`, `pytorch` (public) and `morpheme`, `mosaic`.
+CUDA 13. `torch`/`torchvision` from the `cu130` PyTorch wheel index, plus `cupy-cuda13x`,
+`cutensor-cu13`, `nvidia-nccl-cu13`, all pip-installed. Requires **Python 3.11** (the recipe
+pins 3.11). `install.sh --cpu` swaps in the CPU wheels from the `cpu` index instead and skips
+the CUDA packages.
 
 The deep-learning pipelines ({doc}`pipelines/topbrain`, {doc}`pipelines/cvit`) and
 `nvitk.nn` need this stack: `torch` plus nnU-Net's own dependencies (`batchgenerators`,
@@ -198,7 +202,7 @@ pipelines put them on the training subprocess's `PYTHONPATH`, so run them from a
 or the cluster container. Check an environment with
 `python -c "import torch, nnunetv2; print(torch.cuda.is_available())"`.
 
-## External prerequisites (not installed by conda or pixi)
+## External prerequisites (not installed by conda or `install.sh`)
 
 Separately licensed or with no package-manager distribution — install these yourself and
 confirm they're on `PATH`/the relevant environment variable. nvitk's CLIs notify you when a

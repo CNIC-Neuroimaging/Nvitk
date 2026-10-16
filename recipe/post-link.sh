@@ -1,21 +1,54 @@
 #!/bin/bash
-# Installs every dependency from pyproject.toml that pixi itself already treats as a PyPI
-# dependency (i.e. everything except the small conda-native core in recipe.yaml's
-# requirements/run: python, numpy, the R stack + rpy2, mrtrix3, freeimage, libstdcxx-ng,
-# and the Qt/GUI stack except PyQt6-WebEngine — see the comment at the top of recipe.yaml
-# for why that split exists and how it was verified). Runs once, right after `conda`/`mamba`
-# links nvitk into the target env.
+# Installs every pip-only dependency of nvitk, i.e. everything in pyproject.toml except the
+# conda-native core in recipe.yaml's requirements/run (python, numpy, the R stack + rpy2,
+# freeimage, libstdcxx-ng, and the Qt/GUI stack except PyQt6-WebEngine — see the comment at
+# the top of recipe.yaml for why that split exists). Runs once, right after `conda` links
+# nvitk into the target env, and is also run as-is by ../install.sh for development/wheel
+# installs, so the two install routes share one dependency list.
 #
-# Version pins below are copied verbatim from pyproject.toml / [tool.pixi.*] — do not
-# relax them here even where a conda package would technically satisfy the constraint.
+# NVITK_VARIANT selects the PyTorch build: `gpu` (default) installs CUDA 13 torch/torchvision
+# plus cupy/cutensor/nccl; `cpu` installs CPU-only torch/torchvision and no CUDA packages.
+# conda passes the caller's environment through to this script, so
+# `NVITK_VARIANT=cpu conda create -n nvitk-cpu nvitk` selects the CPU build there too.
+#
+# Version pins below are copied verbatim from pyproject.toml — do not relax them here even
+# where a conda package would technically satisfy the constraint.
 set -euo pipefail
 
 PIP="$PREFIX/bin/pip"
 LOG="$PREFIX/.nvitk-post-link.log"
+VARIANT="${NVITK_VARIANT:-gpu}"
 
 log() { echo "[nvitk post-link] $*" | tee -a "$LOG"; }
 
-log "starting pip-only dependency install into $PREFIX"
+trap 'tail -n 30 "$LOG" >&2; log "FAILED — full log: $LOG"' ERR
+
+case "$VARIANT" in
+  gpu) TORCH_INDEX=(--extra-index-url https://download.pytorch.org/whl/cu130) ;;
+  # --index-url, not --extra-index-url: with PyPI also in play, pip could pick PyPI's default
+  # torch wheel, which is the CUDA build (several GB of nvidia-* libraries).
+  cpu) TORCH_INDEX=(--index-url https://download.pytorch.org/whl/cpu) ;;
+  *) log "NVITK_VARIANT must be 'gpu' or 'cpu', got '$VARIANT'"; exit 1 ;;
+esac
+
+log "starting pip-only dependency install into $PREFIX (variant: $VARIANT)"
+
+# torch goes first: totalsegmentator, nnunetv2, fireants, torchio, ... all require it, and if
+# it is not already present pip resolves it from PyPI (the CUDA build) and the variant's own
+# index is never consulted. The constraint file then holds torch/torchvision at exactly this
+# build for every later step, so no dependency can swap it out for a PyPI one.
+log "installing PyTorch ($VARIANT build)..."
+"$PIP" install --no-cache-dir "${TORCH_INDEX[@]}" \
+  "torch>=2.9.0" "torchvision>=0.24.0" \
+  >>"$LOG" 2>&1
+CONSTRAINTS="$(mktemp)"
+trap 'rm -f "$CONSTRAINTS"' EXIT
+"$PREFIX/bin/python" -c '
+from importlib.metadata import version
+for name in ("torch", "torchvision"):
+    print(f"{name}=={version(name)}")
+' >"$CONSTRAINTS"
+export PIP_CONSTRAINT="$CONSTRAINTS"
 
 log "installing core (data/plotting/logging)..."
 "$PIP" install --no-cache-dir \
@@ -26,7 +59,7 @@ log "installing core (data/plotting/logging)..."
 log "installing visualization/plotting/logging..."
 "$PIP" install --no-cache-dir \
   "matplotlib>=3.8.0" "plotly>=6.3.0" "kaleido>=1.0.0" "pyvista>=0.48.0" \
-  "seaborn>=0.13.2" "rich>=14.1.0" "trame>=3.6.0" "trame-vtk>=2.5.8,<2.11.9" \
+  "seaborn>=0.13.2" "rich>=14.1.0" "tensorboard>=2.16.0" "trame>=3.6.0" "trame-vtk>=2.5.8,<2.11.9" \
   >>"$LOG" 2>&1
 
 log "installing image IO..."
@@ -65,38 +98,34 @@ log "installing PyQt6-WebEngine (no conda-forge package yet; --no-deps keeps con
 "$PIP" install --no-cache-dir --no-deps "PyQt6-WebEngine>=6.11.0" \
   >>"$LOG" 2>&1
 
-log "installing CUDA 13 PyTorch stack from the cu130 wheel index..."
-"$PIP" install --no-cache-dir \
-  --extra-index-url https://download.pytorch.org/whl/cu130 \
-  "torch>=2.9.0" "torchvision>=0.24.0" \
-  >>"$LOG" 2>&1
-  
 log "installing PyTorch/nnSSL extras..."
 "$PIP" install --no-cache-dir \
   "lightning-bolts>=0.7.0" "pytorch-msssim>=1.0.0" "torchio>=1.2.1" \
   "lpips>=0.1.4" "loguru==0.7.3" "wandb==0.28.1" \
   >>"$LOG" 2>&1
 
-log "installing remaining CUDA 13 GPU stack (cupy/cutensor/nccl)..."
-"$PIP" install --no-cache-dir \
-  "cupy-cuda13x>=13.6.0" "cutensor-cu13>=2.6.0" "nvidia-nccl-cu13>=2.27.7" \
-  >>"$LOG" 2>&1
+if [[ "$VARIANT" == gpu ]]; then
+  log "installing remaining CUDA 13 GPU stack (cupy/cutensor/nccl)..."
+  "$PIP" install --no-cache-dir \
+    "cupy-cuda13x>=13.6.0" "cutensor-cu13>=2.6.0" "nvidia-nccl-cu13>=2.27.7" \
+    >>"$LOG" 2>&1
+fi
 
-log "installing pyradiomics (no-build-isolation, matching pixi's handling)..."
+log "installing pyradiomics (no-build-isolation)..."
 "$PIP" install --no-cache-dir --no-build-isolation \
   "pyradiomics==3.0.1" \
   >>"$LOG" 2>&1
 
-log "installing pydicom (no-build-isolation, matching pixi's handling)..."
+log "installing pydicom (no-build-isolation)..."
 "$PIP" install --no-cache-dir --no-build-isolation \
   "pydicom==3.0.1" \
   >>"$LOG" 2>&1
 
-log "installing pyvista deps (no-build-isolation, matching pixi's handling)..."
+log "installing pyvista deps (no-build-isolation)..."
 "$PIP" install --no-cache-dir --no-build-isolation 'pyvista[notebook]' \
   >>"$LOG" 2>&1
-  
-log "installing mesh processing deps (no-build-isolation, matching pixi's handling)..."
+
+log "installing mesh processing deps (no-build-isolation)..."
 "$PIP" install --no-cache-dir --no-build-isolation 'pymeshlab>=2025.7.post1' \
   >>"$LOG" 2>&1
 

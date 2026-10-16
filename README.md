@@ -47,39 +47,36 @@ conda install nvitk
 
 Run **`pyhelp`** after activation for an interactive catalog of every CLI tool (`pyhelp --no-interactive` for CI/scripts).
 
-### Development install (pixi)
+### Development / wheel install (`install.sh`)
 
-Contributors working from a clone should use [pixi](https://pixi.sh), which `pyproject.toml` already configures every environment below:
+Contributors working from a clone use `install.sh`. It builds the same environment as the conda package, from the same files: the conda-native requirements in `recipe/recipe.yaml`, the pip-only stack in `recipe/post-link.sh`, and the activation hooks. Then it installs nvitk itself (editable by default). It needs `conda` on `PATH` (e.g. [Miniforge](https://conda-forge.org/download/)).
 
 ```bash
 git clone <repo-url> && cd nvitk
-pixi install               # core only, CPU
-pixi install -e gui        # + Napari workbench
-pixi install -e gpu        # + gui, + CUDA 13 torch/cupy stack
-pixi install -e stats      # + gui, + R/rpy2/pymer4 stack 
-pixi install -e all        # gui + gpu + stats
-pixi install -e dev        # + pytest, sphinx toolchain (for docs/testing)
- 
-pixi shell -e gpu           # activate, like `conda activate`
-pixi run -e all pyhelp --no-interactive
+./install.sh                    # GPU build (default), editable, env "nvitk-dev"
+./install.sh --cpu              # CPU-only build: CPU torch wheels, no CUDA packages
+conda activate nvitk-dev
 ```
- 
-| Environment | Includes |
+
+| Option | Effect |
 |---|---|
-| `default` | Core toolkit only — I/O, segmentation, registration, measurements, pipelines |
-| `gui` | + Napari, magicgui, superqt, PyQt6-WebEngine |
-| `gpu` | + `gui`, + CUDA 13 `torch`/`torchvision`/`cupy`/`cutensor`/`nccl` |
-| `stats` | + `gui`, + R/`rpy2`/`pymer4`/mixed-model tooling |
-| `all` | `gui` + `gpu` + `stats` |
-| `dev` | pytest, sphinx + autoapi + sphinx-click (docs/testing only) |
- 
-### GPU stack 
- 
-CUDA 13. `torch`/`torchvision` from the `cu130` PyPI wheel index, plus `cupy-cuda13x`,
-`cutensor-cu13`, `nvidia-nccl-cu13`. Requires **Python 3.11**. Conda channels needed: 
-`nvidia`, `pytorch` (public) and `morpheme`, `mosaic`.
- 
-### External prerequisites (not installed by conda or pixi)
+| `--gpu` | CUDA 13 `torch`/`torchvision` + `cupy`/`cutensor`/`nccl` (default) |
+| `--cpu` | CPU-only `torch`/`torchvision`; no CUDA packages |
+| `-n NAME` / `-p DIR` | Target environment (default `nvitk-dev`, or `nvitk` with `--wheel`) |
+| `--force` | Remove and recreate the target environment if it already exists |
+| `--wheel [FILE]` | Install nvitk non-editably: from `FILE`, or from a wheel built into `dist/` |
+| `--dev-tools` / `--no-dev-tools` | Include the `[dev]` extra — pytest, sphinx toolchain (default: on for editable, off for `--wheel`) |
+| `--dry-run` | Print what would be installed, change nothing |
+
+Both variants include the GUI and R/statistics stacks; only the PyTorch build differs.
+
+### GPU stack
+
+CUDA 13. `torch`/`torchvision` from the `cu130` PyTorch wheel index, plus `cupy-cuda13x`,
+`cutensor-cu13`, `nvidia-nccl-cu13`, all pip-installed. Requires **Python 3.11**.
+`install.sh --cpu` uses the CPU wheels instead and skips the CUDA packages.
+
+### External prerequisites (not installed by conda or `install.sh`)
  
 Separately licensed or with no package-manager distribution — install these yourself and
 confirm they're on `PATH`/the relevant env var. nvitk's CLIs will notify for any needed-not-installed software.

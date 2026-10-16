@@ -37,8 +37,8 @@ conda install -c conda-forge -c cnic -c bioconda -c mrtrix3 -c ejolly nvitk
 :::{grid-item-card} {octicon}`rocket` Installation
 :link: installation
 :link-type: doc
-Install via conda (recommended, ready-to-use) or set up a pixi development environment
-from a clone.
+Install via conda (recommended, ready-to-use) or set up a development environment from a
+clone with `install.sh` (GPU or CPU-only).
 :::
 
 :::{grid-item-card} {octicon}`gear` Configuration

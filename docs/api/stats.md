@@ -24,8 +24,8 @@ Python function here first, importable and scriptable independently of the GUI.
 The R-backed modules (`r_mixedlm`, `r_gam`, `r_mmrm`, `r_robust`, `sem`) never import R at
 module load time — only when a function that actually needs it is called. Their
 *documented* functionality still requires `rpy2` and the corresponding R packages / `pymer4`
-/ `semopy` at runtime (all included in the conda `nvitk[all]` install and the pixi `stats`
-feature).
+/ `semopy` at runtime (all included in the conda `nvitk[all]` install and in every
+`install.sh` environment).
 ```
 
 ```{seealso}

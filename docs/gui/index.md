@@ -9,9 +9,7 @@ and its own image reader that takes priority over napari's built-ins.
 nvitk-gui
 ```
 
-```{code-block} bash
-pip install -e ".[gui]"   # if installing the GUI extra from a pixi/dev checkout
-```
+The GUI stack is part of every install — the conda package and both `install.sh` variants.
 
 ## Layout
 
