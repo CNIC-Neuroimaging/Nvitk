@@ -745,8 +745,12 @@ def build_fat_im_mask(
     """FAT_IM.nii.gz: intermuscular fat split into legs and trunk along the axial axis.
 
     * ``GRASA_IM_PIERNAS`` -- the axial slices spanned by the quadriceps
-      (CUADRICEPS_L + CUADRICEPS_R in *muscles*);
-    * ``GRASA_IM_TORAX``   -- every slice above the quadriceps' superior end.
+      (CUADRICEPS_L + CUADRICEPS_R in *muscles*), extended by every whole
+      6-connected intermuscular-fat component touching them, so fat running from
+      the thighs into the hips stays with the legs;
+    * ``GRASA_IM_TORAX``   -- the rest of the fat above the quadriceps' superior end.
+
+    Fat entirely below the quadriceps is in neither label.
 
     Empty, with a warning, when *tissue_task* has no intermuscular-fat class (the
     3-class fallback) or *muscles* holds no quadriceps.
@@ -773,16 +777,20 @@ def build_fat_im_mask(
     z0, z1 = int(z_slices.min()), int(z_slices.max())
 
     fat_im = as_backend_array(tissue_types.data) == im_id
-    legs = np.zeros_like(fat_im)
-    legs[..., z0 : z1 + 1] = True
     trunk = np.zeros_like(fat_im)
     if _superior_sign(tissue_types) > 0:
         trunk[..., z1 + 1 :] = True
     else:
         trunk[..., :z0] = True
 
-    out[fat_im & legs] = FAT_IM_LABELS["GRASA_IM_PIERNAS"]
+    # Legs: every component with a voxel in the quadriceps' slices, i.e. those
+    # slices' fat plus the whole components touching it.
+    labeled, _ = label_connected(fat_im, connectivity=3)
+    touching = np.unique(labeled[..., z0 : z1 + 1])
+    legs = np.isin(labeled, touching[touching > 0])
+
     out[fat_im & trunk] = FAT_IM_LABELS["GRASA_IM_TORAX"]
+    out[legs] = FAT_IM_LABELS["GRASA_IM_PIERNAS"]
     return tissue_types.copy().with_data(out)
 
 

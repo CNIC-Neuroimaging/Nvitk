@@ -23,7 +23,8 @@ FAT_LABELS: dict[str, int] = {"GRASA_V": 1, "GRASA_SC": 2}
 FAT_BATCH_LABELS: dict[str, int] = {"GRASA_V_BATCH": 1, "GRASA_SC_BATCH": 2}
 
 # Intermuscular fat (``tissue_4_types``) split along the axial axis: the legs span
-# the quadriceps' Z extent, the trunk everything above the quadriceps.
+# the quadriceps' Z extent plus the fat components touching it, the trunk the rest
+# above the quadriceps.
 FAT_IM_LABELS: dict[str, int] = {"GRASA_IM_PIERNAS": 1, "GRASA_IM_TORAX": 2}
 
 BODY_LABELS: dict[str, int] = {"BODY": 1}
