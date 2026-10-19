@@ -143,19 +143,34 @@ def _layer_source_path(layer: Any) -> Path | None:
     return path if path.is_file() else None
 
 
+#: Temp dirs written by :func:`_ensure_nifti_path`, removed by the tool run that made them.
+_TEMP_INPUT_DIRS: list[Path] = []
+
+
 def _ensure_nifti_path(layer: Any, *, prefix: str) -> Path:
-    """Return on-disk NIfTI for *layer*, exporting a temp file when needed."""
-    src = _layer_source_path(layer)
-    if src is not None:
-        name = src.name.lower()
-        if name.endswith(".nii") or name.endswith(".nii.gz"):
-            return src
+    """On-disk NIfTI of *layer* as it is now, for tools that read files (registration).
+
+    Always the layer's current data, written the way saving the layer would (the
+    file's axis order and affine). Its ``source`` file cannot stand in for it: a crop
+    or a tool output inherits its source's metadata, so a cropped layer used to be
+    registered as the whole image it came from. An untouched layer writes the very
+    grid of its file, so a transform estimated on it still applies to that file.
+    Uncompressed — it is read once — and removed by :func:`_remove_temp_inputs`.
+    """
+    from nvitk.gui.io.export import layer_to_image as export_image
     from nvitk.io import imsave
 
     tmp_dir = Path(tempfile.mkdtemp(prefix=f"nvitk_{prefix}_"))
-    path = tmp_dir / "volume.nii.gz"
-    imsave(path, layer_to_image(layer))
+    _TEMP_INPUT_DIRS.append(tmp_dir)
+    path = tmp_dir / "volume.nii"
+    imsave(path, export_image(layer))
     return path
+
+
+def _remove_temp_inputs(since: int) -> None:
+    """Delete the :func:`_ensure_nifti_path` temp dirs created after the first *since*."""
+    while len(_TEMP_INPUT_DIRS) > since:
+        shutil.rmtree(_TEMP_INPUT_DIRS.pop(), ignore_errors=True)
 
 
 def _export_layer_nifti(layer: Any, *, prefix: str, filename: str = "volume.nii.gz") -> Path:
@@ -1887,6 +1902,15 @@ _ANTS_WARP_INTERPOLATORS: dict[str, str] = {
 
 def _run_registration_tool(tool_id: str, viewer: Any, layer: Any, params: dict[str, Any]) -> None:
     """FLIRT / ANTsPy / FireANTs registration and transform application."""
+    since = len(_TEMP_INPUT_DIRS)
+    try:
+        _run_registration(tool_id, viewer, layer, params)
+    finally:
+        _remove_temp_inputs(since)
+
+
+def _run_registration(tool_id: str, viewer: Any, layer: Any, params: dict[str, Any]) -> None:
+    """Body of :func:`_run_registration_tool` (the inputs it exports are removed afterwards)."""
     ref_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
 
     if tool_id == "reg_flirt_rigid":
