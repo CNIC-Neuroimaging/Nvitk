@@ -154,6 +154,11 @@ def _add_label_volume_surfaces(
         )
 
 
+# Spine classes drawn besides the ``vertebrae_*`` ones (which already include CT's
+# ``vertebrae_S1``), so the overviews show where the lumbar spine starts.
+_SPINE_EXTRA_CLASSES: frozenset[str] = frozenset({"sacrum"})
+
+
 def _add_colored_vertebrae_surfaces(
     pl,
     pv,
@@ -165,10 +170,14 @@ def _add_colored_vertebrae_surfaces(
     task: str = "total",
     opacity: float = 0.45,
 ) -> None:
-    """Render each vertebra label with a high-contrast distinct color."""
+    """Render each vertebra label, plus the sacrum, with a high-contrast distinct color."""
     seg_i = np.asarray(seg, dtype=np.int32)
     cmap = get_class_map(task)
-    vert_items = [(int(i), str(nm)) for i, nm in cmap.items() if str(nm).startswith("vertebrae_")]
+    vert_items = [
+        (int(i), str(nm))
+        for i, nm in cmap.items()
+        if str(nm).startswith("vertebrae_") or str(nm) in _SPINE_EXTRA_CLASSES
+    ]
     if not vert_items:
         vbin = (seg_i > 0).astype(np.uint8)
         _add_label_volume_surfaces(
@@ -207,13 +216,14 @@ def export_ctpet_overview_html(
     *,
     notebook: bool = True,
 ) -> Path | None:
-    """CT-PET overview: FAT+vertebrae, and MO+ORGANS+MUSCLES (2 views)."""
+    """CT-PET overview: FAT+IM fat+vertebrae, MO+ORGANS+MUSCLES and raw vertebrae (3 views)."""
     from nvitk.pipes.pesa_fat.ct_pet_v5 import config as ct_cfg
 
     pv = _require_pyvista()
     stage2 = lay.results_dir / ct_cfg.STAGE2_DIR / subject / "CT"
     stage1 = lay.results_dir / ct_cfg.STAGE1_DIR / subject / "CT"
     fat_p = resolve_nii_optional(stage2, "FAT")
+    fat_im_p = resolve_nii_optional(stage2, "FAT_IM")
     mo_p = resolve_nii_optional(stage2, "MO")
     muscles_p = resolve_nii_optional(stage2, "MUSCLES")
     organs_p = resolve_nii_optional(stage2, "ORGANS")
@@ -225,13 +235,26 @@ def export_ctpet_overview_html(
 
     pl = pv.Plotter(shape=(1, 3), notebook=notebook)
 
-    # View A: FAT + vertebrae
+    # View A: FAT + intermuscular fat (FAT_IM, legs/trunk) + vertebrae. FAT_IM labels
+    # are shifted past the FAT ones so all four depots get their own colour.
     pl.subplot(0, 0)
-    pl.add_text("FAT + vertebrae", font_size=10, position="upper_edge")
-    if fat_p is not None:
-        img = imread(str(fat_p), axes="XYZ")
-        spacing, origin, direction = _spacing_origin_direction(img.metadata)
-        _add_label_volume_surfaces(pl, pv, to_numpy(img.data), spacing=spacing, origin=origin, direction=direction, mask_opacity=0.35)
+    pl.add_text("FAT + IM fat + spine", font_size=10, position="upper_edge")
+    fat_arr: np.ndarray | None = None
+    fat_meta: dict | None = None
+    for pth in (fat_p, fat_im_p):
+        if pth is None:
+            continue
+        img = imread(str(pth), axes="XYZ")
+        arr = to_numpy(img.data).astype(np.int32)
+        if fat_arr is None:
+            fat_arr, fat_meta = arr, img.metadata
+        elif arr.shape == fat_arr.shape:
+            fat_arr = np.where(arr > 0, arr + int(fat_arr.max()), fat_arr)
+        else:
+            log.warning("[%s] FAT_IM grid differs from FAT; IM fat left out of the overview", subject)
+    if fat_arr is not None:
+        spacing, origin, direction = _spacing_origin_direction(fat_meta)
+        _add_label_volume_surfaces(pl, pv, fat_arr, spacing=spacing, origin=origin, direction=direction, mask_opacity=0.35)
     if total_p is not None:
         img = imread(str(total_p), axes="XYZ")
         spacing, origin, direction = _spacing_origin_direction(img.metadata)
@@ -258,9 +281,9 @@ def export_ctpet_overview_html(
         _add_label_volume_surfaces(pl, pv, to_numpy(img.data), spacing=spacing, origin=origin, direction=direction, mask_opacity=op)
     pl.view_isometric()
 
-    # View C: raw vertebrae from TotalSegmentator 'total' (available labels only)
+    # View C: raw vertebrae + sacrum from TotalSegmentator 'total' (available labels only)
     pl.subplot(0, 2)
-    pl.add_text("Vertebrae (raw total)", font_size=10, position="upper_edge")
+    pl.add_text("Raw spine + sacrum", font_size=10, position="upper_edge")
     if total_p is not None:
         img = imread(str(total_p), axes="XYZ")
         spacing, origin, direction = _spacing_origin_direction(img.metadata)
@@ -318,9 +341,9 @@ def export_dixon_overview_html(
         _add_label_volume_surfaces(pl, pv, to_numpy(img.data), spacing=spacing, origin=origin, direction=direction, mask_opacity=op)
     pl.view_isometric()
 
-    # View B: vertebrae only
+    # View B: vertebrae + sacrum
     pl.subplot(0, 1)
-    pl.add_text("Vertebrae", font_size=10, position="upper_edge")
+    pl.add_text("Vertebrae + sacrum", font_size=10, position="upper_edge")
     if vert_p is not None:
         img = imread(str(vert_p), axes="XYZ")
         spacing, origin, direction = _spacing_origin_direction(img.metadata)

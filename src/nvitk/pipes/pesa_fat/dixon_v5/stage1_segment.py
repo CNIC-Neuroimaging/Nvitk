@@ -6,7 +6,8 @@ contrast (``DIXON_<REGION>_<SUFFIX>.nii[.gz]``) and writes the multilabel
 segmentation to
 ``RESULTS/<batch>/res_segmentation_dixon/<SUBJECT>/DIXON_<REGION>/<stem>.nii``
 (the stem is the task name unless the task overrides it, as the WATER-contrast
-liver run does).
+liver run does). Tasks with ``keep_rois`` run the full model and are then trimmed
+to those classes.
 """
 
 from __future__ import annotations
@@ -14,8 +15,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import click
+import numpy as np
 
+from nvitk.core.array import to_numpy
 from nvitk.core.logger import Logger
+from nvitk.io import imread, imsave
 from nvitk.pipes.pesa_fat.common.paths import (
     BatchLayout,
     DEFAULT_MODEL_ROOT,
@@ -24,6 +28,7 @@ from nvitk.pipes.pesa_fat.common.paths import (
 )
 from nvitk.pipes.pesa_fat.dixon_v5 import config as cfg
 from nvitk.segmentation.total_segmentator import run_totalsegmentator
+from nvitk.segmentation.total_segmentator.class_maps import get_class_id
 
 
 log = Logger()
@@ -43,6 +48,15 @@ def _subject_region_output_dir(lay: BatchLayout, subject: str, region: str) -> P
         / subject
         / f"{cfg.INPUT_PREFIX}_{region}"
     )
+
+
+def _keep_only(seg_path: Path, task: cfg.MrTask) -> None:
+    """Zero every class of the multilabel *seg_path* not listed in ``task.keep_rois``."""
+    keep_ids = [get_class_id(name, task.name) for name in task.keep_rois]
+    seg = imread(str(seg_path), axes="XYZ")
+    arr = to_numpy(seg.data)
+    kept = np.where(np.isin(arr, keep_ids), arr, 0).astype(arr.dtype)
+    imsave(str(seg_path), seg.with_data(kept), axes="XYZ")
 
 
 def run_subject(
@@ -109,6 +123,8 @@ def run_subject(
                     check=True,
                     capture_output=False,
                 )
+                if task.keep_rois:
+                    _keep_only(out_file, task)
             except Exception as exc:
                 log.error(f"[{subject}] {region}/{task.stem} failed: {exc}")
 

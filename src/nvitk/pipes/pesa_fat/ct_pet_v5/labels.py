@@ -22,6 +22,12 @@ FAT_LABELS: dict[str, int] = {"GRASA_V": 1, "GRASA_SC": 2}
 
 FAT_BATCH_LABELS: dict[str, int] = {"GRASA_V_BATCH": 1, "GRASA_SC_BATCH": 2}
 
+# Intermuscular fat (``tissue_4_types``) split along the axial axis: the legs span
+# the quadriceps' Z extent plus the fat components touching it, within the trunk's
+# left-right extent; the trunk is the rest above the quadriceps plus the arm fat
+# beside the trunk at the legs' level.
+FAT_IM_LABELS: dict[str, int] = {"GRASA_IM_PIERNAS": 1, "GRASA_IM_TORAX": 2}
+
 BODY_LABELS: dict[str, int] = {"BODY": 1}
 
 ORGANS_LABELS: dict[str, int] = {"HIGADO": 1, "BAZO": 2, "PANCREAS": 3}
@@ -45,10 +51,12 @@ OUTPUT_LABEL_TO_TS: dict[str, list[tuple[str, str]]] = {
     "L4": [("total", "vertebrae_L4")],
     "L3": [("total", "vertebrae_L3")],
     # FAT
-    "GRASA_V": [("tissue_types", "torso_fat")],
-    "GRASA_SC": [("tissue_types", "subcutaneous_fat")],
-    "GRASA_V_BATCH": [("tissue_types", "torso_fat")],
-    "GRASA_SC_BATCH": [("tissue_types", "subcutaneous_fat")],
+    "GRASA_V": [("tissue_4_types", "torso_fat")],
+    "GRASA_SC": [("tissue_4_types", "subcutaneous_fat")],
+    "GRASA_V_BATCH": [("tissue_4_types", "torso_fat")],
+    "GRASA_SC_BATCH": [("tissue_4_types", "subcutaneous_fat")],
+    "GRASA_IM_PIERNAS": [("tissue_4_types", "intermuscular_fat")],
+    "GRASA_IM_TORAX": [("tissue_4_types", "intermuscular_fat")],
     # BODY (merged)
     "BODY_TRUNC": [("body", "body_trunc")],
     "BODY_EXT": [("body", "body_extremities")],
@@ -71,6 +79,7 @@ __all__ = [
     "SKELETON_LABELS",
     "FAT_LABELS",
     "FAT_BATCH_LABELS",
+    "FAT_IM_LABELS",
     "BODY_LABELS",
     "ORGANS_LABELS",
     "MUSCLES_LABELS",

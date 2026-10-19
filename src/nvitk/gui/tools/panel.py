@@ -7,7 +7,7 @@ from typing import Any, Callable
 import numpy as np
 from magicgui import magicgui
 
-from nvitk.gui.labels.visibility import infer_target_mode
+from nvitk.gui.labels.visibility import infer_target_mode, is_label_like_layer
 from nvitk.gui.tools.presets import apply_preset_to_panel, preset_key_from_title
 from nvitk.gui.tools.runner import log_tool_failure, notify, parse_label_ids, run_gui_tool
 from nvitk.gui.tools.registry import (
@@ -1415,12 +1415,24 @@ def build_tool_panel(
             return
 
         name = f"{layer.name}_{tool_id}"
-        try:
-            out_kwargs = layer_display_kwargs(layer, name=name, ndim=int(np.ndim(result)))
-        except TypeError:  # a caller-supplied builder without the ndim keyword
-            out_kwargs = layer_display_kwargs(layer, name=name)
+        # A result on the reference layer's grid (resample to reference) is placed — and
+        # saved — like the reference, never like the active layer it was computed from.
+        grid_ref = None
+        if spec is not None and spec.output_on_reference_grid:
+            ref_name = str(params.get("reference_layer") or "").strip()
+            grid_ref = next((ly for ly in viewer.layers if ly.name == ref_name), None)
+        if grid_ref is not None:
+            from nvitk.gui.core.spatial import reference_grid_kwargs
+
+            out_kwargs = reference_grid_kwargs(layer, grid_ref, name=name)
+        else:
+            try:
+                out_kwargs = layer_display_kwargs(layer, name=name, ndim=int(np.ndim(result)))
+            except TypeError:  # a caller-supplied builder without the ndim keyword
+                out_kwargs = layer_display_kwargs(layer, name=name)
         can_replace = (
             overlay_mode == "replace_active"
+            and grid_ref is None
             and tuple(result.shape) == tuple(layer.data.shape)
         )
         result_arr = np.asarray(result)
@@ -1439,6 +1451,12 @@ def build_tool_panel(
                 layer.name = name
             except Exception:
                 viewer.add_image(result, **out_kwargs)
+        elif spec is not None and spec.geometric and is_label_like_layer(layer):
+            # A label map moved by a geometric tool is still a label map.
+            lab = viewer.add_labels(
+                result_arr.astype(np.int32, copy=False), opacity=0.7, **out_kwargs
+            )
+            lab._nvitk_label_like = True
         elif as_labels:
             from nvitk.gui.core.spatial import layer_spatial_kwargs
 

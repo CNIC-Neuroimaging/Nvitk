@@ -9,6 +9,7 @@ import io
 import base64
 import json
 from pathlib import Path
+from typing import Callable
 
 import matplotlib
 
@@ -24,6 +25,7 @@ from nvitk.pipes.pesa_fat.ct_pet_v5 import config as ct_cfg
 from nvitk.pipes.pesa_fat.ct_pet_v5.labels import (
     BODY_LABELS,
     FAT_BATCH_LABELS,
+    FAT_IM_LABELS,
     FAT_LABELS,
     MO_LABELS,
     MUSCLES_LABELS,
@@ -60,23 +62,33 @@ def _load_mask(stage2_dir: Path, filename: str) -> Image:
 
 
 def _ctpet_roi_specs() -> list[tuple[str, str, tuple[int, ...]]]:
-    """(display_name, mask_file, label_ids) unique over SUV + VOL specs."""
-    seen: set[tuple[str, tuple[int, ...]]] = set()
+    """(display_name, mask_file, label_ids) unique over SUV + VOL specs.
+
+    Deduplicated by display name, so a volume read from a ``*_VOL`` twin shows
+    under its SUV ROI; volume-only ROIs (CORP, MO_L3/MO_L4, GRASA_IM_*) keep
+    their own entry.
+    """
+    seen: set[str] = set()
     out: list[tuple[str, str, tuple[int, ...]]] = []
-    for spec in ct_cfg.SUV_SPECS:
-        key = (spec.mask_file, spec.label_ids)
-        if key in seen:
+    candidates = [(spec.column_prefix, spec.mask_file, spec.label_ids) for spec in ct_cfg.SUV_SPECS]
+    candidates += [
+        (spec.column[: -len("_VOL")] if spec.column.endswith("_VOL") else spec.column, spec.mask_file, spec.label_ids)
+        for spec in ct_cfg.VOL_SPECS
+    ]
+    for name, mask_file, label_ids in candidates:
+        if name in seen:
             continue
-        seen.add(key)
-        out.append((spec.column_prefix, spec.mask_file, spec.label_ids))
-    for spec in ct_cfg.VOL_SPECS:
-        key = (spec.mask_file, spec.label_ids)
-        if key in seen:
-            continue
-        seen.add(key)
-        name = spec.column.replace("_VOL", "")
-        out.append((name, spec.mask_file, spec.label_ids))
+        seen.add(name)
+        out.append((name, mask_file, label_ids))
     return out
+
+
+def _base_mask_file(mask_file: str) -> str:
+    """*mask_file* with a ``_VOL`` twin suffix removed (``"MO_VOL.nii"`` -> ``"MO.nii"``)."""
+    stem, dot, ext = mask_file.partition(".")
+    if stem.endswith("_VOL"):
+        stem = stem[: -len("_VOL")]
+    return f"{stem}{dot}{ext}"
 
 
 def _safe_stem(s: str) -> str:
@@ -88,6 +100,7 @@ _CT_MASK_TO_LABELS: dict[str, dict[str, int]] = {
     "MO.nii": MO_LABELS,
     "FAT.nii": FAT_LABELS,
     "FAT_BATCH.nii": FAT_BATCH_LABELS,
+    "FAT_IM.nii": FAT_IM_LABELS,
     "BODY.nii": BODY_LABELS,
     "ORGANS.nii": ORGANS_LABELS,
     "MUSCLES.nii": MUSCLES_LABELS,
@@ -121,7 +134,7 @@ def _pp_label_names(mask_file: str, label_ids: tuple[int, ...], *, pipeline: str
     """Human-readable label names for *label_ids* in *mask_file* (merges L/R deltoids into one)."""
     labels_dict = (
         _CT_MASK_TO_LABELS if pipeline == "ctpet" else _DIXON_MASK_TO_LABELS
-    ).get(mask_file, {})
+    ).get(_base_mask_file(mask_file), {})
     inv = {v: k for k, v in labels_dict.items()}
     names: list[str] = []
     for lid in label_ids:
@@ -226,6 +239,72 @@ def _load_raw_ts_mask_dixon(
         except Exception:
             return None
     return combined
+
+
+# Bone-marrow ROIs are shown from the sacrum up to L1 (stage-1 classes below), so a
+# reviewer can count the vertebrae and confirm the marrow really sits in L3/L4.
+_CT_SPINE_RANGE_TS: tuple[str, ...] = ("sacrum", "vertebrae_S1", "vertebrae_L1")
+_DIXON_SPINE_RANGE_TS: tuple[str, ...] = ("sacrum", "vertebrae_L1")
+_DIXON_BM_LABELS: frozenset[str] = frozenset({"BN_L3", "BN_L4"})
+
+
+def _spine_z_range(
+    seg_path: Path | None,
+    task: str,
+    class_names: tuple[str, ...],
+    *,
+    target: Image,
+) -> tuple[int, int] | None:
+    """Axial (Z) extent, on *target*'s grid, of the *class_names* present in the stage-1
+    segmentation *seg_path*; None when the file or every class is missing."""
+    if seg_path is None:
+        return None
+    ids: list[int] = []
+    for name in class_names:
+        try:
+            ids.append(int(get_class_id(name, task)))
+        except Exception:
+            continue
+    try:
+        seg = imread(str(seg_path), axes="XYZ")
+    except Exception:
+        return None
+    present = np.isin(to_numpy(seg.data), ids)
+    if not ids or not present.any():
+        return None
+    target_shape = tuple(int(v) for v in to_numpy(target.data).shape)
+    if present.shape != target_shape:
+        try:
+            raw_img = seg.with_data(as_backend_array(present.astype(np.uint8)))
+            present = to_numpy(resample_mask_to_pet(raw_img, target).data) > 0
+        except Exception:
+            return None
+    z_hits = np.where(np.any(present, axis=(0, 1)))[0]
+    if z_hits.size == 0:
+        return None
+    return int(z_hits.min()), int(z_hits.max())
+
+
+def _axial_block(
+    m: np.ndarray,
+    margin_vox: int,
+    spine_z: tuple[int, int] | None = None,
+) -> tuple[int, int, list[int], int]:
+    """Axial block for one ROI: ``(z0, z1, axial slice indices, index of the opening slice)``.
+
+    By default the block is the mask's Z extent plus *margin_vox* and the axial stack
+    lists only the slices holding the mask. With *spine_z* the block also spans that
+    range and the stack lists every slice in it, opening on the mask's middle slice.
+    """
+    mask_z = np.where(np.any(m, axis=(0, 1)))[0]
+    z0 = max(0, int(mask_z.min()) - margin_vox)
+    z1 = min(m.shape[2] - 1, int(mask_z.max()) + margin_vox)
+    if spine_z is None:
+        z_indices = [int(z) for z in mask_z]
+        return z0, z1, z_indices, len(z_indices) // 2
+    z0, z1 = min(z0, spine_z[0]), max(z1, spine_z[1])
+    z_indices = list(range(z0, z1 + 1))
+    return z0, z1, z_indices, z_indices.index(int(mask_z[len(mask_z) // 2]))
 
 
 def _flip_lr_2d(arr: np.ndarray) -> np.ndarray:
@@ -555,6 +634,28 @@ def _viewer_html(
 """
 
 
+#: CT display window (HU) for the soft-tissue ROIs of the CT slice views: abdomen W400/L40.
+CT_ABDOMEN_WINDOW: tuple[float, float] = (-160.0, 240.0)
+
+#: ROI-name prefixes shown in :data:`CT_ABDOMEN_WINDOW` on CT: every fat depot, the
+#: organs and the trunk / shoulder muscles. Bone marrow, body and quadriceps keep the
+#: window computed from their own voxels.
+_CT_ABDOMEN_WINDOW_ROIS: tuple[str, ...] = (
+    "GRASA_",
+    "HIGADO",
+    "BAZO",
+    "PANCREAS",
+    "PARAVERTEBRAL_",
+    "DELTOIDES_",
+    "TRAPECIOS",
+)
+
+
+def _ct_window_for_roi(roi: str) -> tuple[float, float] | None:
+    """Fixed CT window for the slice views of *roi*, or ``None`` to derive it from the mask."""
+    return CT_ABDOMEN_WINDOW if roi.startswith(_CT_ABDOMEN_WINDOW_ROIS) else None
+
+
 def _build_ctpet_slice_viewer_core(
     lay: BatchLayout,
     subject: str,
@@ -569,13 +670,19 @@ def _build_ctpet_slice_viewer_core(
     default_roi: str = "HIGADO",
     review_ctx: dict | None = None,
     sync_peer_dom_ids: list[str] | None = None,
+    window_for_roi: Callable[[str], tuple[float, float] | None] | None = None,
 ) -> str:
-    """Render CT-PET slice stacks for *vol_arr* with masks resampled to *target_img*."""
+    """Render CT-PET slice stacks for *vol_arr* with masks resampled to *target_img*.
+
+    *window_for_roi(roi)* may return a fixed ``(vmin, vmax)`` display window for an
+    ROI; otherwise (or when it returns ``None``) the window comes from the mask's voxels.
+    """
     sagittal_y_height = _figsize_for_slice(
         vol_arr[:, :, min(vol_arr.shape[2] // 2, vol_arr.shape[2] - 1)]
     )[1]
 
     cache: dict[str, Image] = {}
+    spine_cache: dict[str, tuple[int, int] | None] = {}
     roi_names: list[str] = []
     roi_to_ax: dict[str, list[str]] = {}
     roi_to_co: dict[str, list[str]] = {}
@@ -604,15 +711,19 @@ def _build_ctpet_slice_viewer_core(
         if not np.any(m):
             continue
 
-        coords = np.argwhere(m)
-        z0, z1 = int(coords[:, 2].min()), int(coords[:, 2].max())
-        z0 = max(0, z0 - margin_vox)
-        z1 = min(vol_arr.shape[2] - 1, z1 + margin_vox)
-        vmin, vmax = _display_range_block(vol_arr, m, z0, z1)
-
-        z_indices = [z for z in range(z0, z1 + 1) if np.any(m[:, :, z])]
-        if not z_indices:
-            continue
+        spine_z = None
+        if _base_mask_file(mask_file) == "MO.nii":
+            if "z" not in spine_cache:
+                spine_cache["z"] = _spine_z_range(
+                    resolve_nii_optional(lay.results_dir / ct_cfg.STAGE1_DIR / subject / "CT", "total"),
+                    "total",
+                    _CT_SPINE_RANGE_TS,
+                    target=target_img,
+                )
+            spine_z = spine_cache["z"]
+        z0, z1, z_indices, ax_mid = _axial_block(m, margin_vox, spine_z)
+        window = window_for_roi(disp) if window_for_roi is not None else None
+        vmin, vmax = window if window is not None else _display_range_block(vol_arr, m, z0, z1)
         ax_uris: list[str] = []
         for z in z_indices:
             sl = vol_arr[:, :, z]
@@ -634,7 +745,7 @@ def _build_ctpet_slice_viewer_core(
                 )
             )
         roi_to_ax[disp] = ax_uris
-        roi_ax_mid[disp] = len(ax_uris) // 2
+        roi_ax_mid[disp] = ax_mid
 
         y_indices = [y for y in range(0, vol_arr.shape[1]) if np.any(m[:, y, z0 : z1 + 1])]
         if not y_indices:
@@ -746,6 +857,7 @@ def build_ctpet_slice_viewer_html(
         default_roi="HIGADO",
         review_ctx=review_ctx,
         sync_peer_dom_ids=[pet_dom],
+        window_for_roi=_ct_window_for_roi,
     )
 
 
@@ -839,6 +951,7 @@ def build_dixon_slice_viewer_html(
     cache_water: dict[str, Image] = {}
     cache_vrange: dict[str, tuple[float, float]] = {}
     cache_sag_y_height: dict[str, float] = {}
+    cache_spine_z: dict[str, tuple[int, int] | None] = {}
     roi_names: list[str] = []
     roi_to_ax: dict[str, list[str]] = {}
     roi_to_co: dict[str, list[str]] = {}
@@ -879,15 +992,20 @@ def build_dixon_slice_viewer_html(
         if not np.any(m):
             continue
 
-        coords = np.argwhere(m)
-        z0, z1 = int(coords[:, 2].min()), int(coords[:, 2].max())
+        spine_z = None
+        bm_names = set(_pp_label_names(mask_file, label_ids, pipeline="dixon"))
+        if bm_names and bm_names <= _DIXON_BM_LABELS:
+            if region not in cache_spine_z:
+                stage1_dir = lay.results_dir / dx_cfg.STAGE1_DIR / subject / f"{dx_cfg.INPUT_PREFIX}_{region}"
+                cache_spine_z[region] = _spine_z_range(
+                    resolve_nii_optional(stage1_dir, "vertebrae_mr"),
+                    "vertebrae_mr",
+                    _DIXON_SPINE_RANGE_TS,
+                    target=water_img,
+                )
+            spine_z = cache_spine_z[region]
         # Only crop in Z (show full XY with neighbors)
-        z0 = max(0, z0 - margin_vox)
-        z1 = min(vol.shape[2] - 1, z1 + margin_vox)
-
-        z_indices = [z for z in range(z0, z1 + 1) if np.any(m[:, :, z])]
-        if not z_indices:
-            continue
+        z0, z1, z_indices, ax_mid = _axial_block(m, margin_vox, spine_z)
 
         ax_uris: list[str] = []
         for z in z_indices:
@@ -910,7 +1028,7 @@ def build_dixon_slice_viewer_html(
                 )
             )
         roi_to_ax[disp] = ax_uris
-        roi_ax_mid[disp] = len(ax_uris) // 2
+        roi_ax_mid[disp] = ax_mid
 
         # coronal slices over y
         y_indices = [y for y in range(0, vol.shape[1]) if np.any(m[:, y, z0 : z1 + 1])]

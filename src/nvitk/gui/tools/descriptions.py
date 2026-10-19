@@ -220,7 +220,11 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "reg_flirt_rigid": "Rigid FLIRT registration to a reference volume.",
     "reg_flirt_apply": "Apply a saved FLIRT transform to a volume.",
     "isotropy": "Resample to near-isotropic voxel spacing.",
-    "resample_to": "Resample to a target voxel size.",
+    "resample_to": (
+        "Resample the active layer onto the reference layer's grid (shape, spacing, position and "
+        "orientation), like `nvitk-transform resample`. The result is placed and saved on the "
+        "reference grid; label maps are resampled nearest-neighbour."
+    ),
     "rotate_volume": (
         "Rotate the active volume around axis 0/1/2 (default Z = 2). "
         "Angle is counter-clockwise in the plane orthogonal to that axis. "

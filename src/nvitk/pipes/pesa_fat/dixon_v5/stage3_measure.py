@@ -5,7 +5,11 @@ Port of :code:`BioImaging/src/pesa_fat/dixon/3_measure_vol_int.py`.
 For a PESA* subject with stage-2 outputs (``HEAD``, ``THORAX``, ``LEGS``),
 computes per label and per region:
 
-* ``VOL`` - volume in cc (voxel count * prod(spacing) / 1000)
+* ``VOL`` - volume in cc (voxel count * prod(spacing) / 1000), measured with
+            ``NSlices`` on the ``<REGION>_VOL`` stage-2 mask (no post-processing
+            erosions/dilations) when present, else on ``<REGION>``. The other
+            metrics read ``<REGION>``, eroded per label by
+            ``stage2_postprocess.MEASURE_ERODE``
 * ``FF``  - mean of the Dixon fat-fraction map inside the mask
 * ``T2``  - mean of the T2* map inside the mask
 * ``R2``  - mean of the reciprocal T2* map (``1/T2`` where T2 > 0)
@@ -187,6 +191,14 @@ def process_subject(
         "THORAX": mask_thorax,
         "LEGS": mask_legs,
     }
+    # Volumes read the uneroded ``_VOL`` twin; stage-2 outputs written before the
+    # twins existed fall back to the regular mask.
+    region_masks_vol: dict[str, Image | None] = {}
+    for region, mask in region_masks.items():
+        vol_mask = _imread_opt(subject_stage2_dir, f"{region}_VOL")
+        if vol_mask is None and mask is not None:
+            log.info(f"{region}_VOL.nii(.gz) not found; measuring {region} volumes on {region}.")
+        region_masks_vol[region] = vol_mask if vol_mask is not None else mask
 
     wf_ref = _wf_reference(
         region_masks=region_masks,
@@ -205,10 +217,11 @@ def process_subject(
 
         try:
             bm = _binary_mask(label_img, spec.label_ids)
+            bm_vol = _binary_mask(region_masks_vol[spec.region], spec.label_ids)
 
             if "VOL" in spec.metrics:
                 row[f"{spec.prefix}_VOL"] = (
-                    volume_cc(bm) if bool(bm.data.any()) else 0.0
+                    volume_cc(bm_vol) if bool(bm_vol.data.any()) else 0.0
                 )
 
             ff_map = maps[spec.region].get("FF")
@@ -245,7 +258,7 @@ def process_subject(
                         row[f"{spec.prefix}_WF"] = float((tissue_water / wf_ref) * 100.0)
 
             if "NSlices" in spec.metrics:
-                row[f"{spec.prefix}_NSlices"] = _nslices_axial_xyz(bm)
+                row[f"{spec.prefix}_NSlices"] = _nslices_axial_xyz(bm_vol)
         except Exception as exc:
             log.error(f"spec {spec.prefix} failed: {exc}")
             for metric in spec.metrics:

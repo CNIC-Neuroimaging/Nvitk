@@ -99,6 +99,16 @@ def _resolve_layer(viewer: Any, name: str) -> Any:
     raise ValueError(f"Layer not found: {name}")
 
 
+def _napari_data_to_world(layer: Any) -> np.ndarray | None:
+    """*layer*'s full data->world matrix as Napari composes it (scale, translate, affine...),
+    or ``None`` for a layer without Napari transforms (the headless stand-ins)."""
+    import numpy as numpy_host  # module ``np`` may be a CuPy proxy via ``setup(globals())``
+
+    transform = getattr(layer, "_data_to_world", None)
+    matrix = getattr(transform, "affine_matrix", None)
+    return None if matrix is None else numpy_host.asarray(matrix, dtype=float)
+
+
 def _layer_param(params: dict[str, Any], key: str) -> str:
     """Layer dropdown value; treats ``(none)`` and empty as unset."""
     raw = str(params.get(key) or "").strip()
@@ -133,19 +143,34 @@ def _layer_source_path(layer: Any) -> Path | None:
     return path if path.is_file() else None
 
 
+#: Temp dirs written by :func:`_ensure_nifti_path`, removed by the tool run that made them.
+_TEMP_INPUT_DIRS: list[Path] = []
+
+
 def _ensure_nifti_path(layer: Any, *, prefix: str) -> Path:
-    """Return on-disk NIfTI for *layer*, exporting a temp file when needed."""
-    src = _layer_source_path(layer)
-    if src is not None:
-        name = src.name.lower()
-        if name.endswith(".nii") or name.endswith(".nii.gz"):
-            return src
+    """On-disk NIfTI of *layer* as it is now, for tools that read files (registration).
+
+    Always the layer's current data, written the way saving the layer would (the
+    file's axis order and affine). Its ``source`` file cannot stand in for it: a crop
+    or a tool output inherits its source's metadata, so a cropped layer used to be
+    registered as the whole image it came from. An untouched layer writes the very
+    grid of its file, so a transform estimated on it still applies to that file.
+    Uncompressed — it is read once — and removed by :func:`_remove_temp_inputs`.
+    """
+    from nvitk.gui.io.export import layer_to_image as export_image
     from nvitk.io import imsave
 
     tmp_dir = Path(tempfile.mkdtemp(prefix=f"nvitk_{prefix}_"))
-    path = tmp_dir / "volume.nii.gz"
-    imsave(path, layer_to_image(layer))
+    _TEMP_INPUT_DIRS.append(tmp_dir)
+    path = tmp_dir / "volume.nii"
+    imsave(path, export_image(layer))
     return path
+
+
+def _remove_temp_inputs(since: int) -> None:
+    """Delete the :func:`_ensure_nifti_path` temp dirs created after the first *since*."""
+    while len(_TEMP_INPUT_DIRS) > since:
+        shutil.rmtree(_TEMP_INPUT_DIRS.pop(), ignore_errors=True)
 
 
 def _export_layer_nifti(layer: Any, *, prefix: str, filename: str = "volume.nii.gz") -> Path:
@@ -421,6 +446,18 @@ def coerce_tool_output(out: Any) -> np.ndarray:
 def coerce_label_output(out: Any) -> np.ndarray:
     """Napari-safe output for a **label map** — keeps the integer dtype the ids live in."""
     return napari_label_array(out)
+
+
+def _order_param(params: dict[str, Any], default: int = 1) -> int:
+    """The ``order`` (interpolation) parameter; an explicit 0 (nearest) is kept, not defaulted."""
+    order = params.get("order")
+    return default if order is None or order == "" else int(order)
+
+
+def _geometric_output(out: Any, label_map: bool) -> np.ndarray:
+    """Napari-safe output of a geometric tool: integer ids kept for a label map."""
+    data = getattr(out, "data", out)
+    return coerce_label_output(data) if label_map else coerce_tool_output(data)
 
 
 def _morph_common(img: Image, op: str, params: dict[str, Any]) -> np.ndarray:
@@ -828,6 +865,19 @@ def run_gui_tool(
         proc_data = as_backend_array(to_numpy(proc_data))
     img = layer_to_image(layer, proc_data)
 
+    # A geometric transform moves a label map's ids — only the selected ones when labels
+    # are picked — not the binary union the label target modes reduce it to.
+    geo_labels = False
+    if spec.geometric:
+        from nvitk.gui.labels.visibility import is_label_like_layer
+
+        geo_labels = is_label_like_layer(layer)
+        if geo_labels:
+            ids_data = as_backend_array(data)
+            if target_mode == "label" and label_ids:
+                ids_data = np.where(np.isin(ids_data, _label_ids_array(label_ids)), ids_data, 0)
+            img = layer_to_image(layer, ids_data)
+
     if spec.needs_3d and img.ndim != 3:
         raise ValueError(f"{spec.label} requires a 3D layer.")
 
@@ -1045,14 +1095,13 @@ def run_gui_tool(
 
         axis = int(params.get("axis", -1))
         factor = float(params.get("factor") or 0)
-        order = int(params.get("order") or 1)
-        kw = {"order": order}
+        kw = {"order": 0 if geo_labels else _order_param(params)}
         if axis >= 0:
             kw["axis"] = axis
         if factor > 0:
             kw["factor"] = factor
         with using(bk):
-            return coerce_tool_output(isotropy(img, **kw))
+            return _geometric_output(isotropy(img, **kw), geo_labels)
 
     if tool_id == "rotate_volume":
         from nvitk.transform.rotate import rotate_volume
@@ -1062,10 +1111,10 @@ def run_gui_tool(
                 img,
                 float(params.get("angle_degrees") if params.get("angle_degrees") is not None else 90.0),
                 axis=int(params.get("axis") if params.get("axis") is not None else 2),
-                order=int(params.get("order") if params.get("order") is not None else 1),
+                order=0 if geo_labels else _order_param(params),
                 reshape=bool(params.get("reshape")),
             )
-            return coerce_tool_output(getattr(out, "data", out))
+            return _geometric_output(out, geo_labels)
 
     if tool_id == "swap_axes":
         from nvitk.transform.swap_axes import swap_axes
@@ -1074,22 +1123,32 @@ def run_gui_tool(
         a1 = int(params.get("swap_axis1") if params.get("swap_axis1") is not None else 1)
         with using(bk):
             out = swap_axes(img, a0, a1)
-            return coerce_tool_output(getattr(out, "data", out))
+            return _geometric_output(out, geo_labels)
 
     if tool_id == "resample_to":
         from nvitk.transform.resampling import resample_to
 
         ref_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
         target = layer_to_image(ref_layer)
+        # Map both grids with the data->world transform Napari draws them with (affine
+        # *and* scale/translate), so the result matches what the viewer shows aligned.
+        # Headless stand-in layers have no such transform and keep their file affine.
+        # The output layer is placed on the reference by the Tools panel
+        # (``output_on_reference_grid``).
+        for image, source_layer in ((img, layer), (target, ref_layer)):
+            world = _napari_data_to_world(source_layer)
+            if world is not None and world.shape == (4, 4):
+                image.metadata["affine"] = world
         with using(bk):
-            return coerce_tool_output(
-                resample_to(img, target, order=int(params.get("order") or 0))
-            )
+            out = resample_to(img, target, order=0 if geo_labels else _order_param(params))
+            return _geometric_output(out, geo_labels)
 
     if tool_id == "oblique_slice":
         from nvitk.transform.oblique import oblique_slice
 
-        arr = as_backend_array(img.data).astype(np.float64)
+        arr = as_backend_array(img.data)
+        if not geo_labels:
+            arr = arr.astype(np.float64)
         cx, cy, cz = [s / 2.0 for s in arr.shape]
         center = (cx, cy, cz)
         u = (0.0, 1.0, 0.0)
@@ -1102,9 +1161,9 @@ def run_gui_tool(
                 v_xyz=v,
                 radius_vox=float(params.get("radius_vox") or 40),
                 res=int(params.get("res") or 256),
-                order=int(params.get("order") or 1),
+                order=0 if geo_labels else _order_param(params),
             )
-            return coerce_tool_output(slc)
+            return _geometric_output(slc, geo_labels)
 
     if tool_id == "volume_mm3":
         from nvitk.measure.volume import volume_mm3
@@ -1742,6 +1801,44 @@ def _add_volume_file(viewer: Any, path: Path, name: str, *, labels: bool = False
     return viewer.add_image(coerce_tool_output(data), **kwargs)
 
 
+def _label_on_moving_grid(layer: Any, moving_path: Path, *, prefix: str) -> Path:
+    """*layer* — a label map in the moving image's space — as a temp NIfTI on that image's grid.
+
+    A registration transform is defined on the moving image's own grid (an FSL ``.mat``
+    on its voxel grid), so a label map stored on another grid is first resampled onto
+    it, nearest neighbour; one already on that grid is written unchanged.
+    """
+    import nibabel as nib
+    import numpy as numpy_host  # module ``np`` may be a CuPy proxy via ``setup(globals())``
+
+    from nvitk.io import imread, imsave
+    from nvitk.transform.resampling import resample_to
+
+    label_img = layer_to_image(layer)
+    world = _napari_data_to_world(layer)
+    if world is not None and world.shape == (4, 4):
+        label_img.metadata["affine"] = world
+    header = nib.load(str(moving_path))
+    label_aff = label_img.affine
+    same_grid = (
+        tuple(int(v) for v in label_img.shape[:3]) == tuple(int(v) for v in header.shape[:3])
+        and label_aff is not None
+        and numpy_host.allclose(to_numpy(label_aff), header.affine, atol=1e-3)
+    )
+    if not same_grid:
+        notify(
+            f"“{layer.name}” is not on the moving image's grid: resampling it onto that grid "
+            "(nearest neighbour) before warping."
+        )
+        moving = imread(moving_path, backend="numpy")
+        moving = moving[0] if isinstance(moving, list) else moving
+        with using("numpy"):
+            label_img = resample_to(label_img, moving, order=0)
+    path = Path(tempfile.mkdtemp(prefix=f"nvitk_{prefix}_")) / "volume.nii.gz"
+    imsave(path, label_img)
+    return path
+
+
 def _also_warp(
     viewer: Any,
     params: dict[str, Any],
@@ -1749,17 +1846,37 @@ def _also_warp(
     apply: Any,
     *,
     tag: str,
+    moving_path: Path,
 ) -> list[str]:
-    """Map every layer named in ``reg_also_warp`` with *apply*; returns the new layer names.
+    """Map the label layer (``reg_label_layer``) and every layer named in ``reg_also_warp``
+    with *apply*; returns the new layer names.
 
-    *apply(moving_path, out_path, is_label)* reslices one file into the reference
-    space. Masks keep their ids: they go through the label interpolator.
+    *apply(src_path, out_path, mode)* reslices one file into the reference space;
+    *mode* is ``"nearest"`` for the label layer (nearest neighbour, on the moving
+    image's grid *moving_path*), ``"label"`` for the masks in 'Also warp' (the
+    tool's label interpolator) and ``"intensity"`` otherwise.
     """
     from nvitk.gui.labels.visibility import is_label_like_layer
 
-    raw = str(params.get("reg_also_warp") or "").strip()
     added: list[str] = []
+    label_name = _layer_param(params, "reg_label_layer")
+    if label_name:
+        try:
+            label_layer = _resolve_layer(viewer, label_name)
+        except ValueError as exc:
+            notify(str(exc), error=True)
+        else:
+            src = _label_on_moving_grid(label_layer, moving_path, prefix=f"{tag}_label")
+            out = src.parent / "warped.nii.gz"
+            apply(src, out, "nearest")
+            new_name = f"{label_layer.name}_{tag}_warped"
+            _add_volume_file(viewer, out, new_name, labels=True)
+            added.append(new_name)
+
+    raw = str(params.get("reg_also_warp") or "").strip()
     for name in [n.strip() for n in raw.split(",") if n.strip()]:
+        if name == label_name:
+            continue  # already warped as the label layer
         try:
             other = _resolve_layer(viewer, name)
         except ValueError as exc:
@@ -1768,15 +1885,32 @@ def _also_warp(
         is_label = type(other).__name__ == "Labels" or is_label_like_layer(other)
         src = _export_layer_nifti(other, prefix=f"{tag}_also")
         out = src.parent / "warped.nii.gz"
-        apply(src, out, is_label)
+        apply(src, out, "label" if is_label else "intensity")
         new_name = f"{other.name}_{tag}_warped"
         _add_volume_file(viewer, out, new_name, labels=is_label)
         added.append(new_name)
     return added
 
 
+#: ANTs interpolator per :func:`_also_warp` mode.
+_ANTS_WARP_INTERPOLATORS: dict[str, str] = {
+    "intensity": "linear",
+    "label": "genericLabel",
+    "nearest": "nearestNeighbor",
+}
+
+
 def _run_registration_tool(tool_id: str, viewer: Any, layer: Any, params: dict[str, Any]) -> None:
     """FLIRT / ANTsPy / FireANTs registration and transform application."""
+    since = len(_TEMP_INPUT_DIRS)
+    try:
+        _run_registration(tool_id, viewer, layer, params)
+    finally:
+        _remove_temp_inputs(since)
+
+
+def _run_registration(tool_id: str, viewer: Any, layer: Any, params: dict[str, Any]) -> None:
+    """Body of :func:`_run_registration_tool` (the inputs it exports are removed afterwards)."""
     ref_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
 
     if tool_id == "reg_flirt_rigid":
@@ -1809,13 +1943,13 @@ def _run_registration_tool(tool_id: str, viewer: Any, layer: Any, params: dict[s
         if res.warped_path is not None:
             _add_volume_file(viewer, res.warped_path, f"{layer.name}_flirt_warped")
 
-        def _apply(src: Path, out: Path, is_label: bool) -> None:
+        def _apply(src: Path, out: Path, mode: str) -> None:
             flirt_apply_rigid(
                 src, fixed_path, res.matrix_path, out,
-                interp="nearestneighbour" if is_label else interp,
+                interp=interp if mode == "intensity" else "nearestneighbour",
             )
 
-        _also_warp(viewer, params, ref_layer, _apply, tag="flirt")
+        _also_warp(viewer, params, ref_layer, _apply, tag="flirt", moving_path=moving_path)
         return None
 
     if tool_id == "reg_flirt_apply":
@@ -1871,16 +2005,16 @@ def _run_registration_tool(tool_id: str, viewer: Any, layer: Any, params: dict[s
         notify(f"ANTs ({tot}) done. Forward transforms: {fwd}")
         gui_log(f"ANTs inverse transforms: {', '.join(str(p) for p in res.inv_transforms)}")
 
-        def _apply(src: Path, out: Path, is_label: bool) -> None:
+        def _apply(src: Path, out: Path, mode: str) -> None:
             ants_apply(
                 fixed_path=fixed_path,
                 moving_path=src,
                 out_path=out,
                 transforms=list(res.fwd_transforms),
-                interpolator="genericLabel" if is_label else "linear",
+                interpolator=_ANTS_WARP_INTERPOLATORS[mode],
             )
 
-        _also_warp(viewer, params, ref_layer, _apply, tag="ants")
+        _also_warp(viewer, params, ref_layer, _apply, tag="ants", moving_path=moving_path)
         return None
 
     if tool_id == "reg_ants_apply":
@@ -1948,16 +2082,16 @@ def _run_registration_tool(tool_id: str, viewer: Any, layer: Any, params: dict[s
             + ", ".join(str(p) for p in res.transforms)
         )
 
-        def _apply(src: Path, out: Path, is_label: bool) -> None:
+        def _apply(src: Path, out: Path, mode: str) -> None:
             fireants_apply(
                 fixed_path=fixed_path,
                 moving_path=src,
                 out_path=out,
                 transforms=list(res.transforms),
-                interpolator="genericLabel" if is_label else "linear",
+                interpolator=_ANTS_WARP_INTERPOLATORS[mode],
             )
 
-        _also_warp(viewer, params, ref_layer, _apply, tag="fireants")
+        _also_warp(viewer, params, ref_layer, _apply, tag="fireants", moving_path=moving_path)
         return None
 
     if tool_id == "reg_fireants_apply":
