@@ -139,6 +139,63 @@ def layer_spatial_kwargs(layer: Any, ndim: int | None = None) -> dict[str, Any]:
     return kwargs
 
 
+#: nvitk metadata keys describing a layer's *grid* — where its voxels sit, how big they
+#: are and in which axis order the file stores them — rather than what the voxels hold.
+GRID_METADATA_KEYS: tuple[str, ...] = (
+    "affine",
+    "affine_source",
+    "axes",
+    "shape",
+    "spacing",
+    "x_res",
+    "y_res",
+    "z_res",
+    "orientation",
+    "true_orientation",
+    "display_reordered",
+    "source_axes",
+    "time_leading",
+    "ImageOrientationPatient",
+    "ImagePositionPatient",
+    "PixelSpacing",
+    "SliceThickness",
+    "Rows",
+    "Columns",
+)
+
+
+def reference_grid_kwargs(layer: Any, reference: Any, *, name: str) -> dict[str, Any]:
+    """``add_image`` / ``add_labels`` kwargs for data computed from *layer* on *reference*'s grid.
+
+    The placement (``scale``/``translate``/``affine``) and the :data:`GRID_METADATA_KEYS`
+    come from *reference*, so the layer is drawn where the reference is and is saved
+    with the reference's header; every other metadata entry (modality, acquisition
+    tags, ...) stays *layer*'s. A grid key the reference lacks is dropped rather than
+    left describing *layer*'s grid.
+    """
+    from nvitk.gui.labels.visibility import copy_layer_metadata_for_output
+
+    meta = copy_layer_metadata_for_output(getattr(layer, "metadata", None))
+    ref_meta = dict(getattr(reference, "metadata", None) or {})
+    nested = dict(meta.get("nvitk_metadata") or {})
+    ref_nested = dict(ref_meta.get("nvitk_metadata") or {})
+    for out, ref in ((meta, ref_meta), (nested, ref_nested)):
+        for key in GRID_METADATA_KEYS:
+            if key in ref:
+                out[key] = ref[key]
+            else:
+                out.pop(key, None)
+    if nested or "nvitk_metadata" in meta:
+        meta["nvitk_metadata"] = nested
+
+    kwargs: dict[str, Any] = {"name": name, "metadata": meta}
+    kwargs.update(layer_spatial_kwargs(reference))
+    axis_labels = getattr(reference, "axis_labels", None)
+    if axis_labels is not None:
+        kwargs["axis_labels"] = tuple(axis_labels)
+    return kwargs
+
+
 def _lo_in_file_order(layer: Any, lo: list[int]) -> list[int] | None:
     """The spatial part of a voxel offset *lo* (in *layer*'s axis order) in the
     order of the file's axes — what the file's affine (``affine_source``) indexes."""

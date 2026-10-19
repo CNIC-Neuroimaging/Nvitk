@@ -40,6 +40,16 @@ def _write_done_marker(
     )
 
 
+def _reference_grid_image(job, aux: dict[str, Image]) -> Image | None:
+    """The staged reference layer when *job*'s tool outputs on the reference grid, else ``None``."""
+    from nvitk.gui.tools.registry import tool_by_id
+
+    spec = tool_by_id(job.tool_id)
+    if spec is None or not spec.output_on_reference_grid:
+        return None
+    return aux.get(str((job.params or {}).get("reference_layer") or ""))
+
+
 @click.command("sge-worker")
 @click.option(
     "--job",
@@ -84,7 +94,20 @@ def main(job_path: Path) -> None:
 
         meta = dict(primary.metadata or {})
         meta.pop("source", None)
-        out_img = Image(data=out_data, metadata=meta, axes=primary.axes, name=job.output_name)
+        axes = primary.axes
+        reference = _reference_grid_image(job, aux)
+        if reference is not None:
+            # The result lives on the reference's grid: write its header, not the input's.
+            from nvitk.gui.core.spatial import GRID_METADATA_KEYS
+
+            ref_meta = dict(reference.metadata or {})
+            for key in GRID_METADATA_KEYS:
+                if key in ref_meta:
+                    meta[key] = ref_meta[key]
+                else:
+                    meta.pop(key, None)
+            axes = reference.axes
+        out_img = Image(data=out_data, metadata=meta, axes=axes, name=job.output_name)
         out_path = output_dir / job.output_name
         out_path.parent.mkdir(parents=True, exist_ok=True)
         imsave(out_path, out_img)

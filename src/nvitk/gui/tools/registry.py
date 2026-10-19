@@ -74,6 +74,15 @@ class GuiToolSpec:
     #: do not — a union is exactly what they are for — and neither does ``label_cc``, which
     #: *assigns* new ids and would need a documented offset scheme per label rather than a flag.
     multilabel: bool = False
+    #: The result lives on the **reference layer's** grid, not the active layer's: the output layer
+    #: takes the reference layer's placement and grid metadata (affine, spacing, axes, ...) and the
+    #: active layer's everything else, so it is drawn — and saved — where the reference is.
+    output_on_reference_grid: bool = False
+    #: A geometric transform: it moves voxels without changing what they hold. On a label map it
+    #: runs on the label ids themselves (only the selected ones when labels are picked), always
+    #: nearest-neighbour, and returns a label map — like its ``nvitk-transform`` counterpart —
+    #: instead of transforming the binary union the label target modes reduce the layer to.
+    geometric: bool = False
 
 
 #: Ids of tools since folded into another: ``old id → (new id, params the old id fixes)``.
@@ -259,6 +268,11 @@ def _registration_choices() -> dict[str, tuple[str, ...]]:
 _REG_CHOICES = _registration_choices()
 _REG_ALSO_WARP = ParamSpec(
     "reg_also_warp", "Also warp layers (comma-separated names)", "str", ""
+)
+#: A label map / segmentation in the moving image's space, carried through the
+#: registration with the same transform, always nearest neighbour.
+_REG_LABEL_LAYER = ParamSpec(
+    "reg_label_layer", "Label / segmentation layer to warp (optional, moving space)", "layer", ""
 )
 
 _TOOLS: tuple[GuiToolSpec, ...] = (
@@ -1764,6 +1778,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("flirt_no_search", "No search (images already roughly aligned)", "bool", False),
             ParamSpec("flirt_interp", "Output interpolation", "choice", "trilinear", choices=_REG_CHOICES["flirt_interp"]),
             ParamSpec("flirt_bins", "Histogram bins", "int", 256, min=16, max=1024),
+            _REG_LABEL_LAYER,
             _REG_ALSO_WARP,
             ParamSpec("warped_name", "Warped output filename", "str", "moving_warped.nii.gz"),
             ParamSpec("matrix_name", "Matrix output filename", "str", "affine.mat"),
@@ -1773,8 +1788,9 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         description=(
             "FSL FLIRT: align the active (moving) layer to the reference. 6 DOF is rigid, "
             "7 adds a global scale, 9 per-axis scales, 12 a full affine. Writes the .mat "
-            "matrix and adds the resliced moving image; 'Also warp' reslices more layers "
-            "(masks with nearest neighbour)."
+            "matrix and adds the resliced moving image. A label / segmentation layer in the "
+            "moving space is resliced with the same matrix, nearest neighbour; 'Also warp' "
+            "reslices more layers (masks with nearest neighbour)."
         ),
     ),
     GuiToolSpec(
@@ -1812,6 +1828,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("ants_fixed_mask", "Fixed mask layer (optional)", "layer", ""),
             ParamSpec("ants_moving_mask", "Moving mask layer (optional)", "layer", ""),
             ParamSpec("ants_initial_transform", "Initial transform file (optional)", "str", ""),
+            _REG_LABEL_LAYER,
             _REG_ALSO_WARP,
             ParamSpec("write_composite_transform", "Write composite transform", "bool", False),
             ParamSpec("verbose", "Verbose", "bool", False),
@@ -1822,7 +1839,9 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "ants.registration of the active (moving) layer to the reference: Rigid, Affine, "
             "SyN, the antsRegistrationSyN[r/a/s/b] presets… with the stage metrics, iteration "
             "schedules and smoothing exposed. Adds the warped image and lists the forward "
-            "transforms; 'Also warp' maps more layers with them (masks with genericLabel)."
+            "transforms. A label / segmentation layer in the moving space is mapped with them "
+            "(genericLabel, nearest-neighbour-like); 'Also warp' maps more layers (masks with "
+            "genericLabel)."
         ),
     ),
     GuiToolSpec(
@@ -1863,6 +1882,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("fireants_smooth_warp", "Warp smoothing sigma", "float", 0.5, min=0.0, max=10.0),
             ParamSpec("fireants_smooth_grad", "Gradient smoothing sigma", "float", 1.0, min=0.0, max=10.0),
             ParamSpec("device", "Device (e.g. cuda:0, cpu)", "str", "cuda:0"),
+            _REG_LABEL_LAYER,
             _REG_ALSO_WARP,
             ParamSpec("verbose", "Verbose", "bool", False),
         ),
@@ -1871,7 +1891,9 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         description=(
             "GPU registration with FireANTs: any chain of moments → rigid → affine → greedy / "
             "SyN, each stage starting from the previous one, with a multi-resolution pyramid. "
-            "Transforms are saved in ANTs format, so 'FireANTs apply' or ANTsPy maps more images."
+            "Transforms are saved in ANTs format, so 'FireANTs apply' or ANTsPy maps more images. "
+            "A label / segmentation layer in the moving space is mapped with them (genericLabel); "
+            "'Also warp' maps more layers."
         ),
     ),
     GuiToolSpec(
@@ -1961,6 +1983,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "Rotate the active 3D layer around axis 0/1/2 (default Z). "
             "Use order 0 for label masks. Keep reshape off to preserve shape."
         ),
+        geometric=True,
     ),
     GuiToolSpec(
         "swap_axes",
@@ -1975,6 +1998,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "Exchange two array axes of the active volume (e.g. 0↔2 to turn XYZ into ZYX). "
             "Spacing/affine columns are updated when metadata is present."
         ),
+        geometric=True,
     ),
     GuiToolSpec(
         "isotropy",
@@ -1986,6 +2010,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("order", "Interpolation order", "int", 1, min=0, max=5),
         ),
         needs_3d=True,
+        geometric=True,
     ),
     GuiToolSpec(
         "resample_to",
@@ -1993,9 +2018,11 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         "Resample to reference layer grid",
         (
             ParamSpec("reference_layer", "Reference layer", "layer", ""),
-            ParamSpec("order", "Interpolation order", "int", 0, min=0, max=5),
+            ParamSpec("order", "Interpolation order (label maps use 0)", "int", 1, min=0, max=5),
         ),
         needs_reference_layer=True,
+        output_on_reference_grid=True,
+        geometric=True,
     ),
     GuiToolSpec(
         "oblique_slice",
@@ -2007,6 +2034,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("order", "Interpolation order", "int", 1, min=0, max=5),
         ),
         needs_3d=True,
+        geometric=True,
     ),
     GuiToolSpec(
         "qvtpy_locs",
