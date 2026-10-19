@@ -7,8 +7,11 @@ For a PESA* subject with stage-2 outputs (``MO``, ``FAT``, ``BODY``,
 grid (via :class:`nvitk.measure.Measurer` alignment) and records:
 
 * SUV stats (bw, max/mean/p95) for L3, L4, L3+L4 (MO), fat depots, organs
-  and hemisphere-split muscles.
-* Volumes (cc) for fat, body, and per-hemisphere muscles.
+  and hemisphere-split muscles, on the stage-2 SUV masks (already eroded per
+  label by ``stage2_postprocess.SUV_ERODE`` against CT/PET organ motion).
+* Volumes (cc) for fat, body, and per-hemisphere muscles, read from the
+  ``*_VOL`` stage-2 masks (no post-processing erosions/dilations). Stage-2
+  outputs predating those fall back to the regular mask.
 
 The CLI writes a per-subject Excel row as a single-row file; the batch
 master (``run_batch.py``) concatenates all subjects' rows into
@@ -29,7 +32,12 @@ from nvitk.core.logger import Logger
 from nvitk.io import imread
 from nvitk.measure import Measurer
 from nvitk.pipes.pesa_fat.common.db_publish import maybe_publish_stage3_on_sge
-from nvitk.pipes.pesa_fat.common.paths import BatchLayout, layout, resolve_nii
+from nvitk.pipes.pesa_fat.common.paths import (
+    BatchLayout,
+    layout,
+    resolve_nii,
+    resolve_nii_optional,
+)
 from nvitk.pipes.pesa_fat.ct_pet_v5 import config as cfg
 from nvitk.segmentation.labels import get_label
 from nvitk.types import Image
@@ -79,13 +87,25 @@ def _build_binary_mask(label_img: Image, label_ids: tuple[int, ...]) -> Image:
     return label_img.with_data(first.astype("uint8"))
 
 
-def _load_mask(subject_stage2_dir: Path, filename: str) -> Image:
-    """Read a stage-2 mask NIfTI named *filename* (extension optional) from *subject_stage2_dir*."""
-    stem = filename
+def _mask_stem(filename: str) -> str:
+    """*filename* without its ``.nii``/``.nii.gz`` suffix."""
     for suffix in (".nii.gz", ".nii"):
-        if stem.endswith(suffix):
-            stem = stem[: -len(suffix)]
-            break
+        if filename.endswith(suffix):
+            return filename[: -len(suffix)]
+    return filename
+
+
+def _load_mask(subject_stage2_dir: Path, filename: str) -> Image:
+    """Read a stage-2 mask NIfTI named *filename* (extension optional) from *subject_stage2_dir*.
+
+    A missing ``<NAME>_VOL`` volume mask falls back to ``<NAME>``, so stage-2
+    outputs written before the volume variants still measure.
+    """
+    stem = _mask_stem(filename)
+    if stem.endswith("_VOL") and resolve_nii_optional(subject_stage2_dir, stem) is None:
+        base = stem[: -len("_VOL")]
+        log.info(f"{stem}.nii(.gz) not found in {subject_stage2_dir}; measuring volumes on {base}.")
+        stem = base
     return imread(str(resolve_nii(subject_stage2_dir, stem)), axes="XYZ")
 
 

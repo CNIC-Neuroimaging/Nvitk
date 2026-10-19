@@ -17,7 +17,16 @@ Two inputs do not come from the region's FAT contrast:
 * the liver is taken from the WATER-contrast ``total_mr`` run
   (``cfg.THORAX_WATER_STEM``), where it is far better defined than on FAT;
 * the LEGS quadriceps have the femur/hip skeleton (``cfg.SKELETON_ROIS_MR``)
-  subtracted, so bone marrow stays out of their fat-fraction statistics.
+  subtracted, the femurs dilated by ``cfg.LEGS_SKELETON_DILATE`` first, so bone
+  marrow stays out of their fat-fraction statistics.
+
+The liver also loses its vessels: voxels whose ``DIXON_THORAX_T2STAR`` exceeds
+``cfg.LIVER_VESSEL_T2STAR_MS``.
+
+THORAX and LEGS get a ``<REGION>_VOL.nii.gz`` twin with the same labels, read by
+the stage-3 volumes: no erosions of the measured structures, no dilations of the
+structures subtracted from them and no vessel cut, so BN_L3/BN_L4 there are the
+raw vertebrae.
 """
 
 from __future__ import annotations
@@ -123,7 +132,7 @@ def _kidney_remove_pelvis(kidney: Image, *, dilate_iters: int = 1) -> Image:
     - Compute 3D convex hull of the kidney
     - Pelvis candidate = hull \\ kidney
     - Keep biggest CC of candidate (if any)
-    - Dilate candidate one iter
+    - Dilate candidate *dilate_iters* iterations (none when 0)
     - Subtract candidate from kidney
     """
     binary = (kidney.data > 0).astype(np.uint8)
@@ -140,18 +149,24 @@ def _kidney_remove_pelvis(kidney: Image, *, dilate_iters: int = 1) -> Image:
     if not bool(pelvis_img.data.any()):
         return kidney.with_data(binary)
 
-    pelvis_dil = dilate(pelvis_img, footprint=1, iterations=int(dilate_iters), mode="binary")
-    pelvis_mask = (pelvis_dil.data > 0)
+    if int(dilate_iters) > 0:
+        pelvis_img = dilate(pelvis_img, footprint=1, iterations=int(dilate_iters), mode="binary")
+    pelvis_mask = (pelvis_img.data > 0)
     cleaned = (binary > 0) & (~pelvis_mask)
     return kidney.with_data(cleaned.astype(np.uint8))
 
 
-def build_skeleton_mask(total_mr: Image | None) -> Image | None:
+def build_skeleton_mask(
+    total_mr: Image | None,
+    *,
+    dilate_rois: dict[str, int] | None = None,
+) -> Image | None:
     """Union of the :data:`cfg.SKELETON_ROIS_MR` bone classes, or ``None``.
 
     ``None`` means there is nothing to subtract: either the region has no
     ``total_mr`` output (a stage-1 run predating the bone ROIs) or the model
-    found none of those bones.
+    found none of those bones. Classes in *dilate_rois* are grown by their radius
+    (voxels) before joining the union.
     """
     if total_mr is None:
         log.warning(
@@ -172,8 +187,17 @@ def build_skeleton_mask(total_mr: Image | None) -> Image | None:
         log.warning("No skeleton bone labels found in 'total_mr'; nothing to subtract.")
         return None
 
-    bone = combine_labels(total_mr, present, new_id=1)
-    return total_mr.with_data(bone.data.astype(np.uint8))
+    bone = combine_labels(total_mr, present, new_id=1).data
+    for name, radius in (dilate_rois or {}).items():
+        try:
+            cid = get_class_id(name, "total_mr")
+        except ValueError:
+            continue
+        if cid not in present or int(radius) <= 0:
+            continue
+        single = total_mr.with_data((total_mr.data == cid).astype(np.uint8))
+        bone[dilate(single, footprint=int(radius)).data > 0] = 1
+    return total_mr.with_data(bone.astype(np.uint8))
 
 
 def _subtract_skeleton(out_labels: Image, skeleton: Image | None, label_names: tuple[str, ...],
@@ -218,20 +242,39 @@ def build_head_mask(head_total_mr: Image) -> Image:
     return _muscles_keep_biggest_cc_per_label(head_total_mr, head_total_mr.with_data(out))
 
 
+def _liver_without_vessels(liver: Image, t2star: Image | None) -> Image:
+    """*liver* minus its vessels: voxels whose T2* exceeds :data:`cfg.LIVER_VESSEL_T2STAR_MS`."""
+    if t2star is None:
+        log.warning("DIXON_THORAX_T2STAR not found; liver vessels are not removed.")
+        return liver
+    if tuple(t2star.data.shape) != tuple(liver.data.shape):
+        log.warning(
+            f"T2STAR grid {tuple(t2star.data.shape)} does not match the liver grid "
+            f"{tuple(liver.data.shape)}; liver vessels are not removed."
+        )
+        return liver
+    vessels = as_backend_array(t2star.data) > cfg.LIVER_VESSEL_T2STAR_MS
+    return liver.with_data(((as_backend_array(liver.data) > 0) & ~vessels).astype(np.uint8))
+
+
 def build_thorax_mask(
     thorax_total_mr: Image,
     thorax_vertebrae_mr: Image,
     thorax_total_mr_water: Image | None = None,
-) -> Image:
-    """THORAX: liver, pancreas, kidneys L/R, paravertebral L/R and BN_L3/L4.
+    t2star: Image | None = None,
+) -> tuple[Image, Image]:
+    """THORAX and THORAX_VOL: liver, pancreas, kidneys L/R, paravertebral L/R and BN_L3/L4.
 
     The liver comes from *thorax_total_mr_water* (the WATER-contrast ``total_mr``
     run). Everything else comes from the FAT-contrast run. When the WATER output
     is missing the liver falls back to the FAT run with a warning, so batches
     segmented before the split still process.
-    """
-    out = np.zeros_like(thorax_total_mr.data, dtype=np.uint8)
 
+    THORAX (FF/T2*/R2*/WF) drops the liver vessels (*t2star* above
+    :data:`cfg.LIVER_VESSEL_T2STAR_MS`), clears each kidney's pelvis dilated by
+    two iterations and erodes the vertebrae to bone narrow. THORAX_VOL (volumes)
+    keeps the vessels, clears the pelvis undilated and keeps the raw vertebrae.
+    """
     liver_source = thorax_total_mr_water
     if liver_source is None:
         log.warning(
@@ -250,37 +293,43 @@ def build_thorax_mask(
     pancreas = _biggest_cc_or_empty(thorax_total_mr, get_class_id("pancreas", "total_mr"))
     kidney_l = _biggest_cc_or_empty(thorax_total_mr, get_class_id("kidney_left", "total_mr"))
     kidney_r = _biggest_cc_or_empty(thorax_total_mr, get_class_id("kidney_right", "total_mr"))
-    kidney_l = _kidney_remove_pelvis(kidney_l, dilate_iters=2)
-    kidney_r = _kidney_remove_pelvis(kidney_r, dilate_iters=2)
-
-    out[liver.data > 0] = THORAX_LABELS["LIVER"]
-    out[pancreas.data > 0] = THORAX_LABELS["PANCREAS"]
-    out[kidney_l.data > 0] = THORAX_LABELS["KIDNEY_L"]
-    out[kidney_r.data > 0] = THORAX_LABELS["KIDNEY_R"]
-
     pvm_l = _biggest_cc_or_empty(thorax_total_mr, get_class_id("autochthon_left", "total_mr"))
     pvm_r = _biggest_cc_or_empty(thorax_total_mr, get_class_id("autochthon_right", "total_mr"))
-    out[pvm_l.data > 0] = THORAX_LABELS["T_PVM_L"]
-    out[pvm_r.data > 0] = THORAX_LABELS["T_PVM_R"]
-
-    bn_l3 = _vertebra_narrow(
-        get_label(
-            thorax_vertebrae_mr,
-            get_class_id("vertebrae_L3", "vertebrae_mr"),
-            missing="empty",
-        )
+    vert_l3 = get_label(
+        thorax_vertebrae_mr, get_class_id("vertebrae_L3", "vertebrae_mr"), missing="empty"
     )
-    bn_l4 = _vertebra_narrow(
-        get_label(
-            thorax_vertebrae_mr,
-            get_class_id("vertebrae_L4", "vertebrae_mr"),
-            missing="empty",
-        )
+    vert_l4 = get_label(
+        thorax_vertebrae_mr, get_class_id("vertebrae_L4", "vertebrae_mr"), missing="empty"
     )
-    out[bn_l3.data > 0] = THORAX_LABELS["BN_L3"]
-    out[bn_l4.data > 0] = THORAX_LABELS["BN_L4"]
 
-    return _muscles_keep_biggest_cc_per_label(thorax_total_mr, thorax_total_mr.with_data(out))
+    def assemble(liver_m: Image, kidney_l_m: Image, kidney_r_m: Image, l3: Image, l4: Image) -> Image:
+        """Label image from the per-structure masks (later labels win overlaps)."""
+        out = np.zeros_like(thorax_total_mr.data, dtype=np.uint8)
+        out[liver_m.data > 0] = THORAX_LABELS["LIVER"]
+        out[pancreas.data > 0] = THORAX_LABELS["PANCREAS"]
+        out[kidney_l_m.data > 0] = THORAX_LABELS["KIDNEY_L"]
+        out[kidney_r_m.data > 0] = THORAX_LABELS["KIDNEY_R"]
+        out[pvm_l.data > 0] = THORAX_LABELS["T_PVM_L"]
+        out[pvm_r.data > 0] = THORAX_LABELS["T_PVM_R"]
+        out[l3.data > 0] = THORAX_LABELS["BN_L3"]
+        out[l4.data > 0] = THORAX_LABELS["BN_L4"]
+        return _muscles_keep_biggest_cc_per_label(thorax_total_mr, thorax_total_mr.with_data(out))
+
+    thorax = assemble(
+        _liver_without_vessels(liver, t2star),
+        _kidney_remove_pelvis(kidney_l, dilate_iters=2),
+        _kidney_remove_pelvis(kidney_r, dilate_iters=2),
+        _vertebra_narrow(vert_l3),
+        _vertebra_narrow(vert_l4),
+    )
+    thorax_vol = assemble(
+        liver,
+        _kidney_remove_pelvis(kidney_l, dilate_iters=0),
+        _kidney_remove_pelvis(kidney_r, dilate_iters=0),
+        vert_l3,
+        vert_l4,
+    )
+    return thorax, thorax_vol
 
 
 def build_legs_mask(legs_muscles_mr: Image, skeleton: Image | None = None) -> Image:
@@ -310,9 +359,10 @@ def build_legs_mask(legs_muscles_mr: Image, skeleton: Image | None = None) -> Im
 # ---------------------------------------------------------------------------
 
 
-def _process(segmentation_dir: Path, output_dir: Path) -> None:
-    """Build and write the per-region (HEAD/THORAX/LEGS) post-processed Dixon masks for one subject
-    from its TotalSegmentator outputs, skipping any region whose inputs are missing."""
+def _process(segmentation_dir: Path, nifti_dir: Path, output_dir: Path) -> None:
+    """Build and write the per-region (HEAD/THORAX/LEGS, plus THORAX_VOL/LEGS_VOL) post-processed
+    Dixon masks for one subject from its TotalSegmentator outputs and Dixon maps, skipping any
+    region whose inputs are missing."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # HEAD
@@ -334,8 +384,12 @@ def _process(segmentation_dir: Path, output_dir: Path) -> None:
                 np.zeros_like(thorax_total.data, dtype=np.uint8)
             )
         thorax_water = _imread_opt(thorax_dir, cfg.THORAX_WATER_STEM)
-        thorax_mask = build_thorax_mask(thorax_total, thorax_vert, thorax_water)
+        thorax_t2star = _imread_opt(nifti_dir, f"{cfg.INPUT_PREFIX}_THORAX_T2STAR")
+        thorax_mask, thorax_vol = build_thorax_mask(
+            thorax_total, thorax_vert, thorax_water, thorax_t2star
+        )
         imsave(str(output_dir / "THORAX.nii.gz"), thorax_mask, axes="XYZ")
+        imsave(str(output_dir / "THORAX_VOL.nii.gz"), thorax_vol, axes="XYZ")
     else:
         log.warning(f"THORAX/total_mr missing in {segmentation_dir} - skipping THORAX")
 
@@ -343,9 +397,17 @@ def _process(segmentation_dir: Path, output_dir: Path) -> None:
     legs_dir = segmentation_dir / f"{cfg.INPUT_PREFIX}_LEGS"
     legs_muscles = _imread_opt(legs_dir, "thigh_shoulder_muscles_mr")
     if legs_muscles is not None:
-        legs_skeleton = build_skeleton_mask(_imread_opt(legs_dir, "total_mr"))
+        legs_total = _imread_opt(legs_dir, "total_mr")
+        legs_skeleton_raw = build_skeleton_mask(legs_total)
+        legs_skeleton = (
+            build_skeleton_mask(legs_total, dilate_rois=cfg.LEGS_SKELETON_DILATE)
+            if legs_skeleton_raw is not None
+            else None
+        )
         legs_mask = build_legs_mask(legs_muscles, skeleton=legs_skeleton)
+        legs_vol = build_legs_mask(legs_muscles, skeleton=legs_skeleton_raw)
         imsave(str(output_dir / "LEGS.nii.gz"), legs_mask, axes="XYZ")
+        imsave(str(output_dir / "LEGS_VOL.nii.gz"), legs_vol, axes="XYZ")
         if legs_skeleton is not None:
             imsave(str(output_dir / "LEGS_SKELETON.nii.gz"), legs_skeleton, axes="XYZ")
     else:
@@ -367,7 +429,7 @@ def run_subject(subject: str, lay: BatchLayout, *, backend: str = "cupy") -> Pat
 
     out_dir = lay.results_dir / cfg.STAGE2_DIR / subject
     log.info(f"Dixon v5 stage 2 | subject={subject}")
-    _process(seg_dir, out_dir)
+    _process(seg_dir, lay.subject_nifti_dir(subject), out_dir)
     log.info(f"[{subject}] ok -> {out_dir}")
     return out_dir
 

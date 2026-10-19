@@ -228,7 +228,7 @@ def _ctpet_load_extra_mask_on_pet_grid(
     Load an extra mask for CT-PET and resample it onto the PET grid.
 
     - For `ureter`, load stage-2 `_URETER.nii[.gz]` if present.
-    - Otherwise load from stage-1 task outputs (`total`, `body`, `tissue_types`, `thigh_shoulder_muscles`)
+    - Otherwise load from stage-1 task outputs (`total`, `body`, `tissue_4_types`, `thigh_shoulder_muscles`)
       and extract the TotalSegmentator class by name.
     """
     stage2_dir = lay.results_dir / ct_cfg.STAGE2_DIR / subject / "CT"
@@ -242,7 +242,7 @@ def _ctpet_load_extra_mask_on_pet_grid(
         return resample_mask_to_pet(ureter, pet)
 
     stage1_dir = lay.results_dir / ct_cfg.STAGE1_DIR / subject / "CT"
-    tasks = ("total", "body", "tissue_types", "thigh_shoulder_muscles")
+    tasks = ("total", "body", ct_cfg.FAT_TASK, "thigh_shoulder_muscles")
     last_err: Exception | None = None
     for task in tasks:
         try:
