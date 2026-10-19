@@ -23,10 +23,13 @@ Two inputs do not come from the region's FAT contrast:
 The liver also loses its vessels: voxels whose ``DIXON_THORAX_T2STAR`` exceeds
 ``cfg.LIVER_VESSEL_T2STAR_MS``.
 
-THORAX and LEGS get a ``<REGION>_VOL.nii.gz`` twin with the same labels, read by
-the stage-3 volumes: no erosions of the measured structures, no dilations of the
-structures subtracted from them and no vessel cut, so BN_L3/BN_L4 there are the
-raw vertebrae.
+Every label of HEAD, THORAX and LEGS is then eroded by its :data:`MEASURE_ERODE`
+iterations (top of this module): those masks feed the FF / T2* / R2* / WF statistics.
+
+Each region also gets a ``<REGION>_VOL.nii.gz`` twin with the same labels, read by
+the stage-3 volumes: no erosions of the measured structures (including
+:data:`MEASURE_ERODE`), no dilations of the structures subtracted from them and no
+vessel cut, so BN_L3/BN_L4 there are the raw vertebrae.
 """
 
 from __future__ import annotations
@@ -41,6 +44,7 @@ from nvitk.core.backend import setup
 from nvitk.core.logger import Logger
 from nvitk.io import imread, imsave
 from nvitk.morphology import dilate, erode
+from nvitk.pipes.pesa_fat.common.label_erosion import erode_labels
 from nvitk.pipes.pesa_fat.common.paths import (
     BatchLayout,
     layout,
@@ -56,6 +60,31 @@ from nvitk.segmentation.labels import biggest_cc, combine_labels, get_label
 from nvitk.segmentation.hull_edt import convex_hull_3d
 from nvitk.segmentation.total_segmentator.class_maps import get_class_id
 from nvitk.types import Image
+
+# Measurement-mask erosion: binary erosion iterations (6-connected, on the region's
+# grid) per output label, applied last to HEAD, THORAX and LEGS -- the masks the FF /
+# T2* / R2* / WF statistics, the QC report (red contours) and the hotspots read -- so
+# they stay clear of partial volume at the structure's border. The ``*_VOL`` twins
+# used for VOL / NSlices are never eroded. 0 (or a missing label) means no erosion; a
+# label that erosion would empty is kept as is (BN_L3 / BN_L4, already eroded to
+# bone narrow, are often only 2-3 slices thick).
+MEASURE_ERODE: dict[str, int] = {
+    # HEAD
+    "H_PVM_L": 1,
+    "H_PVM_R": 1,
+    # THORAX
+    "LIVER": 1,
+    "PANCREAS": 1,
+    "KIDNEY_L": 1,
+    "KIDNEY_R": 1,
+    "T_PVM_L": 1,
+    "T_PVM_R": 1,
+    "BN_L3": 1,
+    "BN_L4": 1,
+    # LEGS
+    "L_QM_L": 1,
+    "L_QM_R": 1,
+}
 
 setup(globals())
 
@@ -360,17 +389,19 @@ def build_legs_mask(legs_muscles_mr: Image, skeleton: Image | None = None) -> Im
 
 
 def _process(segmentation_dir: Path, nifti_dir: Path, output_dir: Path) -> None:
-    """Build and write the per-region (HEAD/THORAX/LEGS, plus THORAX_VOL/LEGS_VOL) post-processed
-    Dixon masks for one subject from its TotalSegmentator outputs and Dixon maps, skipping any
-    region whose inputs are missing."""
+    """Build and write the per-region post-processed Dixon masks for one subject from its
+    TotalSegmentator outputs and Dixon maps: HEAD/THORAX/LEGS (eroded by :data:`MEASURE_ERODE`)
+    and their uneroded ``_VOL`` twins, skipping any region whose inputs are missing."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # HEAD
     head_dir = segmentation_dir / f"{cfg.INPUT_PREFIX}_HEAD"
     head_total = _imread_opt(head_dir, "total_mr")
     if head_total is not None:
-        head_mask = build_head_mask(head_total)
+        head_vol = build_head_mask(head_total)
+        head_mask = erode_labels(head_vol, HEAD_LABELS, MEASURE_ERODE)
         imsave(str(output_dir / "HEAD.nii.gz"), head_mask, axes="XYZ")
+        imsave(str(output_dir / "HEAD_VOL.nii.gz"), head_vol, axes="XYZ")
     else:
         log.warning(f"HEAD/total_mr missing in {segmentation_dir} - skipping HEAD")
 
@@ -388,6 +419,7 @@ def _process(segmentation_dir: Path, nifti_dir: Path, output_dir: Path) -> None:
         thorax_mask, thorax_vol = build_thorax_mask(
             thorax_total, thorax_vert, thorax_water, thorax_t2star
         )
+        thorax_mask = erode_labels(thorax_mask, THORAX_LABELS, MEASURE_ERODE)
         imsave(str(output_dir / "THORAX.nii.gz"), thorax_mask, axes="XYZ")
         imsave(str(output_dir / "THORAX_VOL.nii.gz"), thorax_vol, axes="XYZ")
     else:
@@ -404,7 +436,9 @@ def _process(segmentation_dir: Path, nifti_dir: Path, output_dir: Path) -> None:
             if legs_skeleton_raw is not None
             else None
         )
-        legs_mask = build_legs_mask(legs_muscles, skeleton=legs_skeleton)
+        legs_mask = erode_labels(
+            build_legs_mask(legs_muscles, skeleton=legs_skeleton), LEGS_LABELS, MEASURE_ERODE
+        )
         legs_vol = build_legs_mask(legs_muscles, skeleton=legs_skeleton_raw)
         imsave(str(output_dir / "LEGS.nii.gz"), legs_mask, axes="XYZ")
         imsave(str(output_dir / "LEGS_VOL.nii.gz"), legs_vol, axes="XYZ")

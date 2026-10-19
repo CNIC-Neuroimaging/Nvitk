@@ -68,6 +68,7 @@ from nvitk.pipes.pesa_fat.common.paths import (
     resolve_nii,
     resolve_nii_optional,
 )
+from nvitk.pipes.pesa_fat.common.label_erosion import erode_labels
 from nvitk.pipes.pesa_fat.ct_pet_v5 import config as cfg
 from nvitk.pipes.pesa_fat.ct_pet_v5.labels import (
     BODY_LABELS,
@@ -364,48 +365,6 @@ def _subtract_skeleton(out_labels: Image, skeleton: Image | None) -> Image:
     return out_labels.with_data(arr)
 
 
-def _erode_binary(ref: Image, binary: Any, iterations: int, name: str) -> Any:
-    """*binary* eroded by *iterations* 6-connected steps on *ref*'s grid.
-
-    Returned uneroded, with a warning, when erosion would empty it, since an empty
-    mask yields no measurement at all.
-    """
-    binary = as_backend_array(binary) > 0
-    if int(iterations) <= 0 or not bool(binary.any()):
-        return binary
-    shrunk = erode(
-        ref.with_data(binary.astype(np.uint8)),
-        footprint=1,
-        iterations=int(iterations),
-        mode="binary",
-    ).data > 0
-    if not bool(shrunk.any()):
-        log.warning(
-            f"Eroding {name} by {int(iterations)} iteration(s) would empty it; keeping it as is."
-        )
-        return binary
-    return shrunk
-
-
-def _erode_labels(label_img: Image, labels: dict[str, int], iterations_by_name: dict[str, int]) -> Image:
-    """Erode each label of *label_img* named in *iterations_by_name* by its iterations.
-
-    Every label is eroded on its own (other labels count as background), so
-    neighbouring labels shrink away from each other too.
-    """
-    arr = as_backend_array(label_img.data).copy()
-    for name, iterations in iterations_by_name.items():
-        lid = labels.get(name)
-        if lid is None or int(iterations) <= 0:
-            continue
-        bin_mask = arr == lid
-        if not bool(bin_mask.any()):
-            continue
-        shrunk = _erode_binary(label_img, bin_mask, int(iterations), name)
-        arr[bin_mask & ~shrunk] = 0
-    return label_img.with_data(arr)
-
-
 def _erode_after_skeleton(out_labels: Image) -> Image:
     """Shave :data:`cfg.MUSCLE_ERODE_AFTER_SKELETON` labels by their configured iterations.
 
@@ -413,7 +372,7 @@ def _erode_after_skeleton(out_labels: Image) -> Image:
     left behind once bone is gone -- the voxels most likely to be contaminated by
     neighbouring tissue. A label that erosion would empty is kept intact instead.
     """
-    return _erode_labels(out_labels, MUSCLES_LABELS, cfg.MUSCLE_ERODE_AFTER_SKELETON)
+    return erode_labels(out_labels, MUSCLES_LABELS, cfg.MUSCLE_ERODE_AFTER_SKELETON)
 
 
 # ---------------------------------------------------------------------------
@@ -631,7 +590,7 @@ def _fat_batch_image(
         _apply_ureter_exclusion(out_batch, ureter, mask_file="FAT_BATCH")
     batch = template.copy().with_data(out_batch)
     if suv_erode:
-        batch = _erode_labels(batch, FAT_BATCH_LABELS, SUV_ERODE)
+        batch = erode_labels(batch, FAT_BATCH_LABELS, SUV_ERODE)
     slab = limit_vertebrae_axial(batch.data, vertebrae_l3_l4, MO_LABELS["L4"], MO_LABELS["L3"], total)
     return template.copy().with_data(slab.data)
 
@@ -718,7 +677,7 @@ def build_fat_mask(
 
     # ---- FAT / FAT BATCH (SUV and volume variants) -------------------------
     vertebrae_l3_l4 = _vertebrae_l3_l4_labels(total)
-    fat = _erode_labels(_fat_image(fat_v, fat_s, tissue_types), FAT_LABELS, SUV_ERODE)
+    fat = erode_labels(_fat_image(fat_v, fat_s, tissue_types), FAT_LABELS, SUV_ERODE)
     fat_batch = _fat_batch_image(
         fat_v, fat_s, tissue_types, vertebrae_l3_l4, total, ureter, suv_erode=True
     )
@@ -736,21 +695,65 @@ def _superior_sign(img: Image) -> int:
     return 1 if float(to_numpy(affine)[2, 2]) >= 0 else -1
 
 
+def _trunk_lr_range(body: Image | None, total: Image | None, ref: Image) -> tuple[int, int, int] | None:
+    """``(lr_axis, first, last)``: the left-right extent of ``body_trunc``, projected axially over
+    its slices from the trunk's inferior end up to the top of L3.
+
+    The legs lie within it and arms hanging beside the hips outside it, so it tells the
+    two apart where an axial split cannot. ``None``, with a warning, when an input is
+    missing, off *ref*'s grid, or holds no trunk / L3.
+    """
+    if body is None or total is None:
+        log.warning("No 'body' / 'total' segmentation; arm fat is not separated from the legs.")
+        return None
+    shape = tuple(ref.data.shape)
+    if tuple(body.data.shape) != shape or tuple(total.data.shape) != shape:
+        log.warning("'body' / 'total' grid differs from the tissue grid; arm fat is not separated from the legs.")
+        return None
+    trunc = as_backend_array(body.data) == get_class_id("body_trunc", "body")
+    l3 = as_backend_array(total.data) == get_class_id("vertebrae_L3", "total")
+    z_trunc = np.where(np.any(trunc, axis=(0, 1)))[0]
+    z_l3 = np.where(np.any(l3, axis=(0, 1)))[0]
+    if int(z_trunc.size) == 0 or int(z_l3.size) == 0:
+        log.warning("No body_trunc or L3 found; arm fat is not separated from the legs.")
+        return None
+    if _superior_sign(ref) > 0:
+        z_lo, z_hi = int(z_trunc.min()), int(z_l3.max())
+    else:
+        z_lo, z_hi = int(z_l3.min()), int(z_trunc.max())
+    if z_lo > z_hi:
+        log.warning("body_trunc starts above L3; arm fat is not separated from the legs.")
+        return None
+    lr_axis = 0 if ref.affine is None else lr_axis_and_sign(ref.affine)[0]
+    if lr_axis == 2:
+        log.warning("The left-right axis is the slice axis; arm fat is not separated from the legs.")
+        return None
+    projection = np.any(trunc[..., z_lo : z_hi + 1], axis=2)
+    lr = np.where(np.any(projection, axis=1 - lr_axis))[0]
+    return lr_axis, int(lr.min()), int(lr.max())
+
+
 def build_fat_im_mask(
     tissue_types: Image,
     muscles: Image,
     *,
+    body: Image | None = None,
+    total: Image | None = None,
     tissue_task: str = cfg.FAT_TASK,
 ) -> Image:
     """FAT_IM.nii.gz: intermuscular fat split into legs and trunk along the axial axis.
 
     * ``GRASA_IM_PIERNAS`` -- the axial slices spanned by the quadriceps
       (CUADRICEPS_L + CUADRICEPS_R in *muscles*), extended by every whole
-      6-connected intermuscular-fat component touching them, so fat running from
+      26-connected intermuscular-fat component touching them, so fat running from
       the thighs into the hips stays with the legs;
     * ``GRASA_IM_TORAX``   -- the rest of the fat above the quadriceps' superior end.
 
-    Fat entirely below the quadriceps is in neither label.
+    Arms hanging beside the body share the quadriceps' slices, so the legs are kept
+    within the trunk's left-right extent (:func:`_trunk_lr_range`, from the stage-1
+    *body* and *total*): fat beside it neither seeds the component extension nor
+    stays in PIERNAS, and goes to TORAX with the rest of the arms. Fat entirely
+    below the quadriceps is in neither label.
 
     Empty, with a warning, when *tissue_task* has no intermuscular-fat class (the
     3-class fallback) or *muscles* holds no quadriceps.
@@ -783,13 +786,27 @@ def build_fat_im_mask(
     else:
         trunk[..., :z0] = True
 
-    # Legs: every component with a voxel in the quadriceps' slices, i.e. those
-    # slices' fat plus the whole components touching it.
-    labeled, _ = label_connected(fat_im, connectivity=3)
-    touching = np.unique(labeled[..., z0 : z1 + 1])
-    legs = np.isin(labeled, touching[touching > 0])
+    # Beside the trunk: left and right of its left-right extent (the arms).
+    beside = np.zeros_like(fat_im)
+    lr_range = _trunk_lr_range(body, total, tissue_types)
+    if lr_range is not None:
+        lr_axis, first, last = lr_range
+        for part in (slice(None, first), slice(last + 1, None)):
+            index = [slice(None)] * fat_im.ndim
+            index[lr_axis] = part
+            beside[tuple(index)] = True
 
-    out[fat_im & trunk] = FAT_IM_LABELS["GRASA_IM_TORAX"]
+    # Legs: every component with a voxel in the quadriceps' slices, i.e. those
+    # slices' fat plus the whole components touching it -- seeded and kept only
+    # within the trunk's extent. What the slices reach beside it is arm fat.
+    labeled, _ = label_connected(fat_im, connectivity=3)
+    slab = labeled[..., z0 : z1 + 1]
+    seeds = np.unique(slab[~beside[..., z0 : z1 + 1]])
+    legs = np.isin(labeled, seeds[seeds > 0]) & ~beside
+    reached = np.unique(slab)
+    arms = np.isin(labeled, reached[reached > 0]) & beside
+
+    out[(fat_im & trunk) | arms] = FAT_IM_LABELS["GRASA_IM_TORAX"]
     out[legs] = FAT_IM_LABELS["GRASA_IM_PIERNAS"]
     return tissue_types.copy().with_data(out)
 
@@ -936,12 +953,14 @@ def _process(segmentation_dir: Path, nifti_dir: Path, output_dir: Path, exclude_
         tissue_task=tissue_task,
     )
     bod = build_body_mask(body)
-    organs = _erode_labels(build_organs_mask(total), ORGANS_LABELS, SUV_ERODE)
+    organs = erode_labels(build_organs_mask(total), ORGANS_LABELS, SUV_ERODE)
     organs_vol = build_organs_mask(total, dilate_kidneys=False)
     skeleton = build_skeleton_mask(total)
     muscles_vol = build_muscles_mask(total, muscles, skeleton=skeleton, erode_after_skeleton=False)
-    muscles_out = _erode_labels(_erode_after_skeleton(muscles_vol), MUSCLES_LABELS, SUV_ERODE)
-    fat_im = build_fat_im_mask(tissue_types, muscles_vol, tissue_task=tissue_task)
+    muscles_out = erode_labels(_erode_after_skeleton(muscles_vol), MUSCLES_LABELS, SUV_ERODE)
+    fat_im = build_fat_im_mask(
+        tissue_types, muscles_vol, body=body, total=total, tissue_task=tissue_task
+    )
 
     imsave(str(output_dir / "MO.nii.gz"), mo, axes="XYZ")
     imsave(str(output_dir / "MO_VOL.nii.gz"), mo_vol, axes="XYZ")

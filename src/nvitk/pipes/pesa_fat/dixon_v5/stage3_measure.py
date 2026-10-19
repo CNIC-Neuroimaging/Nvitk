@@ -7,7 +7,9 @@ computes per label and per region:
 
 * ``VOL`` - volume in cc (voxel count * prod(spacing) / 1000), measured with
             ``NSlices`` on the ``<REGION>_VOL`` stage-2 mask (no post-processing
-            erosions/dilations) when present, else on ``<REGION>``
+            erosions/dilations) when present, else on ``<REGION>``. The other
+            metrics read ``<REGION>``, eroded per label by
+            ``stage2_postprocess.MEASURE_ERODE``
 * ``FF``  - mean of the Dixon fat-fraction map inside the mask
 * ``T2``  - mean of the T2* map inside the mask
 * ``R2``  - mean of the reciprocal T2* map (``1/T2`` where T2 > 0)
@@ -189,12 +191,12 @@ def process_subject(
         "THORAX": mask_thorax,
         "LEGS": mask_legs,
     }
-    # Volumes read the ``_VOL`` twin; regions without one (HEAD has no
-    # post-processing morphology, older stage-2 outputs) use the regular mask.
+    # Volumes read the uneroded ``_VOL`` twin; stage-2 outputs written before the
+    # twins existed fall back to the regular mask.
     region_masks_vol: dict[str, Image | None] = {}
     for region, mask in region_masks.items():
         vol_mask = _imread_opt(subject_stage2_dir, f"{region}_VOL")
-        if vol_mask is None and mask is not None and region != "HEAD":
+        if vol_mask is None and mask is not None:
             log.info(f"{region}_VOL.nii(.gz) not found; measuring {region} volumes on {region}.")
         region_masks_vol[region] = vol_mask if vol_mask is not None else mask
 

@@ -9,6 +9,7 @@ import io
 import base64
 import json
 from pathlib import Path
+from typing import Callable
 
 import matplotlib
 
@@ -633,6 +634,28 @@ def _viewer_html(
 """
 
 
+#: CT display window (HU) for the soft-tissue ROIs of the CT slice views: abdomen W400/L40.
+CT_ABDOMEN_WINDOW: tuple[float, float] = (-160.0, 240.0)
+
+#: ROI-name prefixes shown in :data:`CT_ABDOMEN_WINDOW` on CT: every fat depot, the
+#: organs and the trunk / shoulder muscles. Bone marrow, body and quadriceps keep the
+#: window computed from their own voxels.
+_CT_ABDOMEN_WINDOW_ROIS: tuple[str, ...] = (
+    "GRASA_",
+    "HIGADO",
+    "BAZO",
+    "PANCREAS",
+    "PARAVERTEBRAL_",
+    "DELTOIDES_",
+    "TRAPECIOS",
+)
+
+
+def _ct_window_for_roi(roi: str) -> tuple[float, float] | None:
+    """Fixed CT window for the slice views of *roi*, or ``None`` to derive it from the mask."""
+    return CT_ABDOMEN_WINDOW if roi.startswith(_CT_ABDOMEN_WINDOW_ROIS) else None
+
+
 def _build_ctpet_slice_viewer_core(
     lay: BatchLayout,
     subject: str,
@@ -647,8 +670,13 @@ def _build_ctpet_slice_viewer_core(
     default_roi: str = "HIGADO",
     review_ctx: dict | None = None,
     sync_peer_dom_ids: list[str] | None = None,
+    window_for_roi: Callable[[str], tuple[float, float] | None] | None = None,
 ) -> str:
-    """Render CT-PET slice stacks for *vol_arr* with masks resampled to *target_img*."""
+    """Render CT-PET slice stacks for *vol_arr* with masks resampled to *target_img*.
+
+    *window_for_roi(roi)* may return a fixed ``(vmin, vmax)`` display window for an
+    ROI; otherwise (or when it returns ``None``) the window comes from the mask's voxels.
+    """
     sagittal_y_height = _figsize_for_slice(
         vol_arr[:, :, min(vol_arr.shape[2] // 2, vol_arr.shape[2] - 1)]
     )[1]
@@ -694,7 +722,8 @@ def _build_ctpet_slice_viewer_core(
                 )
             spine_z = spine_cache["z"]
         z0, z1, z_indices, ax_mid = _axial_block(m, margin_vox, spine_z)
-        vmin, vmax = _display_range_block(vol_arr, m, z0, z1)
+        window = window_for_roi(disp) if window_for_roi is not None else None
+        vmin, vmax = window if window is not None else _display_range_block(vol_arr, m, z0, z1)
         ax_uris: list[str] = []
         for z in z_indices:
             sl = vol_arr[:, :, z]
@@ -828,6 +857,7 @@ def build_ctpet_slice_viewer_html(
         default_roi="HIGADO",
         review_ctx=review_ctx,
         sync_peer_dom_ids=[pet_dom],
+        window_for_roi=_ct_window_for_roi,
     )
 
 
