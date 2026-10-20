@@ -430,7 +430,7 @@ def add_centerline_polylines_shapes(
     if not paths:
         return None
 
-    from nvitk.gui.core.spatial import layer_affine
+    from nvitk.gui.core.spatial import layer_spatial_kwargs
 
     kwargs: dict[str, Any] = {
         "name": str(layer_name),
@@ -445,9 +445,9 @@ def add_centerline_polylines_shapes(
             "source_layer": str(getattr(reference_layer, "name", "")),
         },
     }
-    aff = layer_affine(reference_layer)
-    if aff is not None:
-        kwargs["affine"] = aff
+    # The reference's whole placement (scale, translate, affine): the affine alone drops the
+    # spacing of a layer that carries it in `scale`, and the paths land off the vessel.
+    kwargs.update(layer_spatial_kwargs(reference_layer))
 
     shapes = viewer.add_shapes(paths, **kwargs)
     try:

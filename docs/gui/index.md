@@ -401,6 +401,10 @@ without a position keep the ordinary 2D path.
 
 ## Orthogonal views
 
+The main canvas opens in **3D**, and stays in 3D when the first volume is opened (its axial
+order is still set, for when you switch to 2D). Set `"gui.ndisplay": 2` in `gui.json` to open in
+2D instead.
+
 The **Orthogonal views** dock opens with the window (tabbed with napari's layer controls; a
 position you give it is remembered) and shows axial / coronal / sagittal through one crosshair,
 drawing every visible layer on the bound layer's grid (off-grid layers are resampled once and
@@ -588,7 +592,7 @@ each backed by the same functions documented in the {doc}`Main API Reference <..
 | Reconstruction | 1 | Background phase correction (qvtpy's polynomial correction of the complex difference; 3D and 3D+t) |
 | Filters | 18 | Sliding threshold, Hessian, Jerman vesselness, VMTK vessel enhancement (Frangi / Sato / VED), snakes, skimage thresholds and filters |
 | Morphology | 11 | Dilate/erode/open/close, fill holes, connected components, ICA siphon correction, mask genus |
-| Centerline | 4 | Detect/cut junctions, convert to polyline, centerline network (branches with inscribed radius) |
+| Centerline | 5 | Detect/cut junctions, convert to polyline, centerline network (branches with inscribed radius), centre a centerline on the lumen |
 | Segmentation | 26 | Label ops, mask boolean algebra, mask image (keep / remove regions), region growing, blood flood, ANTsPyNet brain/vessel/DKT, TotalSegmentator, eICAB |
 | FastSurfer | 12 | Whole-brain aseg+DKT segmentation with cerebellum (CerebNet), hypothalamus (HypVINN) and corpus callosum modules, recon-surf surfaces, full and longitudinal pipelines, subject loading, PV-corrected label stats, aseg reduction, conforming, FreeSurfer installer — see below |
 | FSL | 35 | BET, FAST, FIRST, fsl_anat, SIENA/SIENAX, FNIRT/applywarp/invwarp, MCFLIRT, epi_reg, TOPUP, EDDY, DTIFIT, BEDPOSTX, PROBTRACKX2, TBSS, XTRACT, MELODIC, SUSAN, slice timing, FUGUE, fslmaths/fslstats/cluster/smoothest, any FSL command, FSL core installer — see below |
@@ -615,6 +619,38 @@ Centerline arc length, Centerline network, Vessel CPR and Generic cross-sections
 
 Tools that work on a voxel skeleton receive the VMTK or ray-cast network rasterized to a 1-voxel
 skeleton, so junction detection and cutting behave the same with every method.
+
+**VMTK coverage.** A single VMTK run from the widest end point to every other one traces a
+shortest-path tree. It skips one segment of every loop (the circle of Willis is a ring) and
+reaches nothing outside that end's connected piece. On a whole circle-of-Willis tree it recovered
+about half the vessel length.
+
+*VMTK centerlines: all branches (full network)* is the default. It works per connected piece of
+the surface:
+1. a first VMTK run from the widest end point;
+2. further runs from other end points, keeping only what the first one skipped;
+3. for any skeleton branch still missed, a run between that branch's own two ends;
+4. where VMTK cannot trace a branch, the skeleton re-centred on the lumen.
+
+On the same tree this covers 97 % of the skeleton, in about 30 s. *widest end → end points
+(tree)* keeps the single run. The voxel-skeleton tools always use the full network.
+
+**Centerline network** has a coverage choice and a *Network of* choice. Its default, *all selected
+labels together*, builds one network: the bifurcations between vessels lie on label boundaries
+(ICA → MCA / ACA), so per-label networks cannot contain them. Every branch and point is still
+tagged with its label, and the summary gives each label's branches, length and diameter. *each
+label separately* builds one network per label.
+
+**Centre centerline on the lumen** (Centerline) moves a centerline onto the lumen centre of the
+active vessel mask (the selected labels, else every label):
+1. each point moves to the centroid of the lumen cross-section;
+2. it then climbs the inscribed-radius ridge, where VMTK's centerlines run.
+
+The centerline can be any Shapes path (*To polyline*, CPR, *Centerline network*), the Mesh panel's
+centerline lines or points, or a skeleton mask. With none, the mask's own skeleton is centred. The
+tool adds the centred paths and radius-coloured points. It reports the shift and the median
+inscribed radius before → after; the radius grows when the line was off-centre. The Mesh panel has
+the same operation for surfaces.
 
 **4D-flow particle tracing (VMTK)** replaces the former PyVista streamline tool. It traces
 **streamlines** (one phase, steady) or **pathlines** (released at a phase, integrated periodically
@@ -695,6 +731,42 @@ measured) turn grey; labels hidden in a label list stay hidden, and every label 
 *Original colours* gives the labels back the colours they had, hand-picked ones included
 (`nvitk.gui.labels.visibility.apply_label_value_colors`). An image mask is turned into a
 Labels layer to take per-label colours, as when a label's colour is changed by hand.
+
+**TOF morphometrics** (Measure → *Morphometrics*, and Visualization → *TOF morphometrics* for a
+stage-7 folder) shows its results the same way (`nvitk.gui.viz.morpho_results`). It adds four
+results to the history:
+- **vessels**: one row per vessel, with every measure. That is every column of `vessel_summary.csv`
+  (calibre, end-window diameters, bifurcation blanking, first / last-N-mm tortuosity, curvature
+  integrals, direction angles, branching, lesion counts, worst-lesion severity and confidence),
+  then the earlier measures: cow_morpho's path metrics per vessel, volumetry, and the literature
+  tortuosity metrics. Names that clash with a new column get `_legacy`.
+- **lesions**: severity (taper %, diameter / area % against the proximal reference) and confidence
+  with its flags. Clicking a row selects and centres that lesion.
+- **segments** and **subject** (circle-of-Willis variants, asymmetry, totals).
+
+*Colour labels by* on the vessel table colours the measured mask **and the vessel surfaces** by the
+chosen column, in the same colours. The surfaces are one Mesh-panel surface whose vertices carry
+their `label` field. The tool also draws the centerlines, the vessel surfaces in their label
+colours, and the lesions as points: orange stenoses, blue enlargements, more opaque the higher
+their confidence, larger the more severe.
+
+Lesions can be analysed in the viewer:
+- hovering a lesion point shows its card (severity, length, position, confidence and each penalty
+  in words);
+- clicking it, or its table row, opens the **Lesion inspector**. It plots the calibre along the
+  measured path: the tested radius against the taper reference and threshold, the lesion's run,
+  the reference window, the siphon mask and the path's other lesions. ◀ / ▶ step through them;
+- *Morpho lesion extents* draws each lesion's run along its centerline;
+- the lesion table's rows are tinted by confidence class: green high (≥ 0.7), yellow moderate
+  (≥ 0.4), red low;
+- the filter above the lesion table hides the less confident lesions in the viewer, points and
+  extents alike: *all lesions*, *moderate and high*, *high only*, or any minimum confidence. Hidden
+  lesions are skipped by hover, click and ◀ / ▶, and the filter is kept for later runs.
+
+Further options:
+- the case id (default: the layer name);
+- cow_morpho's legacy siphon mask;
+- whether to show the lesions.
 
 ### Background phase correction
 
@@ -777,7 +849,7 @@ an image / labels layer, or a mesh time series.
 | Remesh | Decimate, subdivide (Loop / butterfly), isotropic remesh (even triangles), remesh through voxels (watertight), clip at a click; VMTK isotropic remesh, decimate, subdivide |
 | Transform & align | Translate / rotate / scale, ICP onto another surface or cloud, principal axes |
 | Measure | Area, volume, sphericity, topology (holes, genus), curvature maps, cross-section at a click; VMTK surface curvature, area / volume / shape index |
-| Vessels & tubes | Centerlines and diameter profile with the VMTK / native / ray-cast method (per-branch length, tortuosity, curvature, min / max diameter, stenosis; bifurcation angles — click a row of the table to see that branch or junction), vessel cross-section at a click, local thickness map; VMTK branches & bifurcation angles (surface coloured by branch), centerline sections, distance to centerlines, flow extensions; ray-cast skeleton + EXPIGEO descriptors (experimental) |
+| Vessels & tubes | Centerlines and diameter profile with the VMTK / native / ray-cast method (VMTK: all branches, loops and separate pieces, or one tree; native / ray-cast lines optionally re-centred on the lumen; per-branch length, tortuosity, curvature, min / max diameter, stenosis; bifurcation angles — click a row of the table to see that branch or junction), centre any centerline layer on the lumen, vessel cross-section at a click, local thickness map; VMTK branches & bifurcation angles (surface coloured by branch), centerline sections, distance to centerlines, flow extensions; ray-cast skeleton + EXPIGEO descriptors (experimental) |
 | Compare | Distance maps and ASSD / Hausdorff |
 | Convert (image ↔ mesh ↔ points) | Mesh → mask or signed-distance image on any grid, mesh → points (vertices or uniform samples), mask → points, points → mask (dots or filled), points → mesh, sample an image onto a surface or cloud |
 | Point cloud | Surface reconstruction (Poisson, MeshLab's screened Poisson and ball pivoting, IMLS, implicit, alpha shape, hull), voxel / random downsampling, outlier removal, normals |

@@ -153,8 +153,8 @@ _EICAB_CW: dict[str, Any] = {
     "PRUNE_SPUR_LENGTH_MM": 2.0,
 
     # ── Stenosis / enlargement detection (cow_morpho rules) ──────────────────
-    "STENOSIS_THRESHOLD_PCT": 10.0,
-    "ENLARGEMENT_THRESHOLD_PCT": 10.0,
+    "STENOSIS_THRESHOLD_PCT": 20.0,
+    "ENLARGEMENT_THRESHOLD_PCT": 20.0,
     "RADIUS_SOURCE_FOR_CALIBER_DETECTION": "maximum_inscribed_sphere",  # or "cross_section"
     "STENOSIS_MIN_LEN_MM": 3.0,
     "STENOSIS_EXCLUDE_END_MM": 2.0,

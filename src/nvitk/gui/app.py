@@ -177,6 +177,14 @@ def run_app() -> None:
         viewer.theme = theme_id
     except Exception:
         pass
+    try:
+        # The main canvas opens in 3D (gui.json "gui.ndisplay": 2 for 2D); the
+        # orthogonal views dock gives the slices.
+        from nvitk.gui.core.orientation import default_ndisplay
+
+        viewer.dims.ndisplay = default_ndisplay()
+    except Exception:  # noqa: BLE001
+        pass
     install_nvitk_io(viewer)
     from nvitk.gui.core.activity import install_activity_indicator
 

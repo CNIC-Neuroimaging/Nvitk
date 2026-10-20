@@ -258,10 +258,12 @@ def lesion_rows(
     (``stenosis_segments_point_idx`` / ``enlargement_segments_point_idx``), counted once where
     overlapping paths share them, and named after the non-overlapping segment that contains their
     midpoint. Severity is reported three ways: against the taper reference (``taper_percent``, the
-    detection measure) and against the **proximal healthy reference** — the median detection radius
-    over ``LESION_PROXIMAL_REFERENCE_WINDOW_MM`` upstream on the same path (downstream when there
-    is no upstream room) — as diameter and area stenosis (NASCET-like); for enlargements both are
-    signed so that positive means wider than the reference.
+    detection measure) and against the **proximal healthy reference** — the median radius over
+    ``LESION_PROXIMAL_REFERENCE_WINDOW_MM`` upstream on the same path (downstream when there is no
+    upstream room) — as diameter and area stenosis (NASCET-like); for enlargements both are signed
+    so that positive means wider than the reference. Each kind is measured on the radius its test
+    used: stenoses on the detection (inscribed) radius, enlargements on ``enlargement_radius_mm``
+    (cow tests them on the cross-section radius, or on the detection radius on re-measured paths).
 
     Confidence ∈ [0, 1] multiplies a penalty for each condition that makes a calibre change
     unreliable (the applied ones are listed in ``confidence_flags``):
@@ -297,6 +299,9 @@ def lesion_rows(
             continue
         s = _arc(pts)
         det_r = np.asarray(path.get("stenosis_detection_radius_mm", path.get("radius_mm")), dtype=float)
+        # Enlargements are tested on their own radius (cow: the cross-section one on a path's first
+        # measurement); their severity is measured on that same radius.
+        enl_r = np.asarray(path.get("enlargement_radius_mm", path.get("radius_mm", det_r)), dtype=float)
         mis = np.asarray(path.get("maximum_inscribed_sphere_radius_mm", np.full(n, np.nan)), dtype=float)
         cs = np.asarray(path.get("radius_mm", np.full(n, np.nan)), dtype=float)
         siphon = np.asarray(path.get("siphon_mask_point", np.zeros(n)), dtype=float) >= 0.5
@@ -305,10 +310,11 @@ def lesion_rows(
         with np.errstate(divide="ignore", invalid="ignore"):
             ratio = np.where(mis > 0, cs / mis, np.nan)
         path_ratio = _stat(ratio, np.median)
-        for kind, runs_key, pct_key, min_len in (
-            ("stenosis", "stenosis_segments_point_idx", "stenosis_percent_point", float(_cfg.STENOSIS_MIN_LEN_MM)),
+        for kind, runs_key, pct_key, min_len, kind_r in (
+            ("stenosis", "stenosis_segments_point_idx", "stenosis_percent_point", float(_cfg.STENOSIS_MIN_LEN_MM),
+             det_r),
             ("enlargement", "enlargement_segments_point_idx", "enlargement_percent_point",
-             float(_cfg.ENLARGEMENT_MIN_LEN_MM)),
+             float(_cfg.ENLARGEMENT_MIN_LEN_MM), enl_r),
         ):
             pct = np.asarray(path.get(pct_key, np.full(n, np.nan)), dtype=float)
             for a, b in _parse_runs(path.get(runs_key)):
@@ -320,15 +326,15 @@ def lesion_rows(
                     continue  # the same lesion, measured again on an overlapping path
                 seen[kind].append(mid)
                 sl = slice(a, b + 1)
-                extreme_r = _stat(det_r[sl], np.min) if kind == "stenosis" else _stat(det_r[sl], np.max)
+                extreme_r = _stat(kind_r[sl], np.min) if kind == "stenosis" else _stat(kind_r[sl], np.max)
                 flags: list[str] = []
                 conf = 1.0
                 up = (s >= s[a] - hi_w) & (s <= s[a] - lo_w)
                 if up.sum() >= 3:
-                    ref_r, ref_where = _stat(det_r[up], np.median), "proximal"
+                    ref_r, ref_where = _stat(kind_r[up], np.median), "proximal"
                 else:
                     down = (s >= s[b] + lo_w) & (s <= s[b] + hi_w)
-                    ref_r, ref_where = (_stat(det_r[down], np.median), "distal") if down.sum() >= 3 else (np.nan, "none")
+                    ref_r, ref_where = (_stat(kind_r[down], np.median), "distal") if down.sum() >= 3 else (np.nan, "none")
                 if ref_where != "proximal":
                     conf *= 0.8
                     flags.append(f"reference_{ref_where}")
@@ -366,6 +372,8 @@ def lesion_rows(
                     "kind": kind,
                     "segment": _segment_name_at(mid, segments) if segments else str(path.get("tree_label") or ""),
                     "path_id": str(path.get("path_id", "")),
+                    "point_start": int(a),
+                    "point_end": int(b),
                     "start_s_from_vessel_origin_mm": float(s[a]),
                     "length_mm": length,
                     "taper_percent": _stat(pct[sl], np.max),

@@ -2147,6 +2147,10 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ),
             ParamSpec("bridge_gaps_vox", "Bridge same-label gaps up to N voxels (0 = off)", "int", 0,
                       min=0, max=50),
+            ParamSpec("siphon_legacy", "cow_morpho's siphon mask (legacy, covers whole vessels)", "bool",
+                      False),
+            ParamSpec("case_id", "Case id (empty = the layer name)", "str", ""),
+            ParamSpec("show_lesions", "Show lesions as points", "bool", True),
             ParamSpec("n_workers", "Workers", "int", 1, min=1, max=64),
             ParamSpec("skip_existing", "Skip if Excel exists", "bool", False),
             ParamSpec(
@@ -2166,10 +2170,17 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "reference), or 'none' for topology-agnostic per-label metrics. "
             "Species 'auto' reads the topology's _meta block. The profile 'eicab_cw' "
             "is tuned for eICAB Circle-of-Willis masks (cow_morpho parity, VMTK "
-            "centerlines); bridging same-label gaps departs from that tuning. Results: "
-            "one row per vessel (vessel_summary.csv), per segment, per lesion (with "
-            "severity and confidence) and per subject. Leave Output directory empty to "
-            "show results in the GUI only."
+            "centerlines, calibrated siphon mask; the legacy switch restores cow's); "
+            "bridging same-label gaps departs from that tuning. Shows the centerlines, "
+            "the vessel surfaces and the lesions (orange stenoses, blue enlargements, "
+            "opaque by confidence, sized by severity; hover one for its details, click it "
+            "for its calibre profile in the Lesion inspector), and opens the results window: "
+            "per vessel every measure (calibre, end-window diameters, blanking, "
+            "first/last-N-mm tortuosity, curvature integrals, direction angles, branching, "
+            "lesion severity and confidence, plus the earlier path, volumetry and "
+            "tortuosity metrics), with Colour labels by colouring the labels and the "
+            "surfaces by any of them; per lesion (click to show it), per segment and per "
+            "subject. Leave Output directory empty to show results in the GUI only."
         ),
     ),
     GuiToolSpec(

@@ -281,10 +281,15 @@ measure twice is counted once, and is named after the segment containing its mid
 | Column | Meaning |
 |---|---|
 | `kind` | `stenosis` / `enlargement` |
-| `segment`, `path_id`, `start_s_from_vessel_origin_mm`, `length_mm`, `x/y/z_mm` | location |
+| `segment`, `path_id`, `point_start` / `point_end` (indices on that path's point table), `start_s_from_vessel_origin_mm`, `length_mm`, `x/y/z_mm` | location |
 | `taper_percent` | peak severity against the taper reference (the detection measure) |
-| `reference_radius_mm`, `reference` | the healthy reference: median detection radius 2–10 mm **upstream** (`proximal`), else downstream (`distal`), else `none` |
+| `reference_radius_mm`, `reference` | the healthy reference: median radius 2–10 mm **upstream** (`proximal`), else downstream (`distal`), else `none` |
 | `extreme_radius_mm` | minimum (stenosis) / maximum (enlargement) radius in the lesion |
+
+Each kind is measured on the radius its test used. Stenoses use the detection (inscribed) radius.
+Enlargements use `enlargement_radius_mm`: cow tests them on the cross-section radius on a path's
+first measurement, and on the detection radius on paths re-measured after trunk pruning. Measuring
+an enlargement's severity on the other radius understated it.
 | `diameter_percent`, `area_percent` | NASCET-like severity against that reference (positive = narrower for stenoses, wider for enlargements) |
 | `confidence`, `confidence_class`, `confidence_flags` | below |
 
@@ -332,6 +337,8 @@ One table per measured path. `Sheet_Index` maps each sheet to its `path_id`, `la
 | `stenosis_raw_percent_point`, `stenosis_core/support_candidate_point`, `stenosis_percent_point`, `is_stenotic` | stenosis detection, raw → final |
 | `enlargement_percent_point`, `is_enlarged` | enlargement |
 | `siphon_mask_point` | the siphon mask (§4) |
+| `stenosis_reference_radius_mm`, `enlargement_reference_radius_mm` | the healthy taper references the percentages are measured against (§5.1) |
+| `enlargement_radius_mm` | the radius the enlargement test used (cross-section or detection radius) |
 
 ### `02_Branchpoints`
 
@@ -420,6 +427,50 @@ The parameters that move the numbers most (change them with `with_params`):
 
 The GUI's *TOF morphometrics* tool exposes the profile, the backend and an optional same-label gap
 bridge (`bridge_gaps_vox`, default 0 = off).
+
+---
+
+## 11 · In the GUI
+
+Measure → *Morphometrics* runs the same pipeline on a Labels layer, with the same profile,
+backend and the legacy-siphon switch. The case id defaults to the layer name. It shows the
+centerlines, the vessel surfaces (one Mesh-panel surface whose vertices carry their `label`) and
+the lesions as points (orange stenoses, blue enlargements, opaque by confidence, sized by severity).
+
+The results window gets four tables:
+- **vessels**: every column of §6.1, then the per-vessel aggregates of the earlier measures:
+  - `00_Path_Summary` (§5.3);
+  - volumetry;
+  - the tortuosity workbook (§7).
+
+  A clashing name gets `_legacy`; e.g. `tortuosity_dm_legacy` is cow's length-weighted mean over
+  segments.
+- **lesions** (§6.3): clicking a row shows that lesion and opens it in the *Lesion inspector*.
+- **segments** and **subject**.
+
+On the vessel table, *Colour labels by* colours the measured labels and the surfaces by any
+column. Visualization → *TOF morphometrics* does the same for an existing stage-7 folder.
+
+**Analysing lesions** (`nvitk.gui.viz.lesion_inspector`):
+- **Hover** a lesion point for its card: vessel and segment, diameter / area % against the
+  reference (with both radii), taper %, length, position, and the confidence with each penalty in
+  words.
+- **Click** it, or its table row, to open the **Lesion inspector** dock. It plots the calibre
+  along the measured path:
+  - the radius the lesion was tested on and the other radius;
+  - the dashed taper reference, and the dotted threshold the radius had to cross;
+  - the lesion's run and the green reference window its severity is measured against;
+  - the siphon mask and the path's other lesions.
+
+  It shows why the lesion was called, and whether it is a real calibre change or a local artefact
+  (a cross-section spike at a branch opening, say). ◀ / ▶ step through the lesions.
+- **Morpho lesion extents** draws each lesion's run along its centerline.
+- The lesion table's rows are tinted by confidence class (green high, yellow moderate, red low).
+  A filter above it hides the less confident lesions in the viewer (points and extents): all,
+  moderate and high, high only, or any minimum confidence.
+
+Outputs older than the reference columns get the stenosis reference back from the stored
+percentages.
 
 ---
 

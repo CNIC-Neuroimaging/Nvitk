@@ -3664,22 +3664,35 @@ def _run_viz_tof_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
         point_size=float(params.get("point_size") or 2.0),
         edge_width=float(params.get("edge_width") or 0.35),
     )
+    from nvitk.gui.viz.morpho_results import default_key_of, show_morphometrics_results
+
+    labels = ref_layer if type(ref_layer).__name__ == "Labels" else None
+    counts = show_morphometrics_results(
+        viewer, stage7_path, label_layer=labels, surface_layer=info.get("surface_layer"),
+        lesion_layer=info.get("lesion_layer"), key_of=default_key_of(ref_layer),
+    )
     notify(
         f"TOF morphometrics: loaded {info['n_paths']} centerline path(s) "
-        f"(color_by={info['color_by']}) from {stage7_path}."
+        f"(color_by={info['color_by']}), {counts.get('vessels', 0)} vessel(s) and "
+        f"{counts.get('lesions', 0)} lesion(s) in the results window, from {stage7_path}."
     )
 
 
 def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
     """Run morphometrics on the selected multilabel Labels / Image layer.
 
-    Empty ``output_dir``: write to a temp folder (not kept as a user result) and
-    display centerlines / surfaces via the morphometrics viz dock.
+    Shows the centerlines, surfaces and lesions, and the results as the other measurements do:
+    the vessel table (every compact-table column plus the earlier path / volumetry / tortuosity
+    measures), lesions (severity, confidence), segments and the subject summary, with *Colour
+    labels by* colouring the measured labels and the vessel surfaces (nvitk.gui.viz.morpho_results).
+    Empty ``output_dir``: write to a temp folder (not kept as a user result).
     """
     from nvitk.gui.core.spatial import layer_spatial_kwargs
+    from nvitk.gui.viz.morpho_results import default_key_of, show_morphometrics_results
     from nvitk.gui.viz.morpho_viz import DEFAULT_MORPHO_POINT_SIZE, install_morphometrics_viz
     from nvitk.io import imsave
     from nvitk.measure.morphometrics import run_morphometrics_case
+    from nvitk.measure.morphometrics_config import DEFAULT_PROFILE, morphometrics_config
     from nvitk.measure.morpho.anatomy_axes import SPECIES_AUTO
     from nvitk.measure.morpho.topology_io import TOPOLOGY_NONE
     from nvitk.morphology.skeleton_methods import normalize_skeleton_method
@@ -3718,6 +3731,10 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
     n_workers = int(params.get("n_workers") or 1)
     skip_existing = bool(params.get("skip_existing")) and persist
     already_smoothed = bool(params.get("input_already_smoothed"))
+    config = morphometrics_config(str(params.get("profile") or "") or DEFAULT_PROFILE, n_workers=n_workers)
+    if bool(params.get("siphon_legacy")):
+        config = config.with_params(SIPHON_LEGACY_MASK=True)
+    case_id = re.sub(r"[^\w.-]+", "_", str(params.get("case_id") or "").strip() or str(layer.name)).strip("_")
 
     if persist:
         notify(f"Morphometrics running (topology={topology!r}, species={species!r}) → {out_dir} …")
@@ -3729,7 +3746,8 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
     excel = run_morphometrics_case(
         seg_path,
         out_dir,
-        profile=str(params.get("profile") or "") or None,
+        config=config,
+        case_id=case_id or None,
         centerline_backend=normalize_skeleton_method(params.get("centerline_backend"), default="vmtk"),
         mapping_json=topology,
         case_out_dir_override=out_dir,
@@ -3742,20 +3760,36 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
     # Show the (bridged) vessel mask used for computation as a Labels layer.
     spatial = layer_spatial_kwargs(layer)
     mask_name = f"{getattr(layer, 'name', 'seg')}_morpho_input"
+    mask_layer = None
+    # The source's own label colours and names, so the result rows, their swatches and the
+    # surfaces read the same as the layer the user picked.
+    from nvitk.gui.labels.catalog import LABEL_NAMES_KEY, layer_schema_key, remember_layer_schema
+
+    same_look: dict[str, Any] = {}
+    if type(layer).__name__ == "Labels":
+        same_look = {"colormap": layer.colormap}
+        names = (getattr(layer, "metadata", {}) or {}).get(LABEL_NAMES_KEY)
+        if names:
+            same_look["metadata"] = {LABEL_NAMES_KEY: dict(names)}
     try:
-        mask_layer = viewer.add_labels(
-            bridged.astype(numpy.int32, copy=False),
-            name=mask_name,
-            opacity=0.45,
-            **spatial,
-        )
+        try:
+            mask_layer = viewer.add_labels(
+                bridged.astype(numpy.int32, copy=False), name=mask_name, opacity=0.45, **same_look, **spatial,
+            )
+        except Exception:  # noqa: BLE001 — a colormap Napari will not copy: its default colours
+            mask_layer = viewer.add_labels(
+                bridged.astype(numpy.int32, copy=False), name=mask_name, opacity=0.45, **spatial,
+            )
         try:
             mask_layer._nvitk_label_like = True
         except Exception:
             pass
+        remember_layer_schema(mask_layer, layer_schema_key(layer))
     except Exception as mask_exc:  # noqa: BLE001
         notify(f"Could not add morpho input mask layer: {mask_exc}", error=True)
 
+    label_layer = mask_layer if mask_layer is not None else layer
+    info: dict[str, Any] = {}
     try:
         info = install_morphometrics_viz(
             viewer,
@@ -3764,24 +3798,30 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
             color_by="radius",
             point_size=DEFAULT_MORPHO_POINT_SIZE,
             show_surfaces=True,
+            show_lesions=bool(params.get("show_lesions", True)),
+            label_layer=label_layer if type(label_layer).__name__ == "Labels" else None,
         )
-        n_paths = int(info.get("n_paths") or 0)
-        n_surf = int(info.get("n_surfaces") or 0)
     except Exception as viz_exc:  # noqa: BLE001
-        n_paths = 0
-        n_surf = 0
         notify(f"Morphometrics viz skipped: {viz_exc}", error=True)
+    n_paths = int(info.get("n_paths") or 0)
+    n_surf = int(info.get("n_surfaces") or 0)
+    counts: dict[str, int] = {}
+    try:
+        counts = show_morphometrics_results(
+            viewer, out_dir, label_layer=label_layer, surface_layer=info.get("surface_layer"),
+            lesion_layer=info.get("lesion_layer"), key_of=default_key_of(layer),
+            subtitle=f"{layer.name}" + (f" → {out_dir}" if persist else ""),
+        )
+    except Exception as res_exc:  # noqa: BLE001
+        notify(f"Morphometrics tables not shown: {res_exc}", error=True)
 
+    shown = (f"{counts.get('vessels', 0)} vessel(s), {counts.get('segments', 0)} segment(s), "
+             f"{counts.get('lesions', 0)} lesion(s) in the results window; {n_paths} path(s), "
+             f"{n_surf} vessel surface(s) shown")
     if persist:
-        notify(
-            f"Morphometrics done: {excel} "
-            f"({n_paths} path(s), {n_surf} surface layer(s) shown)."
-        )
+        notify(f"Morphometrics done: {excel} ({shown}).")
     else:
-        notify(
-            f"Morphometrics done ({n_paths} path(s), {n_surf} surface(s) in GUI; "
-            "nothing saved — set Output directory to persist)."
-        )
+        notify(f"Morphometrics done ({shown}; nothing saved — set Output directory to persist).")
 
 
 def _run_intensity_similarity(

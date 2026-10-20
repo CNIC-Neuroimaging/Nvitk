@@ -28,7 +28,14 @@ labels by*: pick a measured column and a colormap, and the layer's labels take
 the colour of their value (the range automatic or typed, a legend beside it;
 labels without a value turn grey), as the Meshlab panel colours a surface by a
 field. *Original colours* puts the label colours back as they were. Each label
-row carries a swatch of its label's colour.
+row carries a swatch of its label's colour. An ``on_colour`` callback colours
+more than the label layer — the surfaces of those labels, say — with the same
+values: it is called with ``(column, label id → value, colormap, (lo, hi))``, and
+with ``(None, {}, colormap, None)`` when the labels take their own colours back.
+
+A result may also tint its rows (``row_colours``: row key → colour, e.g. a lesion's confidence
+class) and bring its own controls (``controls``: a factory returning a widget shown above the
+table while that result is on screen, e.g. a filter of what the viewer shows).
 """
 
 from __future__ import annotations
@@ -37,7 +44,7 @@ import weakref
 from typing import Any, Callable, Mapping, Sequence
 
 from qtpy.QtCore import Qt
-from qtpy.QtGui import QColor, QIcon, QImage, QPixmap
+from qtpy.QtGui import QBrush, QColor, QIcon, QImage, QPixmap
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -151,8 +158,16 @@ class _Result:
         on_select: Callable[[str | None], None] | None = None,
         label_layer: Any = None,
         row_labels: Mapping[Any, int] | None = None,
+        on_colour: Callable[..., None] | None = None,
+        row_colours: Mapping[Any, Any] | None = None,
+        controls: Callable[[], QWidget] | None = None,
     ) -> None:
         self.title = title
+        self.on_colour = on_colour
+        #: Row key → tint of that row (any colour Qt understands, or RGB(A) floats).
+        self.row_colours = {str(k): v for k, v in dict(row_colours or {}).items()}
+        #: Builds the widget shown above the table while this result is displayed.
+        self.controls = controls
         self.payload = dict(payload)
         self.subtitle = subtitle
         self.row_header = row_header
@@ -289,6 +304,11 @@ class ResultsWindow(QDialog):
         #: Set by :func:`results_window`: Image masks are turned into Labels to be coloured.
         self._viewer: Any = None
         self._colour_row = self._build_colour_row()
+        # The shown result's own controls (``_Result.controls``), rebuilt on every _show.
+        self._controls_box = QWidget()
+        self._controls_layout = QVBoxLayout(self._controls_box)
+        self._controls_layout.setContentsMargins(0, 0, 0, 0)
+        self._controls_box.setVisible(False)
 
         toolbar = QHBoxLayout()
         toolbar.setSpacing(SPACE_TIGHT)
@@ -303,6 +323,7 @@ class ResultsWindow(QDialog):
         root.addWidget(self._subtitle)
         root.addLayout(toolbar)
         root.addWidget(self._colour_row)
+        root.addWidget(self._controls_box)
         root.addWidget(self._table, stretch=1)
         root.addWidget(self._note)
 
@@ -446,6 +467,7 @@ class ResultsWindow(QDialog):
                     restore_label_color_state(layer, original)
                     self._colour_status.setText(f"“{layer.name}”: its own label colours again.")
                 self._row_swatches(result)
+                self._colour_others(result, None, {}, colormap, None)
                 return
             values = result.label_values(column)
             if layer not in _ORIGINAL_COLOURS:
@@ -469,6 +491,17 @@ class ResultsWindow(QDialog):
             + (f"; {missing} without a value in grey." if missing else ".")
         )
         self._row_swatches(result)
+        self._colour_others(result, column, values, colormap, (lo, hi))
+
+    def _colour_others(self, result: _Result, column: str | None, values: dict[int, float], colormap: str,
+                       limits: tuple[float, float] | None) -> None:
+        """Pass the colouring on to the result's ``on_colour`` (surfaces of the same labels…)."""
+        if result.on_colour is None:
+            return
+        try:
+            result.on_colour(column, values, colormap, limits)
+        except Exception as exc:  # noqa: BLE001 — the label colouring already happened
+            self._colour_status.setText(f"{self._colour_status.text()} (Surfaces not coloured: {exc})")
 
     def _row_swatches(self, result: _Result) -> None:
         """A swatch of each label row's current label colour, beside its key."""
@@ -486,6 +519,39 @@ class ResultsWindow(QDialog):
             except Exception:  # noqa: BLE001
                 continue
 
+    def _tint_rows(self, result: _Result) -> None:
+        """Give each row the tint its result asks for (``row_colours``)."""
+        if not result.row_colours:
+            return
+        for row in range(self._table.rowCount()):
+            key_item = self._table.item(row, 0)
+            colour = result.row_colours.get(key_item.text()) if key_item is not None else None
+            if colour is None:
+                continue
+            brush = QBrush(_tint(colour))
+            for col in range(self._table.columnCount()):
+                item = self._table.item(row, col)
+                if item is not None:
+                    item.setBackground(brush)
+
+    def _show_controls(self, result: _Result) -> None:
+        """Swap in the shown result's own controls (or none)."""
+        while self._controls_layout.count():
+            widget = self._controls_layout.takeAt(0).widget()
+            if widget is not None:
+                widget.hide()  # before un-parenting, or Qt shows it as a stray top-level window
+                widget.setParent(None)
+                widget.deleteLater()
+        widget = None
+        if result.controls is not None:
+            try:
+                widget = result.controls()
+            except Exception as exc:  # noqa: BLE001 — a broken control must not hide the table
+                widget = QLabel(f"Controls unavailable: {exc}")
+        if widget is not None:
+            self._controls_layout.addWidget(widget)
+        self._controls_box.setVisible(widget is not None)
+
     def add_result(
         self,
         title: str,
@@ -497,15 +563,20 @@ class ResultsWindow(QDialog):
         on_select: Callable[[str | None], None] | None = None,
         label_layer: Any = None,
         row_labels: Mapping[Any, int] | None = None,
+        on_colour: Callable[..., None] | None = None,
+        row_colours: Mapping[Any, Any] | None = None,
+        controls: Callable[[], QWidget] | None = None,
     ) -> None:
         """Show *payload* and keep the previous results in the history picker.
 
         With *label_layer* and *row_labels* (row key → label id), the labels can be
-        coloured by any measured column."""
+        coloured by any measured column; *on_colour* passes that colouring on.
+        *row_colours* tints rows; *controls* builds a widget shown above the table."""
         if on_select is not None and not note:
             note = "Click a row to show it in the viewer."
         result = _Result(title, payload, subtitle=subtitle, row_header=row_header, note=note, on_select=on_select,
-                         label_layer=label_layer, row_labels=row_labels)
+                         label_layer=label_layer, row_labels=row_labels, on_colour=on_colour,
+                         row_colours=row_colours, controls=controls)
         self._results.insert(0, result)
         del self._results[_HISTORY_LIMIT:]
         # Repopulating fires currentIndexChanged; suppress it so rebuilding the
@@ -598,7 +669,9 @@ class ResultsWindow(QDialog):
             for row, (key, value) in enumerate(result.payload.items()):
                 self._table.setItem(row, 0, _item(str(key), align_left=True))
                 self._table.setItem(row, 1, _item(_format_value(value, key)))
+        self._tint_rows(result)
         self._table.setSortingEnabled(True)
+        self._show_controls(result)
 
         # Sized to content, not stretched to fill: a 13-column metrics table
         # divided equally leaves every cell too narrow and elides the digits,
@@ -610,6 +683,17 @@ class ResultsWindow(QDialog):
         self._filling = False
         self._sync_colour_row(result)
         self._row_swatches(result)
+
+
+def _tint(colour: Any) -> QColor:
+    """*colour* (a name / hex, or RGB(A) floats) as a translucent row tint."""
+    if isinstance(colour, (tuple, list)):
+        r, g, b = (max(0.0, min(1.0, float(c))) for c in list(colour)[:3])
+        qc = QColor.fromRgbF(r, g, b)
+    else:
+        qc = QColor(str(colour))
+    qc.setAlpha(90)
+    return qc
 
 
 def _item(text: str, *, align_left: bool = False) -> QTableWidgetItem:
@@ -663,12 +747,18 @@ def show_results(
     on_select: Callable[[str | None], None] | None = None,
     label_layer: Any = None,
     row_labels: Mapping[Any, int] | None = None,
+    on_colour: Callable[..., None] | None = None,
+    row_colours: Mapping[Any, Any] | None = None,
+    controls: Callable[[], QWidget] | None = None,
 ) -> str:
     """Show *payload* in the viewer's results window; return it as text.
 
     With *on_select*, selecting a row calls it with the row's key (and ``None``
     when the highlight should go). With *label_layer* and *row_labels* (row key →
-    label id), the window offers to colour those labels by a measured column.
+    label id), the window offers to colour those labels by a measured column;
+    *on_colour* (see the module docstring) colours other layers along with them.
+    *row_colours* (row key → colour) tints rows; *controls* builds a widget shown above the
+    table while this result is displayed.
 
     The text is returned rather than logged here so the caller keeps control of
     the log — every measurement already writes one line, and this must not
@@ -679,7 +769,8 @@ def show_results(
     if window is None:
         return text
     window.add_result(title, payload, subtitle=subtitle, row_header=row_header, note=note, on_select=on_select,
-                      label_layer=label_layer, row_labels=row_labels)
+                      label_layer=label_layer, row_labels=row_labels, on_colour=on_colour,
+                      row_colours=row_colours, controls=controls)
     window.show()
     window.raise_()
     return text

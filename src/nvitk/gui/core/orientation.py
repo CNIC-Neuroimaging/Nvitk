@@ -940,6 +940,22 @@ def _focus_time_leading(viewer: Any, layer: Any, *, superior: int | None = None)
         pass
 
 
+#: gui.json key: the main canvas's display mode (2 or 3) at launch and for the first volume.
+NDISPLAY_PREF_KEY = "gui.ndisplay"
+
+
+def default_ndisplay() -> int:
+    """The main canvas's display mode: 3D unless gui.json sets ``"gui.ndisplay": 2``. The
+    orthogonal 2D views stay available in their own dock either way."""
+    try:
+        from nvitk.gui.core.prefs import load_prefs
+
+        value = int(load_prefs().get(NDISPLAY_PREF_KEY, 3))
+    except Exception:  # noqa: BLE001 — a preference must never block a launch
+        value = 3
+    return 2 if value == 2 else 3
+
+
 def configure_viewer_for_layer(
     viewer: Any,
     layer: Any,
@@ -972,14 +988,15 @@ def configure_viewer_for_layer(
             return
 
         if layer_is_time_leading(layer):
-            # A 3D+t volume opens like a 3D one — axial, 2D — with the time
-            # slider on its first frame; the play button on that slider is the cine.
+            # A 3D+t volume opens like a 3D one — axial order, the default display
+            # mode — with the time slider on its first frame; the play button on that
+            # slider is the cine.
             from nvitk.gui.core.spatial import layer_affine
 
             spatial = layer_affine(layer)
             order3 = dim_order_2d_for_display(spatial, 3)
             offset = int(viewer.dims.ndim) - 3
-            viewer.dims.ndisplay = 2
+            viewer.dims.ndisplay = default_ndisplay()
             viewer.dims.order = tuple(range(offset)) + tuple(offset + o for o in order3)
             labels = list(viewer.dims.axis_labels)
             axes_str = _axes_string_from_layer(layer) or "TXYZ"
@@ -994,9 +1011,11 @@ def configure_viewer_for_layer(
             return
 
         if ndim == 3:
+            # Axial order (what 2D shows, and the slice the ortho views start on); the main
+            # canvas stays in the default display mode (3D).
             order = dim_order_2d_for_display(aff_arr, ndim)
             sup = order[0]
-            viewer.dims.ndisplay = 2
+            viewer.dims.ndisplay = default_ndisplay()
             viewer.dims.order = order
             mid = int(shape[sup] // 2) if sup < len(shape) else 0
             point = [int(round(float(x))) for x in viewer.dims.point]

@@ -336,6 +336,7 @@ def refresh_centerline_result_metrics(res: dict) -> None:
     res["is_enlarged_cs"] = is_enlarged_cs
     res["enlargement_reference_radius_point"] = enlarg.r_ref_per_point
     res["enlargement_threshold_radius_point"] = (1.0 + _cfg.ENLARGEMENT_THRESHOLD_PCT / 100.0) * enlarg.r_ref_per_point
+    res["enlargement_radius_mm"] = radius
     stenotic_radius = radius[(is_stenotic == 1) & np.isfinite(radius)]
     enlarged_radius = radius[(is_enlarged == 1) & np.isfinite(radius)]
     res["radius_ref_mm"] = float(sten.r_ref)
@@ -1138,6 +1139,9 @@ def analyze_centerline_poly(
         "siphon_mask_point": siphon_mask.astype(float),
         "enlargement_reference_radius_point": enlarg.r_ref_per_point,
         "enlargement_threshold_radius_point": (1.0 + _cfg.ENLARGEMENT_THRESHOLD_PCT / 100.0) * enlarg.r_ref_per_point,
+        # The radius the enlargement test used (cow: cross-section here, the detection radius when
+        # a pruned path is re-measured) — the lesion table measures severity on the same one.
+        "enlargement_radius_mm": radius_area,
         "length_mm": float(L), "chord_length_mm": float(C), "tortuosity_dm": float(T),
         "curvature_mean_1_per_mm": float(k_mean), "curvature_median_1_per_mm": float(k_median),
         "curvature_p95_1_per_mm": float(k_p95), "curvature_max_1_per_mm": float(k_max),
