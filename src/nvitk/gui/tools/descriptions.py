@@ -267,6 +267,120 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Left ICA → Right ICA → Basilar; then a final multilabel blood-flood expand "
         "(labels 1/2/3) on the raw TOF volume."
     ),
+    # ── FastSurfer ───────────────────────────────────────────────────────────
+    "fastsurfer_seg": (
+        "FastSurfer (Deep-MI) on the active T1: whole-brain aparc.DKTatlas+aseg segmentation, and "
+        "by default cerebellum (CerebNet), hypothalamus (HypVINN) and corpus callosum. Runs in the "
+        "background (Jobs window, ~1-3 min on GPU); label maps open named and coloured, stats go to "
+        "the results window. 'Native image' keeps every result on the input's own grid; off, they are "
+        "on FastSurfer's conformed isotropic grid. Uses the GPU when GPU computing is on."
+    ),
+    "fastsurfer_cereb": (
+        "CerebNet cerebellum sub-segmentation (lobules, vermis, white matter). Reuses the subject's "
+        "whole-brain segmentation when the subjects directory + id already hold one; otherwise it is "
+        "computed first from the active T1."
+    ),
+    "fastsurfer_hypothal": (
+        "HypVINN hypothalamus sub-segmentation (hypothalamic nuclei, fornix, mammillary bodies, "
+        "optic chiasm …). A T2 layer improves it. Reuses an existing whole-brain segmentation."
+    ),
+    "fastsurfer_cc": (
+        "Corpus callosum and fornix segmentation with FastSurfer-CC shape analysis (thickness, "
+        "area, curvature per segment → results window). Reuses an existing whole-brain segmentation."
+    ),
+    "fastsurfer_surf": (
+        "FastSurfer's recon-surf on an already segmented subject: white/pial surfaces, cortical "
+        "thickness, surface parcellation and stats. Needs FreeSurfer 7.4.1 and its license (see "
+        "'Install FreeSurfer'); takes about an hour, in the background."
+    ),
+    "fastsurfer_full": (
+        "The whole FastSurfer pipeline on the active T1: every segmentation module, then the "
+        "surfaces (FreeSurfer 7.4.1 + license). About an hour, in the background."
+    ),
+    "fastsurfer_long": (
+        "FastSurfer longitudinal processing: an unbiased within-subject template from the named "
+        "time-point layers, then each time point initialised from it (surfaces included; needs "
+        "FreeSurfer 7.4.1 + license). Several hours, in the background."
+    ),
+    "fastsurfer_load_subject": (
+        "Open an existing FastSurfer / FreeSurfer subject directory: T1s, segmentations (named and "
+        "coloured), white/pial surfaces (pial coloured by thickness) and every .stats table."
+    ),
+    "fastsurfer_segstats": (
+        "Partial-volume corrected volume (and intensity) statistics per label of the active "
+        "segmentation (FastSurfer's segstats); give the bias-corrected T1 as intensity layer for "
+        "the PV correction."
+    ),
+    "fastsurfer_reduce_aseg": (
+        "Reduce the active aparc+aseg segmentation to aseg (cortex one label per hemisphere) and a "
+        "brain mask."
+    ),
+    "fastsurfer_conform": (
+        "Conform the active image the way FastSurfer does before segmenting: isotropic voxels, "
+        "256³ (or the field of view), LIA orientation, uint8. A label map is conformed "
+        "nearest-neighbour."
+    ),
+    "fastsurfer_install_freesurfer": (
+        "Download (≈9.5 GB, resumable) and unpack FreeSurfer 7.4.1, which FastSurfer's surface and "
+        "longitudinal pipelines need. The license is free: register at surfer.nmr.mgh.harvard.edu."
+    ),
+    # ── FSL ──────────────────────────────────────────────────────────────────
+    "fsl_bet": "FSL BET brain extraction of the active image: brain and brain-mask layers.",
+    "fsl_fast": (
+        "FSL FAST: CSF / GM / WM segmentation (Labels), partial-volume maps (hidden) and the "
+        "bias-corrected image. Background job."
+    ),
+    "fsl_first": "FSL FIRST (run_first_all) subcortical segmentation, as named Labels. Background job.",
+    "fsl_anat": (
+        "fsl_anat: reorientation, FOV crop, bias correction, linear + non-linear registration to MNI, "
+        "FAST and FIRST in one run. Background job; the .anat folder holds every intermediate."
+    ),
+    "fsl_siena": "SIENA percentage brain volume change between the active and a second time point.",
+    "fsl_sienax": "SIENAX normalised brain, grey and white matter volumes (results window).",
+    "fsl_reorient2std": "fslreorient2std: reorient to the MNI orientation (axis swaps / flips, no resampling).",
+    "fsl_robustfov": "robustfov: crop the lower head and neck before registration or BET.",
+    "fsl_deface": "fsl_deface: remove the face from a structural image (anonymisation).",
+    "fsl_lesion_filling": "lesion_filling: fill lesions with surrounding white-matter intensities.",
+    "fsl_fnirt": (
+        "FNIRT non-linear registration of the active image to a reference layer. Start from a FLIRT "
+        "affine (Registration ▸ FLIRT) for robust results. Background job."
+    ),
+    "fsl_applywarp": "applywarp: resample the active layer onto a reference through a warp and/or affine.",
+    "fsl_invwarp": "invwarp: invert the active warp field.",
+    "fsl_convert_xfm": "convert_xfm: invert a FLIRT matrix, or concatenate two.",
+    "fsl_mcflirt": "MCFLIRT motion correction of a 4D series; motion summary in the results window.",
+    "fsl_epi_reg": "epi_reg: boundary-based registration of an EPI to its T1.",
+    "fsl_topup": "TOPUP: susceptibility field from reversed phase-encode b0 volumes (needs a datain file).",
+    "fsl_eddy": (
+        "EDDY eddy-current and motion correction of the active DWI series (GPU build when installed). "
+        "bvecs / bvals are found next to the layer's source file when left blank."
+    ),
+    "fsl_dtifit": "DTIFIT tensor fit of the active DWI series: FA (shown), MD, L1, V1, S0.",
+    "fsl_bedpostx": "BEDPOSTX fibre orientation distributions (GPU build when installed). Background job.",
+    "fsl_probtrackx2": "PROBTRACKX2 probabilistic tractography seeded from the active mask layer.",
+    "fsl_tbss": (
+        "TBSS steps 1-4 on a cohort's FA maps: mean FA, skeleton, and the 4D skeletonised data for "
+        "randomise (Measure ▸ Voxelwise)."
+    ),
+    "fsl_xtract": "XTRACT: standardised tractography of the major white-matter tracts from a BEDPOSTX run.",
+    "fsl_melodic": "MELODIC single-session ICA of the active 4D series (component maps + HTML report).",
+    "fsl_susan": "SUSAN edge-preserving noise reduction.",
+    "fsl_slicetimer": "slicetimer: slice-timing correction of a 4D series.",
+    "fsl_fugue": "FUGUE: unwarp an EPI with a field map in rad/s.",
+    "fsl_prepare_fieldmap": "fsl_prepare_fieldmap: a field map in rad/s from Siemens phase difference / GE Hz data.",
+    "fsl_maths": "fslmaths on the active layer; {layer:NAME} brings in another layer (e.g. -mas {layer:mask}).",
+    "fsl_stats": "fslstats summary (range, robust range, mean, std, volume) of the active layer, optionally in a mask.",
+    "fsl_meants": "fslmeants: the mean time series of the active 4D layer inside a mask.",
+    "fsl_cluster": "cluster: connected clusters above a threshold, as Labels plus the cluster table.",
+    "fsl_smoothest": "smoothest: smoothness (DLH, resels, FWHM) of the active z-stat inside a mask.",
+    "fsl_command": (
+        "Run any FSL command in the FSL environment — FEAT, or anything not wrapped. {layer:NAME} is "
+        "replaced by that layer's file, {out:NAME} names an output that is opened afterwards."
+    ),
+    "fsl_install": (
+        "Install nvitk's own FSL core (FSL's conda packages, pinned release) into this environment. "
+        "An FSL already set up through $FSLDIR is used first."
+    ),
 }
 
 

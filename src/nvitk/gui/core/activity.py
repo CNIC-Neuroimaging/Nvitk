@@ -19,6 +19,9 @@ Two kinds of work, two behaviours:
   stays while the job is queued and running (its state in the message), for as long
   as that takes, and the GUI is free meanwhile. Elapsed times read as minutes and
   hours, and the tooltip lists every task when several are running.
+* **A background command on this machine** (``kind="job"``, an
+  :class:`~nvitk.gui.core.external_jobs.ExternalJob`: FastSurfer, an FSL pipeline):
+  like a cluster job, the GUI is free while it runs.
 """
 
 from __future__ import annotations

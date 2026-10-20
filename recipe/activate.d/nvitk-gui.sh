@@ -12,3 +12,10 @@ export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH
 # reproducing the crash and confirming this fixes it — see conversation history).
 export _NVITK_OLD_QT_PLUGIN_PATH="${QT_PLUGIN_PATH-}"
 export QT_PLUGIN_PATH="${CONDA_PREFIX}/lib/qt6/plugins${QT_PLUGIN_PATH:+:${QT_PLUGIN_PATH}}"
+
+# FastSurfer as installed by nvitk (share/nvitk/fastsurfer), for running run_fastsurfer.sh by hand.
+# nvitk's own tools find it without this.
+if [[ -f "${CONDA_PREFIX}/share/nvitk/fastsurfer/FastSurfer/run_fastsurfer.sh" ]]; then
+  export _NVITK_OLD_FASTSURFER_HOME="${FASTSURFER_HOME-}"
+  export FASTSURFER_HOME="${CONDA_PREFIX}/share/nvitk/fastsurfer/FastSurfer"
+fi

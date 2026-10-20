@@ -11,3 +11,11 @@ if [ -n "${_NVITK_OLD_QT_PLUGIN_PATH+set}" ]; then
   fi
   unset _NVITK_OLD_QT_PLUGIN_PATH
 fi
+if [ -n "${_NVITK_OLD_FASTSURFER_HOME+set}" ]; then
+  if [ -n "${_NVITK_OLD_FASTSURFER_HOME}" ]; then
+    export FASTSURFER_HOME="${_NVITK_OLD_FASTSURFER_HOME}"
+  else
+    unset FASTSURFER_HOME
+  fi
+  unset _NVITK_OLD_FASTSURFER_HOME
+fi

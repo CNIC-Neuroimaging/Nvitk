@@ -138,9 +138,7 @@ def submit_gui_sge(
     parent = None,
 ) -> bool:
     """Validate tool/layer, stage locally, upload, and SSH-run ``submit.sh``."""
-    if not viewer.layers:
-        notify("No layers loaded. Open an image first.", error=True)
-        return False
+    from nvitk.gui.sge.external import is_external_tool
 
     category = tool_panel.category.value
     operation = tool_panel.operation.value
@@ -148,14 +146,19 @@ def submit_gui_sge(
     if not tool_id:
         notify("Select a valid operation.", error=True)
         return False
+    external = is_external_tool(tool_id)
+    spec = tool_by_id(tool_id)
+    # FastSurfer / FSL tools that work from paths alone (TBSS, XTRACT, …) need no layer.
+    if not viewer.layers and not (external and spec is not None and not spec.requires_layer):
+        notify("No layers loaded. Open an image first.", error=True)
+        return False
     if not is_sge_capable(tool_id):
         notify(sge_block_reason(tool_id), error=True)
         return False
 
     from nvitk.gui.labels.visibility import infer_target_mode
 
-    spec = tool_by_id(tool_id)
-    layer = viewer.layers.selection.active or viewer.layers[-1]
+    layer = (viewer.layers.selection.active or viewer.layers[-1]) if viewer.layers else None
 
     ids = []
     if get_label_ids is not None:
@@ -163,9 +166,9 @@ def submit_gui_sge(
     if not ids:
         ids = parse_label_ids(tool_panel.label_ids.value)
 
-    target_mode = infer_target_mode(layer, label_ids=ids or None)
+    target_mode = infer_target_mode(layer, label_ids=ids or None) if layer is not None else "raw"
 
-    if spec and spec.run_mode == "layer" and target_mode == "label" and not ids:
+    if not external and spec and spec.run_mode == "layer" and target_mode == "label" and not ids:
         notify("Select at least one label (checkbox list or id field).", error=True)
         return False
 
@@ -197,21 +200,30 @@ def submit_gui_sge(
     from nvitk.cluster.sge_chunk import parse_sge_submission_job_ids
     from nvitk.gui.core.activity import activity, run_in_background, start_task
 
-    label = f"{spec.label if spec else tool_id} on “{getattr(layer, 'name', 'layer')}”"
+    label = f"{spec.label if spec else tool_id}" + (f" on “{layer.name}”" if layer is not None else "")
     staging = None
     try:
         with activity(f"SGE: preparing {label}", total=3) as task:
             # The layer is read here, on the GUI thread; the network steps below go
             # to a worker, so the window keeps redrawing while they run.
-            staging, job = stage_job_locally(
-                viewer,
-                layer,
-                tool_id=tool_id,
-                params=params,
-                target_mode=target_mode,
-                label_ids=ids or None,
-                gpu=gpu_enabled(),
-            )
+            if external:
+                from nvitk.gui.sge.external import stage_external_job
+                from nvitk.gui.viz.main_canvas import world_geometry
+
+                # Real placement for the exported layers (the main canvas may be drawing
+                # them on their own grids).
+                with world_geometry(viewer):
+                    staging, job = stage_external_job(viewer, layer, tool_id=tool_id, params=params)
+            else:
+                staging, job = stage_job_locally(
+                    viewer,
+                    layer,
+                    tool_id=tool_id,
+                    params=params,
+                    target_mode=target_mode,
+                    label_ids=ids or None,
+                    gpu=gpu_enabled(),
+                )
             remote_job_root = _resolve_remote_job_root(conn.remote_job_root, job.job_id)
             emit_gui_sge_script(
                 job,

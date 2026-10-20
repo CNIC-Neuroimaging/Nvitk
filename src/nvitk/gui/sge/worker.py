@@ -23,9 +23,13 @@ def _write_done_marker(
     exit_code: int,
     output_files: list[str],
     error = None,
+    manifest: dict | None = None,
 ) -> None:
     """Write a ``.done`` JSON marker in *output_dir* recording job id, exit code, produced output
-    files, finish timestamp, and any error — signals the GUI that the job finished."""
+    files, finish timestamp, and any error — signals the GUI that the job finished.
+
+    *manifest* (FastSurfer / FSL jobs) says how the GUI should open the outputs: which are
+    label maps and their names, the tables to show (see :mod:`nvitk.gui.tools.external_io`)."""
     payload = {
         "job_id": job_id,
         "exit_code": int(exit_code),
@@ -33,6 +37,8 @@ def _write_done_marker(
         "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "error": error,
     }
+    if manifest is not None:
+        payload["manifest"] = manifest
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / DONE_FILE).write_text(
         json.dumps(payload, indent=2),
@@ -72,6 +78,29 @@ def main(job_path: Path) -> None:
     exit_code = 0
     err_msg = None
     output_files = []
+    manifest = None
+
+    from nvitk.gui.sge.external import is_external_tool
+
+    if is_external_tool(job.tool_id):
+        # FastSurfer / FSL: several inputs and outputs, opened from an import manifest.
+        from nvitk.gui.sge.external import run_external_job
+
+        try:
+            log.info("Running %s (job %s)", job.tool_id, job.job_id)
+            output_files, manifest = run_external_job(job, data_dir, output_dir)
+            log.info("%s finished: %d output file(s)", job.tool_id, len(output_files))
+        except Exception as exc:  # noqa: BLE001
+            exit_code = 1
+            err_msg = str(exc) or exc.__class__.__name__
+            log.error("SGE worker failed: %s", err_msg)
+            traceback.print_exc()
+        finally:
+            _write_done_marker(output_dir, job_id=job.job_id, exit_code=exit_code, output_files=output_files,
+                               error=err_msg, manifest=manifest)
+        if exit_code != 0:
+            raise SystemExit(exit_code)
+        return
 
     try:
         primary = imread(data_dir / job.input_name, backend="numpy")

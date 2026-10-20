@@ -29,7 +29,7 @@ from nvitk.io._common import default_nifti_axes, guess_read_type
 from nvitk.types import Image
 
 _NVITK_OPEN_SUFFIXES = frozenset({
-    ".nii", ".nii.gz", ".mha", ".mhd", ".tif", ".tiff", ".nd2",
+    ".nii", ".nii.gz", ".mgz", ".mgh", ".mha", ".mhd", ".tif", ".tiff", ".nd2",
     ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".dcm",
     # nnU-Net / nnssl preprocessed cases: the Blosc2 array and its geometry sidecar.
     ".b2nd", ".pkl",

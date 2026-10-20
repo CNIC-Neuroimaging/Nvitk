@@ -22,6 +22,12 @@ log "removing pip-only dependencies installed by post-link.sh..."
   pyradiomics pydicom \
   torch torchvision \
   cupy-cuda13x cutensor-cu13 nvidia-nccl-cu13 \
+  monai lapy yacs neuroreg meshpy pyrr whippersnappy \
   >>"$LOG" 2>&1 || log "warning: some packages were already absent or failed to uninstall cleanly"
+
+# Trees nvitk installed itself, which conda does not track: FastSurfer (+ checkpoints) and the
+# FSL core `nvitk-fsl install` creates. FreeSurfer is never inside the environment.
+log "removing FastSurfer and nvitk's FSL core..."
+rm -rf "$PREFIX/share/nvitk/fastsurfer" "$PREFIX/share/nvitk/fsl" "$PREFIX/share/nvitk/micromamba"
 
 log "done."

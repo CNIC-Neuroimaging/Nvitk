@@ -497,7 +497,28 @@ def run_gui_tool(
     """Central GUI tool dispatcher: resolve *tool_id* in the registry and route to its implementation
     (pipeline CLI subprocess, a dedicated viz/measure handler, or a generic array-in/array-out tool
     call on *layer*'s prepared data). Returns the new layer data, or ``None`` for tools that manage
-    their own output (pipelines, viewer overlays, notifications)."""
+    their own output (pipelines, viewer overlays, notifications).
+
+    Runs with every layer in its real placement: with resampling off on the main canvas the
+    layers are drawn on their own voxel grids, and tools read and write real geometry
+    (:func:`nvitk.gui.viz.main_canvas.world_geometry`)."""
+    from nvitk.gui.viz.main_canvas import world_geometry
+
+    with world_geometry(viewer):
+        return _run_gui_tool(tool_id, layer, viewer, target_mode=target_mode, label_ids=label_ids,
+                             params=params)
+
+
+def _run_gui_tool(
+    tool_id: str,
+    layer: Any,
+    viewer: Any,
+    *,
+    target_mode: str,
+    label_ids: list[int] | None,
+    params = None,
+) -> np.ndarray | None:
+    """:func:`run_gui_tool`'s body (layers already in their real placement)."""
     from nvitk.gui.tools.registry import TOOL_ID_ALIASES
 
     params = dict(params or {})
@@ -551,6 +572,18 @@ def run_gui_tool(
         from nvitk.gui.tools.interpolation_tools import run_interpolation_tool
 
         run_interpolation_tool(tool_id, viewer, layer, params, label_ids=label_ids)
+        return None
+
+    if tool_id.startswith("fastsurfer_"):
+        from nvitk.gui.tools.fastsurfer_tools import run_fastsurfer_tool
+
+        run_fastsurfer_tool(tool_id, viewer, layer, params)
+        return None
+
+    if tool_id.startswith("fsl_"):
+        from nvitk.gui.tools.fsl_tools import run_fsl_tool
+
+        run_fsl_tool(tool_id, viewer, layer, params)
         return None
 
     from nvitk.gui.tools.reconstruction_tools import RECONSTRUCTION_TOOL_IDS

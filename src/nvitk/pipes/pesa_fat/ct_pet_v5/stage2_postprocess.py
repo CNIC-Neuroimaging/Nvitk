@@ -105,17 +105,17 @@ SUV_ERODE: dict[str, int] = {
     "GRASA_V_BATCH": 1,
     "GRASA_SC_BATCH": 1,
     # ORGANS
-    "HIGADO": 2,
-    "BAZO": 2,
-    "PANCREAS": 1,
+    "HIGADO": 4,
+    "BAZO": 4,
+    "PANCREAS": 2,
     # MUSCLES
-    "CUADRICEPS_L": 2,
-    "CUADRICEPS_R": 2,
-    "PARAVERTEBRAL_L": 2,
-    "PARAVERTEBRAL_R": 2,
-    "DELTOIDES_L": 2,
-    "DELTOIDES_R": 2,
-    "TRAPECIOS": 2,
+    "CUADRICEPS_L": 4,
+    "CUADRICEPS_R": 4,
+    "PARAVERTEBRAL_L": 4,
+    "PARAVERTEBRAL_R": 4,
+    "DELTOIDES_L": 4,
+    "DELTOIDES_R": 4,
+    "TRAPECIOS": 2
 }
 
 # Output mask file → label name(s) to clear where PET ureter overlaps.

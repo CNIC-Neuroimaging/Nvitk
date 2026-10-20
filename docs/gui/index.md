@@ -480,6 +480,29 @@ canvas* shows a person with R/L, A/P and H/F arrows — the marker of the QC rep
 renders — in the corner of the 3D view, turning with the camera
 (`nvitk.gui.viz.orientation_overlay`). Both choices are remembered in `gui.json`.
 
+**The main canvas** (`nvitk.gui.viz.main_canvas`) has its own switches in the same card, which
+leave the layer list and these views alone:
+
+- *Main canvas: resample layers into world space* — on (the default), napari draws every layer
+  in world (scanner) space through its affine: an oblique or flipped acquisition is turned into
+  place, and a layer on another grid is resampled into alignment with the others. Off, every image
+  and label layer is drawn **as stored, on its own voxel grid** — its voxel size kept, but no
+  rotation, flip, obliquity or offset, the way these views lay a volume out (2D slicing of an
+  oblique series is then a plain slice through its voxels). Layers on the same grid still overlay
+  exactly; layers on other grids are shown but not aligned. Meshes, points and shapes stay in world
+  space. This is display only: each layer keeps its real transform, and tools, the orientation
+  buttons, saving and exports always work on the real geometry (they put the real transforms back
+  while they run; a layer created while it is off is placed by its real geometry).
+- *Main* column of the layers table — untick a layer to hide it **on the main canvas only**: it
+  stays visible in the layer list and is still drawn in the orthogonal views (its napari
+  `visible` is untouched; only its canvas node is hidden, through every path napari redraws it).
+- *Show the main canvas* (also **View ▸ Show main canvas**) — hide the whole main canvas: it stops
+  rendering and the docks, the orthogonal views first, take its space. Closing the orthogonal
+  views brings it back.
+
+The resampling and canvas switches are remembered in `gui.json`; the per-layer choices last
+for the session.
+
 ## Spectral CT (Philips SBI)
 
 A Philips Spectral CT stores, next to each reconstruction, a *spectral base image* (SBI) series
@@ -556,7 +579,7 @@ window expressed in intensity units, and the live preview is reverted if the dia
 
 `nvitk.gui.tools.registry` defines every tool as a `GuiToolSpec` (id, category, parameter
 spec, whether it needs a reference layer or 3D data, and its run mode), merged with the
-pipeline shortcuts from `nvitk.gui.pipeline.catalog`. **124 tools across 14 categories**,
+pipeline shortcuts from `nvitk.gui.pipeline.catalog`. **172 tools across 16 categories**,
 each backed by the same functions documented in the {doc}`Main API Reference <../api/index>`:
 
 | Category | Count | Examples |
@@ -567,6 +590,8 @@ each backed by the same functions documented in the {doc}`Main API Reference <..
 | Morphology | 11 | Dilate/erode/open/close, fill holes, connected components, ICA siphon correction, mask genus |
 | Centerline | 4 | Detect/cut junctions, convert to polyline, centerline network (branches with inscribed radius) |
 | Segmentation | 26 | Label ops, mask boolean algebra, mask image (keep / remove regions), region growing, blood flood, ANTsPyNet brain/vessel/DKT, TotalSegmentator, eICAB |
+| FastSurfer | 12 | Whole-brain aseg+DKT segmentation with cerebellum (CerebNet), hypothalamus (HypVINN) and corpus callosum modules, recon-surf surfaces, full and longitudinal pipelines, subject loading, PV-corrected label stats, aseg reduction, conforming, FreeSurfer installer — see below |
+| FSL | 35 | BET, FAST, FIRST, fsl_anat, SIENA/SIENAX, FNIRT/applywarp/invwarp, MCFLIRT, epi_reg, TOPUP, EDDY, DTIFIT, BEDPOSTX, PROBTRACKX2, TBSS, XTRACT, MELODIC, SUSAN, slice timing, FUGUE, fslmaths/fslstats/cluster/smoothest, any FSL command, FSL core installer — see below |
 | Registration | 6 | FLIRT register (6/7/9/12 DOF, cost, search range) / apply; ANTsPy register (every `type_of_transform`, stage metrics, iteration schedules, masks) / apply; FireANTs register (moments → rigid → affine → greedy / SyN chains on the GPU) / apply. Each can also warp further layers with the new transform. |
 | Visualization | 12 | PET/SUV hotspots, 4D-flow vectors, 4D-flow particle tracing (VMTK streamlines / pathlines), vessel cross-sections, hemodynamics, TOF morphometrics |
 | Transform | 8 | Volume projection, reorient, rotate, swap axes, isotropy, resample, oblique slice |
@@ -608,6 +633,41 @@ Every parameter a tool declares in the registry gets a widget, whether or not th
 declares one by hand (`nvitk.gui.tools.panel._add_registry_widgets`), laid out in the
 order the tool lists them. Widgets are shared between tools by parameter name; selecting a
 tool gives each of its fields that tool's own caption, choices and numeric range.
+
+### FastSurfer and FSL tools
+
+The *FastSurfer* and *FSL* categories run the same code as `nvitk-fastsurfer` / `nvitk-fsl`
+({doc}`../api/segmentation`, {doc}`../installation`). Each tool writes the layers it needs to a
+run folder (its *Output directory*, or a temporary one), runs the suite, and opens the outputs as
+layers placed by **their own affine** — FastSurfer's conformed grid, or the input's with
+*native image* (the default); FSL's reoriented / cropped / registered grids — never assumed to
+match the input. Label maps (segmentations, masks, cluster indices) open as Labels layers named
+from their lookup table; reports and tables (stats files, SIENA/SIENAX, fslstats, cluster,
+MCFLIRT motion) go to the results window.
+
+Long runs — FastSurfer, FAST, FIRST, fsl_anat, FNIRT, EDDY, BEDPOSTX, TBSS, … — are **background
+jobs** (`nvitk.gui.core.external_jobs`): the tool returns at once, the GUI stays usable, a
+*Jobs* window lists each job with its current stage and a **Cancel** button, the activity bar
+counts the time, and the outputs open when the job ends. Closing the window with jobs running
+asks first and stops them. These tools manage their own outputs, so they are not recorded as
+replayable steps.
+
+**On the cluster.** *Run SGE* works for every FastSurfer and FSL tool except loading a subject and
+the installers (`nvitk.gui.sge.external`). The job is staged with everything the tool reads: the
+active layer, the layers its form names, layers named in a command (`{layer:NAME}`) or as
+longitudinal time points, and every file or folder a path field names (bvecs/bvals — found next to
+the layer's source when left blank —, acqp/index, warps and matrices, a BEDPOSTX folder, the FA
+list, the FreeSurfer license). On the node the worker runs the same tool definition headless, in
+the nvitk container (which carries FSL, FastSurfer and a pruned FreeSurfer), and writes an import
+manifest into `.done`; the GUI downloads the files it lists and opens them exactly as a local run
+does — label maps named and coloured, tables in the results window. FastSurfer, eddy, bedpostx,
+probtrackx2 and XTRACT ask for a GPU node.
+
+When FastSurfer or FSL is missing, the tool offers to install it in the background
+(*FastSurfer ▸ Install FreeSurfer 7.4.1* and *FSL ▸ Install nvitk's FSL core* do it on request).
+DWI tools find `bvecs` / `bvals` next to the layer's source file when those fields are blank;
+`{layer:NAME}` in *fslmaths* and *Run any FSL command* stands for another layer's file, and
+`{out:NAME}` in the latter names an output to open afterwards.
 
 ### Measurement results: colouring the labels
 

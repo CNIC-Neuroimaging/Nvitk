@@ -19,6 +19,9 @@ _TYPE_ALIASES = {
     "nii": "nifti",
     "nii.gz": "nifti",
     "nifti": "nifti",
+    # FreeSurfer / FastSurfer volumes: nibabel loads them with the same API.
+    "mgz": "nifti",
+    "mgh": "nifti",
     "dicom": "dicom",
     "dcm": "dicom",
     "tif": "tiff",
