@@ -28,7 +28,7 @@ FORCE=0
 DRY_RUN=0
 FASTSURFER=1
 FSL=1
-FSL_COMPONENTS="structural,registration,diffusion,functional"
+FSL_COMPONENTS="structural,registration,diffusion,functional,asl"
 
 usage() {
   cat <<EOF

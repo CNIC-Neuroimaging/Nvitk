@@ -36,7 +36,7 @@ commands backing the entry points in the table below.
 | `nvitk-fastsurfer` | FastSurfer v2.5.4: whole-brain, cerebellum, hypothalamus, corpus callosum, surfaces, longitudinal |
 | **Registration** | |
 | `nvitk-flirt` | FSL FLIRT wrapper |
-| `nvitk-fsl` | FSL suite: BET, FAST, FIRST, fsl_anat, SIENA/X, FNIRT, MCFLIRT, TOPUP, EDDY, DTIFIT, BEDPOSTX, PROBTRACKX2, TBSS, XTRACT, MELODIC, SUSAN, fslmaths/fslstats/cluster, any FSL command |
+| `nvitk-fsl` | FSL suite: BET, FAST, FIRST, fsl_anat, SIENA/X, FNIRT, MCFLIRT, TOPUP, EDDY, DTIFIT, BEDPOSTX, PROBTRACKX2, TBSS, XTRACT, MELODIC, SUSAN, BASIL ASL perfusion (oxford_asl, basil, asl_file, asl_calib), fslmaths/fslstats/cluster, any FSL command |
 | `nvitk-ants` | ANTsPy registration |
 | `nvitk-fireants` | FireANTs (GPU) registration |
 | **Image module CLIs** | |

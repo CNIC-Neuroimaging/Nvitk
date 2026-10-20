@@ -381,6 +381,26 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Install nvitk's own FSL core (FSL's conda packages, pinned release) into this environment. "
         "An FSL already set up through $FSLDIR is used first."
     ),
+    "fsl_asl_oxford": (
+        "FSL BASIL perfusion pipeline (oxford_asl) on the active ASL series: Bayesian kinetic-model fit "
+        "giving CBF (ml/100g/min with an M0 calibration layer or value), arrival time (ATT) and arterial "
+        "blood volume (aCBV), with their variances. Single- or multi-delay pCASL / pASL, tag-control or "
+        "differenced data. A structural layer or fsl_anat folder adds registration, GM / WM means and "
+        "partial-volume correction; the fsl_anat folder also gives MNI-space maps and an atlas region "
+        "analysis (tables). Background job."
+    ),
+    "fsl_asl_basil": (
+        "BASIL alone on label-control differenced data (asl_file): perfusion in data units and arrival "
+        "time from the variational Bayes fit, with the adaptive spatial prior. Calibrate with asl_calib."
+    ),
+    "fsl_asl_file": (
+        "asl_file on the active ASL series: label-control subtraction (difference series + mean per delay), "
+        "tag / control split, or averaging; 'tis' output order is what BASIL reads."
+    ),
+    "fsl_asl_calib": (
+        "asl_calib on the active M0 / calibration layer: arterial-blood M0 from a reference region (CSF by "
+        "default; a mask layer, or segmented from a structural), and the perfusion layer in ml/100g/min."
+    ),
 }
 
 

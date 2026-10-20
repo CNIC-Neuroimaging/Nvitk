@@ -28,6 +28,7 @@ COMPONENT_PROBES: dict[str, tuple[str, ...]] = {
     "registration": ("flirt", "fnirt", "applywarp", "mcflirt", "epi_reg"),
     "diffusion": ("eddy", "topup", "dtifit", "bedpostx", "probtrackx2", "tbss_1_preproc", "xtract"),
     "functional": ("melodic", "susan", "slicetimer", "fugue"),
+    "asl": ("oxford_asl", "basil", "fabber_asl", "asl_file", "asl_calib"),
 }
 
 #: GPU builds, used instead of the CPU ones when present.

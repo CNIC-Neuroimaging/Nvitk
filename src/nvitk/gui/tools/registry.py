@@ -127,6 +127,7 @@ _CATEGORY_ORDER = (
     "Segmentation",
     "FastSurfer",
     "FSL",
+    "ASL perfusion",
     "Registration",
     "Visualization",
     "Transform",
@@ -2698,6 +2699,7 @@ _FSL_TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("fsl_install_registration", "Registration", "bool", True),
             ParamSpec("fsl_install_diffusion", "Diffusion", "bool", True),
             ParamSpec("fsl_install_functional", "Functional", "bool", True),
+            ParamSpec("fsl_install_asl", "ASL perfusion (BASIL)", "bool", True),
             ParamSpec("fsl_install_cuda", "GPU builds (eddy, bedpostx, probtrackx2)", "bool", True),
         ),
         run_mode="notify", requires_layer=False, cli_command="nvitk-fsl install",
@@ -2705,6 +2707,104 @@ _FSL_TOOLS: tuple[GuiToolSpec, ...] = (
 )
 
 _TOOLS = _TOOLS + _FSL_TOOLS
+
+# ── ASL perfusion: FSL BASIL (nvitk.gui.tools.fsl_tools) ─────────────────────
+
+
+def _asl(tool_id: str, label: str, params: tuple[ParamSpec, ...] = (), *, cli: str = "") -> GuiToolSpec:
+    return GuiToolSpec(tool_id, "ASL perfusion", label, (*params, _OUTPUT_DIR), run_mode="notify",
+                       cli_command=f"nvitk-fsl {cli}" if cli else "")
+
+
+_ASL_LABELLING = ParamSpec("fsl_asl_labelling", "Labelling", "choice", "pcasl",
+                           choices=_fsl_choices("asl", "LABELLINGS", ("pcasl", "pasl")))
+_ASL_DELAYS = ParamSpec("fsl_asl_delays", "PLDs (pCASL) / TIs (pASL) in s, comma-separated", "str", "1.8")
+_ASL_BOLUS = ParamSpec("fsl_asl_bolus", "Labelling duration (s; one, or one per delay)", "str", "1.8")
+_ASL_IAF = ParamSpec("fsl_asl_iaf", "Volumes", "choice", "tc",
+                     choices=_fsl_choices("asl", "ASL_FORMATS", ("tc", "ct", "diff")))
+_ASL_IBF = ParamSpec("fsl_asl_ibf", "Order (rpt: all delays repeated; tis: repeats of each delay together)",
+                     "choice", "rpt", choices=_fsl_choices("asl", "BLOCK_FORMATS", ("rpt", "tis")))
+_ASL_RPTS = ParamSpec("fsl_asl_rpts", "Repeats per delay when they differ (with order tis)", "str", "")
+_ASL_T1 = ParamSpec("fsl_asl_t1", "Tissue T1 (s)", "float", 1.3, min=0.1, max=5.0)
+_ASL_T1B = ParamSpec("fsl_asl_t1b", "Blood T1 (s)", "float", 1.65, min=0.1, max=5.0)
+_ASL_BAT = ParamSpec("fsl_asl_bat", "Arrival time prior (s; 0 = 1.3 pCASL / 0.7 pASL)", "float", 0.0,
+                     min=0.0, max=5.0)
+_ASL_ALPHA = ParamSpec("fsl_asl_alpha", "Labelling efficiency (0 = 0.85 pCASL / 0.98 pASL)", "float", 0.0,
+                       min=0.0, max=1.0)
+_ASL_TR = ParamSpec("fsl_asl_tr", "Calibration TR (s)", "float", 3.2, min=0.1, max=100.0)
+_ASL_CGAIN = ParamSpec("fsl_asl_cgain", "ASL / calibration gain ratio", "float", 1.0, min=0.0, max=1000.0)
+_ASL_TISSREF = ParamSpec("fsl_asl_tissref", "Reference tissue", "choice", "csf",
+                         choices=_fsl_choices("asl", "TISSUE_REFS", ("csf", "wm", "gm")))
+_ASL_PVGM = ParamSpec("fsl_asl_pvgm_layer", "GM partial-volume layer (ASL space, optional)", "layer", "")
+_ASL_PVWM = ParamSpec("fsl_asl_pvwm_layer", "WM partial-volume layer (ASL space, optional)", "layer", "")
+
+_ASL_TOOLS: tuple[GuiToolSpec, ...] = (
+    _asl("fsl_asl_oxford", "BASIL perfusion: CBF, arrival time, aCBV (oxford_asl)", (
+        _ASL_LABELLING, _ASL_DELAYS, _ASL_BOLUS, _ASL_IAF, _ASL_IBF, _ASL_RPTS,
+        ParamSpec("fsl_asl_slicedt", "Time between slices (s; 2D readout)", "float", 0.0, min=0.0, max=1.0),
+        ParamSpec("fsl_asl_sliceband", "Slices per band (multiband; 0 = none)", "int", 0, min=0, max=256),
+        ParamSpec("fsl_mask_layer", "Brain mask layer (optional; else automatic)", "layer", ""),
+        ParamSpec("fsl_asl_calib_layer", "M0 calibration layer (optional)", "layer", ""),
+        ParamSpec("fsl_asl_cmethod", "Calibration", "choice", "auto", choices=("auto", "voxel", "single", "both")),
+        _ASL_TR, _ASL_CGAIN, _ASL_TISSREF,
+        ParamSpec("fsl_asl_m0", "M0 value (without a calibration layer; 0 = uncalibrated)", "float", 0.0,
+                  min=0.0, max=1e12),
+        _ASL_ALPHA,
+        ParamSpec("fsl_asl_struct_layer", "Structural layer (whole head, optional)", "layer", ""),
+        ParamSpec("fsl_asl_fslanat", "fsl_anat folder (optional; MNI space, region analysis)", "str", ""),
+        ParamSpec("fsl_asl_wp", "White-paper quantification (Alsop 2015)", "bool", False),
+        ParamSpec("fsl_asl_spatial", "Adaptive spatial prior on CBF", "bool", True),
+        ParamSpec("fsl_asl_mc", "Motion correction (MCFLIRT)", "bool", False),
+        ParamSpec("fsl_asl_pvcorr", "Partial-volume correction (GM / WM CBF)", "bool", False),
+        _ASL_PVGM, _ASL_PVWM,
+        ParamSpec("fsl_asl_artsupp", "Vascular crushing used (no arterial component)", "bool", False),
+        ParamSpec("fsl_asl_fixbolus", "Fix the labelling duration (always for pCASL)", "bool", False),
+        ParamSpec("fsl_asl_infert1", "Include T1 uncertainty", "bool", False),
+        _ASL_BAT, _ASL_T1, _ASL_T1B,
+        ParamSpec("fsl_asl_region_analysis", "Region analysis (needs the fsl_anat folder)", "bool", False),
+        ParamSpec("fsl_asl_cblip_layer", "Reversed phase-encode calibration layer (optional, TOPUP)", "layer", ""),
+        ParamSpec("fsl_asl_echospacing", "Effective echo spacing (s, with the reversed calibration)", "float", 0.0,
+                  min=0.0, max=1.0),
+        ParamSpec("fsl_asl_pedir", "Phase-encode direction", "choice", "",
+                  choices=("", *_fsl_choices("asl", "PE_DIRECTIONS", ("x", "y", "z", "-x", "-y", "-z")))),
+        ParamSpec("fsl_asl_extra", "Extra oxford_asl options", "str", ""),
+    ), cli="asl"),
+    _asl("fsl_asl_basil", "BASIL fit (label-control differenced data)", (
+        ParamSpec("fsl_mask_layer", "Brain mask layer", "layer", ""),
+        _ASL_LABELLING, _ASL_DELAYS, _ASL_BOLUS,
+        ParamSpec("fsl_asl_repeats", "Repeats per delay", "int", 1, min=1, max=10000),
+        ParamSpec("fsl_asl_ibf", "Order (tis: repeats of each delay together; rpt: reordered first)", "choice",
+                  "tis", choices=_fsl_choices("asl", "BLOCK_FORMATS", ("rpt", "tis"))),
+        _ASL_BAT, _ASL_T1, _ASL_T1B,
+        ParamSpec("fsl_asl_spatial", "Adaptive spatial prior", "bool", True),
+        ParamSpec("fsl_asl_inferart", "Arterial (macrovascular) component", "bool", False),
+        ParamSpec("fsl_asl_infertau", "Infer the labelling duration", "bool", False),
+        ParamSpec("fsl_asl_infert1", "Include T1 uncertainty", "bool", False),
+        _ASL_PVGM, _ASL_PVWM,
+    ), cli="basil"),
+    _asl("fsl_asl_file", "asl_file: label-control subtraction / averaging", (
+        ParamSpec("fsl_asl_ntis", "Number of delays in the data", "int", 1, min=1, max=1000),
+        ParamSpec("fsl_asl_operation", "Operation", "choice", "diff",
+                  choices=_fsl_choices("asl", "ASL_FILE_OPERATIONS", ("diff", "split-pairs", "mean"))),
+        _ASL_IAF, _ASL_IBF,
+        ParamSpec("fsl_asl_obf", "Output order (tis = grouped by delay, as BASIL reads it)", "choice", "same",
+                  choices=("same", "tis", "rpt")),
+        _ASL_RPTS, ParamSpec("fsl_mask_layer", "Mask layer (optional)", "layer", ""),
+    ), cli="asl-file"),
+    _asl("fsl_asl_calib", "asl_calib: M0 from a reference region (active layer = calibration)", (
+        ParamSpec("fsl_asl_perfusion_layer", "Perfusion layer to calibrate (optional)", "layer", ""),
+        ParamSpec("fsl_asl_refmask_layer", "Reference-region mask layer", "layer", ""),
+        ParamSpec("fsl_asl_struct_layer", "Brain-extracted structural (instead of a mask)", "layer", ""),
+        ParamSpec("fsl_asl_asl2struct", "ASL → structural matrix (with the structural)", "str", ""),
+        _ASL_TISSREF,
+        ParamSpec("fsl_asl_calib_mode", "Mode", "choice", "longtr",
+                  choices=_fsl_choices("asl", "CALIB_MODES", ("longtr", "satrecov"))),
+        _ASL_TR, _ASL_CGAIN, ParamSpec("fsl_asl_te", "Echo time (ms)", "float", 0.0, min=0.0, max=1000.0),
+        _ASL_ALPHA, ParamSpec("fsl_mask_layer", "Brain mask layer (optional)", "layer", ""),
+    ), cli="asl-calib"),
+)
+
+_TOOLS = _TOOLS + _ASL_TOOLS
 
 
 

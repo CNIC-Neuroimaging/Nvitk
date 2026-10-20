@@ -60,6 +60,7 @@ GPU_TOOLS: frozenset[str] = frozenset({
 FILE_PARAMS: frozenset[str] = frozenset({
     "fsl_bvecs", "fsl_bvals", "fsl_acqp", "fsl_index", "fsl_datain", "fsl_affine", "fsl_warp", "fsl_premat",
     "fsl_matrix", "fsl_matrix2", "fsl_bedpostx_dir", "fsl_std2diff", "fsl_diff2std", "fsl_timings", "fs_license",
+    "fsl_asl_fslanat", "fsl_asl_asl2struct",
 })
 #: Parameters naming a basename: every file starting with it is uploaded (TOPUP's outputs).
 PREFIX_PARAMS: frozenset[str] = frozenset({"fsl_topup_base"})

@@ -10,6 +10,9 @@ structural      BET, FAST, FIRST (+ models), SIENA/SIENAX, lesion filling, defac
 registration    FLIRT, FNIRT (+ applywarp/invwarp/convertwarp), FUGUE, MCFLIRT
 diffusion       TOPUP, EDDY, FDT (dtifit/bedpostx), probtrackx2, TBSS, XTRACT (+ atlases)
 functional      MELODIC, SUSAN, slicetimer
+asl             BASIL: oxford_asl, basil, asl_file, asl_calib (fabber ASL models); brings the
+                structural and registration components it calls, and the atlases its region
+                analysis uses
 ==============  ===========================================================================
 
 and, with ``cuda``, the GPU builds of eddy, bedpostx and probtrackx2.
@@ -59,7 +62,10 @@ COMPONENTS: dict[str, tuple[str, ...]] = {
         "fsl-data_atlases",
     ),
     "functional": ("fsl-melodic", "fsl-susan", "fsl-slicetimer"),
+    "asl": ("fsl-oxford_asl", "fsl-basil", "fsl-fabber_core", "fsl-fabber_models_asl", "fsl-data_atlases"),
 }
+#: Components another one runs commands of (oxford_asl calls BET, FAST, FLIRT, MCFLIRT …).
+COMPONENT_REQUIRES: dict[str, tuple[str, ...]] = {"asl": ("structural", "registration")}
 #: GPU builds added with ``cuda`` (only meaningful with the diffusion component).
 CUDA_PACKAGES: tuple[str, ...] = ("fsl-eddy-cuda", "fsl-fdt-cuda", "fsl-ptx2-cuda")
 ALL_COMPONENTS: tuple[str, ...] = tuple(COMPONENTS)
@@ -103,8 +109,11 @@ def package_specs(
     unknown = sorted(set(components) - set(COMPONENTS))
     if unknown:
         raise ValueError(f"Unknown FSL component(s): {', '.join(unknown)} (known: {', '.join(COMPONENTS)})")
+    chosen = set(components)
+    for component in list(chosen):
+        chosen |= set(COMPONENT_REQUIRES.get(component, ()))
     wanted: list[str] = []
-    for component in ("base", *[c for c in COMPONENTS if c != "base" and c in set(components)]):
+    for component in ("base", *[c for c in COMPONENTS if c != "base" and c in chosen]):
         wanted += [p for p in COMPONENTS[component] if p not in wanted]
     if cuda and "diffusion" in set(components):
         wanted += list(CUDA_PACKAGES)
@@ -299,6 +308,7 @@ def install_fsl(
 __all__ = [
     "ALL_COMPONENTS",
     "COMPONENTS",
+    "COMPONENT_REQUIRES",
     "CUDA_PACKAGES",
     "FSL_CHANNEL",
     "FSL_VERSION",

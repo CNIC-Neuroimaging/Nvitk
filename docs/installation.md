@@ -247,7 +247,8 @@ surface and longitudinal pipelines also need FreeSurfer 7.4.1 + license (see bel
 nvitk uses the FSL installation `$FSLDIR` points to. Without one, `nvitk-fsl install` (run by
 `install.sh` by default, offered by the GUI the first time an FSL tool finds no FSL) creates
 **nvitk's own FSL core** in `$CONDA_PREFIX/share/nvitk/fsl`: FSL's conda packages for the chosen
-components, at exactly the versions of FSL release 6.0.7.23 (a few GB; the GPU builds of eddy,
+components (structural, registration, diffusion, functional and `asl` — BASIL / oxford_asl for
+ASL perfusion), at exactly the versions of FSL release 6.0.7.23 (a few GB; the GPU builds of eddy,
 bedpostx and probtrackx2 with `--cuda`). It is a separate prefix — FSL brings its own Python — and
 it needs conda, which is why the conda package's post-link step does not create it.
 `nvitk-fsl info` shows which installation is in use; `NVITK_FSLDIR` or `nvitk-fsl use DIR`

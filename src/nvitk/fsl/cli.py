@@ -11,7 +11,8 @@ Structural: ``bet``, ``fast``, ``first``, ``anat``, ``siena``, ``sienax``, ``reo
 ``invwarp``, ``convertwarp``, ``convert-xfm``, ``mcflirt``, ``epi-reg`` (FLIRT: ``nvitk-flirt``).
 Diffusion: ``topup``, ``applytopup``, ``eddy``, ``dtifit``, ``bedpostx``, ``probtrackx2``,
 ``tbss``, ``xtract``. Functional: ``melodic``, ``susan``, ``slicetimer``, ``fugue``,
-``prepare-fieldmap``. Utilities: ``maths``, ``stats``, ``meants``, ``cluster``, ``smoothest``,
+``prepare-fieldmap``. ASL perfusion (BASIL): ``asl`` (the oxford_asl pipeline: CBF, arrival
+time, aCBV), ``basil``, ``asl-file``, ``asl-calib``. Utilities: ``maths``, ``stats``, ``meants``, ``cluster``, ``smoothest``,
 ``run`` (any FSL command in the FSL environment).
 
 Every command runs here by default, or on the cluster with ``--submit sge`` (in the nvitk
@@ -93,8 +94,10 @@ def info_cmd(as_json: bool) -> None:
 
 
 @main.command("install")
-@click.option("--components", default=",".join(c for c in ("structural", "registration", "diffusion", "functional")),
-              show_default=True, help="Comma-separated: structural, registration, diffusion, functional (base always).")
+@click.option("--components",
+              default=",".join(c for c in ("structural", "registration", "diffusion", "functional", "asl")),
+              show_default=True,
+              help="Comma-separated: structural, registration, diffusion, functional, asl (base always).")
 @click.option("--cuda/--no-cuda", default=None, help="GPU builds of eddy/bedpostx/probtrackx2 (default: if NVIDIA).")
 @click.option("--version", default=None, help="FSL release (default: the pinned one).")
 @click.option("--dry-run", is_flag=True, help="Only report what would be downloaded.")
@@ -530,6 +533,181 @@ def fugue_cmd(input: Path, output: Path, fieldmap: Path, dwell_time: float, unwa
 def prepare_fieldmap_cmd(phase: Path, magnitude_brain: Path, output: Path, delta_te: float, scanner: str) -> None:
     """A field map in rad/s from phase-difference (Siemens) or Hz (GE) data."""
     _run(functional.prepare_fieldmap(phase, magnitude_brain, output, delta_te_ms=delta_te, scanner=scanner))
+
+
+# ── ASL perfusion (BASIL) ────────────────────────────────────────────────────
+
+_LABELLING = click.Choice(list(("pcasl", "pasl")), case_sensitive=False)
+
+
+def _delay_options(func):
+    """--plds / --tis / --bolus / --labelling, shared by ``asl`` and ``basil``."""
+    for decorator in reversed((
+        click.option("--labelling", type=_LABELLING, default="pcasl", show_default=True,
+                     help="pCASL (give --plds) or pASL (give --tis)."),
+        click.option("--plds", default="", help="Post-labelling delays in s, comma-separated (pCASL)."),
+        click.option("--tis", default="", help="Inversion times in s, comma-separated (pASL)."),
+        click.option("--bolus", default="1.8", show_default=True,
+                     help="Labelling (bolus) duration in s; one, or one per delay."),
+    )):
+        func = decorator(func)
+    return func
+
+
+def _print_asl_summary(outputs: dict[str, Path]) -> None:
+    from . import asl
+
+    native = outputs.get("native_dir")
+    if native is not None and Path(native).is_dir():
+        for group, values in asl.summary(native).items():
+            click.echo(f"[{group}]")
+            _table(values)
+    region = outputs.get("region_analysis")
+    if region is not None and Path(region).is_file():
+        tables = asl.region_tables(Path(region).parent)
+        click.echo(f"Region analysis ({', '.join(title for title, _ in tables)}): {Path(region).parent}")
+
+
+@main.command("asl")
+@click.argument("asl_data", type=_IN)
+@click.argument("out_dir", type=_PATH)
+@_delay_options
+@click.option("--iaf", type=click.Choice(["tc", "ct", "diff", "tcb", "ctb"]), default="tc", show_default=True,
+              help="Volumes: tag-control / control-tag pairs, or differenced.")
+@click.option("--ibf", type=click.Choice(["rpt", "tis"]), default="rpt", show_default=True,
+              help="Order: all delays repeated (rpt), or the repeats of each delay together (tis).")
+@click.option("--rpts", default="", help="Repeats per delay when they differ (with --ibf tis).")
+@click.option("--slicedt", type=float, default=0.0, help="Time between slices (s; 2D multi-slice readouts).")
+@click.option("--sliceband", type=int, default=None, help="Slices per band (multiband).")
+@click.option("-m", "--mask", type=_IN, default=None, help="Brain mask in ASL space (default: automatic).")
+@click.option("-c", "--calib", type=_IN, default=None, help="M0 / proton-density calibration image.")
+@click.option("--cmethod", type=click.Choice(["voxel", "single", "both"]), default=None,
+              help="Voxelwise M0, or one M0 from a reference region (default: voxel without a structural).")
+@click.option("--tr", type=float, default=None, help="TR of the calibration image (s, default 3.2).")
+@click.option("--cgain", type=float, default=None, help="Gain of the ASL data relative to the calibration image.")
+@click.option("--alpha", type=float, default=None, help="Labelling efficiency (default 0.85 pCASL, 0.98 pASL).")
+@click.option("--tissref", type=click.Choice(["csf", "wm", "gm", "none"]), default=None,
+              help="Reference tissue for --cmethod single (default csf).")
+@click.option("--csf", "csf_mask", type=_IN, default=None, help="CSF mask for the reference region.")
+@click.option("--te", type=float, default=None, help="Echo time (ms) for the T2 correction of the reference.")
+@click.option("--m0", type=float, default=None, help="A precomputed M0 value instead of a calibration image.")
+@click.option("-s", "--struct", "structural", type=_IN, default=None, help="Structural image (whole head).")
+@click.option("--struct-brain", "structural_brain", type=_IN, default=None,
+              help="The structural, brain-extracted (else BET runs).")
+@click.option("--fslanat", type=_IN, default=None, help="An fsl_anat folder (registration to MNI, region analysis).")
+@click.option("--wp", "white_paper", is_flag=True, help="ASL white-paper (Alsop 2015) quantification.")
+@click.option("--spatial/--no-spatial", default=True, show_default=True, help="Adaptive spatial prior on CBF.")
+@click.option("--mc", "motion_correction", is_flag=True, help="Motion correction (MCFLIRT).")
+@click.option("--pvcorr", is_flag=True, help="Partial-volume correction (GM and WM perfusion).")
+@click.option("--pvgm", type=_IN, default=None, help="GM partial-volume map in ASL space.")
+@click.option("--pvwm", type=_IN, default=None, help="WM partial-volume map in ASL space.")
+@click.option("--infert1", is_flag=True, help="Include T1 uncertainty in the fit.")
+@click.option("--fixbolus", is_flag=True, default=None, help="Fix the bolus duration (default for pCASL).")
+@click.option("--fixbat", is_flag=True, help="Fix the arrival time at --bat.")
+@click.option("--artsupp", is_flag=True, help="Arterial (vascular) crushing used: no arterial component.")
+@click.option("--bat", type=float, default=None, help="Arrival time prior mean (s; default 1.3 pCASL, 0.7 pASL).")
+@click.option("--t1", type=float, default=None, help="Tissue T1 (s, default 1.3).")
+@click.option("--t1b", type=float, default=None, help="Blood T1 (s, default 1.65).")
+@click.option("--region-analysis", is_flag=True, help="CBF / ATT per atlas region (needs --fslanat).")
+@click.option("--cblip", type=_IN, default=None, help="Phase-encode-reversed calibration (TOPUP correction).")
+@click.option("--echospacing", type=float, default=None, help="Effective echo spacing (s) for --cblip.")
+@click.option("--pedir", type=click.Choice(["x", "y", "z", "-x", "-y", "-z"]), default=None,
+              help="Phase-encode direction for --cblip.")
+def asl_cmd(asl_data: Path, out_dir: Path, **kw: Any) -> None:
+    """BASIL perfusion pipeline (oxford_asl): CBF (ml/100g/min), arrival time, aCBV.
+
+    \b
+    nvitk-fsl asl asl.nii.gz out --plds 1.8 --bolus 1.8 -c m0.nii.gz --tr 6
+    nvitk-fsl asl asl.nii.gz out --plds 0.25,0.5,0.75,1,1.25,1.5 --bolus 1.4
+              -c m0.nii.gz --fslanat T1.anat --pvcorr --region-analysis
+    """
+    from . import asl
+
+    try:
+        cmd = asl.oxford_asl(asl_data, out_dir, **kw)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+    _run(cmd)
+    _print_asl_summary(cmd.existing_outputs())
+
+
+@main.command("basil")
+@click.argument("diff_data", type=_IN)
+@click.argument("mask", type=_IN)
+@click.argument("out_dir", type=_PATH)
+@_delay_options
+@click.option("--repeats", type=int, default=None, help="Repeats per delay in the data.")
+@click.option("--ibf", type=click.Choice(["tis", "rpt"]), default="tis", show_default=True,
+              help="Order of the volumes (rpt data are reordered first).")
+@click.option("--t1", type=float, default=1.3, show_default=True)
+@click.option("--t1b", type=float, default=1.65, show_default=True)
+@click.option("--bat", type=float, default=None, help="Arrival time prior mean (s).")
+@click.option("--batsd", type=float, default=None, help="Arrival time prior SD (s; default 1 for multi-delay).")
+@click.option("--slicedt", type=float, default=0.0)
+@click.option("--spatial/--no-spatial", default=True, show_default=True)
+@click.option("--infertau", is_flag=True, help="Infer the bolus duration.")
+@click.option("--inferart", is_flag=True, help="Include an arterial (macrovascular) component.")
+@click.option("--infert1", is_flag=True, help="Include T1 uncertainty.")
+@click.option("--pvgm", type=_IN, default=None)
+@click.option("--pvwm", type=_IN, default=None)
+def basil_cmd(diff_data: Path, mask: Path, out_dir: Path, **kw: Any) -> None:
+    """BASIL fit on label-control differenced data (perfusion in data units, arrival time)."""
+    from . import asl
+
+    try:
+        cmd = asl.basil(diff_data, mask, out_dir, **kw)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+    _run(cmd)
+
+
+@main.command("asl-file")
+@click.argument("data", type=_IN)
+@click.argument("out_base", type=_PATH)
+@click.option("--ntis", type=int, required=True, help="Number of delays in the data.")
+@click.option("--operation", type=click.Choice(["diff", "split-pairs", "mean"]), default="diff", show_default=True)
+@click.option("--iaf", type=click.Choice(["tc", "ct", "diff", "tcb", "ctb"]), default="tc", show_default=True)
+@click.option("--ibf", type=click.Choice(["rpt", "tis"]), default="rpt", show_default=True)
+@click.option("--obf", type=click.Choice(["rpt", "tis"]), default=None,
+              help="Output order (tis: grouped by delay, as basil reads it; default: as the input).")
+@click.option("--rpts", default="", help="Repeats per delay when they differ (with --ibf tis).")
+@click.option("--mask", type=_IN, default=None)
+def asl_file_cmd(data: Path, out_base: Path, **kw: Any) -> None:
+    """Label-control subtraction, tag / control split or averaging of an ASL series."""
+    from . import asl
+
+    try:
+        cmd = asl.asl_file(data, out_base, **kw)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+    _run(cmd)
+
+
+@main.command("asl-calib")
+@click.argument("calib", type=_IN)
+@click.argument("out_dir", type=_PATH)
+@click.option("-i", "--perfusion", type=_IN, default=None, help="Perfusion image to calibrate (ASL space).")
+@click.option("-m", "--ref-mask", type=_IN, default=None, help="Reference-region mask in calibration space.")
+@click.option("--struct-brain", "structural_brain", type=_IN, default=None, help="Brain-extracted structural.")
+@click.option("--asl2struct", type=_IN, default=None, help="ASL → structural matrix (with --struct-brain).")
+@click.option("--tissref", type=click.Choice(["csf", "wm", "gm", "none"]), default="csf", show_default=True)
+@click.option("--mode", type=click.Choice(["longtr", "satrecov"]), default="longtr", show_default=True)
+@click.option("--tr", type=float, default=3.2, show_default=True, help="TR of the calibration image (s).")
+@click.option("--cgain", type=float, default=1.0, show_default=True)
+@click.option("--te", type=float, default=0.0, show_default=True, help="Echo time (ms).")
+@click.option("--alpha", type=float, default=None, help="Labelling efficiency applied to M0.")
+@click.option("--bmask", "brain_mask", type=_IN, default=None, help="Brain mask in ASL space.")
+def asl_calib_cmd(calib: Path, out_dir: Path, **kw: Any) -> None:
+    """M0 from a reference region of a calibration image (and a perfusion image in ml/100g/min)."""
+    from . import asl
+
+    try:
+        cmd = asl.asl_calib(calib, out_dir, **kw)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+    outputs = _run(cmd).existing_outputs()
+    if "m0_value" in outputs:
+        click.echo(f"{'M0':22s} {asl.read_value(outputs['m0_value'])}")
 
 
 # ── utilities ────────────────────────────────────────────────────────────────

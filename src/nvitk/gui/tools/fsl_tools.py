@@ -6,8 +6,11 @@ reorients, crops and resamples, so nothing is assumed to share the input's grid)
 (masks, FAST/FIRST segmentations, cluster indices) open as Labels layers; reports and tables
 (SIENA/SIENAX, fslstats, cluster, smoothest) go to the results window.
 
+The ASL tools (category *ASL perfusion*) run BASIL: the oxford_asl pipeline (CBF, arrival
+time, aCBV, GM/WM means and region tables), the BASIL fit alone, asl_file and asl_calib.
+
 Short commands run in the foreground (seconds); long ones — FAST, FIRST, fsl_anat, FNIRT,
-EDDY, BEDPOSTX, TBSS … — run as background jobs (Jobs window, cancellable) and open their
+EDDY, BEDPOSTX, TBSS, BASIL … — run as background jobs (Jobs window, cancellable) and open their
 outputs when they finish. With no FSL installed the tool offers to install nvitk's FSL core.
 """
 
@@ -46,12 +49,14 @@ class _Load:
     labels: bool = False
     visible: bool = True
     lut: dict[int, Any] | None = None
+    colormap: str | None = None
 
 
 @dataclass
 class _Plan:
     loads: list[_Load] = field(default_factory=list)
-    #: ``(cmd) -> [(title, payload)]`` tables for the results window.
+    #: ``(cmd) -> [(title, payload)]`` tables for the results window (or ``(title, payload,
+    #: row_header)`` for a table whose rows are regions, labels …).
     tables: Callable[[Any], list[tuple[str, dict]]] | None = None
     #: Also open every NIfTI under this output role's directory (hidden).
     load_dir: str | None = None
@@ -405,6 +410,146 @@ def _smoothest(c: ToolInputs):
     return cmd, _Plan(tables=lambda cmd: [("smoothest", utils.parse_smoothest(cmd.stdout))])
 
 
+# ── ASL perfusion (BASIL) ────────────────────────────────────────────────────
+
+
+def _asl_delays(c: ToolInputs) -> dict[str, Any]:
+    """Labelling, its delays (PLDs for pCASL, TIs for pASL) and the labelling duration."""
+    labelling = c.s("fsl_asl_labelling", "pcasl")
+    delays = c.s("fsl_asl_delays")
+    if not delays:
+        raise ValueError("Give the post-labelling delay(s) (pCASL) or inversion time(s) (pASL), in seconds.")
+    return {"labelling": labelling, ("plds" if labelling == "pcasl" else "tis"): delays,
+            "bolus": c.s("fsl_asl_bolus", "1.8")}
+
+
+def _asl_tables(cmd: Any) -> list[tuple[Any, ...]]:
+    """GM / WM means per output set, and the region-analysis CSVs (one table each)."""
+    from nvitk.fsl import asl
+
+    found = cmd.existing_outputs()
+    tables: list[tuple[Any, ...]] = []
+    native = found.get("native_dir")
+    if native is not None:
+        for group, values in asl.summary(native).items():
+            tables.append((f"BASIL GM / WM means ({group})", values))
+    region_dir = found.get("region_analysis_dir")
+    if region_dir is not None and region_dir.is_dir():
+        for title, rows in asl.region_tables(region_dir):
+            tables.append((f"BASIL regions: {title}", rows, "Region"))
+    m0 = found.get("m0_value")
+    if m0 is not None and asl.read_value(m0) is not None:
+        tables.append(("BASIL calibration", {"M0 (reference region)": asl.read_value(m0)}))
+    return tables
+
+
+def _asl_oxford(c: ToolInputs):
+    from nvitk.fsl import asl
+
+    calib = c.layer_file("fsl_asl_calib_layer", required=False)
+    pvgm = c.layer_file("fsl_asl_pvgm_layer", required=False)
+    pvwm = c.layer_file("fsl_asl_pvwm_layer", required=False)
+    cmethod = c.s("fsl_asl_cmethod", "auto")
+    extra = shlex.split(c.s("fsl_asl_extra"))
+    cmd = asl.oxford_asl(
+        c.input(), c.work / "oxford_asl", **_asl_delays(c),
+        iaf=c.s("fsl_asl_iaf", "tc"), ibf=c.s("fsl_asl_ibf", "rpt"), rpts=c.s("fsl_asl_rpts"),
+        slicedt=c.f("fsl_asl_slicedt", 0.0), sliceband=c.i("fsl_asl_sliceband", 0) or None,
+        mask=c.layer_file("fsl_mask_layer", required=False),
+        calib=calib, cmethod=None if cmethod == "auto" else cmethod,
+        tr=c.f("fsl_asl_tr", 3.2) if calib else None, cgain=c.f("fsl_asl_cgain", 1.0) if calib else None,
+        tissref=c.s("fsl_asl_tissref", "csf") if calib and cmethod in ("single", "both") else None,
+        m0=(c.f("fsl_asl_m0", 0.0) or None) if calib is None else None,
+        alpha=c.f("fsl_asl_alpha", 0.0) or None,
+        structural=c.layer_file("fsl_asl_struct_layer", required=False), fslanat=c.path("fsl_asl_fslanat"),
+        white_paper=c.b("fsl_asl_wp"), spatial=c.b("fsl_asl_spatial", True), motion_correction=c.b("fsl_asl_mc"),
+        pvcorr=c.b("fsl_asl_pvcorr"), pvgm=pvgm, pvwm=pvwm, infert1=c.b("fsl_asl_infert1"),
+        fixbolus=True if c.b("fsl_asl_fixbolus") else None, artsupp=c.b("fsl_asl_artsupp"),
+        bat=c.f("fsl_asl_bat", 0.0) or None, t1=c.f("fsl_asl_t1", 1.3), t1b=c.f("fsl_asl_t1b", 1.65),
+        region_analysis=c.b("fsl_asl_region_analysis"),
+        cblip=c.layer_file("fsl_asl_cblip_layer", required=False),
+        echospacing=c.f("fsl_asl_echospacing", 0.0) or None, pedir=c.s("fsl_asl_pedir") or None, extra=extra,
+    )
+    calibrated = "perfusion_calib" in cmd.outputs
+    cbf = "perfusion_calib" if calibrated else "perfusion"
+    loads = [
+        _Load(cbf, "CBF (ml/100g/min)" if calibrated else "perfusion (uncalibrated)", colormap="inferno"),
+        _Load("arrival", "ATT arrival time (s)", visible=False, colormap="viridis"),
+        _Load("aCBV_calib" if calibrated else "aCBV", "aCBV (%)" if calibrated else "aCBV", visible=False,
+              colormap="magma"),
+        _Load("perfusion_var_calib" if calibrated else "perfusion_var", "CBF variance", visible=False),
+        _Load("pvcorr_perfusion_calib" if calibrated else "pvcorr_perfusion", "GM CBF (PV-corrected)",
+              visible=False, colormap="inferno"),
+        _Load("pvcorr_perfusion_wm_calib" if calibrated else "pvcorr_perfusion_wm", "WM CBF (PV-corrected)",
+              visible=False, colormap="inferno"),
+        _Load("pvcorr_arrival", "GM ATT (PV-corrected)", visible=False, colormap="viridis"),
+        _Load("refregion_perfusion_calib", "CBF (reference-region M0)", visible=False, colormap="inferno"),
+        _Load("std_perfusion_calib" if calibrated else "std_perfusion", "CBF in MNI space", visible=False,
+              colormap="inferno"),
+        _Load("std_arrival", "ATT in MNI space", visible=False, colormap="viridis"),
+        _Load("mask", "ASL analysis mask", labels=True, visible=False),
+    ]
+    if calibrated:
+        loads.append(_Load("perfusion", "perfusion (uncalibrated)", visible=False))
+    return cmd, _Plan(loads, tables=_asl_tables,
+                      note=lambda cmd: f"BASIL results: {cmd.outputs['dir']} (native_space; struct_space / std_space "
+                                       "with a structural image or fsl_anat folder).")
+
+
+def _asl_basil(c: ToolInputs):
+    from nvitk.fsl import asl
+
+    cmd = asl.basil(
+        c.input(), c.layer_file("fsl_mask_layer", what="brain mask layer"), c.work / "basil", **_asl_delays(c),
+        repeats=c.i("fsl_asl_repeats", 1), ibf=c.s("fsl_asl_ibf", "tis"), t1=c.f("fsl_asl_t1", 1.3),
+        t1b=c.f("fsl_asl_t1b", 1.65), bat=c.f("fsl_asl_bat", 0.0) or None, spatial=c.b("fsl_asl_spatial", True),
+        inferart=c.b("fsl_asl_inferart"), infertau=c.b("fsl_asl_infertau"), infert1=c.b("fsl_asl_infert1"),
+        pvgm=c.layer_file("fsl_asl_pvgm_layer", required=False), pvwm=c.layer_file("fsl_asl_pvwm_layer", required=False),
+    )
+    return cmd, _Plan([
+        _Load("mean_ftiss", "BASIL perfusion (data units)", colormap="inferno"),
+        _Load("mean_delttiss", "BASIL ATT (s)", visible=False, colormap="viridis"),
+        _Load("mean_fblood", "BASIL arterial component", visible=False, colormap="magma"),
+        _Load("mean_fwm", "BASIL WM perfusion (data units)", visible=False, colormap="inferno"),
+        _Load("mean_deltwm", "BASIL WM ATT (s)", visible=False, colormap="viridis"),
+    ], note=lambda cmd: f"BASIL steps: {cmd.outputs['steps']} — perfusion is in data units; ASL calibration "
+                        "(asl_calib) converts it to ml/100g/min.")
+
+
+def _asl_file(c: ToolInputs):
+    from nvitk.fsl import asl
+
+    obf = c.s("fsl_asl_obf", "same")
+    cmd = asl.asl_file(c.input(), c.out("asl"), ntis=c.i("fsl_asl_ntis", 1), operation=c.s("fsl_asl_operation", "diff"),
+                       iaf=c.s("fsl_asl_iaf", "tc"), ibf=c.s("fsl_asl_ibf", "rpt"), rpts=c.s("fsl_asl_rpts"),
+                       obf=None if obf == "same" else obf, mask=c.layer_file("fsl_mask_layer", required=False))
+    return cmd, _Plan([_Load("mean", "ASL mean difference", colormap="inferno"),
+                       _Load("diff", "ASL difference series", visible=False),
+                       _Load("tag", "ASL tag (label) images", visible=False),
+                       _Load("control", "ASL control images", visible=False)])
+
+
+def _asl_calib(c: ToolInputs):
+    from nvitk.fsl import asl
+
+    cmd = asl.asl_calib(
+        c.input(), c.work / "asl_calib", perfusion=c.layer_file("fsl_asl_perfusion_layer", required=False),
+        ref_mask=c.layer_file("fsl_asl_refmask_layer", required=False),
+        structural_brain=c.layer_file("fsl_asl_struct_layer", required=False), asl2struct=c.path("fsl_asl_asl2struct"),
+        tissref=c.s("fsl_asl_tissref", "csf"), mode=c.s("fsl_asl_calib_mode", "longtr"), tr=c.f("fsl_asl_tr", 3.2),
+        cgain=c.f("fsl_asl_cgain", 1.0), te=c.f("fsl_asl_te", 0.0), alpha=c.f("fsl_asl_alpha", 0.0) or None,
+        brain_mask=c.layer_file("fsl_mask_layer", required=False),
+    )
+
+    def tables(cmd):
+        m0 = cmd.existing_outputs().get("m0_value")
+        value = asl.read_value(m0) if m0 else None
+        return [("ASL calibration", {"M0 (arterial blood, × α when given)": value})] if value is not None else []
+
+    return cmd, _Plan([_Load("perfusion_calib", "CBF (ml/100g/min)", colormap="inferno"),
+                       _Load("refmask", "calibration reference mask", labels=True, visible=False)], tables=tables)
+
+
 _LAYER_TOKEN = re.compile(r"\{layer:([^}]+)\}")
 _OUT_TOKEN = re.compile(r"\{out:([^}]+)\}")
 
@@ -444,6 +589,7 @@ _BUILDERS: dict[str, Callable[[ToolInputs], tuple[Any, _Plan]]] = {
     "fsl_slicetimer": _slicetimer, "fsl_fugue": _fugue, "fsl_prepare_fieldmap": _prepare_fieldmap,
     "fsl_maths": _maths, "fsl_stats": _stats, "fsl_meants": _meants, "fsl_cluster": _cluster,
     "fsl_smoothest": _smoothest, "fsl_command": _command,
+    "fsl_asl_oxford": _asl_oxford, "fsl_asl_basil": _asl_basil, "fsl_asl_file": _asl_file, "fsl_asl_calib": _asl_calib,
 }
 
 #: Tool ids handled here.
@@ -463,7 +609,7 @@ def plan_manifest(cmd: Any, plan: _Plan, base: Path) -> dict[str, Any]:
         if path is None or path.is_dir() or not path.name.endswith((".nii", ".nii.gz")):
             continue
         layers.append(manifest_layer(path, load.title or load.role, base=base, labels=load.labels,
-                                     visible=load.visible, lut=load.lut))
+                                     visible=load.visible, lut=load.lut, colormap=load.colormap))
     if plan.load_dir:
         folder = found.get(plan.load_dir)
         if folder is not None and folder.is_dir():
@@ -471,9 +617,12 @@ def plan_manifest(cmd: Any, plan: _Plan, base: Path) -> dict[str, Any]:
                 layers.append(manifest_layer(path, path.parent.name, base=base, visible=False, colormap="hot"))
     tables = []
     if plan.tables is not None:
-        for title, payload in plan.tables(cmd):
+        for title, payload, *rest in plan.tables(cmd):
             if payload:
-                tables.append({"title": title, "payload": _jsonable(payload)})
+                entry = {"title": title, "payload": _jsonable(payload)}
+                if rest:
+                    entry["row_header"] = str(rest[0])
+                tables.append(entry)
     notes = [plan.note(cmd)] if plan.note is not None else []
     # Small text outputs (matrices, motion parameters, reports) come back too.
     extra = [
@@ -539,7 +688,7 @@ def _offer_install(reason: str) -> None:
 def _start_install(params: dict[str, Any]) -> None:
     from nvitk.gui.core.external_jobs import start_external_job
 
-    components = [c for c in ("structural", "registration", "diffusion", "functional")
+    components = [c for c in ("structural", "registration", "diffusion", "functional", "asl")
                   if params.get(f"fsl_install_{c}", True)]
     argv = [sys.executable, "-m", "nvitk.fsl.cli", "install", "-y", "--components", ",".join(components) or "structural"]
     if "fsl_install_cuda" in params:

@@ -579,7 +579,7 @@ window expressed in intensity units, and the live preview is reverted if the dia
 
 `nvitk.gui.tools.registry` defines every tool as a `GuiToolSpec` (id, category, parameter
 spec, whether it needs a reference layer or 3D data, and its run mode), merged with the
-pipeline shortcuts from `nvitk.gui.pipeline.catalog`. **172 tools across 16 categories**,
+pipeline shortcuts from `nvitk.gui.pipeline.catalog`. **176 tools across 17 categories**,
 each backed by the same functions documented in the {doc}`Main API Reference <../api/index>`:
 
 | Category | Count | Examples |
@@ -592,6 +592,7 @@ each backed by the same functions documented in the {doc}`Main API Reference <..
 | Segmentation | 26 | Label ops, mask boolean algebra, mask image (keep / remove regions), region growing, blood flood, ANTsPyNet brain/vessel/DKT, TotalSegmentator, eICAB |
 | FastSurfer | 12 | Whole-brain aseg+DKT segmentation with cerebellum (CerebNet), hypothalamus (HypVINN) and corpus callosum modules, recon-surf surfaces, full and longitudinal pipelines, subject loading, PV-corrected label stats, aseg reduction, conforming, FreeSurfer installer — see below |
 | FSL | 35 | BET, FAST, FIRST, fsl_anat, SIENA/SIENAX, FNIRT/applywarp/invwarp, MCFLIRT, epi_reg, TOPUP, EDDY, DTIFIT, BEDPOSTX, PROBTRACKX2, TBSS, XTRACT, MELODIC, SUSAN, slice timing, FUGUE, fslmaths/fslstats/cluster/smoothest, any FSL command, FSL core installer — see below |
+| ASL perfusion | 4 | FSL BASIL: CBF (ml/100g/min), arrival time and aCBV with oxford_asl (calibration, partial-volume correction, MNI space, atlas region tables), the BASIL fit alone, asl_file subtraction, asl_calib M0 — see below |
 | Registration | 6 | FLIRT register (6/7/9/12 DOF, cost, search range) / apply; ANTsPy register (every `type_of_transform`, stage metrics, iteration schedules, masks) / apply; FireANTs register (moments → rigid → affine → greedy / SyN chains on the GPU) / apply. Each can also warp further layers with the new transform. |
 | Visualization | 12 | PET/SUV hotspots, 4D-flow vectors, 4D-flow particle tracing (VMTK streamlines / pathlines), vessel cross-sections, hemodynamics, TOF morphometrics |
 | Transform | 8 | Volume projection, reorient, rotate, swap axes, isotropy, resample, oblique slice |
@@ -668,6 +669,18 @@ When FastSurfer or FSL is missing, the tool offers to install it in the backgrou
 DWI tools find `bvecs` / `bvals` next to the layer's source file when those fields are blank;
 `{layer:NAME}` in *fslmaths* and *Run any FSL command* stands for another layer's file, and
 `{out:NAME}` in the latter names an output to open afterwards.
+
+### ASL perfusion (BASIL)
+
+The *ASL perfusion* category runs FSL's BASIL on the active ASL series, the same code as
+`nvitk-fsl asl` / `basil` / `asl-file` / `asl-calib` ({doc}`../api/measure`). *BASIL perfusion*
+takes the labelling (pCASL / pASL), the delays and labelling duration, the volume layout, and
+optionally an M0 calibration layer (or an M0 value), a brain mask, a structural layer or an
+`fsl_anat` folder, and GM / WM partial-volume layers. It runs as a background job and opens CBF
+in ml/100g/min (calibrated; *inferno*), with arrival time, aCBV, the CBF variance, the
+partial-volume-corrected GM / WM maps and the MNI-space maps as hidden layers; the GM / WM means
+and, with *Region analysis*, the per-region CBF and ATT tables go to the results window. *Run SGE*
+works for all four tools (the `fsl_anat` folder is uploaded with the job).
 
 ### Measurement results: colouring the labels
 
