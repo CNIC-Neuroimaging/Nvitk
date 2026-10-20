@@ -157,38 +157,22 @@ class FslBackendStatus:
 
 def _fsl_version(fsldir: str | None) -> str:
     """Read the FSL version string from ``$FSLDIR/etc/fslversion``, or ``""`` when unreadable."""
-    if not fsldir:
-        return ""
-    for rel in ("etc/fslversion", "VERSION", "share/fsl/etc/fslversion"):
-        candidate = Path(fsldir) / rel
-        try:
-            if candidate.is_file():
-                return candidate.read_text(encoding="utf-8").strip().splitlines()[0]
-        except OSError:
-            continue
-    return ""
+    from nvitk.fsl.env import fsl_version
+
+    return fsl_version(Path(fsldir)) if fsldir else ""
 
 
 def resolve_fsldir() -> Path | None:
-    """The FSL installation: ``$FSLDIR`` when set, else inferred from where ``randomise`` lives.
+    """The FSL installation (see :func:`nvitk.fsl.env.resolve_fsldir` for the order).
 
     ``randomise_parallel`` calls ``$FSLDIR/bin/randomise`` and ``$FSLDIR/bin/fsl_sub`` by absolute
     path, so a GUI started without sourcing ``fsl.sh`` — FSL on ``PATH`` but ``FSLDIR`` unset — fails
-    at its first line. The binaries' location is enough to recover it: conda installs put wrappers in
-    ``$FSLDIR/share/fsl/bin`` and the real files in ``$FSLDIR/bin``, and either way an ancestor holds
-    ``etc/fslversion``.
+    at its first line; the resolver recovers it from the binaries' location, and also finds nvitk's
+    own FSL core when no other installation is configured.
     """
-    env = os.environ.get("FSLDIR", "").strip()
-    if env and Path(env).is_dir():
-        return Path(env)
-    for name in ("randomise", "fslmerge"):
-        exe = shutil.which(name)
-        if not exe:
-            continue
-        for parent in Path(exe).resolve().parents:
-            if (parent / "etc" / "fslversion").is_file():
-                return parent
-    return None
+    from nvitk.fsl.env import resolve_fsldir as _resolve
+
+    return _resolve()
 
 
 def fsl_backend_status() -> FslBackendStatus:
@@ -199,7 +183,10 @@ def fsl_backend_status() -> FslBackendStatus:
     ``fslmerge`` resolves and ``randomise`` does not. A single "FSL missing" would send someone
     looking for the wrong problem.
     """
-    resolved_dir = resolve_fsldir()
+    # Put the resolved installation on PATH first: nvitk's own FSL core is not on it otherwise.
+    from nvitk.fsl.env import ensure_fsl_in_process
+
+    resolved_dir = ensure_fsl_in_process()
     fsldir = str(resolved_dir) if resolved_dir else None
     found: dict[str, str] = {}
     for name in FSL_BINARIES:

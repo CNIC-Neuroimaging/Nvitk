@@ -43,6 +43,8 @@ class SgeDoneMarker:
     output_files: list[str] = field(default_factory=list)
     finished_at: str = ""
     error: str | None = None
+    #: How to open the outputs (FastSurfer / FSL jobs; see :mod:`nvitk.gui.tools.external_io`).
+    manifest: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SgeDoneMarker:
@@ -56,6 +58,7 @@ class SgeDoneMarker:
             output_files=[str(f) for f in files],
             finished_at=str(data.get("finished_at") or ""),
             error=(str(data["error"]) if data.get("error") else None),
+            manifest=data.get("manifest") if isinstance(data.get("manifest"), dict) else None,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -66,6 +69,7 @@ class SgeDoneMarker:
             "output_files": list(self.output_files),
             "finished_at": self.finished_at,
             "error": self.error,
+            **({"manifest": self.manifest} if self.manifest is not None else {}),
         }
 
 
@@ -82,7 +86,8 @@ def remote_output_dir(remote_job_root: str) -> str:
 def verify_local_downloads(local_dir: Path, done: SgeDoneMarker) -> list[Path]:
     """Ensure every file listed in *done* was downloaded with non-zero size."""
     expected = done.output_files or []
-    if not expected:
+    if not expected and not (done.manifest and done.manifest.get("tables")):
+        # A job whose results are only tables (fslstats, cluster) sends no files.
         raise ValueError("Done marker lists no output files.")
     paths = []
     for name in expected:

@@ -2544,6 +2544,15 @@ class OrthoViewerPanel(QWidget):
         stored = _ortho_prefs()
         self._resample_offgrid = bool(stored.get("resample", True))
         self._offgrid_skipped: list[str] = []
+        #: What the main Napari canvas draws: layers hidden there only, layers on
+        #: other grids, the whole canvas. Shared through the viewer.
+        from nvitk.gui.viz.main_canvas import MainCanvasFilter
+
+        self._main_canvas = MainCanvasFilter(viewer)
+        try:
+            viewer._nvitk_main_canvas = self._main_canvas
+        except Exception:  # noqa: BLE001
+            pass
         #: The person + R/L A/P H/F marker on the 3D canvas, created on first use.
         self._marker: Any | None = None
 
@@ -2747,6 +2756,36 @@ class OrthoViewerPanel(QWidget):
         self._resample_box.toggled.connect(self._on_resample_toggled)
         card.add(self._resample_box)
 
+        # The main canvas has its own say over resampling: Napari draws every layer
+        # in world space through its affine — turned, flipped and placed as acquired,
+        # layers on other grids resampled into alignment. Off, each image and label
+        # layer is drawn as stored, on its own voxel grid. Which layers are drawn
+        # there at all is the table's "Main" column.
+        self._main_resample_box = QCheckBox("Main canvas: resample layers into world space")
+        self._main_resample_box.setToolTip(
+            "On: the main Napari canvas draws every layer in world (scanner) space through "
+            "its affine — an oblique or flipped acquisition turned into place, layers on "
+            "other grids resampled into alignment. Off: every image and label layer is drawn "
+            "as stored, on its own voxel grid (voxel size kept; no rotation, flip, "
+            "obliquity or offset), the way these views lay a volume out — layers on the "
+            "same grid still overlay, layers on other grids are not aligned. Meshes, points "
+            "and shapes stay in world space. Tools, saving and exports always use the real "
+            "geometry."
+        )
+        self._main_resample_box.setChecked(self._main_canvas.resample())
+        self._main_resample_box.toggled.connect(self._main_canvas.set_resample)
+        card.add(self._main_resample_box)
+
+        self._main_canvas_box = QCheckBox("Show the main canvas")
+        self._main_canvas_box.setToolTip(
+            "Off: the main Napari canvas is hidden and stops rendering; these views "
+            "and the other docks take its space. Also under View ▸ Show main canvas."
+        )
+        self._main_canvas_box.setChecked(self._main_canvas.canvas_shown())
+        self._main_canvas_box.toggled.connect(self._main_canvas.set_canvas_shown)
+        card.add(self._main_canvas_box)
+        self._main_canvas.changed.connect(self._on_main_canvas_changed)
+
         self._marker_box = QCheckBox("Orientation figure on the 3D canvas")
         self._marker_box.setToolTip(
             "A person and R/L, A/P, H/F arrows in the corner of the 3D view, turning "
@@ -2758,8 +2797,8 @@ class OrthoViewerPanel(QWidget):
         # One row per drawn layer: whether it gets a slice image in 3D, and
         # whether the see-inside cut opens it. A mask can stay whole while the
         # CT around it is cut away — or the other way round.
-        self._layers_table = QTableWidget(0, 3)
-        self._layers_table.setHorizontalHeaderLabels(["Layer", "3D slice", "Cut"])
+        self._layers_table = QTableWidget(0, 4)
+        self._layers_table.setHorizontalHeaderLabels(["Layer", "3D slice", "Cut", "Main"])
         self._layers_table.verticalHeader().setVisible(False)
         self._layers_table.setSelectionMode(QAbstractItemView.NoSelection)
         self._layers_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -2767,11 +2806,14 @@ class OrthoViewerPanel(QWidget):
         header.setSectionResizeMode(0, QHeaderView.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         self._layers_table.setMinimumHeight(70)
         self._layers_table.setMaximumHeight(150)
         self._layers_table.setToolTip(
             "3D slice: draw this layer's slice image on the 3D planes (needs "
-            "'…and the slice image' below). Cut: let 'See inside' open this layer."
+            "'…and the slice image' below). Cut: let 'See inside' open this layer. "
+            "Main: draw this layer on the main Napari canvas — unticked, it is hidden "
+            "there only and still drawn in these views and listed as visible."
         )
         self._layers_table.itemChanged.connect(self._on_table_item_changed)
         card.add(self._layers_table)
@@ -3106,6 +3148,7 @@ class OrthoViewerPanel(QWidget):
         self._redraw(force=True)
         self._apply_clip()
         self._label_editor.refresh()
+        self._main_canvas.schedule()
 
     def _update_composite_label(self) -> None:
         """Say what the composite is currently made of."""
@@ -3727,6 +3770,38 @@ class OrthoViewerPanel(QWidget):
             self._plane_choice[key] = source.layer is self._layer
         return self._plane_choice[key]
 
+    def _main_item(self, layer: Any) -> QTableWidgetItem:
+        """The "Main" cell: drawn on the main canvas, or hidden there only."""
+        item = QTableWidgetItem()
+        item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+        shown = not self._main_canvas.is_manually_hidden(layer)
+        item.setCheckState(Qt.Checked if shown else Qt.Unchecked)
+        return item
+
+    def _on_main_canvas_changed(self) -> None:
+        """Keep the "Main" column and the two canvas boxes in step with the filter."""
+        for box, value in (
+            (self._main_resample_box, self._main_canvas.resample()),
+            (self._main_canvas_box, self._main_canvas.canvas_shown()),
+        ):
+            if box.isChecked() != value:
+                box.blockSignals(True)
+                box.setChecked(value)
+                box.blockSignals(False)
+        layers = getattr(self, "_table_layers", [])
+        self._table_guard = True
+        try:
+            for row, layer in enumerate(layers):
+                if row < self._layers_table.rowCount():
+                    self._layers_table.setItem(row, 3, self._main_item(layer))
+        finally:
+            self._table_guard = False
+
+    def restore_canvas_preference(self) -> None:
+        """Hide the main canvas if it was hidden last session (the dock exists by now)."""
+        if not self._main_canvas.canvas_shown():
+            self._main_canvas.set_canvas_shown(False, remember=False)
+
     def _wants_cut(self, layer: Any) -> bool:
         """Whether the see-inside cut opens *layer* (default: every drawn layer)."""
         return self._cut_choice.get(id(layer), True)
@@ -3753,6 +3828,7 @@ class OrthoViewerPanel(QWidget):
                 cut.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
                 cut.setCheckState(Qt.Checked if self._wants_cut(source.layer) else Qt.Unchecked)
                 table.setItem(row, 2, cut)
+                table.setItem(row, 3, self._main_item(source.layer))
         finally:
             self._table_guard = False
 
@@ -3762,11 +3838,13 @@ class OrthoViewerPanel(QWidget):
             return
         row, col = item.row(), item.column()
         layers = getattr(self, "_table_layers", [])
-        if row >= len(layers) or col not in (1, 2):
+        if row >= len(layers) or col not in (1, 2, 3):
             return
         layer = layers[row]
         checked = item.checkState() == Qt.Checked
-        if col == 1:
+        if col == 3:
+            self._main_canvas.set_manually_hidden(layer, not checked)
+        elif col == 1:
             self._plane_choice[id(layer)] = checked
             if self._show_planes.isChecked():
                 try:
@@ -4072,6 +4150,7 @@ def open_ortho_views(viewer: Any, layer: Any | None = None) -> OrthoViewerPanel:
             pass
         # Next turn: the canvas has to exist before the marker can be put on it.
         QTimer.singleShot(0, panel.restore_marker_preference)
+        QTimer.singleShot(0, panel.restore_canvas_preference)
     dock = getattr(panel, "_nvitk_dock", None)
     if dock is not None:
         dock.show()
@@ -4101,6 +4180,15 @@ def attach_ortho_dock(viewer: Any, panel: OrthoViewerPanel) -> Any:
         minimum_width=360,
     )
     panel._nvitk_dock = dock
+    if dock is not None:
+        # Closing the views with the main canvas hidden would leave nothing to look
+        # at: the canvas comes back. (The toggle action follows closing, not a tab
+        # switch that merely puts another dock in front.)
+        def _closed(open_: bool) -> None:
+            if not open_ and not panel._main_canvas.canvas_shown():
+                panel._main_canvas.set_canvas_shown(True)
+
+        dock.toggleViewAction().toggled.connect(_closed)
 
     def _refresh(_event: Any = None) -> None:
         """Rebind the panel to whichever layer is active.

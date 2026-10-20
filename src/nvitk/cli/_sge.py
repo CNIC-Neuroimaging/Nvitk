@@ -98,13 +98,16 @@ def submit_tool_job(
     models: Path | None = None,
     extra_env: dict[str, str] | None = None,
     overrides: SgeResourceOverrides | None = None,
+    extra_host_binds: tuple[tuple[Path, str], ...] = (),
 ) -> str | None:
     """Submit (or, if *emit* is given, append to that script file handle instead of submitting) one
     SGE stage running *python_cmd* under Singularity, using default resources/binds for *gpu*.
 
     *models* adds a ``-B`` bind for a weights directory the tool needs, and
     *extra_env* exports additional variables inside the container — a tool whose
-    weights live outside ``image_tools`` (TotalSegmentator) needs both."""
+    weights live outside ``image_tools`` (TotalSegmentator) needs both. *extra_host_binds*
+    adds ``(host directory, container path)`` binds — the FSL / FastSurfer CLIs bind every
+    folder their path arguments live in."""
     # No ensure_dirs() here: these are cluster paths and cluster storage is not mounted
     # locally. submit_stage() creates them on the direct (on-cluster) submission path, and
     # write_script_header() emits the mkdir -p for the emit path.
@@ -120,6 +123,7 @@ def submit_tool_job(
         binds=binds,
         use_nv=gpu,
         extra_env=env,
+        extra_host_binds=tuple((Path(h), str(c)) for h, c in extra_host_binds),
     )
     return submit_stage(spec, paths, emit=emit)
 
@@ -134,6 +138,8 @@ def emit_submit_script(
     models: Path | None = None,
     extra_env: dict[str, str] | None = None,
     overrides: SgeResourceOverrides | None = None,
+    extra_host_binds: tuple[tuple[Path, str], ...] = (),
+    title: str = "nvitk image_tools CLI",
 ) -> Path:
     """Write a qsub shell script at *script_path* containing one job stage per ``(job_name,
     python_cmd)`` in *stages*, sharing the header, cluster paths and resource request."""
@@ -144,7 +150,7 @@ def emit_submit_script(
             fh,
             log_dir=paths.log_dir,
             err_dir=paths.err_dir,
-            title="nvitk image_tools CLI",
+            title=title,
         )
         for job_name, python_cmd in stages:
             submit_tool_job(
@@ -157,6 +163,7 @@ def emit_submit_script(
                 models=models,
                 extra_env=extra_env,
                 overrides=overrides,
+                extra_host_binds=extra_host_binds,
             )
     return script_path
 

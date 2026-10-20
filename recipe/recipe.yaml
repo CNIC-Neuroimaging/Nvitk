@@ -22,7 +22,7 @@ source:
   path: ../
 
 build:
-  number: 1
+  number: 2
   noarch: python
   script:
     - pip install . --no-deps -vv
@@ -39,6 +39,13 @@ build:
     - mkdir -p "$PREFIX/share/nvitk/vmtk"
     - cp "$RECIPE_DIR/vmtk/build_wheel.sh" "$PREFIX/share/nvitk/vmtk/build_wheel.sh"
     - chmod +x "$PREFIX/share/nvitk/vmtk/build_wheel.sh"
+    # FastSurfer (v2.5.4, the newest on Python 3.11) is installed by post-link from these scripts —
+    # and again on demand by `nvitk-fastsurfer install` — into $PREFIX/share/nvitk/fastsurfer.
+    - mkdir -p "$PREFIX/share/nvitk/fastsurfer-install"
+    - cp "$RECIPE_DIR/fastsurfer/install_fastsurfer.sh" "$RECIPE_DIR/fastsurfer/download_checkpoints.py" "$PREFIX/share/nvitk/fastsurfer-install/"
+    - chmod +x "$PREFIX/share/nvitk/fastsurfer-install/install_fastsurfer.sh"
+    # nvitk's own FSL core is created by `nvitk-fsl install` (nvitk.fsl.install), never by post-link:
+    # it needs conda, which a post-link script must not call.
     # Activation hooks: prepend $CONDA_PREFIX/lib to LD_LIBRARY_PATH so conda Qt/font
     # libraries win over HPC module paths (see activate.d/nvitk-gui.sh).
     - mkdir -p "$PREFIX/etc/conda/activate.d" "$PREFIX/etc/conda/deactivate.d"

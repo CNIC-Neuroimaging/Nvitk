@@ -181,6 +181,8 @@ conda activate nvitk-dev
 | `--force` | Remove and recreate the target environment if it already exists |
 | `--wheel [FILE]` | Install nvitk non-editably: from `FILE`, or from a wheel built into `dist/` |
 | `--dev-tools` / `--no-dev-tools` | Include the `[dev]` extra — pytest, sphinx toolchain (default: on for editable, off for `--wheel`) |
+| `--no-fastsurfer` | Skip FastSurfer (tree + network weights, ≈340 MB); `nvitk-fastsurfer install` adds it later |
+| `--no-fsl` / `--fsl-components LIST` | Skip nvitk's FSL core, or choose its components (default: structural, registration, diffusion, functional) |
 | `--dry-run` | Print the variant, target and conda requirements without installing anything |
 
 Both variants include the GUI and R/statistics stacks; only the PyTorch build differs. The
@@ -230,6 +232,38 @@ bash recipe/vmtk/build_wheel.sh manylinux dist/vmtk
 Check an environment with
 `python -c "from nvitk.vmtk import vmtk_version; print(vmtk_version())"`.
 
+### FastSurfer
+
+FastSurfer **v2.5.4** (the newest release that runs on Python 3.11) is installed by the post-link
+step into `$CONDA_PREFIX/share/nvitk/fastsurfer`: its source tree, its network checkpoints
+(≈320 MB, fetched with a timeout-guarded downloader because one of FastSurfer's mirrors stalls),
+and its Python dependencies (`monai`, `lapy`, `yacs`, `neuroreg`, `meshpy`, `pyrr`,
+`whippersnappy`). A failure there does not fail the install; `nvitk-fastsurfer install` retries.
+Set `NVITK_FASTSURFER=0` (conda) or pass `--no-fastsurfer` (`install.sh`) to skip it. Its
+surface and longitudinal pipelines also need FreeSurfer 7.4.1 + license (see below).
+
+### FSL
+
+nvitk uses the FSL installation `$FSLDIR` points to. Without one, `nvitk-fsl install` (run by
+`install.sh` by default, offered by the GUI the first time an FSL tool finds no FSL) creates
+**nvitk's own FSL core** in `$CONDA_PREFIX/share/nvitk/fsl`: FSL's conda packages for the chosen
+components (structural, registration, diffusion, functional and `asl` — BASIL / oxford_asl for
+ASL perfusion), at exactly the versions of FSL release 6.0.7.23 (a few GB; the GPU builds of eddy,
+bedpostx and probtrackx2 with `--cuda`). It is a separate prefix — FSL brings its own Python — and
+it needs conda, which is why the conda package's post-link step does not create it.
+`nvitk-fsl info` shows which installation is in use; `NVITK_FSLDIR` or `nvitk-fsl use DIR`
+overrides `$FSLDIR`. FSL is free for non-commercial use only — see its
+[license](https://fsl.fmrib.ox.ac.uk/fsl/docs/license.html).
+
+### On the cluster
+
+FastSurfer and FSL jobs (`--submit sge`, the GUI's *Run SGE*) run in the nvitk Singularity
+container, whose definition (`registry/containers/projects/nvitk`) installs the FSL components
+above (`FSLDIR=/opt/conda`), FastSurfer v2.5.4 with its checkpoints, and FreeSurfer 7.4.1 pruned to
+what recon-surf runs (`FREESURFER_HOME=/opt/freesurfer`; the license is bound per job, never baked
+in). Rebuild the container and point `paths.nvitk_container` in `sge.json` at it; the nvitk source
+the jobs bind (`paths.nvitk_src_dir`) has to be a version with these tools.
+
 ## External prerequisites (not installed by conda or `install.sh`)
 
 Separately licensed or with no package-manager distribution — install these yourself and
@@ -238,8 +272,8 @@ needed-but-missing external tool is required for the operation you're running.
 
 | Dependency | Version | Used by | Install |
 |---|---|---|---|
-| **FSL** | 6.0.7.19 | `nvitk-flirt`, registration CLIs, the {doc}`QVTPy pipeline <pipelines/qvtpy>` | [fsl.fmrib.ox.ac.uk/fsldownloads](https://fsl.fmrib.ox.ac.uk/fsldownloads/) — official `fslinstaller.py`; non-commercial license required |
-| **FreeSurfer** | 7.x | Desikan atlas lookups (`$FREESURFER_HOME`) | [surfer.nmr.mgh.harvard.edu](https://surfer.nmr.mgh.harvard.edu/fswiki/DownloadAndInstall) — free registration required |
+| **FSL** (full suite) | 6.0.7.x | anything beyond nvitk's FSL core (FEAT GUI, FSLeyes …) | [fsl.fmrib.ox.ac.uk/fsldownloads](https://fsl.fmrib.ox.ac.uk/fsldownloads/) — official `fslinstaller.py`; non-commercial license required. `nvitk-fsl install` covers the tools nvitk wraps. |
+| **FreeSurfer** | 7.4.1 | FastSurfer surfaces / longitudinal, Desikan atlas lookups (`$FREESURFER_HOME`) | `nvitk-fastsurfer install-freesurfer`, or [surfer.nmr.mgh.harvard.edu](https://surfer.nmr.mgh.harvard.edu/fswiki/DownloadAndInstall) — free registration (license file) required |
 | **SPM12** | r7771 | The QVT+ MATLAB reference pipeline | [fil.ion.ucl.ac.uk/spm/software/spm12](https://www.fil.ion.ucl.ac.uk/spm/software/spm12/) |
 
 ```{seealso}

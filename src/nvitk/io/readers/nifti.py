@@ -156,6 +156,9 @@ def read_nifti(
     """
     Load a NIfTI file or the first ``.nii`` / ``.nii.gz`` in a directory via nibabel.
 
+    FreeSurfer ``.mgz`` / ``.mgh`` files load through here too: nibabel gives them the
+    same affine (voxel → scanner RAS) and zooms.
+
     Populates ``axes``, ``shape``, ``affine``, ``orientation`` (when derivable), voxel sizes,
     and merges a sibling JSON sidecar if present (or *metadata_json* when given). NIfTI header
     extension payloads that decode as JSON are merged without overwriting core spatial keys.
@@ -221,7 +224,8 @@ def read_nifti(
             stored_axes = sidecar.get("axes", stored_axes)
         _merge_sidecar_dict(metadata, sidecar)
 
-    for extension in proxy.header.extensions:
+    # MGH/MGZ headers (FreeSurfer) have no extensions.
+    for extension in getattr(proxy.header, "extensions", ()):
         try:
             try:
                 content_bytes = extension.get_content()

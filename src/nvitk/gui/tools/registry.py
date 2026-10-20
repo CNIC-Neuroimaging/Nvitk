@@ -125,6 +125,9 @@ _CATEGORY_ORDER = (
     "Morphology",
     "Centerline",
     "Segmentation",
+    "FastSurfer",
+    "FSL",
+    "ASL perfusion",
     "Registration",
     "Visualization",
     "Transform",
@@ -2340,6 +2343,471 @@ _PIPELINE_GUI: tuple[GuiToolSpec, ...] = tuple(
 
 _TOOLS = _TOOLS + _PIPELINE_GUI
 
+# ── FastSurfer (nvitk.gui.tools.fastsurfer_tools) ────────────────────────────
+
+
+def _fastsurfer_default(kind: str) -> str:
+    """The remembered FreeSurfer installation / license, to prefill the surface tools."""
+    try:
+        from nvitk.segmentation.fastsurfer import config as _fs
+
+        if kind == "dest":
+            return str(_fs.default_freesurfer_dest())
+        path = _fs.freesurfer_home() if kind == "home" else _fs.fs_license()
+        return str(path) if path else ""
+    except Exception:  # noqa: BLE001 — the registry must import without FastSurfer
+        return ""
+
+
+_FS_SUBJECTS = ParamSpec("output_dir", "Subjects directory (blank = temporary)", "str", "")
+_FS_SID = ParamSpec("fs_sid", "Subject id (blank = layer name)", "str", "")
+_FS_NATIVE = ParamSpec("fs_native_image", "Results on the input's own grid (native image)", "bool", True)
+_FS_VOX = ParamSpec(
+    "fs_vox_size", "Voxel size when not native", "choice", "min", choices=("min", "1", "0.9", "0.8", "0.7")
+)
+_FS_BIAS = ParamSpec("fs_biasfield", "Bias-field correction + PV-corrected stats", "bool", True)
+_FS_COMPUTE = (
+    ParamSpec("fs_viewagg_device", "View aggregation on", "choice", "auto", choices=("auto", "cuda", "cpu")),
+    ParamSpec("fs_batch", "Inference batch size", "int", 1, min=1, max=16),
+    ParamSpec("fs_threads", "Threads (0 = auto)", "int", 0, min=0, max=128),
+)
+_FS_SURFACE = (
+    ParamSpec("fs_freesurfer_home", "FreeSurfer home (7.4.1)", "str", _fastsurfer_default("home")),
+    ParamSpec("fs_license", "FreeSurfer license file", "str", _fastsurfer_default("license")),
+    ParamSpec("fs_3t", "3T Talairach atlas", "bool", False),
+    ParamSpec("fs_parallel", "Both hemispheres at once", "bool", True),
+    ParamSpec("fs_no_surfreg", "Skip spherical registration (faster)", "bool", False),
+    ParamSpec("fs_fsaparc", "Also FreeSurfer's own aparc", "bool", False),
+    ParamSpec("fs_ignore_fs_version", "Accept another FreeSurfer version", "bool", False),
+)
+_FS_MODULE_PARAMS = (_FS_SUBJECTS, _FS_SID, _FS_NATIVE, _FS_VOX, _FS_BIAS, *_FS_COMPUTE)
+
+_FASTSURFER_TOOLS: tuple[GuiToolSpec, ...] = (
+    GuiToolSpec(
+        "fastsurfer_seg",
+        "FastSurfer",
+        "Whole-brain segmentation (aseg + DKT, all modules)",
+        (
+            _FS_SUBJECTS,
+            _FS_SID,
+            ParamSpec("fs_cereb", "Cerebellum (CerebNet)", "bool", True),
+            ParamSpec("fs_hypothal", "Hypothalamus (HypVINN)", "bool", True),
+            ParamSpec("fs_cc", "Corpus callosum segmentation + shape", "bool", True),
+            ParamSpec("fs_t2_layer", "T2 layer for HypVINN (optional)", "layer", ""),
+            ParamSpec("fs_reg_mode", "T1/T2 registration", "choice", "coreg", choices=("coreg", "robust", "none")),
+            _FS_NATIVE,
+            _FS_VOX,
+            _FS_BIAS,
+            ParamSpec("fs_tal_reg", "Talairach registration (eTIV; needs the license)", "bool", False),
+            ParamSpec("fs_qc_snap", "QC snapshots", "bool", False),
+            *_FS_COMPUTE,
+        ),
+        run_mode="notify",
+        cli_command="nvitk-fastsurfer seg",
+    ),
+    GuiToolSpec(
+        "fastsurfer_cereb", "FastSurfer", "Cerebellum sub-segmentation (CerebNet)", _FS_MODULE_PARAMS,
+        run_mode="notify", requires_layer=False, cli_command="nvitk-fastsurfer cereb",
+    ),
+    GuiToolSpec(
+        "fastsurfer_hypothal",
+        "FastSurfer",
+        "Hypothalamus sub-segmentation (HypVINN)",
+        (*_FS_MODULE_PARAMS[:2], ParamSpec("fs_t2_layer", "T2 layer (optional)", "layer", ""),
+         ParamSpec("fs_reg_mode", "T1/T2 registration", "choice", "coreg", choices=("coreg", "robust", "none")),
+         *_FS_MODULE_PARAMS[2:]),
+        run_mode="notify", requires_layer=False, cli_command="nvitk-fastsurfer hypothal",
+    ),
+    GuiToolSpec(
+        "fastsurfer_cc", "FastSurfer", "Corpus callosum segmentation + shape", _FS_MODULE_PARAMS,
+        run_mode="notify", requires_layer=False, cli_command="nvitk-fastsurfer cc",
+    ),
+    GuiToolSpec(
+        "fastsurfer_surf", "FastSurfer", "Cortical surfaces (recon-surf)", (_FS_SUBJECTS, _FS_SID, *_FS_SURFACE,
+                                                                          _FS_COMPUTE[2]),
+        run_mode="notify", requires_layer=False, cli_command="nvitk-fastsurfer surf",
+    ),
+    GuiToolSpec(
+        "fastsurfer_full",
+        "FastSurfer",
+        "Full pipeline (segmentation + surfaces)",
+        (_FS_SUBJECTS, _FS_SID, ParamSpec("fs_t2_layer", "T2 layer for HypVINN (optional)", "layer", ""),
+         ParamSpec("fs_vox_size", "Voxel size", "choice", "min", choices=("min", "1", "0.9", "0.8", "0.7")),
+         _FS_BIAS, *_FS_SURFACE, *_FS_COMPUTE),
+        run_mode="notify", cli_command="nvitk-fastsurfer run",
+    ),
+    GuiToolSpec(
+        "fastsurfer_long",
+        "FastSurfer",
+        "Longitudinal (template + time points)",
+        (
+            ParamSpec("fs_long_layers", "Time-point T1 layers (comma-separated names)", "str", ""),
+            ParamSpec("fs_template_id", "Template id", "str", "template"),
+            ParamSpec("fs_long_parallel", "Time points at once (0 = one)", "int", 0, min=0, max=16),
+            _FS_SUBJECTS,
+            *_FS_SURFACE[:2],
+        ),
+        run_mode="notify", requires_layer=False, cli_command="nvitk-fastsurfer long",
+    ),
+    GuiToolSpec(
+        "fastsurfer_load_subject",
+        "FastSurfer",
+        "Load a FastSurfer / FreeSurfer subject",
+        (
+            ParamSpec("fs_subject_dir", "Subject directory (…/subjects/<id>)", "str", ""),
+            ParamSpec("fs_load_surfaces", "Load surfaces", "bool", True),
+        ),
+        run_mode="notify", requires_layer=False,
+    ),
+    GuiToolSpec(
+        "fastsurfer_segstats",
+        "FastSurfer",
+        "Partial-volume corrected label statistics",
+        (ParamSpec("fs_norm_layer", "Intensity layer (bias-corrected T1, optional)", "layer", ""), _OUTPUT_DIR),
+        run_mode="notify", cli_command="nvitk-fastsurfer segstats",
+    ),
+    GuiToolSpec(
+        "fastsurfer_reduce_aseg",
+        "FastSurfer",
+        "aparc+aseg → aseg + brain mask",
+        (ParamSpec("fs_fixwm", "Relabel disconnected white matter", "bool", True), _OUTPUT_DIR),
+        run_mode="notify", cli_command="nvitk-fastsurfer reduce-to-aseg",
+    ),
+    GuiToolSpec(
+        "fastsurfer_conform",
+        "FastSurfer",
+        "Conform to FastSurfer space (isotropic, 256³, LIA)",
+        (ParamSpec("fs_conform_vox", "Voxel size", "choice", "1", choices=("1", "min", "any")), _OUTPUT_DIR),
+        run_mode="notify", cli_command="nvitk-fastsurfer conform",
+    ),
+    GuiToolSpec(
+        "fastsurfer_install_freesurfer",
+        "FastSurfer",
+        "Install FreeSurfer 7.4.1 (for surfaces)",
+        (
+            ParamSpec("fs_install_dest", "Install into", "str", _fastsurfer_default("dest")),
+            ParamSpec("fs_license", "FreeSurfer license file (optional)", "str", ""),
+        ),
+        run_mode="notify", requires_layer=False, cli_command="nvitk-fastsurfer install-freesurfer",
+    ),
+)
+
+_TOOLS = _TOOLS + _FASTSURFER_TOOLS
+
+# ── FSL (nvitk.gui.tools.fsl_tools) ──────────────────────────────────────────
+
+
+def _fsl_choices(module: str, name: str, fallback: tuple[str, ...]) -> tuple[str, ...]:
+    """An option list from the :mod:`nvitk.fsl` wrapper itself, so the picker cannot drift from it."""
+    try:
+        import importlib
+
+        value = getattr(importlib.import_module(f"nvitk.fsl.{module}"), name)
+        return tuple(value)
+    except Exception:  # noqa: BLE001 — the registry must import regardless
+        return fallback
+
+
+def _fsl(tool_id: str, label: str, params: tuple[ParamSpec, ...] = (), *, layer: bool = True,
+         cli: str = "") -> GuiToolSpec:
+    return GuiToolSpec(tool_id, "FSL", label, (*params, _OUTPUT_DIR), run_mode="notify", requires_layer=layer,
+                       cli_command=f"nvitk-fsl {cli}" if cli else "")
+
+
+_FSL_MASK = ParamSpec("fsl_mask_layer", "Brain mask layer", "layer", "")
+_FSL_BVECS = ParamSpec("fsl_bvecs", "bvecs file (blank = next to the layer's source)", "str", "")
+_FSL_BVALS = ParamSpec("fsl_bvals", "bvals file (blank = next to the layer's source)", "str", "")
+_FSL_REF = ParamSpec("fsl_ref_layer", "Reference layer", "layer", "")
+_FSL_IMG_TYPE = ParamSpec("fsl_img_type", "Image type", "choice", "T1", choices=("T1", "T2", "PD"))
+
+_FSL_TOOLS: tuple[GuiToolSpec, ...] = (
+    # structural
+    _fsl("fsl_bet", "BET brain extraction", (
+        ParamSpec("fsl_f", "Fractional intensity (smaller = larger brain)", "float", 0.5, min=0.0, max=1.0),
+        ParamSpec("fsl_g", "Vertical gradient in f", "float", 0.0, min=-1.0, max=1.0),
+        ParamSpec("fsl_bet_mode", "Variant", "choice", "standard",
+                  choices=_fsl_choices("structural", "BET_MODES", ("standard",))),
+        ParamSpec("fsl_mask", "Brain mask", "bool", True),
+        ParamSpec("fsl_skull", "Skull image", "bool", False),
+    ), cli="bet"),
+    _fsl("fsl_fast", "FAST tissue segmentation (+ bias correction)", (
+        ParamSpec("fsl_classes", "Tissue classes", "int", 3, min=2, max=6), _FSL_IMG_TYPE,
+        ParamSpec("fsl_bias", "Bias-field correction", "bool", True),
+    ), cli="fast"),
+    _fsl("fsl_first", "FIRST subcortical segmentation", (
+        ParamSpec("fsl_structures", "Structures (blank = all; e.g. L_Hipp,R_Hipp)", "str", ""),
+        ParamSpec("fsl_brain_extracted", "Input is brain-extracted", "bool", False),
+        ParamSpec("fsl_first_method", "Boundary correction", "choice", "auto", choices=("auto", "fast", "none")),
+    ), cli="first"),
+    _fsl("fsl_anat", "fsl_anat structural pipeline", (
+        _FSL_IMG_TYPE,
+        ParamSpec("fsl_strong_bias", "Strong bias field", "bool", False),
+        ParamSpec("fsl_no_crop", "No FOV cropping", "bool", False),
+        ParamSpec("fsl_no_nonlinreg", "No non-linear registration", "bool", False),
+        ParamSpec("fsl_no_subcortseg", "No FIRST", "bool", False),
+    ), cli="anat"),
+    _fsl("fsl_siena", "SIENA two-time-point atrophy (PBVC)", (
+        ParamSpec("fsl_layer2", "Second time point layer", "layer", ""),
+        ParamSpec("fsl_bet_opts", "BET options (e.g. -f 0.3)", "str", ""),
+        ParamSpec("fsl_ventricles", "Ventricular analysis (VIENA)", "bool", False),
+    ), cli="siena"),
+    _fsl("fsl_sienax", "SIENAX normalised brain volume", (
+        ParamSpec("fsl_bet_opts", "BET options (e.g. -f 0.3)", "str", ""),
+        ParamSpec("fsl_regional", "Regional (peripheral GM, ventricular CSF)", "bool", False),
+    ), cli="sienax"),
+    _fsl("fsl_reorient2std", "Reorient to standard (fslreorient2std)", cli="reorient2std"),
+    _fsl("fsl_robustfov", "Crop neck (robustfov)", (
+        ParamSpec("fsl_brain_size", "Brain size in z (mm)", "float", 170.0, min=50.0, max=300.0),
+    ), cli="robustfov"),
+    _fsl("fsl_deface", "Deface (fsl_deface)", (
+        ParamSpec("fsl_f", "BET fractional intensity", "float", 0.5, min=0.0, max=1.0),
+        ParamSpec("fsl_bias", "Bias-correct first", "bool", False),
+    ), cli="deface"),
+    _fsl("fsl_lesion_filling", "Lesion filling", (
+        ParamSpec("fsl_lesion_layer", "Lesion mask layer", "layer", ""),
+        ParamSpec("fsl_wm_layer", "White-matter mask layer (optional)", "layer", ""),
+    ), cli="lesion-filling"),
+    # registration
+    _fsl("fsl_fnirt", "FNIRT non-linear registration", (
+        _FSL_REF,
+        ParamSpec("fsl_affine", "FLIRT affine input→reference (.mat, recommended)", "str", ""),
+        ParamSpec("fsl_fnirt_config", "Configuration", "choice", "T1_2_MNI152_2mm",
+                  choices=_fsl_choices("registration", "FNIRT_CONFIGS", ("T1_2_MNI152_2mm",))),
+    ), cli="fnirt"),
+    _fsl("fsl_applywarp", "applywarp (warp / affine onto a reference)", (
+        _FSL_REF,
+        ParamSpec("fsl_warp", "Warp field / coefficients file", "str", ""),
+        ParamSpec("fsl_premat", "Affine before the warp (.mat)", "str", ""),
+        ParamSpec("fsl_interp", "Interpolation (labels always nn)", "choice", "trilinear",
+                  choices=_fsl_choices("registration", "APPLYWARP_INTERP", ("trilinear", "nn"))),
+    ), cli="applywarp"),
+    _fsl("fsl_invwarp", "invwarp (invert the active warp layer)", (
+        ParamSpec("fsl_ref_layer", "Original input space layer", "layer", ""),
+    ), cli="invwarp"),
+    _fsl("fsl_convert_xfm", "convert_xfm (invert / concatenate matrices)", (
+        ParamSpec("fsl_xfm_mode", "Operation", "choice", "inverse", choices=("inverse", "concatenate")),
+        ParamSpec("fsl_matrix", "Matrix (.mat; for concatenate: applied first)", "str", ""),
+        ParamSpec("fsl_matrix2", "Second matrix (concatenate)", "str", ""),
+        ParamSpec("fsl_output_matrix", "Output .mat (blank = run folder)", "str", ""),
+    ), layer=False, cli="convert-xfm"),
+    _fsl("fsl_mcflirt", "MCFLIRT motion correction (4D)", (
+        ParamSpec("fsl_ref_vol", "Reference volume (-1 = middle)", "int", -1, min=-1, max=10000),
+        ParamSpec("fsl_mean_vol", "Register to the mean volume", "bool", False),
+        ParamSpec("fsl_cost", "Cost", "choice", "normcorr",
+                  choices=_fsl_choices("registration", "MCFLIRT_COSTS", ("normcorr",))),
+    ), cli="mcflirt"),
+    _fsl("fsl_epi_reg", "epi_reg (EPI → T1, BBR)", (
+        ParamSpec("fsl_t1_layer", "T1 (whole head) layer", "layer", ""),
+        ParamSpec("fsl_t1brain_layer", "T1 brain layer", "layer", ""),
+        ParamSpec("fsl_wmseg_layer", "White-matter segmentation layer (optional)", "layer", ""),
+    ), cli="epi-reg"),
+    # diffusion
+    _fsl("fsl_topup", "TOPUP susceptibility field (b0 pair)", (
+        ParamSpec("fsl_datain", "Acquisition parameters file (datain)", "str", ""),
+        ParamSpec("fsl_topup_config", "Configuration", "choice", "b02b0.cnf",
+                  choices=_fsl_choices("diffusion", "TOPUP_CONFIGS", ("b02b0.cnf",))),
+    ), cli="topup"),
+    _fsl("fsl_eddy", "EDDY eddy-current / motion correction (DWI)", (
+        _FSL_MASK, ParamSpec("fsl_acqp", "acqp file", "str", ""), ParamSpec("fsl_index", "index file", "str", ""),
+        _FSL_BVECS, _FSL_BVALS, ParamSpec("fsl_topup_base", "TOPUP basename (optional)", "str", ""),
+        ParamSpec("fsl_repol", "Replace outlier slices (--repol)", "bool", True),
+    ), cli="eddy"),
+    _fsl("fsl_dtifit", "DTIFIT tensor fit (FA, MD …)", (
+        _FSL_MASK, _FSL_BVECS, _FSL_BVALS, ParamSpec("fsl_wls", "Weighted least squares", "bool", False),
+    ), cli="dtifit"),
+    _fsl("fsl_bedpostx", "BEDPOSTX fibre orientations (DWI)", (
+        _FSL_MASK, _FSL_BVECS, _FSL_BVALS, ParamSpec("fsl_fibres", "Fibres per voxel", "int", 3, min=1, max=3),
+    ), cli="bedpostx"),
+    _fsl("fsl_probtrackx2", "PROBTRACKX2 tractography (active layer = seed)", (
+        ParamSpec("fsl_bedpostx_dir", "BEDPOSTX folder (….bedpostX)", "str", ""),
+        ParamSpec("fsl_samples", "Samples per seed voxel", "int", 5000, min=100, max=100000),
+        ParamSpec("fsl_waypoint_layer", "Waypoint mask layer (optional)", "layer", ""),
+        ParamSpec("fsl_exclusion_layer", "Exclusion mask layer (optional)", "layer", ""),
+    ), cli="probtrackx2"),
+    _fsl("fsl_tbss", "TBSS skeleton (cohort FA maps)", (
+        ParamSpec("fsl_fa_list", "FA maps (comma-separated paths, or a folder)", "str", ""),
+        ParamSpec("fsl_tbss_target", "Registration target", "choice", "FMRIB58",
+                  choices=("FMRIB58", "most_representative")),
+        ParamSpec("fsl_threshold", "Skeleton FA threshold", "float", 0.2, min=0.0, max=1.0),
+    ), layer=False, cli="tbss"),
+    _fsl("fsl_xtract", "XTRACT standard tracts", (
+        ParamSpec("fsl_bedpostx_dir", "BEDPOSTX folder (….bedpostX)", "str", ""),
+        ParamSpec("fsl_species", "Species", "choice", "HUMAN",
+                  choices=_fsl_choices("diffusion", "XTRACT_SPECIES", ("HUMAN",))),
+        ParamSpec("fsl_std2diff", "standard → diffusion warp (blank = <bpx>/xfms)", "str", ""),
+        ParamSpec("fsl_diff2std", "diffusion → standard warp", "str", ""),
+        ParamSpec("fsl_tracts", "Tracts (blank = all)", "str", ""),
+    ), layer=False, cli="xtract"),
+    # functional
+    _fsl("fsl_melodic", "MELODIC ICA (4D)", (
+        ParamSpec("fsl_dim", "Components (0 = automatic)", "int", 0, min=0, max=500),
+        ParamSpec("fsl_approach", "Approach", "choice", "symm",
+                  choices=_fsl_choices("functional", "MELODIC_APPROACHES", ("symm",))),
+        ParamSpec("fsl_tr", "TR (s, 0 = from header)", "float", 0.0, min=0.0, max=60.0),
+    ), cli="melodic"),
+    _fsl("fsl_susan", "SUSAN noise reduction", (
+        ParamSpec("fsl_sigma", "Smoothing sigma (mm)", "float", 2.0, min=0.1, max=50.0),
+        ParamSpec("fsl_bt", "Brightness threshold (negative = 10% of robust range)", "float", -1.0,
+                  min=-1.0, max=1e9),
+    ), cli="susan"),
+    _fsl("fsl_slicetimer", "Slice-timing correction (4D)", (
+        ParamSpec("fsl_tr", "TR (s)", "float", 2.0, min=0.01, max=60.0),
+        ParamSpec("fsl_slice_order", "Acquisition order", "choice", "bottom-up",
+                  choices=_fsl_choices("functional", "SLICE_ORDERS", ("bottom-up",))),
+        ParamSpec("fsl_timings", "Slice timings file (optional)", "str", ""),
+    ), cli="slicetimer"),
+    _fsl("fsl_fugue", "FUGUE field-map unwarping (EPI)", (
+        ParamSpec("fsl_fmap_layer", "Field map layer (rad/s)", "layer", ""),
+        ParamSpec("fsl_dwell", "Effective echo spacing (s)", "float", 0.0005, min=0.0, max=1.0),
+        ParamSpec("fsl_unwarpdir", "Unwarp direction", "choice", "y",
+                  choices=_fsl_choices("functional", "UNWARP_DIRECTIONS", ("y",))),
+    ), cli="fugue"),
+    _fsl("fsl_prepare_fieldmap", "Prepare field map (active layer = phase)", (
+        ParamSpec("fsl_mag_layer", "Brain-extracted magnitude layer", "layer", ""),
+        ParamSpec("fsl_delta_te", "Echo time difference (ms)", "float", 2.46, min=0.01, max=100.0),
+        ParamSpec("fsl_scanner", "Scanner", "choice", "SIEMENS",
+                  choices=_fsl_choices("functional", "FIELDMAP_SCANNERS", ("SIEMENS",))),
+    ), cli="prepare-fieldmap"),
+    # utilities
+    _fsl("fsl_maths", "fslmaths", (
+        ParamSpec("fsl_ops", "Operations (e.g. -thr 100 -bin; {layer:NAME} for another layer)", "str", ""),
+        ParamSpec("fsl_odt", "Output data type (blank = input's)", "choice", "",
+                  choices=("", "char", "short", "int", "float", "double")),
+    ), cli="maths"),
+    _fsl("fsl_stats", "fslstats summary", (
+        ParamSpec("fsl_mask_layer", "Mask layer (optional)", "layer", ""),
+        ParamSpec("fsl_stats_options", "Options", "str", "-R -r -M -S -V"),
+    ), cli="stats"),
+    _fsl("fsl_meants", "fslmeants (mean time series in a mask)", (
+        ParamSpec("fsl_mask_layer", "Mask layer", "layer", ""),
+    ), cli="meants"),
+    _fsl("fsl_cluster", "cluster (clusters above a threshold)", (
+        ParamSpec("fsl_threshold", "Threshold", "float", 3.1, min=-1e9, max=1e9),
+        ParamSpec("fsl_connectivity", "Connectivity", "choice", "26", choices=("6", "18", "26")),
+        ParamSpec("fsl_min_extent", "Minimum cluster size (voxels)", "int", 0, min=0, max=10_000_000),
+    ), cli="cluster"),
+    _fsl("fsl_smoothest", "smoothest (smoothness of a z-stat)", (
+        ParamSpec("fsl_mask_layer", "Mask layer", "layer", ""),
+    ), cli="smoothest"),
+    _fsl("fsl_command", "Run any FSL command", (
+        ParamSpec("fsl_command", "Command ({layer:NAME} inputs, {out:NAME} outputs)", "str", ""),
+        ParamSpec("fsl_long", "Long-running (background job)", "bool", False),
+    ), layer=False, cli="run"),
+    GuiToolSpec(
+        "fsl_install", "FSL", "Install nvitk's FSL core", (
+            ParamSpec("fsl_install_structural", "Structural", "bool", True),
+            ParamSpec("fsl_install_registration", "Registration", "bool", True),
+            ParamSpec("fsl_install_diffusion", "Diffusion", "bool", True),
+            ParamSpec("fsl_install_functional", "Functional", "bool", True),
+            ParamSpec("fsl_install_asl", "ASL perfusion (BASIL)", "bool", True),
+            ParamSpec("fsl_install_cuda", "GPU builds (eddy, bedpostx, probtrackx2)", "bool", True),
+        ),
+        run_mode="notify", requires_layer=False, cli_command="nvitk-fsl install",
+    ),
+)
+
+_TOOLS = _TOOLS + _FSL_TOOLS
+
+# ── ASL perfusion: FSL BASIL (nvitk.gui.tools.fsl_tools) ─────────────────────
+
+
+def _asl(tool_id: str, label: str, params: tuple[ParamSpec, ...] = (), *, cli: str = "") -> GuiToolSpec:
+    return GuiToolSpec(tool_id, "ASL perfusion", label, (*params, _OUTPUT_DIR), run_mode="notify",
+                       cli_command=f"nvitk-fsl {cli}" if cli else "")
+
+
+_ASL_LABELLING = ParamSpec("fsl_asl_labelling", "Labelling", "choice", "pcasl",
+                           choices=_fsl_choices("asl", "LABELLINGS", ("pcasl", "pasl")))
+_ASL_DELAYS = ParamSpec("fsl_asl_delays", "PLDs (pCASL) / TIs (pASL) in s, comma-separated", "str", "1.8")
+_ASL_BOLUS = ParamSpec("fsl_asl_bolus", "Labelling duration (s; one, or one per delay)", "str", "1.8")
+_ASL_IAF = ParamSpec("fsl_asl_iaf", "Volumes", "choice", "tc",
+                     choices=_fsl_choices("asl", "ASL_FORMATS", ("tc", "ct", "diff")))
+_ASL_IBF = ParamSpec("fsl_asl_ibf", "Order (rpt: all delays repeated; tis: repeats of each delay together)",
+                     "choice", "rpt", choices=_fsl_choices("asl", "BLOCK_FORMATS", ("rpt", "tis")))
+_ASL_RPTS = ParamSpec("fsl_asl_rpts", "Repeats per delay when they differ (with order tis)", "str", "")
+_ASL_T1 = ParamSpec("fsl_asl_t1", "Tissue T1 (s)", "float", 1.3, min=0.1, max=5.0)
+_ASL_T1B = ParamSpec("fsl_asl_t1b", "Blood T1 (s)", "float", 1.65, min=0.1, max=5.0)
+_ASL_BAT = ParamSpec("fsl_asl_bat", "Arrival time prior (s; 0 = 1.3 pCASL / 0.7 pASL)", "float", 0.0,
+                     min=0.0, max=5.0)
+_ASL_ALPHA = ParamSpec("fsl_asl_alpha", "Labelling efficiency (0 = 0.85 pCASL / 0.98 pASL)", "float", 0.0,
+                       min=0.0, max=1.0)
+_ASL_TR = ParamSpec("fsl_asl_tr", "Calibration TR (s)", "float", 3.2, min=0.1, max=100.0)
+_ASL_CGAIN = ParamSpec("fsl_asl_cgain", "ASL / calibration gain ratio", "float", 1.0, min=0.0, max=1000.0)
+_ASL_TISSREF = ParamSpec("fsl_asl_tissref", "Reference tissue", "choice", "csf",
+                         choices=_fsl_choices("asl", "TISSUE_REFS", ("csf", "wm", "gm")))
+_ASL_PVGM = ParamSpec("fsl_asl_pvgm_layer", "GM partial-volume layer (ASL space, optional)", "layer", "")
+_ASL_PVWM = ParamSpec("fsl_asl_pvwm_layer", "WM partial-volume layer (ASL space, optional)", "layer", "")
+
+_ASL_TOOLS: tuple[GuiToolSpec, ...] = (
+    _asl("fsl_asl_oxford", "BASIL perfusion: CBF, arrival time, aCBV (oxford_asl)", (
+        _ASL_LABELLING, _ASL_DELAYS, _ASL_BOLUS, _ASL_IAF, _ASL_IBF, _ASL_RPTS,
+        ParamSpec("fsl_asl_slicedt", "Time between slices (s; 2D readout)", "float", 0.0, min=0.0, max=1.0),
+        ParamSpec("fsl_asl_sliceband", "Slices per band (multiband; 0 = none)", "int", 0, min=0, max=256),
+        ParamSpec("fsl_mask_layer", "Brain mask layer (optional; else automatic)", "layer", ""),
+        ParamSpec("fsl_asl_calib_layer", "M0 calibration layer (optional)", "layer", ""),
+        ParamSpec("fsl_asl_cmethod", "Calibration", "choice", "auto", choices=("auto", "voxel", "single", "both")),
+        _ASL_TR, _ASL_CGAIN, _ASL_TISSREF,
+        ParamSpec("fsl_asl_m0", "M0 value (without a calibration layer; 0 = uncalibrated)", "float", 0.0,
+                  min=0.0, max=1e12),
+        _ASL_ALPHA,
+        ParamSpec("fsl_asl_struct_layer", "Structural layer (whole head, optional)", "layer", ""),
+        ParamSpec("fsl_asl_fslanat", "fsl_anat folder (optional; MNI space, region analysis)", "str", ""),
+        ParamSpec("fsl_asl_wp", "White-paper quantification (Alsop 2015)", "bool", False),
+        ParamSpec("fsl_asl_spatial", "Adaptive spatial prior on CBF", "bool", True),
+        ParamSpec("fsl_asl_mc", "Motion correction (MCFLIRT)", "bool", False),
+        ParamSpec("fsl_asl_pvcorr", "Partial-volume correction (GM / WM CBF)", "bool", False),
+        _ASL_PVGM, _ASL_PVWM,
+        ParamSpec("fsl_asl_artsupp", "Vascular crushing used (no arterial component)", "bool", False),
+        ParamSpec("fsl_asl_fixbolus", "Fix the labelling duration (always for pCASL)", "bool", False),
+        ParamSpec("fsl_asl_infert1", "Include T1 uncertainty", "bool", False),
+        _ASL_BAT, _ASL_T1, _ASL_T1B,
+        ParamSpec("fsl_asl_region_analysis", "Region analysis (needs the fsl_anat folder)", "bool", False),
+        ParamSpec("fsl_asl_cblip_layer", "Reversed phase-encode calibration layer (optional, TOPUP)", "layer", ""),
+        ParamSpec("fsl_asl_echospacing", "Effective echo spacing (s, with the reversed calibration)", "float", 0.0,
+                  min=0.0, max=1.0),
+        ParamSpec("fsl_asl_pedir", "Phase-encode direction", "choice", "",
+                  choices=("", *_fsl_choices("asl", "PE_DIRECTIONS", ("x", "y", "z", "-x", "-y", "-z")))),
+        ParamSpec("fsl_asl_extra", "Extra oxford_asl options", "str", ""),
+    ), cli="asl"),
+    _asl("fsl_asl_basil", "BASIL fit (label-control differenced data)", (
+        ParamSpec("fsl_mask_layer", "Brain mask layer", "layer", ""),
+        _ASL_LABELLING, _ASL_DELAYS, _ASL_BOLUS,
+        ParamSpec("fsl_asl_repeats", "Repeats per delay", "int", 1, min=1, max=10000),
+        ParamSpec("fsl_asl_ibf", "Order (tis: repeats of each delay together; rpt: reordered first)", "choice",
+                  "tis", choices=_fsl_choices("asl", "BLOCK_FORMATS", ("rpt", "tis"))),
+        _ASL_BAT, _ASL_T1, _ASL_T1B,
+        ParamSpec("fsl_asl_spatial", "Adaptive spatial prior", "bool", True),
+        ParamSpec("fsl_asl_inferart", "Arterial (macrovascular) component", "bool", False),
+        ParamSpec("fsl_asl_infertau", "Infer the labelling duration", "bool", False),
+        ParamSpec("fsl_asl_infert1", "Include T1 uncertainty", "bool", False),
+        _ASL_PVGM, _ASL_PVWM,
+    ), cli="basil"),
+    _asl("fsl_asl_file", "asl_file: label-control subtraction / averaging", (
+        ParamSpec("fsl_asl_ntis", "Number of delays in the data", "int", 1, min=1, max=1000),
+        ParamSpec("fsl_asl_operation", "Operation", "choice", "diff",
+                  choices=_fsl_choices("asl", "ASL_FILE_OPERATIONS", ("diff", "split-pairs", "mean"))),
+        _ASL_IAF, _ASL_IBF,
+        ParamSpec("fsl_asl_obf", "Output order (tis = grouped by delay, as BASIL reads it)", "choice", "same",
+                  choices=("same", "tis", "rpt")),
+        _ASL_RPTS, ParamSpec("fsl_mask_layer", "Mask layer (optional)", "layer", ""),
+    ), cli="asl-file"),
+    _asl("fsl_asl_calib", "asl_calib: M0 from a reference region (active layer = calibration)", (
+        ParamSpec("fsl_asl_perfusion_layer", "Perfusion layer to calibrate (optional)", "layer", ""),
+        ParamSpec("fsl_asl_refmask_layer", "Reference-region mask layer", "layer", ""),
+        ParamSpec("fsl_asl_struct_layer", "Brain-extracted structural (instead of a mask)", "layer", ""),
+        ParamSpec("fsl_asl_asl2struct", "ASL → structural matrix (with the structural)", "str", ""),
+        _ASL_TISSREF,
+        ParamSpec("fsl_asl_calib_mode", "Mode", "choice", "longtr",
+                  choices=_fsl_choices("asl", "CALIB_MODES", ("longtr", "satrecov"))),
+        _ASL_TR, _ASL_CGAIN, ParamSpec("fsl_asl_te", "Echo time (ms)", "float", 0.0, min=0.0, max=1000.0),
+        _ASL_ALPHA, ParamSpec("fsl_mask_layer", "Brain mask layer (optional)", "layer", ""),
+    ), cli="asl-calib"),
+)
+
+_TOOLS = _TOOLS + _ASL_TOOLS
+
+
+
 
 def categories() -> list[str]:
     """Display order of tool categories."""
@@ -2467,6 +2935,11 @@ def is_sge_capable(tool_id: str | None) -> bool:
     if not tool_id:
         return False
     tid = str(tool_id).strip()
+    # FastSurfer / FSL: several inputs and outputs, staged their own way (nvitk.gui.sge.external).
+    if tid.startswith(("fastsurfer_", "fsl_")):
+        from nvitk.gui.sge.external import external_sge_capable
+
+        return tool_by_id(tid) is not None and external_sge_capable(tid)
     if tid in SGE_BLOCKLIST:
         return False
     if any(tid.startswith(p) for p in SGE_BLOCKLIST_PREFIXES):
@@ -2488,6 +2961,8 @@ def sge_block_reason(tool_id: str | None) -> str:
     spec = tool_by_id(str(tool_id))
     if spec is None:
         return f"Unknown tool {tool_id!r}."
+    if str(tool_id).startswith(("fastsurfer_", "fsl_")):
+        return f"{spec.label} works on this computer only (it reads local folders or installs software)."
     if spec.run_mode != "layer":
         return f"{spec.label} uses run mode {spec.run_mode!r} (not supported on SGE yet)."
     if str(tool_id) in SGE_BLOCKLIST:

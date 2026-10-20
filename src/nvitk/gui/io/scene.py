@@ -186,7 +186,15 @@ def _tool_overlay_names() -> set[str]:
 
 def collect_scene(viewer: Any) -> dict[str, Any]:
     """Everything a scene holds, taken from *viewer* (GUI thread; the data are the
-    layers' arrays, read on the host)."""
+    layers' arrays, read on the host). Layers are saved in their real placement, even
+    while the main canvas draws them on their own voxel grids."""
+    from nvitk.gui.viz.main_canvas import world_geometry
+
+    with world_geometry(viewer):
+        return _collect_scene(viewer)
+
+
+def _collect_scene(viewer: Any) -> dict[str, Any]:
     layers = []
     overlays = _tool_overlay_names()
     for layer in viewer.layers:

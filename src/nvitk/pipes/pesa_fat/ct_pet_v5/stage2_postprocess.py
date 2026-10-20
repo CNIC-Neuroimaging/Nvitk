@@ -105,18 +105,25 @@ SUV_ERODE: dict[str, int] = {
     "GRASA_V_BATCH": 1,
     "GRASA_SC_BATCH": 1,
     # ORGANS
-    "HIGADO": 2,
-    "BAZO": 2,
-    "PANCREAS": 1,
+    "HIGADO": 4,
+    "BAZO": 4,
+    "PANCREAS": 2,
     # MUSCLES
-    "CUADRICEPS_L": 2,
-    "CUADRICEPS_R": 2,
-    "PARAVERTEBRAL_L": 2,
-    "PARAVERTEBRAL_R": 2,
-    "DELTOIDES_L": 2,
-    "DELTOIDES_R": 2,
-    "TRAPECIOS": 2,
+    "CUADRICEPS_L": 4,
+    "CUADRICEPS_R": 4,
+    "PARAVERTEBRAL_L": 4,
+    "PARAVERTEBRAL_R": 4,
+    "DELTOIDES_L": 4,
+    "DELTOIDES_R": 4,
+    "TRAPECIOS": 2
 }
+
+# FAT_IM leg / trunk clean-up radius, in voxels of the CT grid (a ball). After the axial
+# split every GRASA_IM_PIERNAS / GRASA_IM_TORAX voxel takes the label carried by most of
+# its labelled neighbours within this radius (a tie keeps its own), so leg islands left
+# in the arms and trunk islands left in the legs switch sides. Above the sacrum's lowest
+# slice no voxel may become PIERNAS, so the legs never spread up the body. 0 disables it.
+FAT_IM_NEIGHBOUR_RADIUS: int = 25
 
 # Output mask file → label name(s) to clear where PET ureter overlaps.
 URETER_EXCLUSION_BY_MASK: dict[str, tuple[str, ...]] = {
@@ -733,6 +740,86 @@ def _trunk_lr_range(body: Image | None, total: Image | None, ref: Image) -> tupl
     return lr_axis, int(lr.min()), int(lr.max())
 
 
+def _sacrum_lowest_slice(total: Image | None, ref: Image) -> int | None:
+    """Index of the most inferior axial slice holding ``total``'s sacrum, on *ref*'s grid.
+
+    ``None``, with a warning, when *total* is missing, off *ref*'s grid, or has no sacrum.
+    """
+    if total is None or tuple(total.data.shape) != tuple(ref.data.shape):
+        log.warning("No 'total' segmentation on the tissue grid; FAT_IM legs may not grow in the clean-up.")
+        return None
+    sacrum = as_backend_array(total.data) == get_class_id("sacrum", "total")
+    z = np.where(np.any(sacrum, axis=(0, 1)))[0]
+    if int(z.size) == 0:
+        log.warning("No sacrum in 'total'; FAT_IM legs may not grow in the clean-up.")
+        return None
+    return int(z.min()) if _superior_sign(ref) > 0 else int(z.max())
+
+
+def _ball_offsets(radius: int) -> Any:
+    """``(n, 3)`` integer offsets within Euclidean *radius* of the origin, the origin excluded."""
+    r = int(radius)
+    grid = np.stack(np.meshgrid(*([np.arange(-r, r + 1)] * 3), indexing="ij"), axis=-1).reshape(-1, 3)
+    norm = np.sum(grid * grid, axis=1)
+    return grid[(norm <= r * r) & (norm > 0)]
+
+
+def _neighbour_majority(
+    labels: Any,
+    a: int,
+    b: int,
+    radius: int,
+    *,
+    a_limit: int | None,
+    superior: int,
+) -> Any:
+    """Give each *a* / *b* voxel of *labels* the label most of its neighbours carry.
+
+    Neighbours are the *a* / *b* voxels within *radius* (a ball, voxels); background is
+    not counted, a tie keeps the voxel's label, and every voxel is decided from the
+    labels as they were (one simultaneous pass). A *b* voxel may only become *a* at or
+    below slice *a_limit* (*superior*: the sign of a step toward the head along Z); with
+    no limit it never does.
+    """
+    labels = as_backend_array(labels)
+    labelled = (labels == a) | (labels == b)
+    if int(radius) <= 0 or not bool(labelled.any()):
+        return labels
+    r = int(radius)
+    box = _mask_bbox_slices(labelled)
+    sub = labels[box]
+    # +1 for a, -1 for b, padded by r so every neighbour offset stays inside the array.
+    signed = np.zeros(tuple(int(n) + 2 * r for n in sub.shape), dtype=np.int8)
+    core = (slice(r, -r),) * 3
+    signed[core] = (sub == a).astype(np.int8) - (sub == b).astype(np.int8)
+    flat = signed.ravel()
+    strides = np.asarray([signed.shape[1] * signed.shape[2], signed.shape[2], 1])
+    steps = _ball_offsets(r) @ strides
+    idx = np.flatnonzero(flat)
+    votes = np.zeros(idx.shape, dtype=np.int32)
+    for step in to_numpy(steps).tolist():
+        votes += flat[idx + int(step)]
+    own = flat[idx]
+    to_b = (own > 0) & (votes < 0)
+    to_a = (own < 0) & (votes > 0)
+    if a_limit is None:
+        to_a[:] = False
+    else:
+        z = idx % signed.shape[2] - r + box[2].start
+        to_a &= (z <= a_limit) if superior > 0 else (z >= a_limit)
+    flat[idx[to_b]] = -1
+    flat[idx[to_a]] = 1
+    log.info(
+        f"FAT_IM clean-up (radius {r}): {int(to_a.sum())} voxel(s) to label {a}, {int(to_b.sum())} to label {b}."
+    )
+    out = labels.copy()
+    relabelled = signed[core]
+    out_sub = out[box]
+    out_sub[relabelled > 0] = a
+    out_sub[relabelled < 0] = b
+    return out
+
+
 def build_fat_im_mask(
     tissue_types: Image,
     muscles: Image,
@@ -740,6 +827,7 @@ def build_fat_im_mask(
     body: Image | None = None,
     total: Image | None = None,
     tissue_task: str = cfg.FAT_TASK,
+    neighbour_radius: int = FAT_IM_NEIGHBOUR_RADIUS,
 ) -> Image:
     """FAT_IM.nii.gz: intermuscular fat split into legs and trunk along the axial axis.
 
@@ -754,6 +842,11 @@ def build_fat_im_mask(
     *body* and *total*): fat beside it neither seeds the component extension nor
     stays in PIERNAS, and goes to TORAX with the rest of the arms. Fat entirely
     below the quadriceps is in neither label.
+
+    Last, a neighbour-majority pass (:func:`_neighbour_majority`, *neighbour_radius*
+    voxels, :data:`FAT_IM_NEIGHBOUR_RADIUS`) moves the islands each side leaves in the
+    other to the label around them; above the lowest slice of *total*'s sacrum no
+    voxel may become PIERNAS (without a sacrum, none may).
 
     Empty, with a warning, when *tissue_task* has no intermuscular-fat class (the
     3-class fallback) or *muscles* holds no quadriceps.
@@ -808,6 +901,15 @@ def build_fat_im_mask(
 
     out[(fat_im & trunk) | arms] = FAT_IM_LABELS["GRASA_IM_TORAX"]
     out[legs] = FAT_IM_LABELS["GRASA_IM_PIERNAS"]
+    if neighbour_radius > 0:
+        out = _neighbour_majority(
+            out,
+            FAT_IM_LABELS["GRASA_IM_PIERNAS"],
+            FAT_IM_LABELS["GRASA_IM_TORAX"],
+            neighbour_radius,
+            a_limit=_sacrum_lowest_slice(total, tissue_types),
+            superior=_superior_sign(tissue_types),
+        )
     return tissue_types.copy().with_data(out)
 
 

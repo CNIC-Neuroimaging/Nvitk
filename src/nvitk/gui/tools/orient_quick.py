@@ -57,8 +57,12 @@ def build_orientation_quick_button(viewer: Any) -> QToolButton:
         if not _is_reorientable(layer):
             notify("Select a 3D image or mask layer with an affine first.", error=True)
             return
+        from nvitk.gui.viz.main_canvas import world_geometry
+
         try:
-            previous, applied = apply_target_orientation(viewer, layer, target)
+            # Real placement: the reorientation composes with the layer's affine.
+            with world_geometry(viewer):
+                previous, applied = apply_target_orientation(viewer, layer, target)
         except Exception as exc:  # noqa: BLE001
             log_tool_failure(exc)
             notify(f"Could not reorient to {target}: {exc}", error=True)

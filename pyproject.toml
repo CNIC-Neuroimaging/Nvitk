@@ -94,6 +94,15 @@ dependencies = [
   # ────────────────────────── Segmentation tools ───────────────────────────────
   "totalsegmentator>=2.11.0",      # TotalSegmentator nnUNetv2-based segmentation
   "nnunetv2>=2.6.2",               # nnUNetv2 segmentation
+  # FastSurfer v2.5.4 runs from its own tree (recipe/fastsurfer) with this environment's Python;
+  # these are the packages it imports beyond the ones above (pins from its requirements.txt).
+  "monai>=1.4.0",                  # FastSurfer corpus callosum module
+  "lapy>=1.5.0",                   # FastSurfer surfaces / CC shape
+  "yacs>=0.1.8",                   # FastSurfer network configs
+  "neuroreg==0.6.2",               # FastSurfer registration helpers (asegdkt, CerebNet, CC, recon-surf)
+  "meshpy==2025.1.1",              # FastSurfer CC meshes
+  "pyrr==0.10.3",                  # FastSurfer CC visualisation
+  "whippersnappy==2.1.0",          # FastSurfer QC snapshots
 
   # ────────────────────────── Registration tools ───────────────────────────────
   "fireants>=1.5.0",               # Fireants for ANTs-based image processing
@@ -179,6 +188,8 @@ nikon2nifti = "nvitk.io.conversors.nikon2nifti:main"
 # Segmentation scripts
 # -----------------------------------------------------------------------------
 nvitk-totalseg = "nvitk.segmentation.total_segmentator.cli:main"
+nvitk-fastsurfer = "nvitk.segmentation.fastsurfer.cli:main"
+nvitk-fsl = "nvitk.fsl.cli:main"
 nvitk-eicab = "nvitk.segmentation.eicab.cli:main"
 nvitk-seg = "nvitk.cli.segmentation:main"
 

@@ -184,6 +184,59 @@ def _build_totalsegmentator_schemas() -> dict[str, LabelSchema]:
     return out
 
 
+def _build_fastsurfer_schemas() -> dict[str, LabelSchema]:
+    """FastSurfer's label sets, named from the lookup tables in the installed FastSurfer tree.
+
+    Without a tree the whole-brain sets fall back to nvitk's own Desikan–Killiany table
+    (cortex only); the sub-module sets are left out.
+    """
+    try:
+        from nvitk.segmentation.fastsurfer.outputs import lut_for
+
+        freesurfer = {k: v[0] for k, v in lut_for("freesurfer").items()}
+        fastsurfer = {k: v[0] for k, v in lut_for("fastsurfer").items()}
+    except Exception:  # noqa: BLE001 — no tree, no pyyaml: the fallback below
+        freesurfer = fastsurfer = {}
+    if not freesurfer:
+        from nvitk.segmentation.dkt import _aparc_label_table
+
+        freesurfer = _aparc_label_table()
+    # CerebNet and HypVINN write FreeSurfer's ids (601-631 with the cerebellar white
+    # matter 7/46; 961-984), not their own LUTs' indices.
+    cerebnet = {k: v for k, v in freesurfer.items() if 601 <= k <= 631 or k in (7, 46)}
+    hypvinn = {k: v for k, v in freesurfer.items() if 961 <= k <= 984}
+    callosum = {k: freesurfer.get(k, f"CC {k}") for k in range(250, 256)}
+    aparc = {k: freesurfer.get(k, name) for k, name in (fastsurfer or freesurfer).items()}
+    aparc.update(callosum)
+    aseg = {k: v for k, v in aparc.items() if k < 1000}
+    out = {
+        "fastsurfer_aparc_aseg": LabelSchema(
+            "fastsurfer_aparc_aseg", "FastSurfer — aparc.DKTatlas+aseg", "FastSurfer", aparc,
+            "Whole-brain segmentation: subcortical structures and DKT cortical parcels "
+            "(FreeSurfer numbering).",
+        ),
+        "fastsurfer_aseg": LabelSchema(
+            "fastsurfer_aseg", "FastSurfer — aseg", "FastSurfer", aseg,
+            "aparc+aseg reduced to aseg (cortex as one label per hemisphere).",
+        ),
+        "fastsurfer_cc": LabelSchema(
+            "fastsurfer_cc", "FastSurfer — corpus callosum", "FastSurfer", callosum,
+            "Corpus callosum segments, posterior to anterior.",
+        ),
+    }
+    if cerebnet:
+        out["cerebnet"] = LabelSchema(
+            "cerebnet", "FastSurfer — cerebellum (CerebNet)", "FastSurfer", cerebnet,
+            "Cerebellar lobules, vermis and white matter.",
+        )
+    if hypvinn:
+        out["hypvinn"] = LabelSchema(
+            "hypvinn", "FastSurfer — hypothalamus (HypVINN)", "FastSurfer", hypvinn,
+            "Hypothalamic sub-structures and adjacent regions.",
+        )
+    return out
+
+
 #: The three TopBrain schema keys, in the order the challenge introduced them.
 TOPBRAIN_SCHEMA_KEYS: tuple[str, ...] = ("topbrain-ta36", "topbrain-v1-ct", "topbrain-v1-mr")
 
@@ -196,6 +249,10 @@ def all_schemas() -> dict[str, LabelSchema]:
     if _SCHEMAS is None:
         merged = _build_pipeline_schemas()
         merged.update(_build_totalsegmentator_schemas())
+        try:
+            merged.update(_build_fastsurfer_schemas())
+        except Exception:  # noqa: BLE001 — naming is cosmetic
+            pass
         _SCHEMAS = merged
     return _SCHEMAS
 
@@ -210,7 +267,7 @@ def schema_keys() -> list[str]:
         order = {"General": 0, "Segmentation / vessels": 1, "Pipelines / QVTpy": 2,
                  "Pipelines / TopBrain": 3,
                  "Pipelines / PESA-FAT": 4, "Pipelines / PESA-FAT Dixon": 5,
-                 "TotalSegmentator": 6}
+                 "TotalSegmentator": 6, "FastSurfer": 7}
         return (order.get(s.group, 99), s.title)
 
     return sorted(schemas.keys(), key=_sort_key)
@@ -245,6 +302,13 @@ _GUESS_RULES: tuple[tuple[str, str], ...] = (
     ("topbrain_v1_mr", "topbrain-v1-mr"),
     ("topbrainv1mr", "topbrain-v1-mr"),
     ("dataset503", "topbrain-v1-mr"),
+    # FastSurfer / FreeSurfer output names.
+    ("aparc.dktatlas+aseg", "fastsurfer_aparc_aseg"),
+    ("aparc+aseg", "fastsurfer_aparc_aseg"),
+    ("aseg.auto", "fastsurfer_aseg"),
+    ("cerebellum.cerebnet", "cerebnet"),
+    ("hypothalamus.hypvinn", "hypvinn"),
+    ("callosum.cc", "fastsurfer_cc"),
     ("eicab", "eicab"),
     ("seg_4dflow", "qvtpy-4dflow"),
     ("centerlines_mask", "qvtpy-4dflow"),

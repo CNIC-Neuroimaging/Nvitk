@@ -24,9 +24,28 @@ def nvitk_metadata_from_layer(layer: Any) -> dict[str, Any]:
     return meta
 
 
+def _real_parts(layer: Any) -> dict[str, Any] | None:
+    """The real transform of a layer the main canvas draws on its own voxel grid
+    (resampling off, :mod:`nvitk.gui.viz.main_canvas`), else ``None``. Geometry is always
+    computed from these, never from the scale-only transform Napari is drawing with."""
+    value = getattr(layer, "_nvitk_true_transform", None)
+    return value if isinstance(value, dict) else None
+
+
+def _layer_transform_part(layer: Any, name: str) -> Any:
+    """``layer.<name>`` (scale / translate / affine matrix), the real one when overridden."""
+    real = _real_parts(layer)
+    if real is not None and name in real:
+        return real[name]
+    value = getattr(layer, name, None)
+    if name == "affine" and value is not None and hasattr(value, "affine_matrix"):
+        return value.affine_matrix
+    return value
+
+
 def layer_affine(layer: Any) -> np.ndarray | None:
     """4x4 transform used by the Napari layer (voxel index → world)."""
-    aff = getattr(layer, "affine", None)
+    aff = _layer_transform_part(layer, "affine")
     if aff is not None:
         aff = to_numpy(aff).astype(float)
         if aff.shape == (4, 4):
@@ -117,17 +136,17 @@ def layer_spatial_kwargs(layer: Any, ndim: int | None = None) -> dict[str, Any]:
     landed at unit spacing and no longer lined up with its source.
     """
     kwargs: dict[str, Any] = {}
-    scale = getattr(layer, "scale", None)
+    scale = _layer_transform_part(layer, "scale")
     if scale is not None:
         values = tuple(float(x) for x in scale)
         if any(abs(v - 1.0) > 1e-12 for v in values):
             kwargs["scale"] = values
-    translate = getattr(layer, "translate", None)
+    translate = _layer_transform_part(layer, "translate")
     if translate is not None:
         values = tuple(float(x) for x in translate)
         if any(abs(v) > 1e-12 for v in values):
             kwargs["translate"] = values
-    aff = getattr(layer, "affine", None)
+    aff = _layer_transform_part(layer, "affine")
     if aff is not None:
         matrix = to_numpy(aff).astype(float)
         # An identity affine carries nothing; passing it anyway is harmless but
@@ -228,8 +247,8 @@ def crop_placement(layer: Any, lo: Any) -> tuple[dict[str, Any], dict[str, Any]]
     nd = int(layer.data.ndim)
     lo = [int(v) for v in list(lo)[:nd]] + [0] * max(nd - len(list(lo)), 0)
     kwargs = dict(layer_spatial_kwargs(layer))
-    scale = [float(v) for v in getattr(layer, "scale", [1.0] * nd)]
-    matrix = np.asarray(layer.affine.affine_matrix, dtype=float)
+    scale = [float(v) for v in (_layer_transform_part(layer, "scale") if hasattr(layer, "scale") else [1.0] * nd)]
+    matrix = np.asarray(_layer_transform_part(layer, "affine"), dtype=float)
     shift = np.eye(nd + 1)
     shift[:nd, nd] = [s * o for s, o in zip(scale, lo)]
     kwargs["affine"] = matrix @ shift

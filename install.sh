@@ -4,8 +4,10 @@
 # Builds the same environment `conda create -n ENV nvitk` does, from the same sources:
 #   1. conda-native dependencies  <- recipe/recipe.yaml requirements/run (parsed below)
 #   2. pip-only dependency stack  <- recipe/post-link.sh, run as-is with PREFIX=<env>
+#      (FastSurfer's tree + checkpoints included: recipe/fastsurfer/install_fastsurfer.sh)
 #   3. activation hooks           <- recipe/activate.d, recipe/deactivate.d
 #   4. nvitk itself, --no-deps    <- this checkout (editable, default) or a wheel
+#   5. nvitk's FSL core           <- `nvitk-fsl install` (needs conda, so not part of post-link)
 # A dependency change made in recipe/ therefore reaches both install routes.
 #
 # Run ./install.sh --help for options.
@@ -24,6 +26,9 @@ WHEEL=""
 DEV_TOOLS=""
 FORCE=0
 DRY_RUN=0
+FASTSURFER=1
+FSL=1
+FSL_COMPONENTS="structural,registration,diffusion,functional,asl"
 
 usage() {
   cat <<EOF
@@ -48,6 +53,11 @@ How nvitk itself is installed:
   --dev-tools         also install the [dev] extra: pytest, sphinx toolchain
                       (default for editable installs)
   --no-dev-tools      skip the [dev] extra (default for --wheel)
+
+External suites:
+  --no-fastsurfer     skip FastSurfer (tree + network weights, ~340 MB; later: nvitk-fastsurfer install)
+  --no-fsl            skip nvitk's FSL core (later: nvitk-fsl install; an existing \$FSLDIR is used anyway)
+  --fsl-components L  FSL components, comma-separated (default: $FSL_COMPONENTS)
 
 Other:
   --dry-run           print what would be installed, change nothing
@@ -77,6 +87,9 @@ while [[ $# -gt 0 ]]; do
     --dev-tools) DEV_TOOLS=1 ;;
     --no-dev-tools) DEV_TOOLS=0 ;;
     --dry-run) DRY_RUN=1 ;;
+    --no-fastsurfer) FASTSURFER=0 ;;
+    --no-fsl) FSL=0 ;;
+    --fsl-components) [[ $# -ge 2 ]] || die "$1 needs a value"; FSL_COMPONENTS="$2"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "unknown option: $1" ;;
   esac
@@ -114,6 +127,8 @@ echo "  variant      : $VARIANT"
 echo "  environment  : $TARGET_DESC"
 echo "  nvitk        : $([[ "$MODE" == editable ]] && echo "editable ($REPO)" || echo "wheel (${WHEEL:-built from $REPO})")"
 echo "  dev tools    : $([[ "$DEV_TOOLS" == 1 ]] && echo yes || echo no)"
+echo "  FastSurfer   : $([[ "$FASTSURFER" == 1 ]] && echo yes || echo no)"
+echo "  FSL core     : $([[ "$FSL" == 1 ]] && echo "yes ($FSL_COMPONENTS)" || echo no)"
 echo "  conda deps   : ${CONDA_DEPS[*]}"
 
 if [[ "$DRY_RUN" == 1 ]]; then
@@ -139,7 +154,7 @@ PY="$PREFIX/bin/python"
 PIP="$PREFIX/bin/pip"
 
 step "installing pip-only dependencies (recipe/post-link.sh, log: $PREFIX/.nvitk-post-link.log)"
-PREFIX="$PREFIX" NVITK_VARIANT="$VARIANT" bash "$RECIPE/post-link.sh"
+PREFIX="$PREFIX" NVITK_VARIANT="$VARIANT" NVITK_FASTSURFER="$FASTSURFER" bash "$RECIPE/post-link.sh"
 
 step "installing activation hooks"
 mkdir -p "$PREFIX/etc/conda/activate.d" "$PREFIX/etc/conda/deactivate.d"
@@ -172,6 +187,13 @@ with open(sys.argv[1], "rb") as f:
     print("\n".join(tomllib.load(f)["project"]["optional-dependencies"]["dev"]))
 ' "$REPO/pyproject.toml")
   "$PIP" install --no-cache-dir "${DEV_DEPS[@]}"
+fi
+
+if [[ "$FSL" == 1 ]]; then
+  step "installing nvitk's FSL core ($FSL_COMPONENTS) into $PREFIX/share/nvitk/fsl"
+  FSL_CUDA=(--no-cuda); [[ "$VARIANT" == gpu ]] && FSL_CUDA=(--cuda)
+  CONDA_EXE="$CONDA" "$PY" -m nvitk.fsl.cli install -y --components "$FSL_COMPONENTS" "${FSL_CUDA[@]}" \
+    || echo "warning: the FSL core could not be installed now; run 'nvitk-fsl install' later."
 fi
 
 step "verifying"
