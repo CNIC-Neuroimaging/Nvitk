@@ -169,7 +169,9 @@ def import_sge_results_to_viewer(
     """Open every file in *result.downloaded_files* into *viewer*, then return a copy of *result* with
     ``imported_layers`` updated; calls *on_layers_changed* afterward if given."""
     count = 0
-    manifest = result.done.manifest
+    # getattr: a GUI started before the manifest existed keeps the older SgeDoneMarker class
+    # loaded while this module is imported fresh on its first job.
+    manifest = getattr(result.done, "manifest", None)
     if manifest is not None:
         # FastSurfer / FSL: label maps as named Labels layers, tables in the results window.
         from nvitk.gui.tools.external_io import load_manifest
