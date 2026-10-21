@@ -220,7 +220,9 @@ _LESION_COLUMNS: dict[str, str] = {
     "vessel": "vessel_name", "kind": "kind", "segment": "segment",
     "from origin (mm)": "start_s_from_vessel_origin_mm", "length (mm)": "length_mm",
     "taper %": "taper_percent", "diameter %": "diameter_percent", "area %": "area_percent",
-    "reference": "reference", "reference r (mm)": "reference_radius_mm", "extreme r (mm)": "extreme_radius_mm",
+    "reference": "reference", "reference r (mm)": "reference_radius_mm",
+    "proximal r (mm)": "reference_proximal_radius_mm", "distal r (mm)": "reference_distal_radius_mm",
+    "extreme r (mm)": "extreme_radius_mm",
     "confidence": "confidence", "class": "confidence_class", "flags": "confidence_flags",
 }
 

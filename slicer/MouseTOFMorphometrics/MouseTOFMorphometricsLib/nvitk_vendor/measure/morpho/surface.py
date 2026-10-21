@@ -301,14 +301,77 @@ def cross_section_tangents(pts: np.ndarray, half_window_mm: Optional[float] = No
     return out
 
 
+def _plane_basis(normal: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Two orthonormal in-plane axes of the plane with unit *normal*."""
+    tmp = np.array([0.0, 0.0, 1.0]) if abs(normal[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
+    u = np.cross(normal, tmp)
+    u /= np.linalg.norm(u)
+    return u, np.cross(normal, u)
+
+
+def ray_median_radius(contour_pts: np.ndarray, loops: List[List[int]], origin: np.ndarray,
+                      normal: np.ndarray, n_rays: Optional[int] = None) -> float:
+    """Radius of the lumen around *origin* in a planar cut: the median distance to the first wall
+    crossing over *n_rays* (default ``CROSS_SECTION_RAYS``) rays spread evenly in the plane.
+
+    Every loop of the cut takes part, so a ray meets the wall around the centerline point first and
+    the other vessels a plane can also cut (the siphon's other limb, a neighbouring branch) only
+    behind it. The median is a circle between the nearest and the farthest wall: a branch opening
+    lengthens the few rays that run into it and leaves the median alone, unless it spans half the
+    directions. NaN when *origin* lies outside the lumen (an even number of crossings on most rays)
+    or fewer than half the rays meet a wall.
+    """
+    k = int(_cfg.CROSS_SECTION_RAYS if n_rays is None else n_rays)
+    u, v = _plane_basis(normal)
+    rel = np.asarray(contour_pts, dtype=float) - origin
+    xy = np.column_stack([rel @ u, rel @ v])
+    starts, ends = [], []
+    for loop in loops:
+        if len(loop) < 3:
+            continue
+        idx = np.asarray(loop, dtype=int)
+        if idx[0] != idx[-1]:
+            idx = np.append(idx, idx[0])  # vtkStripper does not always repeat the first point
+        starts.append(xy[idx[:-1]])
+        ends.append(xy[idx[1:]])
+    if not starts:
+        return np.nan
+    a = np.concatenate(starts)                     # segment starts (M, 2)
+    e = np.concatenate(ends) - a                   # segment vectors (M, 2)
+    theta = 2.0 * np.pi * np.arange(k) / k
+    d = np.column_stack([np.cos(theta), np.sin(theta)])  # ray directions (K, 2)
+    # Ray t·d (t > 0) against segment a + s·e (0 ≤ s < 1): t = (a × e) / (d × e), s = (a × d) / (d × e).
+    denom = d[:, :1] * e[None, :, 1] - d[:, 1:] * e[None, :, 0]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t = (a[None, :, 0] * e[None, :, 1] - a[None, :, 1] * e[None, :, 0]) / denom
+        s = (a[None, :, 0] * d[:, 1:] - a[None, :, 1] * d[:, :1]) / denom
+    hit = (np.abs(denom) > 1e-12) & (t > 1e-9) & (s >= 0.0) & (s < 1.0)
+    crossings = hit.sum(axis=1)
+    if (crossings % 2 == 1).sum() * 2 < k:  # outside the lumen, or a broken contour
+        return np.nan
+    first = np.where(hit, t, np.inf).min(axis=1)
+    first = first[np.isfinite(first)]
+    if first.size * 2 < k:
+        return np.nan
+    return float(np.median(first))
+
+
 def compute_cross_section_radius(surface, pts: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """Effective vessel radius at each centerline point: cut *surface* by the local normal plane
-    (normal from :func:`cross_section_tangents`), take the largest closed cross-section loop's area,
-    and convert area → equivalent-circle radius.
+    """Effective vessel radius at each centerline point from the surface cut by the local normal
+    plane (normal from :func:`cross_section_tangents`), per ``CROSS_SECTION_RADIUS_METHOD``:
+
+    ``ray_median``
+        :func:`ray_median_radius` — the median in-plane distance to the wall; the area is that
+        circle's, ``π r²``.
+    ``largest_loop`` (cow_morpho)
+        the largest closed loop's area, converted to the equivalent-circle radius. The largest loop
+        need not be the one around the centerline point: near the siphon or a bifurcation the plane
+        also cuts the vessel's other limb, a neighbouring branch or the merged carina.
     """
     n = len(pts)
     areas = np.full(n, np.nan)
     tangents = cross_section_tangents(pts)
+    ray_median = str(_cfg.CROSS_SECTION_RADIUS_METHOD).lower() == "ray_median"
     plane = vtk.vtkPlane()
     cutter = vtk.vtkCutter(); cutter.SetInputData(surface); cutter.SetCutFunction(plane)
     stripper = vtk.vtkStripper(); stripper.SetInputConnection(cutter.GetOutputPort())
@@ -324,16 +387,24 @@ def compute_cross_section_radius(surface, pts: np.ndarray) -> Tuple[np.ndarray, 
             continue
         all_pts = numpy_support.vtk_to_numpy(result.GetPoints().GetData())
         best_area = 0.0
+        loops: List[List[int]] = []
         lines = result.GetLines(); lines.InitTraversal()
         id_list = vtk.vtkIdList()
         while lines.GetNextCell(id_list):
             idx = [id_list.GetId(j) for j in range(id_list.GetNumberOfIds())]
             if len(idx) < 3:
                 continue
+            if ray_median:
+                loops.append(idx)
+                continue
             a_val = _polygon_area_3d(all_pts[idx], t)
             if a_val > best_area:
                 best_area = a_val
-        if best_area > 0.0:
+        if ray_median:
+            r = ray_median_radius(all_pts, loops, pts[i].astype(float), t)
+            if np.isfinite(r) and r > 0.0:
+                areas[i] = np.pi * r * r
+        elif best_area > 0.0:
             areas[i] = best_area
     radii = np.sqrt(np.maximum(areas, 0.0) / np.pi)
     return radii, areas

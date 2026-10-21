@@ -65,6 +65,14 @@ CENTERLINE_BACKENDS: tuple[str, ...] = ("vmtk", "native", "raycast")
 #: re-measured after trunk pruning and on donut arms. ``cross_section`` and ``detection`` use that
 #: one radius on every path (``detection`` = the stenosis radius, RADIUS_SOURCE_FOR_CALIBER_DETECTION).
 ENLARGEMENT_RADIUS_SOURCES: tuple[str, ...] = ("cow", "cross_section", "detection")
+#: Cross-section radius estimators (``CROSS_SECTION_RADIUS_METHOD``): ``ray_median`` — the median
+#: in-plane distance from the centerline point to the wall over ``CROSS_SECTION_RAYS`` rays;
+#: ``largest_loop`` — cow_morpho's equivalent-circle radius of the largest loop of the cut.
+CROSS_SECTION_RADIUS_METHODS: tuple[str, ...] = ("ray_median", "largest_loop")
+#: Healthy reference of the lesion table's diameter / area % (``LESION_REFERENCE_METHOD``):
+#: ``interpolated`` — proximal and distal windows, interpolated to the lesion (QCA-style, taper
+#: corrected); ``proximal`` — the upstream window alone (distal fallback), as before 2026-10-21.
+LESION_REFERENCE_METHODS: tuple[str, ...] = ("interpolated", "proximal")
 ENLARGEMENT_RADIUS_SOURCE_LABELS: Mapping[str, str] = MappingProxyType({
     "cow": "cow_morpho (cross-section; inscribed on re-measured paths)",
     "cross_section": "cross-section on every path",
@@ -119,6 +127,15 @@ _EICAB_CW: dict[str, Any] = {
     # window tilts the plane less with centerline jitter (fewer oblique, oversized cuts) but turns
     # late in tight bends.
     "CROSS_SECTION_TANGENT_HALF_WINDOW_MM": 1.0,
+    # How the cut becomes a radius (CROSS_SECTION_RADIUS_METHODS). "ray_median": from the centerline
+    # point, CROSS_SECTION_RAYS rays spread evenly in the plane; each stops at its first wall
+    # crossing, and the radius is the median distance — a circle between the nearest and farthest
+    # wall that a branch opening (a few long rays) does not move, and that never sees the other
+    # vessels the plane also cuts. "largest_loop" (cow_morpho): the largest closed loop's area as an
+    # equivalent circle, which near the siphon or a bifurcation is often another limb, a
+    # neighbouring branch or the merged carina, so the radius spikes and climbs towards junctions.
+    "CROSS_SECTION_RADIUS_METHOD": "ray_median",
+    "CROSS_SECTION_RAYS": 36,
 
     # ── Skeleton / tree / donut-loop handling ────────────────────────────────
     "ENABLE_TREE_MODE": True,
@@ -261,10 +278,24 @@ _EICAB_CW: dict[str, Any] = {
     "HYPOPLASIA_DIAMETER_MM": 1.0,
 
     # ── Lesion severity / confidence (lesions table) ─────────────────────────
+    # Healthy reference radius of the lesion table's diameter / area % (LESION_REFERENCE_METHODS).
+    # "interpolated": the median radius of a proximal window (LESION_PROXIMAL_REFERENCE_WINDOW_MM
+    # upstream of the lesion) and of a distal one (the same distances downstream), interpolated in
+    # arc length to the lesion's narrowest (widest) point, so the vessel's natural taper between
+    # them is not counted as stenosis. Windows keep to healthy points of the lesion's own
+    # junction-to-junction stretch (no other lesions, no bifurcation blanking zone, no junction
+    # crossed); a distal median above the proximal one is capped at it; one window only → that one.
+    # "proximal": the upstream window alone (downstream when there is no room), as before 2026-10-21.
+    "LESION_REFERENCE_METHOD": "interpolated",
+    # Window distances from the lesion (mm): upstream for the proximal window, mirrored downstream
+    # for the distal one.
     "LESION_PROXIMAL_REFERENCE_WINDOW_MM": (2.0, 10.0),
-    # The reference window (proximal, or the distal fallback) never reaches into the first / last
-    # this many mm of the path: the tips hold VMTK's seed point on the wall and the end taper.
+    # No reference window reaches into the first / last this many mm of the path: the tips hold
+    # VMTK's seed point on the wall and the end taper.
     "LESION_REFERENCE_EXCLUDE_END_MM": 3.0,
+    # "interpolated": proximal and distal medians differing by more than this fraction (more than
+    # taper explains: distal collapse, dilatation, an unseen branch) flag reference_inconsistent.
+    "LESION_REFERENCE_DISAGREEMENT_FRACTION": 0.25,
     "LESION_NEAR_BIFURCATION_MM": 3.0,
     "LESION_NEAR_END_MM": 5.0,
     # Cross-section / inscribed radius ratio inside the lesion vs that path's median ratio.
@@ -327,6 +358,18 @@ class MorphometricsConfig:
             raise ValueError(
                 "CROSS_SECTION_TANGENT_HALF_WINDOW_MM must be ≥ 0 mm, "
                 f"got {self.params['CROSS_SECTION_TANGENT_HALF_WINDOW_MM']!r}."
+            )
+        if str(self.params["CROSS_SECTION_RADIUS_METHOD"]).lower() not in CROSS_SECTION_RADIUS_METHODS:
+            raise ValueError(
+                f"CROSS_SECTION_RADIUS_METHOD must be one of {CROSS_SECTION_RADIUS_METHODS}, "
+                f"got {self.params['CROSS_SECTION_RADIUS_METHOD']!r}."
+            )
+        if int(self.params["CROSS_SECTION_RAYS"]) < 8:
+            raise ValueError(f"CROSS_SECTION_RAYS must be ≥ 8, got {self.params['CROSS_SECTION_RAYS']!r}.")
+        if str(self.params["LESION_REFERENCE_METHOD"]).lower() not in LESION_REFERENCE_METHODS:
+            raise ValueError(
+                f"LESION_REFERENCE_METHOD must be one of {LESION_REFERENCE_METHODS}, "
+                f"got {self.params['LESION_REFERENCE_METHOD']!r}."
             )
         if str(self.params["ENLARGEMENT_RADIUS_SOURCE"]).lower() not in ENLARGEMENT_RADIUS_SOURCES:
             raise ValueError(

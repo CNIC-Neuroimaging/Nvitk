@@ -751,7 +751,8 @@ results to the history:
   integrals, direction angles, branching, lesion counts, worst-lesion severity and confidence),
   then the earlier measures: cow_morpho's path metrics per vessel, volumetry, and the literature
   tortuosity metrics. Names that clash with a new column get `_legacy`.
-- **lesions**: severity (taper %, diameter / area % against the proximal reference) and confidence
+- **lesions**: severity (taper %, and diameter / area % against the healthy reference interpolated
+  between a proximal and a distal window, `LESION_REFERENCE_METHOD`) and confidence
   with its flags. Clicking a row selects and centres that lesion.
 - **segments** and **subject** (circle-of-Willis variants, asymmetry, totals).
 

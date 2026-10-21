@@ -4,13 +4,14 @@ The lesion points (:func:`nvitk.gui.viz.morpho_viz.add_morpho_lesion_points`) ma
 stenosis / enlargement at its midpoint. This module makes them explorable:
 
 - **hover** a lesion point: a card with the vessel, segment, severity (diameter / area % against
-  the proximal reference, taper %), length, position and the confidence with each penalty
+  the healthy reference, taper %), length, position and the confidence with each penalty
   spelled out;
 - **click** it (or its row in the results window's lesion table): the *Lesion inspector* dock
   plots the calibre along the measured path — inscribed (detection) and cross-section radius, the
   healthy taper reference and the threshold the radius had to cross, the lesion's run, the
-  proximal reference window, the siphon mask and the path's other lesions — i.e. why the lesion
-  was called and how much to trust it. ◀ / ▶ step through the lesions;
+  reference windows (and the interpolated reference between them), the siphon mask and the path's
+  other lesions — i.e. why the lesion was called and how much to trust it. ◀ / ▶ step through the
+  lesions;
 - **extents**: each lesion's run is drawn along its centerline (``Morpho lesion extents``), not
   just its midpoint;
 - **filter** by confidence (:func:`confidence_filter_controls`, above the results window's lesion
@@ -52,8 +53,10 @@ _EXTENT_COLOURS = "nvitk_lesion_colour"
 
 #: Confidence flags → (what it means, factor). ``{near_end}`` / ``{near_bif}`` are filled in mm.
 FLAG_TEXT: dict[str, tuple[str, float]] = {
-    "reference_distal": ("no room upstream: distal reference", 0.8),
+    "reference_distal": ("no proximal reference window: distal one used", 0.8),
     "reference_none": ("no reference window", 0.8),
+    "reference_inconsistent": ("proximal and distal references disagree beyond taper", 0.8),
+    "reference_fallback": ("no healthy window in its stretch: plain windows used", 0.8),
     "in_siphon": ("overlaps the siphon (tight-bend) mask", 0.7),
     "near_vessel_end": ("within {near_end:g} mm of a path end", 0.6),
     "short": ("shorter than 1.5 × the minimum length", 0.8),
@@ -260,11 +263,34 @@ def draw_profile(ax: Any, run: LesionRun, i: int) -> str:
     lo, hi = (float(v) for v in run.param("LESION_PROXIMAL_REFERENCE_WINDOW_MM", (2.0, 10.0)))
     end_ex = float(run.param("LESION_REFERENCE_EXCLUDE_END_MM", 0.0) or 0.0)  # older runs: none
     ref_where = str(row.get("reference", ""))
-    if ref_where in ("proximal", "distal"):
+    ref_r = _num(row, "reference_radius_mm")
+    spans = {side: (_num(row, f"reference_{side}_start_point"), _num(row, f"reference_{side}_end_point"))
+             for side in ("proximal", "distal")}
+    if any(np.isfinite(p0) for p0, _ in spans.values()):
+        # The windows the run used (LESION_REFERENCE_METHOD): both for an interpolated reference.
+        anchors: dict[str, tuple[float, float]] = {}
+        for side in (("proximal", "distal") if ref_where == "interpolated" else (ref_where,)):
+            p0, p1 = spans.get(side, (np.nan, np.nan))
+            if not (np.isfinite(p0) and np.isfinite(p1)):
+                continue
+            w0, w1 = s[int(p0)], s[int(p1)]
+            ax.axvspan(w0, w1, color=COLOR_OK, alpha=0.16, lw=0, label=f"{side} reference window")
+            median = _num(row, f"reference_{side}_radius_mm")
+            anchors[side] = (0.5 * (w0 + w1), median)
+            if np.isfinite(median):  # each window's own median, over the window
+                ax.hlines(median, w0, w1, colors=COLOR_OK, lw=2.2,
+                          label="window median" if len(anchors) == 1 else None)
+        if len(anchors) == 2:
+            (sp, rp), (sd, rd) = anchors["proximal"], anchors["distal"]
+            ax.plot([sp, sd], [rp, min(rd, rp)], color=COLOR_OK, lw=1.2, ls="--", label="interpolated reference")
+            if np.isfinite(rd) and np.isfinite(rp) and rd > rp:
+                # A healthy vessel does not widen downstream: the distal median is capped at the proximal.
+                ax.annotate("distal median capped\nat the proximal one", (sd, rd), xytext=(0, 8),
+                            textcoords="offset points", ha="center", fontsize=6.5, color=COLOR_OK)
+    elif ref_where in ("proximal", "distal"):  # outputs written before the windows were recorded
         w0, w1 = ((s[a] - hi, s[a] - lo) if ref_where == "proximal" else (s[b] + lo, s[b] + hi))
         w0, w1 = max(w0, s[0] + end_ex), min(w1, s[-1] - end_ex)
         ax.axvspan(w0, w1, color=COLOR_OK, alpha=0.16, lw=0, label=f"{ref_where} reference window")
-        ref_r = _num(row, "reference_radius_mm")
         if np.isfinite(ref_r):
             ax.hlines(ref_r, w0, w1, colors=COLOR_OK, lw=1.4)
     ax.axvspan(s[a], s[b], color=colour, alpha=0.30, lw=0, label="this lesion")
@@ -281,6 +307,9 @@ def draw_profile(ax: Any, run: LesionRun, i: int) -> str:
     if np.isfinite(seg).any():
         k = a + int(np.nanargmin(seg) if kind == "stenosis" else np.nanargmax(seg))
         ax.plot([s[k]], [tested[k]], "o", color=colour, ms=6, mec=COLOR_TEXT, mew=0.8)
+        if np.isfinite(ref_r):  # where the diameter / area % read the reference
+            ax.plot([s[k]], [ref_r], "D", color=COLOR_OK, ms=4.5, mec=COLOR_TEXT, mew=0.6,
+                    label="reference at the lesion")
     pad = max(10.0, 2.0 * (s[b] - s[a]))
     ax.set_xlim(max(s[0], s[a] - pad - hi), min(s[-1], s[b] + pad))
     ax.set_xlabel("distance along the path (mm)", fontsize=8)
@@ -387,8 +416,9 @@ def _make_inspector(viewer: Any) -> Any:
             self._note.setText(
                 (note + " " if note else "")
                 + f"The lesion is the run where the tested radius crosses the dotted threshold ({pct:g} % off "
-                  "the dashed taper reference); its diameter / area % compare its extreme radius with the "
-                  "green reference window."
+                  "the dashed taper reference); its diameter / area % compare its extreme radius (dot) with "
+                  "the green reference (diamond): the reference windows' median, interpolated between the "
+                  "proximal and distal one when both exist."
             )
 
     return LesionInspector()
