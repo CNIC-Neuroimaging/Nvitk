@@ -572,6 +572,39 @@ def restore_label_color_state(layer: Any, state: dict[str, Any]) -> None:
     _reapply_label_colors(layer, visible, dict(backup))
 
 
+def label_value_rgba(
+    label_ids: Any,
+    values: dict[int, float],
+    colormap: str,
+    *,
+    limits: tuple[float, float] | None = None,
+) -> tuple[dict[int, np.ndarray], float, float]:
+    """``(label id → RGBA, lo, hi)``: each of *label_ids* coloured by its value in *values*
+    through *colormap* (a Matplotlib name) from *lo* to *hi* (default: the values' range), grey
+    (:data:`NO_VALUE_RGBA`) without a value. Shared by label layers and the surfaces of those
+    labels, so both take exactly the same colours."""
+    from matplotlib import colormaps
+
+    finite = {int(k): float(v) for k, v in values.items() if v is not None and np.isfinite(float(v))}
+    if not finite:
+        raise ValueError("No numeric values to colour the labels by.")
+    if limits is None:
+        lo, hi = min(finite.values()), max(finite.values())
+    else:
+        lo, hi = float(limits[0]), float(limits[1])
+    cmap = colormaps[str(colormap)]
+    grey = _normalize_rgba(NO_VALUE_RGBA)
+    colors: dict[int, np.ndarray] = {}
+    for lid in label_ids:
+        lid = int(lid)
+        if lid in finite:
+            t = 0.5 if hi <= lo else float(np.clip((finite[lid] - lo) / (hi - lo), 0.0, 1.0))
+            colors[lid] = _normalize_rgba(cmap(t))
+        else:
+            colors[lid] = grey.copy()
+    return colors, lo, hi
+
+
 def apply_label_value_colors(
     layer: Any,
     values: dict[int, float],
@@ -586,26 +619,9 @@ def apply_label_value_colors(
     The colours go into the backup the label lists read, so hiding and showing
     labels keeps them (and the hidden ones stay hidden).
     """
-    from matplotlib import colormaps
-
     if not supports_per_label_color(layer):
         raise TypeError("Per-label colours require a Napari Labels layer.")
-    finite = {int(k): float(v) for k, v in values.items() if v is not None and np.isfinite(float(v))}
-    if not finite:
-        raise ValueError("No numeric values to colour the labels by.")
-    if limits is None:
-        lo, hi = min(finite.values()), max(finite.values())
-    else:
-        lo, hi = float(limits[0]), float(limits[1])
-    cmap = colormaps[str(colormap)]
-    grey = _normalize_rgba(NO_VALUE_RGBA)
-    colors: dict[int, np.ndarray] = {}
-    for lid in layer_label_ids(layer):
-        if lid in finite:
-            t = 0.5 if hi <= lo else float(np.clip((finite[lid] - lo) / (hi - lo), 0.0, 1.0))
-            colors[lid] = _normalize_rgba(cmap(t))
-        else:
-            colors[lid] = grey.copy()
+    colors, lo, hi = label_value_rgba(layer_label_ids(layer), values, colormap, limits=limits)
     meta = _layer_metadata(layer)
     visible = stored_visible_ids(layer)
     meta[_NVITK_COLOR_BACKUP_KEY] = colors
@@ -841,6 +857,7 @@ __all__ = [
     "NVITK_LAYER_METADATA_KEYS",
     "apply_label_colormap",
     "apply_label_value_colors",
+    "label_value_rgba",
     "apply_label_visibility",
     "copy_layer_metadata_for_output",
     "ensure_label_source",

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import re
 import shlex
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import TextIO
@@ -382,6 +383,7 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     pitc_quality_metric: str = "stdv_from_mean",
     pitc_measure_resegment: bool = False,
     pitc_label_constrain: bool = True,
+    stage7_n_workers: int | None = None,
 ) -> int:
     """Append one SGE array ``qsub`` per subject; return array jobs emitted."""
     from . import (
@@ -706,6 +708,7 @@ def _emit_qvtpy_sge_subjects_for_chunk(
                             container=container,
                             src_dir=src_p,
                             skip_existing=skip_existing,
+                            n_workers=stage7_n_workers,
                             backend=backend,
                         ),
                     )
@@ -728,6 +731,11 @@ def _emit_qvtpy_sge_subjects_for_chunk(
             eicab_device=eicab_device,
             eicab_pe_smp=eicab_sge_pe_smp,
         )
+        if stage7_n_workers is not None and int(stage7_n_workers) > 1 and any(
+            t.stage_id == STAGE_MORPHOMETRICS for t in tasks
+        ):
+            # One CPU slot per parallel stage-7 vessel job (the array job's -pe smp covers every task).
+            resources = replace(resources, pe_smp=max(int(resources.pe_smp or 1), int(stage7_n_workers)))
         subj_token = _sge_script_subject_token(subj)
         job_name = f"{cfg.SGE_JOB_PREFIX}_{subj_token}"[:63]
         marker_dir = output_root_eff / subj / cfg.QVT_SUBDIR / ".sge_array_markers"
@@ -1305,6 +1313,14 @@ def _submit_qvtpy_sge_subjects_remote(
     default=True,
     show_default=True,
 )
+# --- stage 7 (morphometrics) ---
+@click.option(
+    "--stage7-n-workers",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Stage7: vessels measured in parallel per subject, one process per label/component job "
+         "(1 = one at a time; default min(4, CPUs/2)). On SGE, N > 1 requests -pe smp N.",
+)
 # --- stage 8 (XNAT upload) ---
 @click.option(
     "--xnat-upload-require-stages",
@@ -1369,6 +1385,7 @@ def main(
     venous_min_component_frac: float,
     eicab_min_island_fraction: float,
     eicab_bridge_open_radius: int,
+    stage7_n_workers: int | None,
     venous_min_branch_points: int,
     pcomm_min_points: int,
     arterial_branch_min_points: int,
@@ -1891,6 +1908,7 @@ def main(
                             s,
                             output_root=output_root_eff,
                             skip_existing=skip_existing,
+                            n_workers=stage7_n_workers,
                         ),
                     )
 
@@ -2086,6 +2104,7 @@ def main(
         venous_min_component_frac=venous_min_component_frac,
         eicab_min_island_fraction=eicab_min_island_fraction,
         eicab_bridge_open_radius=eicab_bridge_open_radius,
+        stage7_n_workers=stage7_n_workers,
         venous_min_branch_points=venous_min_branch_points,
         pcomm_min_points=pcomm_min_points,
         arterial_branch_min_points=arterial_branch_min_points,

@@ -417,6 +417,31 @@ def _surface_regions(surface: Any, min_points: int = 20) -> list[Any]:
     return regions
 
 
+def _axis_centerline(region: Any, step: float) -> tuple[np.ndarray, np.ndarray, str] | None:
+    """``(points, radius, source)`` of a vessel piece traced between the two ends of its main
+    (PCA) axis: VMTK (``"tree"``), else the straight axis re-centred on the lumen (``"skeleton"``)."""
+    from nvitk.morphology.centering import center_polyline, inscribed_radius
+
+    pts = points_of(region)
+    if len(pts) < 20:
+        return None
+    centre = pts.mean(axis=0)
+    axis = np.linalg.svd(pts - centre, full_matrices=False)[2][0]
+    proj = (pts - centre) @ axis
+    a, b = pts[int(np.argmin(proj))], pts[int(np.argmax(proj))]
+    try:
+        cl = centerlines_between_points(region, a, [b], resampling_step=step, geometry=False)
+        q = points_of(cl)
+        if _arc_length(q) >= 0.5 * float(np.linalg.norm(b - a)):
+            return q, point_array(cl, RADIUS_ARRAY), "tree"
+    except Exception:  # noqa: BLE001
+        pass
+    n = max(3, int(np.ceil(float(np.linalg.norm(b - a)) / max(step, 1e-6))) + 1)
+    line = a + (b - a) * np.linspace(0.0, 1.0, n)[:, None]
+    centred = center_polyline(line, region, iterations=3, sample_step_mm=step)
+    return centred, inscribed_radius(region, centred), "skeleton"
+
+
 def full_centerline_network(
     surface: Any,
     mask: np.ndarray,
@@ -477,10 +502,8 @@ def full_centerline_network(
     if prune_spur_mm > 0:
         skel = prune_short_terminal_spurs(skel, float(prune_spur_mm), spacing=sp).astype(bool)
     all_coords = np.argwhere(skel)
-    if len(all_coords) < 2:
-        return out
     regions = _surface_regions(surface)
-    if len(regions) == 1:
+    if len(regions) == 1 or len(all_coords) == 0:
         owner = np.zeros(len(all_coords), dtype=int)
     else:
         wall = np.column_stack([cKDTree(points_of(r)).query(to_surface(all_coords))[0] for r in regions])
@@ -502,6 +525,14 @@ def full_centerline_network(
     for k, region in enumerate(regions):
         coords = all_coords[owner == k]
         if len(coords) < 2:
+            # Thinning can erase a whole piece (scikit-image deletes some straight, flat-ended
+            # tubes outright): trace it between the two ends of its main axis instead.
+            piece = _axis_centerline(region, step)
+            if piece is not None:
+                out.n_components += 1
+                out.n_vmtk_runs += int(piece[2] == "tree")
+                add(piece[0], piece[1], piece[2])
+                out.paths.append(piece[0])
             continue
         out.n_components += 1
         with using("cpu"):

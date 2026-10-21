@@ -348,6 +348,15 @@ def build_vessel_points_dataframe(case_id: str, label: int, vessel_info: VesselI
         "siphon_mask_point": np.asarray(
             res.get("siphon_mask_point", np.zeros(len(res["s_mm"]))), dtype=float
         ).astype(int),
+        # The healthy taper references the percentages are measured against (lesion inspection).
+        "stenosis_reference_radius_mm": np.asarray(
+            res.get("stenosis_reference_radius_point", np.full(len(res["s_mm"]), np.nan)), dtype=float
+        ),
+        "enlargement_reference_radius_mm": np.asarray(
+            res.get("enlargement_reference_radius_point", np.full(len(res["s_mm"]), np.nan)), dtype=float
+        ),
+        # The radius the enlargement test was run on (cross-section or detection radius).
+        "enlargement_radius_mm": np.asarray(res.get("enlargement_radius_mm", res["radius_mm"]), dtype=float),
     })
     # Scanner RAS (the frame of the written VTPs) next to the computation frame (x/y/z_mm).
     from nvitk.measure.morpho.surface import to_world

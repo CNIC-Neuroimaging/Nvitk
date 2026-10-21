@@ -60,6 +60,24 @@ TREE_REGION_ROLE_CODES = {
 #: voxel-skeleton path re-centred on the lumen (:mod:`nvitk.morphology.centering`); ``raycast`` is
 #: the experimental EXPIGEO ray-probing skeleton (:mod:`nvitk.morphology.raycast_skeleton`).
 CENTERLINE_BACKENDS: tuple[str, ...] = ("vmtk", "native", "raycast")
+#: Radius the enlargement test reads (``ENLARGEMENT_RADIUS_SOURCE``). ``cow`` follows cow_morpho:
+#: the cross-section radius on a path's first measurement, the detection radius on paths
+#: re-measured after trunk pruning and on donut arms. ``cross_section`` and ``detection`` use that
+#: one radius on every path (``detection`` = the stenosis radius, RADIUS_SOURCE_FOR_CALIBER_DETECTION).
+ENLARGEMENT_RADIUS_SOURCES: tuple[str, ...] = ("cow", "cross_section", "detection")
+#: Cross-section radius estimators (``CROSS_SECTION_RADIUS_METHOD``): ``ray_median`` — the median
+#: in-plane distance from the centerline point to the wall over ``CROSS_SECTION_RAYS`` rays;
+#: ``largest_loop`` — cow_morpho's equivalent-circle radius of the largest loop of the cut.
+CROSS_SECTION_RADIUS_METHODS: tuple[str, ...] = ("ray_median", "largest_loop")
+#: Healthy reference of the lesion table's diameter / area % (``LESION_REFERENCE_METHOD``):
+#: ``interpolated`` — proximal and distal windows, interpolated to the lesion (QCA-style, taper
+#: corrected); ``proximal`` — the upstream window alone (distal fallback), as before 2026-10-21.
+LESION_REFERENCE_METHODS: tuple[str, ...] = ("interpolated", "proximal")
+ENLARGEMENT_RADIUS_SOURCE_LABELS: Mapping[str, str] = MappingProxyType({
+    "cow": "cow_morpho (cross-section; inscribed on re-measured paths)",
+    "cross_section": "cross-section on every path",
+    "detection": "inscribed (detection radius) on every path",
+})
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Profile: eICAB Circle-of-Willis TOF masks (cow_morpho parity)
@@ -101,6 +119,23 @@ _EICAB_CW: dict[str, Any] = {
     # Native backend: re-centring of the voxel-skeleton path (see nvitk.morphology.centering).
     "NATIVE_CENTERING_ITERATIONS": 3,
     "NATIVE_CENTERING_SMOOTH_MM": 0.75,
+
+    # ── Cross-section radius (surface cut by the plane normal to the centerline) ─
+    # The plane's normal is the chord from the point this many mm upstream to the one this many mm
+    # downstream (arc length; at least the neighbouring point on each side, one-sided at the ends).
+    # 0.1 = cow_morpho: the immediate neighbours (±1 point) at the 0.1 mm resampling step. A wider
+    # window tilts the plane less with centerline jitter (fewer oblique, oversized cuts) but turns
+    # late in tight bends.
+    "CROSS_SECTION_TANGENT_HALF_WINDOW_MM": 1.0,
+    # How the cut becomes a radius (CROSS_SECTION_RADIUS_METHODS). "ray_median": from the centerline
+    # point, CROSS_SECTION_RAYS rays spread evenly in the plane; each stops at its first wall
+    # crossing, and the radius is the median distance — a circle between the nearest and farthest
+    # wall that a branch opening (a few long rays) does not move, and that never sees the other
+    # vessels the plane also cuts. "largest_loop" (cow_morpho): the largest closed loop's area as an
+    # equivalent circle, which near the siphon or a bifurcation is often another limb, a
+    # neighbouring branch or the merged carina, so the radius spikes and climbs towards junctions.
+    "CROSS_SECTION_RADIUS_METHOD": "ray_median",
+    "CROSS_SECTION_RAYS": 36,
 
     # ── Skeleton / tree / donut-loop handling ────────────────────────────────
     "ENABLE_TREE_MODE": True,
@@ -153,25 +188,40 @@ _EICAB_CW: dict[str, Any] = {
     "PRUNE_SPUR_LENGTH_MM": 2.0,
 
     # ── Stenosis / enlargement detection (cow_morpho rules) ──────────────────
-    "STENOSIS_THRESHOLD_PCT": 10.0,
-    "ENLARGEMENT_THRESHOLD_PCT": 10.0,
+    "STENOSIS_THRESHOLD_PCT": 20.0,
+    "ENLARGEMENT_THRESHOLD_PCT": 20.0,
     "RADIUS_SOURCE_FOR_CALIBER_DETECTION": "maximum_inscribed_sphere",  # or "cross_section"
     "STENOSIS_MIN_LEN_MM": 3.0,
     "STENOSIS_EXCLUDE_END_MM": 2.0,
     # Diagnostic CoreCandidate / SupportCandidate arrays only.
     "STENOSIS_CANDIDATE_EXCLUDE_END_MM": 5.0,
     "STENOSIS_MAX_INTERNAL_GAP_MM": 1.5,
-    # The support tier is min(support, core): with cow's 25 % against a 10 % core the support and
-    # core contours coincide, i.e. a lesion is a ≥10 % run of ≥3 mm (gaps ≤1.5 mm merged).
+    # The support tier is min(support, core): with cow's 25 % against the 20 % core the support and
+    # core contours coincide, i.e. a stenosis is a ≥20 % run of ≥3 mm (gaps ≤1.5 mm merged). A
+    # support below the core would grow lesions into their shoulders (hysteresis).
     "STENOSIS_SUPPORT_THRESHOLD_PCT": 25.0,
     "STENOSIS_SEGMENT_REFERENCE_MARGIN_MM": 5.0,
     "ENLARGEMENT_MIN_LEN_MM": 5.0,
-    # Alternative acceptance: ≥ this many consecutive support points (0.3 mm at 0.1 mm sampling).
-    "ENLARGEMENT_MIN_CONSECUTIVE_SUPPORT_POINTS": 3,
+    # Alternative acceptance, in arc length: a shorter enlargement still counts when its run spans
+    # ≥ this. It replaces cow_morpho's "≥ 3 consecutive points", which at the 0.1 mm step accepted
+    # 0.2 mm runs — single cross-section spikes; the effective minimum is the smaller of the two.
+    # None = ENLARGEMENT_MIN_LEN_MM alone.
+    "ENLARGEMENT_MIN_SUPPORT_LENGTH_MM": 1.5,
     "ENLARGEMENT_EXCLUDE_END_MM": 3.0,
     "ENLARGEMENT_CANDIDATE_EXCLUDE_END_MM": 5.0,
     "ENLARGEMENT_MAX_INTERNAL_GAP_MM": 1.5,
     "ENLARGEMENT_SUPPORT_THRESHOLD_PCT": 25.0,
+    # Which radius enlargements are tested on (ENLARGEMENT_RADIUS_SOURCES). "cow" keeps cow_morpho's
+    # path-dependent choice: cross-section on a first measurement, detection radius on re-measured
+    # (pruned) paths and donut arms, so the same bulge can pass on one path and fail on another.
+    # "cross_section" or "detection" makes it one radius everywhere.
+    "ENLARGEMENT_RADIUS_SOURCE": "cow",
+    # Where enlargements are tested on the cross-section (area-equivalent) radius, it spikes for one or
+    # two 0.1 mm samples wherever a cut catches a branch opening or sits obliquely in a bend. True
+    # tests a running median of it over ENLARGEMENT_CROSS_SECTION_MEDIAN_MM of arc length instead
+    # (a bulge longer than half the window survives); False keeps the raw radius, as cow_morpho.
+    "ENLARGEMENT_SMOOTH_CROSS_SECTION": False,
+    "ENLARGEMENT_CROSS_SECTION_MEDIAN_MM": 1.0,
     "SUPPRESS_ENLARGEMENT_NEAR_CENTERLINE_STARTS": True,
     "ENLARGEMENT_CENTERLINE_START_EXCLUDE_MM": None,
     # Taper-fit end-zone exclusion (must be ≥ the *_EXCLUDE_END_MM values).
@@ -228,7 +278,24 @@ _EICAB_CW: dict[str, Any] = {
     "HYPOPLASIA_DIAMETER_MM": 1.0,
 
     # ── Lesion severity / confidence (lesions table) ─────────────────────────
+    # Healthy reference radius of the lesion table's diameter / area % (LESION_REFERENCE_METHODS).
+    # "interpolated": the median radius of a proximal window (LESION_PROXIMAL_REFERENCE_WINDOW_MM
+    # upstream of the lesion) and of a distal one (the same distances downstream), interpolated in
+    # arc length to the lesion's narrowest (widest) point, so the vessel's natural taper between
+    # them is not counted as stenosis. Windows keep to healthy points of the lesion's own
+    # junction-to-junction stretch (no other lesions, no bifurcation blanking zone, no junction
+    # crossed); a distal median above the proximal one is capped at it; one window only → that one.
+    # "proximal": the upstream window alone (downstream when there is no room), as before 2026-10-21.
+    "LESION_REFERENCE_METHOD": "interpolated",
+    # Window distances from the lesion (mm): upstream for the proximal window, mirrored downstream
+    # for the distal one.
     "LESION_PROXIMAL_REFERENCE_WINDOW_MM": (2.0, 10.0),
+    # No reference window reaches into the first / last this many mm of the path: the tips hold
+    # VMTK's seed point on the wall and the end taper.
+    "LESION_REFERENCE_EXCLUDE_END_MM": 3.0,
+    # "interpolated": proximal and distal medians differing by more than this fraction (more than
+    # taper explains: distal collapse, dilatation, an unseen branch) flag reference_inconsistent.
+    "LESION_REFERENCE_DISAGREEMENT_FRACTION": 0.25,
     "LESION_NEAR_BIFURCATION_MM": 3.0,
     "LESION_NEAR_END_MM": 5.0,
     # Cross-section / inscribed radius ratio inside the lesion vs that path's median ratio.
@@ -286,6 +353,28 @@ class MorphometricsConfig:
             raise ValueError(
                 f"CENTERLINE_BACKEND must be one of {CENTERLINE_BACKENDS}, "
                 f"got {self.params['CENTERLINE_BACKEND']!r}."
+            )
+        if not float(self.params["CROSS_SECTION_TANGENT_HALF_WINDOW_MM"]) >= 0.0:
+            raise ValueError(
+                "CROSS_SECTION_TANGENT_HALF_WINDOW_MM must be ≥ 0 mm, "
+                f"got {self.params['CROSS_SECTION_TANGENT_HALF_WINDOW_MM']!r}."
+            )
+        if str(self.params["CROSS_SECTION_RADIUS_METHOD"]).lower() not in CROSS_SECTION_RADIUS_METHODS:
+            raise ValueError(
+                f"CROSS_SECTION_RADIUS_METHOD must be one of {CROSS_SECTION_RADIUS_METHODS}, "
+                f"got {self.params['CROSS_SECTION_RADIUS_METHOD']!r}."
+            )
+        if int(self.params["CROSS_SECTION_RAYS"]) < 8:
+            raise ValueError(f"CROSS_SECTION_RAYS must be ≥ 8, got {self.params['CROSS_SECTION_RAYS']!r}.")
+        if str(self.params["LESION_REFERENCE_METHOD"]).lower() not in LESION_REFERENCE_METHODS:
+            raise ValueError(
+                f"LESION_REFERENCE_METHOD must be one of {LESION_REFERENCE_METHODS}, "
+                f"got {self.params['LESION_REFERENCE_METHOD']!r}."
+            )
+        if str(self.params["ENLARGEMENT_RADIUS_SOURCE"]).lower() not in ENLARGEMENT_RADIUS_SOURCES:
+            raise ValueError(
+                f"ENLARGEMENT_RADIUS_SOURCE must be one of {ENLARGEMENT_RADIUS_SOURCES}, "
+                f"got {self.params['ENLARGEMENT_RADIUS_SOURCE']!r}."
             )
 
     @property

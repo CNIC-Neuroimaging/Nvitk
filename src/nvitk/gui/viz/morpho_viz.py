@@ -1,4 +1,11 @@
-"""Napari debug visualization for qvtpy stage-7 TOF morphometrics centerlines."""
+"""Napari visualization of TOF morphometrics outputs (stage 7 / the GUI *Morphometrics* tool).
+
+Overlays: the measured centerlines (paths), samples along them coloured by a per-point array,
+the vessel surfaces as one Mesh-panel surface whose vertices carry the ``label`` they belong to
+(so they can be coloured per vessel, by label or by a measured value —
+:mod:`nvitk.gui.viz.morpho_results`), and the detected lesions as points. Every overlay is
+placed with the reference layer's full data → world transform.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 from nvitk.core.logger import Logger
-from nvitk.gui.core.spatial import layer_affine, layer_spacing
+from nvitk.gui.core.spatial import layer_spacing, layer_spatial_kwargs
 from nvitk.gui.viz.layers import install_points_style_sync
 from nvitk.gui.viz.left_dock import attach_left_inspection_dock
 from nvitk.pipes.qvtpy.util.eicab.morpho_paths import STAGE7_SKIP_MARKER
@@ -20,6 +27,12 @@ MORPHO_OVERLAY_META = "nvitk_morpho_overlay"
 MORPHO_PATHS_LAYER = "Morpho centerlines"
 MORPHO_POINTS_LAYER = "Morpho samples"
 MORPHO_SURFACES_LAYER = "Morpho surfaces"
+MORPHO_LESIONS_LAYER = "Morpho lesions"
+#: Lesion point colours by kind.
+LESION_COLOURS: dict[str, tuple[float, float, float]] = {
+    "stenosis": (0.93, 0.33, 0.10),
+    "enlargement": (0.20, 0.50, 0.95),
+}
 
 _COLOR_BY_ARRAYS: dict[str, tuple[str, ...]] = {
     "radius": ("EffectiveRadius", "CrossSectionRadius", "radius_mm"),
@@ -37,23 +50,27 @@ _COLOR_BY_ARRAYS: dict[str, tuple[str, ...]] = {
 DEFAULT_MORPHO_POINT_SIZE = 0.35
 MORPHO_POINT_CANVAS_SIZE_LIMITS = (0.5, 200.0)
 
-# Path-summary columns preferred in the Morphometrics dock table.
+# Columns of the per-vessel table shown in the Morphometrics dock (the whole table, with every
+# column, is in the results window — nvitk.gui.viz.morpho_results). The legacy names cover
+# outputs written before the compact tables.
 _MORPHO_TABLE_COLS: tuple[str, ...] = (
     "vessel_name",
-    "full_name",
-    "n_voxels",
+    "present",
+    "main_length_mm",
+    "centerline_length_mm",
+    "diameter_median_mm",
+    "diameter_min_mm",
+    "tortuosity_dm",
+    "curvature_mean_1_per_mm",
+    "n_stenosis",
+    "n_stenosis_high_confidence",
+    "stenosis_diameter_percent_max",
+    "n_enlargement",
     "volume_mm3",
     "surface_area_mm2",
     "length_mm",
     "radius_mean_mm",
-    "radius_p95_mm",
-    "equivalent_radius_mm",
-    "tortuosity_dm",
     "stenosis_percent_max",
-    "degree_of_stenosis_pct",
-    "stenosis_length_total_mm",
-    "stenosis_segments_n",
-    "curvature_mean_1_per_mm",
     "n_paths",
 )
 
@@ -71,19 +88,34 @@ _VOLUMETRY_MERGE_COLS: tuple[str, ...] = (
 # Aggregation: length-weighted means for continuous metrics; max / sum for stenosis.
 _AGG_MEAN_COLS: tuple[str, ...] = (
     "radius_mean_mm",
+    "radius_std_mm",
+    "radius_cv",
+    "radius_p05_mm",
+    "radius_p50_mm",
     "radius_p95_mm",
+    "taper_slope_mm_per_mm",
     "tortuosity_dm",
     "curvature_mean_1_per_mm",
+    "curvature_median_1_per_mm",
+    "curvature_p95_1_per_mm",
     "curvature_mean",
 )
 _AGG_MAX_COLS: tuple[str, ...] = (
+    "curvature_max_1_per_mm",
     "stenosis_percent_max",
     "degree_of_stenosis_pct",
     "stenosis_percent",
+    "radius_max_enlarged_mm",
+    "enlargement_percent_max",
+)
+_AGG_MIN_COLS: tuple[str, ...] = (
+    "radius_min_stenotic_mm",
 )
 _AGG_SUM_COLS: tuple[str, ...] = (
     "stenosis_length_total_mm",
     "stenosis_segments_n",
+    "enlargement_length_total_mm",
+    "enlargement_segments_n",
 )
 
 
@@ -320,6 +352,13 @@ def _aggregate_summary_by_vessel(df: pd.DataFrame) -> pd.DataFrame:
             vals = pd.to_numeric(g[col], errors="coerce").to_numpy(dtype=np.float64)
             return float(np.nanmax(vals)) if np.isfinite(vals).any() else float("nan")
 
+        def _min(col: str) -> float:
+            """Min finite value of *col* over the group, or NaN if none are finite."""
+            if col not in g.columns:
+                return float("nan")
+            vals = pd.to_numeric(g[col], errors="coerce").to_numpy(dtype=np.float64)
+            return float(np.nanmin(vals)) if np.isfinite(vals).any() else float("nan")
+
         def _sum(col: str) -> float:
             """Sum of finite values of *col* over the group, or NaN if none are finite."""
             if col not in g.columns:
@@ -333,6 +372,9 @@ def _aggregate_summary_by_vessel(df: pd.DataFrame) -> pd.DataFrame:
         for col in _AGG_MAX_COLS:
             if col in g.columns:
                 row[col] = _max(col)
+        for col in _AGG_MIN_COLS:
+            if col in g.columns:
+                row[col] = _min(col)
         for col in _AGG_SUM_COLS:
             if col in g.columns:
                 row[col] = _sum(col)
@@ -380,33 +422,154 @@ def _load_vtp_surface(path: Path) -> tuple[np.ndarray, np.ndarray]:
     return verts, np.asarray(faces, dtype=np.int64)
 
 
-def load_stage7_surfaces(
+def _surface_label(path: Path) -> int:
+    """Label id of a surface VTP (``<label>_<VESSEL>_comp01.vtp``), 0 when the name has none."""
+    import re
+
+    m = re.match(r"^(\d+)_", path.stem)
+    return int(m.group(1)) if m else 0
+
+
+def load_stage7_surface_mesh(
     stage7_dir: Path,
     *,
     reference_layer: Any | None = None,
-) -> list[tuple[np.ndarray, np.ndarray]]:
-    """Load vessel surface meshes under ``stage7_dir/surfaces`` in data coords."""
+) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """All vessel surfaces under ``stage7_dir/surfaces`` as one mesh in the reference layer's data
+    coordinates: ``(vertices, faces, label id per vertex)``; ``None`` when there are none."""
     surf_dir = Path(stage7_dir) / "surfaces"
     if not surf_dir.is_dir():
-        return []
-    files = sorted(
-        p for p in surf_dir.glob("*.vtp") if "pre_refined" not in p.name.lower()
-    )
-    out: list[tuple[np.ndarray, np.ndarray]] = []
-    vert_offset = 0
-    all_verts: list[np.ndarray] = []
-    all_faces: list[np.ndarray] = []
+        return None
+    files = sorted(p for p in surf_dir.glob("*.vtp") if "pre_refined" not in p.name.lower())
+    all_verts, all_faces, all_labels = [], [], []
+    offset = 0
     for path in files:
         verts_mm, faces = _load_vtp_surface(path)
         if verts_mm.shape[0] < 3 or faces.shape[0] == 0:
             continue
         verts = _vtp_mm_to_data(verts_mm, reference_layer)
         all_verts.append(verts.astype(np.float32))
-        all_faces.append(faces.astype(np.int32) + int(vert_offset))
-        vert_offset += int(verts.shape[0])
+        all_faces.append(faces.astype(np.int32) + int(offset))
+        all_labels.append(np.full(len(verts), _surface_label(path), dtype=np.int32))
+        offset += int(verts.shape[0])
     if not all_verts:
-        return []
-    return [(np.concatenate(all_verts, axis=0), np.concatenate(all_faces, axis=0))]
+        return None
+    return np.concatenate(all_verts), np.concatenate(all_faces), np.concatenate(all_labels)
+
+
+def load_stage7_surfaces(
+    stage7_dir: Path,
+    *,
+    reference_layer: Any | None = None,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Load vessel surface meshes under ``stage7_dir/surfaces`` in data coords."""
+    mesh = load_stage7_surface_mesh(stage7_dir, reference_layer=reference_layer)
+    return [] if mesh is None else [(mesh[0], mesh[1])]
+
+
+def _overlay_kwargs(reference_layer: Any | None) -> dict[str, Any]:
+    """Placement of an overlay given in *reference_layer*'s data coordinates (scale, translate,
+    affine… — every part of its transform, not just the affine)."""
+    return layer_spatial_kwargs(reference_layer) if reference_layer is not None else {}
+
+
+def label_colour_lut(label_ids: Any, label_layer: Any | None) -> dict[int, tuple[float, ...]]:
+    """Label id → RGBA: *label_layer*'s own colours, else a fixed palette."""
+    from matplotlib import colormaps
+
+    tab = colormaps["tab20"]
+    out: dict[int, tuple[float, ...]] = {}
+    for i, lid in enumerate(sorted({int(v) for v in label_ids})):
+        rgba = None
+        if label_layer is not None:
+            try:
+                from nvitk.gui.labels.visibility import get_label_color
+
+                rgba = tuple(float(c) for c in np.asarray(get_label_color(label_layer, lid), dtype=float)[:4])
+            except Exception:  # noqa: BLE001
+                rgba = None
+        if rgba is None or len(rgba) < 4:
+            rgba = tuple(float(c) for c in tab(i % 20))
+        out[lid] = rgba
+    return out
+
+
+def _add_morpho_surface(
+    viewer: Any,
+    verts: np.ndarray,
+    faces: np.ndarray,
+    vertex_labels: np.ndarray,
+    *,
+    reference_layer: Any | None,
+    label_layer: Any | None,
+    metadata: dict[str, Any],
+) -> Any:
+    """The vessel surfaces as one Mesh-panel surface (world coordinates) with a ``label`` field,
+    shown in the label colours."""
+    from nvitk.gui.mesh.layers import add_field, add_mesh_layer, layer_spatial_affine
+    from nvitk.types import Mesh
+
+    aff = layer_spatial_affine(reference_layer) if reference_layer is not None else np.eye(4)
+    world = np.asarray(verts, dtype=float) @ aff[:3, :3].T + aff[:3, 3]
+    layer = add_mesh_layer(
+        viewer, Mesh(vertices=world, faces=np.asarray(faces), metadata={"name": MORPHO_SURFACES_LAYER}),
+        name=MORPHO_SURFACES_LAYER, opacity=0.35,
+    )
+    try:
+        layer.blending = "translucent"
+        layer.metadata = {**dict(layer.metadata or {}), **metadata}
+    except Exception:  # noqa: BLE001
+        pass
+    add_field(layer, "label", np.asarray(vertex_labels, dtype=np.float32),
+              categories=label_colour_lut(np.unique(vertex_labels), label_layer), show=True)
+    return layer
+
+
+def add_morpho_lesion_points(
+    viewer: Any,
+    stage7_dir: Path,
+    *,
+    reference_layer: Any | None,
+    point_size: float = 1.5,
+    metadata: dict[str, Any] | None = None,
+) -> Any | None:
+    """The detected lesions (``lesions.csv``) as points at their midpoints: orange stenoses, blue
+    enlargements, opaque in proportion to their confidence and sized by their severity."""
+    path = Path(stage7_dir) / "lesions.csv"
+    if not path.is_file():
+        return None
+    df = pd.read_csv(path)
+    if df.empty or not {"x_mm", "y_mm", "z_mm"} <= set(df.columns):
+        return None
+    for lyr in list(viewer.layers):
+        if lyr.name == MORPHO_LESIONS_LAYER:
+            viewer.layers.remove(lyr)
+    data = _vtp_mm_to_data(df[["x_mm", "y_mm", "z_mm"]].to_numpy(dtype=float), reference_layer)
+    conf = pd.to_numeric(df.get("confidence"), errors="coerce").fillna(0.5).to_numpy(dtype=float)
+    kind = df.get("kind", pd.Series(["stenosis"] * len(df))).astype(str).to_numpy()
+    rgba = np.asarray([[*LESION_COLOURS.get(k, (0.6, 0.6, 0.6)), 0.35 + 0.65 * float(np.clip(c, 0, 1))]
+                       for k, c in zip(kind, conf)], dtype=float)
+    severity = pd.to_numeric(df.get("diameter_percent"), errors="coerce").abs().fillna(0.0).to_numpy(dtype=float)
+    sizes = float(point_size) * (1.0 + 1.5 * np.clip(severity, 0.0, 80.0) / 80.0)
+    keep = [c for c in ("vessel_name", "kind", "segment", "length_mm", "taper_percent", "diameter_percent",
+                        "area_percent", "reference", "confidence", "confidence_class", "confidence_flags")
+            if c in df.columns]
+    kwargs: dict[str, Any] = {
+        "name": MORPHO_LESIONS_LAYER,
+        "features": df[keep].reset_index(drop=True),
+        "face_color": rgba,
+        "border_color": "white",
+        "size": sizes,
+        "symbol": "disc",
+        "out_of_slice_display": True,
+        "metadata": dict(metadata or {}),
+        **_overlay_kwargs(reference_layer),
+    }
+    try:
+        return viewer.add_points(data.astype(np.float64), **kwargs)
+    except TypeError:
+        kwargs.pop("border_color", None)
+        return viewer.add_points(data.astype(np.float64), **kwargs)
 
 
 def install_morphometrics_viz(
@@ -418,8 +581,13 @@ def install_morphometrics_viz(
     point_size: float = DEFAULT_MORPHO_POINT_SIZE,
     edge_width: float = 0.35,
     show_surfaces: bool = True,
+    show_lesions: bool = True,
+    label_layer: Any | None = None,
 ) -> dict[str, Any]:
-    """Load stage-7 centerline VTPs into Napari and attach a summary dock."""
+    """Load the morphometrics overlays (centerlines, samples, surfaces, lesions) into Napari and
+    attach the summary dock. *label_layer* (default: *reference_layer* when it is a Labels
+    layer) gives the surfaces their label colours. The returned dict names the layers made
+    (``surface_layer``, ``lesion_layer``) for :mod:`nvitk.gui.viz.morpho_results`."""
     stage7_dir = Path(stage7_dir)
     if point_size == DEFAULT_MORPHO_POINT_SIZE:
         point_size = _default_morpho_point_size(reference_layer)
@@ -454,7 +622,8 @@ def install_morphometrics_viz(
         )
 
     meta = {MORPHO_OVERLAY_META: True}
-    aff = layer_affine(reference_layer) if reference_layer is not None else None
+    if label_layer is None and type(reference_layer).__name__ == "Labels":
+        label_layer = reference_layer
     if paths:
         kwargs: dict[str, Any] = {
             "name": MORPHO_PATHS_LAYER,
@@ -463,9 +632,8 @@ def install_morphometrics_viz(
             "edge_width": float(edge_width),
             "opacity": 0.9,
             "metadata": meta,
+            **_overlay_kwargs(reference_layer),
         }
-        if aff is not None:
-            kwargs["affine"] = aff
         shapes = viewer.add_shapes(paths, **kwargs)
         try:
             shapes.editable = False
@@ -473,24 +641,38 @@ def install_morphometrics_viz(
             pass
 
     n_surf = 0
+    surface_layer = None
     if show_surfaces:
         try:
-            surfs = load_stage7_surfaces(stage7_dir, reference_layer=reference_layer)
-            for verts, faces in surfs:
-                if verts.shape[0] < 3 or faces.shape[0] == 0:
-                    continue
-                skw: dict[str, Any] = {
-                    "name": MORPHO_SURFACES_LAYER,
-                    "opacity": 0.35,
-                    "blending": "translucent",
-                    "metadata": meta,
-                }
-                if aff is not None:
-                    skw["affine"] = aff
-                viewer.add_surface((verts, faces), **skw)
-                n_surf += 1
+            mesh = load_stage7_surface_mesh(stage7_dir, reference_layer=reference_layer)
+            if mesh is not None:
+                surface_layer = _add_morpho_surface(
+                    viewer, *mesh, reference_layer=reference_layer, label_layer=label_layer, metadata=meta,
+                )
+                n_surf = int(len(np.unique(mesh[2])))
         except Exception as exc:  # noqa: BLE001
             log.warning("Morpho surfaces not loaded: %s", exc)
+
+    lesion_layer = None
+    extents_layer = None
+    if show_lesions:
+        try:
+            # Extents first, so the points draw on top of them.
+            from nvitk.gui.viz.lesion_inspector import add_lesion_extents, install_lesion_tools, load_lesion_run
+
+            run = load_lesion_run(stage7_dir)
+            if run is not None:
+                extents_layer = add_lesion_extents(viewer, run, reference_layer=reference_layer, metadata=meta)
+            lesion_layer = add_morpho_lesion_points(
+                viewer, stage7_dir, reference_layer=reference_layer,
+                point_size=max(3.0 * float(point_size), 0.5), metadata=meta,
+            )
+            if lesion_layer is not None:
+                # Hover cards and click-to-inspect (the extents are already drawn).
+                install_lesion_tools(viewer, stage7_dir, lesion_layer=lesion_layer, reference_layer=reference_layer,
+                                     metadata=meta, extents=False, extents_layer=extents_layer)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Morpho lesions not loaded: %s", exc)
 
     points_layer = None
     try:
@@ -506,7 +688,13 @@ def install_morphometrics_viz(
     except Exception as exc:  # noqa: BLE001
         log.warning("Morpho sample points not loaded: %s", exc)
 
-    summary = _path_summary_table(stage7_dir)
+    from nvitk.gui.viz.morpho_results import vessel_table
+
+    try:
+        summary = vessel_table(stage7_dir)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Morphometrics vessel table not loaded: %s", exc)
+        summary = _path_summary_table(stage7_dir)
     _attach_summary_dock(
         viewer,
         summary,
@@ -522,8 +710,12 @@ def install_morphometrics_viz(
         "stage7_dir": stage7_dir,
         "n_paths": len(paths),
         "n_surfaces": n_surf,
+        "n_lesions": int(len(lesion_layer.data)) if lesion_layer is not None else 0,
         "color_by": color_by,
         "n_summary_rows": int(len(summary)),
+        "surface_layer": surface_layer,
+        "lesion_layer": lesion_layer,
+        "lesion_extents_layer": extents_layer,
     }
 
 
@@ -667,10 +859,8 @@ def _add_or_update_morpho_points(
         "metadata": metadata,
         "opacity": 0.95,
         "canvas_size_limits": MORPHO_POINT_CANVAS_SIZE_LIMITS,
+        **_overlay_kwargs(reference_layer),
     }
-    aff = layer_affine(reference_layer) if reference_layer is not None else None
-    if aff is not None:
-        pt_kwargs["affine"] = aff
     try:
         layer = viewer.add_points(coords.astype(np.float64), **pt_kwargs)
     except TypeError:
@@ -759,7 +949,7 @@ def _attach_summary_dock(
 
     panel = QWidget()
     layout = QVBoxLayout(panel)
-    layout.addWidget(QLabel(f"Stage-7 morphometrics\n{stage7_dir}"))
+    layout.addWidget(QLabel(f"Morphometrics\n{stage7_dir}\n(full tables in the results window)"))
 
     color_row = QHBoxLayout()
     color_row.addWidget(QLabel("Color samples by"))
@@ -795,7 +985,7 @@ def _attach_summary_dock(
         table.setColumnCount(1)
         table.setHorizontalHeaderLabels(["Info"])
         table.setRowCount(1)
-        table.setItem(0, 0, QTableWidgetItem("No 00_Path_Summary available."))
+        table.setItem(0, 0, QTableWidgetItem("No morphometrics table available."))
     else:
         cols = [c for c in _MORPHO_TABLE_COLS if c in summary.columns]
         if not cols:
@@ -892,9 +1082,13 @@ __all__ = [
     "MORPHO_OVERLAY_META",
     "MORPHO_PATHS_LAYER",
     "MORPHO_POINTS_LAYER",
+    "MORPHO_LESIONS_LAYER",
     "MORPHO_SURFACES_LAYER",
+    "add_morpho_lesion_points",
     "clear_morpho_layers",
     "install_morphometrics_viz",
+    "label_colour_lut",
     "load_stage7_centerline_polylines",
+    "load_stage7_surface_mesh",
     "load_stage7_surfaces",
 ]

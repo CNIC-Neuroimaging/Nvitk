@@ -14,7 +14,7 @@ extraction:
 | `components` | Connected-component labeling and filtering. |
 | `centerline` | Skeleton/centerline extraction from tubular structures (vessels); every entry point takes `method=` (below). |
 | `skeleton_methods` | The skeletonization methods: `vmtk`, `native` (scikit-image thinning, re-centred) and `raycast` (experimental). `centerline_network()` returns sub-voxel branch polylines with radii; `method_skeleton()` rasterizes them to a 1-voxel skeleton so voxel-graph tools work with any method. |
-| `centering` | Re-centres skeleton paths on the lumen (cross-section centroid + inscribed-radius ascent) and measures the inscribed radius as the distance to the surface. |
+| `centering` | Re-centres skeleton paths on the lumen (cross-section centroid + inscribed-radius ascent) and measures the inscribed radius as the distance to the surface. The GUI's *Centre centerline on the lumen* tools (Tools and Mesh panels) apply it to any centerline layer. |
 | `raycast_skeleton` | **Experimental.** EXPIGEO ray-cast skeletonization (inverted-normal ray probing, spatial-median vertices, MST, spur pruning) and its geometric descriptors (radius gradient, termination likelihood, blockage, sphericity, projected flow). |
 | `centerline_siphon` | ICA siphon-specific centerline correction — see the worked methodology in the repo's `notebooks/exploration/pesabrain-anatomy/methods.md`. |
 | `polyline_graph`, `mst_bridge` | Graph representations of centerlines and minimum-spanning-tree bridging between disconnected segments. |
@@ -27,7 +27,7 @@ nvitk-morph dilate -i mask.nii.gz -o mask_dil.nii.gz --footprint 2
 
 | Method | How | Default for |
 |---|---|---|
-| `vmtk` | VMTK Voronoi centerlines on the mask's surface, seeded at the skeleton end points (needs {doc}`vmtk`) | GUI tools, TOF morphometrics |
+| `vmtk` | VMTK Voronoi centerlines on the mask's surface, seeded at the skeleton end points (needs {doc}`vmtk`); `vmtk_coverage="full"` (default) traces every branch, loop and separate piece, `"tree"` one run from the widest end | GUI tools, TOF morphometrics |
 | `native` | scikit-image 3D thinning; networks are re-centred on the lumen | library calls, so the validated 4D-flow qvtpy stages keep their outputs |
 | `raycast` | EXPIGEO ray probing of the surface (Layachi et al., MICCAI 2026) | nothing: experimental, opt-in |
 

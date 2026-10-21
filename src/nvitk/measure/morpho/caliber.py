@@ -12,6 +12,63 @@ from nvitk.measure import morphometrics_config as _cfg
 from .metrics import discrete_curvature, smooth_1d, smoothed_curvature
 from .models import EnlargementResult, StenosisResult
 
+def enlargement_min_length_mm(min_segment_mm: Optional[float] = None) -> float:
+    """Shortest accepted enlargement: *min_segment_mm* (default ``ENLARGEMENT_MIN_LEN_MM``), or the
+    alternative ``ENLARGEMENT_MIN_SUPPORT_LENGTH_MM`` when that is shorter."""
+    base = float(_cfg.ENLARGEMENT_MIN_LEN_MM if min_segment_mm is None else min_segment_mm)
+    alt = _cfg.ENLARGEMENT_MIN_SUPPORT_LENGTH_MM
+    return min(base, float(alt)) if alt is not None else base
+
+
+def detection_radius_is_cross_section() -> bool:
+    """Whether the caliber detection radius is the cross-section one (``RADIUS_SOURCE_FOR_CALIBER_DETECTION``)."""
+    return str(_cfg.RADIUS_SOURCE_FOR_CALIBER_DETECTION).lower() not in {"maximum_inscribed_sphere", "mis", "vmtk"}
+
+
+def enlargement_cross_section_radius(s, r) -> np.ndarray:
+    """The cross-section radius an enlargement test reads: *r* itself, or — with
+    ``ENLARGEMENT_SMOOTH_CROSS_SECTION`` — its running median over ``ENLARGEMENT_CROSS_SECTION_MEDIAN_MM``
+    of arc length (NaNs ignored; the ends padded with their own value).
+
+    A single bad cut (the plane catching a branch opening, or oblique in a bend) spikes the
+    area-equivalent radius for one or two 0.1 mm samples; the median removes it, while a bulge
+    longer than half the window survives.
+    """
+    import warnings
+
+    r = np.asarray(r, dtype=float)
+    if not bool(_cfg.ENLARGEMENT_SMOOTH_CROSS_SECTION) or len(r) < 3:
+        return r.copy()
+    s = np.asarray(s, dtype=float)
+    ds = float(np.median(np.diff(s))) if len(s) > 1 else 0.0
+    if not np.isfinite(ds) or ds <= 0.0:
+        return r.copy()
+    half = max(1, int(round(0.5 * float(_cfg.ENLARGEMENT_CROSS_SECTION_MEDIAN_MM) / ds)))
+    windows = np.lib.stride_tricks.sliding_window_view(np.pad(r, half, mode="edge"), 2 * half + 1)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN windows stay NaN
+        out = np.nanmedian(windows, axis=1)
+    return np.where(np.isfinite(out), out, r)
+
+
+def enlargement_radius(s, cross_section_r, detection_r, *, cow_source: str) -> Tuple[np.ndarray, str]:
+    """The radius one measurement's enlargement test reads, and its source (``"cross_section"`` or
+    ``"detection"``), per ``ENLARGEMENT_RADIUS_SOURCE``.
+
+    *cow_source* is what cow_morpho reads on the calling code path, used under ``"cow"``. A
+    cross-section signal goes through :func:`enlargement_cross_section_radius` (the optional running
+    median), including a detection radius that is itself the cross-section one.
+    """
+    source = str(_cfg.ENLARGEMENT_RADIUS_SOURCE).lower()
+    if source not in _cfg.ENLARGEMENT_RADIUS_SOURCES:
+        raise ValueError(f"ENLARGEMENT_RADIUS_SOURCE must be one of {_cfg.ENLARGEMENT_RADIUS_SOURCES}, got {source!r}.")
+    if source == "cow":
+        source = cow_source
+    if source == "detection" and not detection_radius_is_cross_section():
+        return np.asarray(detection_r, dtype=float).copy(), source
+    return enlargement_cross_section_radius(s, detection_r if source == "detection" else cross_section_r), source
+
+
 def stenosis_valid_mask_from_ends(s, exclude_end_mm) -> np.ndarray:
     """Boolean mask excluding the first/last *exclude_end_mm* of arc length *s* (avoid end-effect false positives)."""
     if len(s) == 0:
@@ -547,8 +604,7 @@ def detect_enlargement_segments(
                 & np.isfinite(pct_iter) & detect_core
             )
             segs_iter = hysteresis_segments_from_min_length(
-                s, core_iter, support_iter, min_segment_mm, max_gap_mm=max_gap,
-                min_points=_cfg.ENLARGEMENT_MIN_CONSECUTIVE_SUPPORT_POINTS,
+                s, core_iter, support_iter, enlargement_min_length_mm(min_segment_mm), max_gap_mm=max_gap,
             )
             new_mask = mask_from_segments(len(r), segs_iter) if segs_iter else np.zeros(len(r), dtype=bool)
             if np.array_equal(new_mask, lesion_mask):
@@ -578,8 +634,7 @@ def detect_enlargement_segments(
         & detect_core
     )
     segments_point_idx = hysteresis_segments_from_min_length(
-        s, core, support, min_segment_mm, max_gap_mm=max_gap,
-        min_points=_cfg.ENLARGEMENT_MIN_CONSECUTIVE_SUPPORT_POINTS,
+        s, core, support, enlargement_min_length_mm(min_segment_mm), max_gap_mm=max_gap,
     )
     accepted = support & mask_from_segments(len(r), segments_point_idx)
     segments_s_mm = [(float(s[a]), float(s[b])) for a, b in segments_point_idx]
@@ -637,9 +692,8 @@ def enlargement_pointwise(
             s,
             is_enlarged == 1,
             support,
-            float(min_segment_mm),
+            enlargement_min_length_mm(min_segment_mm),
             max_gap_mm=max_gap,
-            min_points=_cfg.ENLARGEMENT_MIN_CONSECUTIVE_SUPPORT_POINTS,
         )
         is_enlarged = (support & mask_from_segments(len(r), segments)).astype(int)
         # Return 0 outside enlarged segments (mirrors stenosis_pointwise behaviour so
@@ -823,9 +877,8 @@ def refresh_enlargement_summary_from_flags(res: dict) -> None:
     segments = flag_segments_from_min_length(
         s,
         flag == 1,
-        _cfg.ENLARGEMENT_MIN_LEN_MM,
+        enlargement_min_length_mm(),
         max_gap_mm=_cfg.ENLARGEMENT_MAX_INTERNAL_GAP_MM,
-        min_points=_cfg.ENLARGEMENT_MIN_CONSECUTIVE_SUPPORT_POINTS,
     )
     if segments:
         keep = np.zeros(len(flag), dtype=bool)

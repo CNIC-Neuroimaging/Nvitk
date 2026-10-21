@@ -18,6 +18,7 @@ from .caliber import (
     detect_enlargement_segments,
     detect_stenosis_segments,
     enlargement_pointwise,
+    enlargement_radius,
     resolve_stenosis_enlargement_overlap,
     segment_detail_json,
     select_caliber_detection_radius,
@@ -235,13 +236,15 @@ def run_isolated_donut_arm_vmtk(
         & np.isfinite(stenosis_raw_pct_point)
         & (s >= float(_cfg.STENOSIS_EXCLUDE_END_MM))
     ).astype(np.float64)
+    # Donut arms are tested like re-measured paths (ENLARGEMENT_RADIUS_SOURCE = "cow": detection radius).
+    enl_radius, _ = enlargement_radius(s, radius_area, detection_radius, cow_source="detection")
     enlarg = detect_enlargement_segments(
-        s=s, r=detection_radius, threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT,
+        s=s, r=enl_radius, threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT,
         min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
         pts=pts,
     )
     enlargement_pct_point, is_enlarged = enlargement_pointwise(
-        s=s, r=detection_radius, r_ref_per_point=enlarg.r_ref_per_point,
+        s=s, r=enl_radius, r_ref_per_point=enlarg.r_ref_per_point,
         threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
         min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM,
         pts=pts,

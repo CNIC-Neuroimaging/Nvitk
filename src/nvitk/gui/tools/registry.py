@@ -9,6 +9,7 @@ from nvitk.gui.pipeline.catalog import PIPELINE_TOOLS
 from nvitk.measure.morpho.anatomy_axes import SPECIES_AUTO, SPECIES_CHOICES
 from nvitk.measure.morpho.topology_io import topology_choices as _morpho_topology_choices
 from nvitk.measure.morphometrics_config import DEFAULT_PROFILE as _MORPHO_DEFAULT_PROFILE
+from nvitk.measure.morphometrics_config import ENLARGEMENT_RADIUS_SOURCE_LABELS as _ENLARGEMENT_RADIUS_LABELS
 from nvitk.measure.morphometrics_config import PROFILES as _MORPHO_PROFILE_MAP
 from nvitk.morphology.skeleton_methods import (
     SKELETON_METHOD_CHOICES,
@@ -18,6 +19,9 @@ from nvitk.morphology.skeleton_methods import (
 )
 
 _MORPHO_PROFILES: tuple[str, ...] = tuple(sorted(_MORPHO_PROFILE_MAP))
+#: "Enlargement radius" picker: the profile's own ENLARGEMENT_RADIUS_SOURCE, or an override.
+MORPHO_PROFILE_VALUE = "profile value"
+_ENLARGEMENT_RADIUS_CHOICES: tuple[str, ...] = (MORPHO_PROFILE_VALUE, *_ENLARGEMENT_RADIUS_LABELS.values())
 
 ParamKind = Literal[
     "int",
@@ -2147,7 +2151,15 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ),
             ParamSpec("bridge_gaps_vox", "Bridge same-label gaps up to N voxels (0 = off)", "int", 0,
                       min=0, max=50),
-            ParamSpec("n_workers", "Workers", "int", 1, min=1, max=64),
+            ParamSpec("siphon_legacy", "cow_morpho's siphon mask (legacy, covers whole vessels)", "bool",
+                      False),
+            ParamSpec("enlargement_radius", "Enlargement radius", "choice", MORPHO_PROFILE_VALUE,
+                      choices=_ENLARGEMENT_RADIUS_CHOICES),
+            ParamSpec("smooth_cross_section", "Running median of the cross-section radius (enlargements)",
+                      "bool", False),
+            ParamSpec("case_id", "Case id (empty = the layer name)", "str", ""),
+            ParamSpec("show_lesions", "Show lesions as points", "bool", True),
+            ParamSpec("n_workers", "Parallel vessel jobs (1 = one at a time)", "int", 1, min=1, max=64),
             ParamSpec("skip_existing", "Skip if Excel exists", "bool", False),
             ParamSpec(
                 "input_already_smoothed",
@@ -2166,10 +2178,21 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "reference), or 'none' for topology-agnostic per-label metrics. "
             "Species 'auto' reads the topology's _meta block. The profile 'eicab_cw' "
             "is tuned for eICAB Circle-of-Willis masks (cow_morpho parity, VMTK "
-            "centerlines); bridging same-label gaps departs from that tuning. Results: "
-            "one row per vessel (vessel_summary.csv), per segment, per lesion (with "
-            "severity and confidence) and per subject. Leave Output directory empty to "
-            "show results in the GUI only."
+            "centerlines, calibrated siphon mask; the legacy switch restores cow's); "
+            "bridging same-label gaps departs from that tuning. Enlargement radius and the "
+            "cross-section median override the profile's enlargement test, for comparison. "
+            "Parallel vessel jobs > 1 measures that many vessels (label / component jobs) at "
+            "once, one process each (VMTK is memory-hungry: a few is plenty). "
+            "Shows the centerlines, "
+            "the vessel surfaces and the lesions (orange stenoses, blue enlargements, "
+            "opaque by confidence, sized by severity; hover one for its details, click it "
+            "for its calibre profile in the Lesion inspector), and opens the results window: "
+            "per vessel every measure (calibre, end-window diameters, blanking, "
+            "first/last-N-mm tortuosity, curvature integrals, direction angles, branching, "
+            "lesion severity and confidence, plus the earlier path, volumetry and "
+            "tortuosity metrics), with Colour labels by colouring the labels and the "
+            "surfaces by any of them; per lesion (click to show it), per segment and per "
+            "subject. Leave Output directory empty to show results in the GUI only."
         ),
     ),
     GuiToolSpec(

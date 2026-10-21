@@ -312,6 +312,341 @@ def centerline_network(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Full networks: every branch, loop and fragment
+# ──────────────────────────────────────────────────────────────────────────────
+
+#: How much of a vessel tree a VMTK network covers (see :func:`full_centerline_network`).
+NETWORK_COVERAGES: tuple[str, ...] = ("full", "tree")
+
+
+@dataclass
+class FullCenterlineNetwork:
+    """Every centerline of a vessel mask: all branches, the loops and each fragment."""
+
+    branches: list[np.ndarray] = field(default_factory=list)
+    radii: list[np.ndarray] = field(default_factory=list)
+    #: Where each branch comes from: ``"tree"`` (the VMTK run from a component's widest end),
+    #: ``"loop"`` (a VMTK run from another end, adding what the first one skipped), ``"gap"``
+    #: (VMTK between the two ends of a still-uncovered skeleton branch) or ``"skeleton"`` (that
+    #: skeleton branch re-centred on the lumen, where VMTK could not trace it).
+    sources: list[str] = field(default_factory=list)
+    #: Bifurcations and the points where added pieces join the network.
+    junctions: np.ndarray = field(default_factory=lambda: np.empty((0, 3)))
+    #: Continuous centerlines (each VMTK line and every added piece), e.g. for rasterizing.
+    paths: list[np.ndarray] = field(default_factory=list)
+    n_components: int = 0
+    n_vmtk_runs: int = 0
+
+
+def _arc_length(points: np.ndarray) -> float:
+    return float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum()) if len(points) > 1 else 0.0
+
+
+def _true_runs(flag: np.ndarray) -> list[tuple[int, int]]:
+    """``(start, end)`` index pairs (inclusive) of the runs of True in *flag*."""
+    runs, start = [], None
+    for i, v in enumerate(np.append(np.asarray(flag, dtype=bool), False)):
+        if v and start is None:
+            start = i
+        elif not v and start is not None:
+            runs.append((start, i - 1))
+            start = None
+    return runs
+
+
+def _uncovered_pieces(
+    points: np.ndarray, radius: np.ndarray, tree: Any, voxel: float
+) -> list[tuple[np.ndarray, np.ndarray, list[np.ndarray]]]:
+    """The stretches of a centerline the accepted network (*tree*, a KD-tree of its points) does
+    not run along yet, each joined to the network at its ends.
+
+    A point is covered within max(1.5 voxels, half its radius). Each uncovered stretch is extended
+    to the network point nearest its covered neighbours, so the piece meets the network; those
+    meeting points are returned with it. Stretches shorter than max(3 voxels, 1 mm) are dropped —
+    two centerlines through the same junction diverge that much — and so are stretches that stay
+    within one radius (≥ 2 voxels) of the network on 80 % of their length: inside the same lumen,
+    a second centerline drifting off the first is not a new branch.
+    """
+    pts = np.asarray(points, dtype=float)
+    rad = np.asarray(radius, dtype=float)
+    if tree is None:
+        return [(pts, rad, [])] if _arc_length(pts) > 0 else []
+    d, _ = tree.query(pts)
+    tol = np.maximum(1.5 * voxel, 0.5 * np.where(np.isfinite(rad), rad, 0.0))
+    pieces = []
+    for a, b in _true_runs(d > tol):
+        seg, seg_r, joins = pts[a:b + 1], rad[a:b + 1], []
+        if a > 0:
+            _, j = tree.query(pts[a - 1])
+            seg, seg_r = np.vstack([tree.data[j], seg]), np.r_[rad[a - 1], seg_r]
+            joins.append(tree.data[j])
+        if b < len(pts) - 1:
+            _, j = tree.query(pts[b + 1])
+            seg, seg_r = np.vstack([seg, tree.data[j]]), np.r_[seg_r, rad[b + 1]]
+            joins.append(tree.data[j])
+        if _arc_length(seg) < max(3.0 * voxel, 1.0):
+            continue
+        inner, inner_r = pts[a:b + 1], rad[a:b + 1]
+        d_in, _ = tree.query(inner)
+        same_lumen = d_in <= np.maximum(2.0 * voxel, np.where(np.isfinite(inner_r), inner_r, 0.0))
+        if float(np.mean(same_lumen)) >= 0.8:
+            continue
+        pieces.append((seg, seg_r, joins))
+    return pieces
+
+
+def _surface_regions(surface: Any, min_points: int = 20) -> list[Any]:
+    """The connected pieces of *surface* (largest first), each as its own polydata."""
+    import vtk
+
+    probe = vtk.vtkPolyDataConnectivityFilter()
+    probe.SetInputData(surface)
+    probe.SetExtractionModeToAllRegions()
+    probe.Update()
+    sizes = [int(probe.GetRegionSizes().GetValue(i)) for i in range(probe.GetNumberOfExtractedRegions())]
+    if len(sizes) <= 1:
+        return [surface]
+    regions = []
+    for rid in np.argsort(sizes)[::-1]:
+        if sizes[rid] < int(min_points):
+            continue
+        pick = vtk.vtkPolyDataConnectivityFilter()
+        pick.SetInputData(surface)
+        pick.SetExtractionModeToSpecifiedRegions()
+        pick.AddSpecifiedRegion(int(rid))
+        clean = vtk.vtkCleanPolyData()
+        clean.SetInputConnection(pick.GetOutputPort())
+        clean.Update()
+        piece = vtk.vtkPolyData()
+        piece.DeepCopy(clean.GetOutput())
+        regions.append(piece)
+    return regions
+
+
+def _axis_centerline(region: Any, step: float) -> tuple[np.ndarray, np.ndarray, str] | None:
+    """``(points, radius, source)`` of a vessel piece traced between the two ends of its main
+    (PCA) axis: VMTK (``"tree"``), else the straight axis re-centred on the lumen (``"skeleton"``)."""
+    from nvitk_vendor.morphology.centering import center_polyline, inscribed_radius
+
+    pts = points_of(region)
+    if len(pts) < 20:
+        return None
+    centre = pts.mean(axis=0)
+    axis = np.linalg.svd(pts - centre, full_matrices=False)[2][0]
+    proj = (pts - centre) @ axis
+    a, b = pts[int(np.argmin(proj))], pts[int(np.argmax(proj))]
+    try:
+        cl = centerlines_between_points(region, a, [b], resampling_step=step, geometry=False)
+        q = points_of(cl)
+        if _arc_length(q) >= 0.5 * float(np.linalg.norm(b - a)):
+            return q, point_array(cl, RADIUS_ARRAY), "tree"
+    except Exception:  # noqa: BLE001
+        pass
+    n = max(3, int(np.ceil(float(np.linalg.norm(b - a)) / max(step, 1e-6))) + 1)
+    line = a + (b - a) * np.linspace(0.0, 1.0, n)[:, None]
+    centred = center_polyline(line, region, iterations=3, sample_step_mm=step)
+    return centred, inscribed_radius(region, centred), "skeleton"
+
+
+def full_centerline_network(
+    surface: Any,
+    mask: np.ndarray,
+    spacing: Sequence[float],
+    *,
+    voxel_to_surface: np.ndarray | None = None,
+    resampling_step: float | None = None,
+    prune_spur_mm: float = 2.0,
+    max_sources: int = 4,
+    max_gap_runs: int = 40,
+) -> FullCenterlineNetwork:
+    """VMTK centerlines of **every** branch of a vessel mask, loops and fragments included.
+
+    One source → all end points (:func:`centerline_network`) traces a shortest-path tree. It
+    skips one segment of every loop (the circle of Willis is a ring) and reaches nothing outside
+    the source's connected piece. Here, per connected piece of *surface* (the mask's skeleton
+    voxels go to the piece whose wall is nearest — voxels touching only at an edge or corner are
+    one mask component but two marching-cubes pieces):
+
+    1. VMTK from the widest end point to all others, on that component's piece of *surface*;
+    2. the skeleton branches the result does not run along (within max(1.5 voxels, 0.6 × radius)
+       on 75 % of their length) are "uncovered"; while any are left, VMTK runs again from the
+       unused end point nearest to them (up to *max_sources* runs), keeping only the new stretches;
+    3. each branch still uncovered gets VMTK between its own two skeleton ends (up to
+       *max_gap_runs* in total), accepted when it follows the skeleton branch (length ratio
+       0.5–2, median distance ≤ max(2 voxels, the branch's median radius)); otherwise the skeleton
+       branch is re-centred on the lumen (:func:`nvitk_vendor.morphology.centering.center_polyline`).
+
+    *mask* is in voxel indices; *voxel_to_surface* (4 × 4, default ``diag(spacing)``) maps them
+    into the surface frame (:func:`nvitk_vendor.morphology.centering.mask_surface` uses that default).
+    Skeleton spurs shorter than *prune_spur_mm* are ignored. Every branch keeps the inscribed radius (VMTK's
+    ``MaximumInscribedSphereRadius``, or the distance to the surface for re-centred ones).
+    """
+    from scipy import ndimage as ndi
+    from scipy.spatial import cKDTree
+
+    from nvitk_vendor.core.array import to_numpy
+    from nvitk_vendor.core.backend import using
+    from nvitk_vendor.measure.morpho.skeleton import prune_short_terminal_spurs, skeletonize_mask
+    from nvitk_vendor.morphology.centering import center_polyline, inscribed_radius
+    from nvitk_vendor.morphology.polyline_graph import branch_polylines_from_skeleton, skeleton_graph
+
+    sp = np.asarray(spacing, dtype=float)[:3]
+    aff = np.asarray(voxel_to_surface, dtype=float) if voxel_to_surface is not None else np.diag([*sp, 1.0])
+
+    def to_surface(ijk: np.ndarray) -> np.ndarray:
+        return np.asarray(ijk, dtype=float).reshape(-1, 3) @ aff[:3, :3].T + aff[:3, 3]
+
+    voxel = float(np.mean(np.linalg.norm(aff[:3, :3], axis=0)))
+    step = float(resampling_step) if resampling_step and resampling_step > 0 else 0.5 * voxel
+    m = np.asarray(mask).astype(bool)
+    out = FullCenterlineNetwork()
+    if not m.any():
+        return out
+
+    edt = ndi.distance_transform_edt(m, sampling=sp)
+    skel = skeletonize_mask(m).astype(bool)
+    if prune_spur_mm > 0:
+        skel = prune_short_terminal_spurs(skel, float(prune_spur_mm), spacing=sp).astype(bool)
+    all_coords = np.argwhere(skel)
+    regions = _surface_regions(surface)
+    if len(regions) == 1 or len(all_coords) == 0:
+        owner = np.zeros(len(all_coords), dtype=int)
+    else:
+        wall = np.column_stack([cKDTree(points_of(r)).query(to_surface(all_coords))[0] for r in regions])
+        owner = np.argmin(wall, axis=1)
+    hi = np.asarray(m.shape) - 1
+    accepted: list[np.ndarray] = []
+    junctions: list[np.ndarray] = []
+    gap_budget = int(max_gap_runs)
+
+    def add(points: np.ndarray, radius: np.ndarray, source: str) -> None:
+        out.branches.append(np.asarray(points, dtype=float))
+        out.radii.append(np.asarray(radius, dtype=float))
+        out.sources.append(source)
+        accepted.append(np.asarray(points, dtype=float))
+
+    def accepted_tree() -> Any:
+        return cKDTree(np.vstack(accepted)) if accepted else None
+
+    for k, region in enumerate(regions):
+        coords = all_coords[owner == k]
+        if len(coords) < 2:
+            # Thinning can erase a whole piece (scikit-image deletes some straight, flat-ended
+            # tubes outright): trace it between the two ends of its main axis instead.
+            piece = _axis_centerline(region, step)
+            if piece is not None:
+                out.n_components += 1
+                out.n_vmtk_runs += int(piece[2] == "tree")
+                add(piece[0], piece[1], piece[2])
+                out.paths.append(piece[0])
+            continue
+        out.n_components += 1
+        with using("cpu"):
+            chains_vox = [np.asarray(to_numpy(c), dtype=float)
+                          for c in branch_polylines_from_skeleton(coords.astype(np.float32), min_points=2)]
+            _nodes, _adj, deg = skeleton_graph(coords.astype(np.float32))
+        chains = []
+        for ch in chains_vox:
+            idx = np.clip(np.round(ch).astype(int), 0, hi)
+            pts = to_surface(ch)
+            if _arc_length(pts) >= max(3.0 * voxel, 1.0):
+                chains.append((pts, edt[tuple(idx.T)]))
+        if not chains:
+            continue
+
+        def uncovered(tree: Any) -> list[tuple[np.ndarray, np.ndarray]]:
+            if tree is None:
+                return list(chains)
+            todo = []
+            for pts, r in chains:
+                d, _ = tree.query(pts)
+                if float(np.mean(d <= np.maximum(1.5 * voxel, 0.6 * r))) < 0.75:
+                    todo.append((pts, r))
+            return todo
+
+        # 1–2. VMTK from end points until every skeleton branch is covered.
+        ends_vox = np.asarray([n for n, d in deg.items() if d <= 1], dtype=float).reshape(-1, 3)
+        tree = accepted_tree()
+        if len(ends_vox) >= 2:
+            ends = to_surface(ends_vox)
+            sk_tree = cKDTree(coords * sp)
+            sk_r = edt[tuple(coords.T)]
+            end_r = np.asarray([sk_r[sk_tree.query_ball_point(e * sp, 2.0)].max() for e in ends_vox])
+            used: list[int] = []
+            first = True
+            for _run in range(max(1, int(max_sources))):
+                todo = uncovered(tree) if not first else chains
+                if not todo:
+                    break
+                if first:
+                    src = int(np.argmax(end_r))
+                else:
+                    free = [i for i in range(len(ends)) if i not in used]
+                    if not free:
+                        break
+                    near = cKDTree(np.vstack([p for p, _ in todo]))
+                    src = min(free, key=lambda i: float(near.query(ends[i])[0]))
+                used.append(src)
+                try:
+                    net = centerline_network(region, ends, source_index=src, endpoint_radii=end_r,
+                                             resampling_step=step)
+                except Exception:  # noqa: BLE001 — a failed run leaves the branches to the next steps
+                    continue
+                out.n_vmtk_runs += 1
+                if first:
+                    for pts, rad in net.joined_branches():
+                        add(pts, rad, "tree")
+                    junctions.extend(net.bifurcation_centres)
+                    out.paths.extend(line["points"] for line in polylines_of(net.centerlines))
+                    first = False
+                else:
+                    # Only stretches joining the network at both ends: a loop segment. An open-ended
+                    # stretch is where this run's source tip parts from the first run's line.
+                    for line in polylines_of(net.centerlines, (RADIUS_ARRAY,)):
+                        for pts, rad, joins in _uncovered_pieces(line["points"], line[RADIUS_ARRAY], tree, voxel):
+                            if len(joins) == 2:
+                                add(pts, rad, "loop")
+                                out.paths.append(pts)
+                                junctions.extend(joins)
+                                tree = accepted_tree()
+                tree = accepted_tree()
+
+        # 3. Whatever is left: VMTK between the branch's own ends, else the re-centred skeleton.
+        for pts, r in uncovered(tree):
+            piece, source = None, "skeleton"
+            if gap_budget > 0 and _arc_length(pts) > 0 and float(np.linalg.norm(pts[0] - pts[-1])) > voxel:
+                gap_budget -= 1
+                try:
+                    cl = centerlines_between_points(region, pts[0], [pts[-1]], resampling_step=step,
+                                                    append_endpoints=False, geometry=False)
+                    out.n_vmtk_runs += 1
+                    q, qr = points_of(cl), point_array(cl, RADIUS_ARRAY)
+                    ratio = _arc_length(q) / max(_arc_length(pts), 1e-9)
+                    d, _ = cKDTree(pts).query(q)
+                    if 0.5 <= ratio <= 2.0 and float(np.median(d)) <= max(2.0 * voxel, float(np.median(r))):
+                        piece, source = (q, qr), "gap"
+                except Exception:  # noqa: BLE001
+                    piece = None
+            if piece is None:
+                centred = center_polyline(pts, region, iterations=3, smooth_mm=1.5 * voxel, sample_step_mm=step)
+                piece = (centred, inscribed_radius(region, centred))
+            for p2, r2, joins in _uncovered_pieces(piece[0], piece[1], tree, voxel):
+                add(p2, r2, source)
+                out.paths.append(p2)
+                junctions.extend(joins)
+            tree = accepted_tree()
+
+    if junctions:
+        jun = np.asarray(junctions, dtype=float).reshape(-1, 3)
+        keep: list[np.ndarray] = []
+        for p in jun:
+            if all(float(np.linalg.norm(p - k)) > 1.5 * voxel for k in keep):
+                keep.append(p)
+        out.junctions = np.asarray(keep)
+    return out
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Surface ↔ centerline measurements
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -423,7 +758,9 @@ def point_array_vectors(poly: Any, name: str) -> np.ndarray:
 
 
 __all__ = [
+    "NETWORK_COVERAGES",
     "RADIUS_ARRAY",
+    "FullCenterlineNetwork",
     "VmtkBranch",
     "VmtkNetwork",
     "bifurcation_geometry",
@@ -434,6 +771,7 @@ __all__ = [
     "centerline_sections",
     "centerlines_between_points",
     "distance_to_centerlines",
+    "full_centerline_network",
     "mask_endpoints",
     "resample_centerlines",
     "smooth_centerlines",
