@@ -127,6 +127,23 @@ Compare cow's `00_Path_Summary` with nvitk's **`07`** sheet, not with nvitk's `0
 missing. On TOF the cross-section radius normally exceeds the MIS by 10–25 %, because the lumen is
 not circular.
 
+The cut plane's normal is the chord between the centerline points
+`CROSS_SECTION_TANGENT_HALF_WINDOW_MM` upstream and downstream, by arc length. It always uses at
+least the neighbouring point on each side, and is one-sided at the path ends. The default, 0.1 mm,
+is cow's: the immediate neighbours (±1 point) at the 0.1 mm resampling step, so a 0.2 mm baseline.
+Centerline jitter over that short baseline tilts the plane, and an oblique cut has a larger area. A
+wider window steadies it. On PESA17808400 (4 vessels, 1587 points), the radius jump between
+consecutive points behaves as follows:
+
+| Half-window | Step change p95 | p99 | CS / MIS median | Enlargements |
+|---|---|---|---|---|
+| **0.1 mm** (cow) | 13.9 % | 38.9 % | 1.156 | 5 |
+| 0.5 mm | 8.5 % | 29.2 % | 1.153 | 2 |
+| 1.0 mm | 8.1 % | 31.4 % | 1.155 | 2 |
+
+The median calibre does not move; the spikes shrink. A window much wider than the vessel's radius
+turns late in tight bends.
+
 ---
 
 ## 4 · The siphon mask (taper-fit exclusion)
@@ -452,14 +469,19 @@ Stage-7 CLI:
 | `--centerline-backend` | profile (`vmtk`) | `vmtk` / `native` / `raycast` |
 | `--use-postprocessed-mask/--no-…` | on | prefer `*_eICAB_CW_pp.nii.gz` |
 | `--input-already-smoothed` | off | skip Taubin smoothing |
-| `--n-workers` | ≤ 4 | parallel label jobs (VMTK is memory-hungry) |
+| `--n-workers N` | min(4, CPUs/2) | vessels measured in parallel: one process per label/component job, 1 = one at a time (VMTK is memory-hungry). On SGE, N > 1 requests `-pe smp N` |
 | `--skip-existing` | off | skip when `case_metrics_donut_tree.xlsx` exists |
+
+The batch runner passes it as `nvitk-qvtpy --stage7-n-workers N`, locally and on SGE. On SGE, the
+subject's array job then requests `-pe smp N`. Results do not depend on N. On PESA17808400
+(CW mask, 17 vessel jobs), 1 worker took 143 s and 6 workers took 61 s, with identical tables.
 
 The parameters that move the numbers most (change them with `with_params`):
 
 | Parameter | `eicab_cw` | Changes |
 |---|---|---|
 | `CENTERLINE_RESAMPLE_STEP_MM` | 0.10 | point density → every per-point array |
+| `CROSS_SECTION_TANGENT_HALF_WINDOW_MM` | 0.1 | the cross-section plane's normal: chord over ± this arc length (§3; cow: ±1 point) |
 | `RADIUS_SOURCE_FOR_CALIBER_DETECTION` | `maximum_inscribed_sphere` | which radius stenosis is judged on |
 | `STENOSIS_THRESHOLD_PCT` / `ENLARGEMENT_THRESHOLD_PCT` | 20 / 20 | lesion sensitivity (cow: 10 / 10) |
 | `STENOSIS_SUPPORT_THRESHOLD_PCT` / `ENLARGEMENT_SUPPORT_THRESHOLD_PCT` | 25 / 25 | hysteresis tier; inactive at or above the threshold (§5.2) |
@@ -483,7 +505,8 @@ radius and the cross-section median.
 ## 11 · In the GUI
 
 Measure → *Morphometrics* runs the same pipeline on a Labels layer, with the same profile,
-backend, the legacy-siphon switch and the enlargement-radius / cross-section-median overrides. The case id defaults to the layer name. It shows the
+backend, the legacy-siphon switch and the enlargement-radius / cross-section-median overrides.
+*Parallel vessel jobs* (default 1) measures that many vessels at once, as `--n-workers` does. The case id defaults to the layer name. It shows the
 centerlines, the vessel surfaces (one Mesh-panel surface whose vertices carry their `label`) and
 the lesions as points (orange stenoses, blue enlargements, opaque by confidence, sized by severity).
 

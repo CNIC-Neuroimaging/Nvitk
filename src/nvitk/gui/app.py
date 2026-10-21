@@ -537,7 +537,10 @@ def run_app() -> None:
     # On the Imaging panel's own title bar: the panel most often on screen, and
     # inside the nvitk stylesheet rather than Napari's, which clamps buttons to 12px.
     theme_button = theme_toggle_button(viewer, None)
-    tools_dock = _panel_dock(tools_widget, "tools", "Imaging", extras=[theme_button])
+    from nvitk.gui.viz.results_window import results_button, results_dock
+
+    # Reopens the measurement tables whenever they were closed.
+    tools_dock = _panel_dock(tools_widget, "tools", "Imaging", extras=[results_button(viewer), theme_button])
     labels_dock = build_labels_dock(viewer)
     image_props_dock = _panel_dock(image_props_panel, "image_properties", "Image properties")
     dicom_dock = _panel_dock(dicom_tags_panel, "dicom_tags", "DICOM tags")
@@ -571,6 +574,9 @@ def run_app() -> None:
     if panel_manager is not None:
         panel_manager.set_labels_dock(labels_dock)
         panel_manager.theme_button = theme_button
+    # The Results window, closed until a measurement (or its button) opens it; created now so
+    # the saved layout below can put it back where it was docked or popped out.
+    results_dock(viewer)
 
     log_dock = build_log_dock_widget()
     apply_theme(log_dock)

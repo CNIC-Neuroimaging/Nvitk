@@ -112,6 +112,14 @@ _EICAB_CW: dict[str, Any] = {
     "NATIVE_CENTERING_ITERATIONS": 3,
     "NATIVE_CENTERING_SMOOTH_MM": 0.75,
 
+    # ── Cross-section radius (surface cut by the plane normal to the centerline) ─
+    # The plane's normal is the chord from the point this many mm upstream to the one this many mm
+    # downstream (arc length; at least the neighbouring point on each side, one-sided at the ends).
+    # 0.1 = cow_morpho: the immediate neighbours (±1 point) at the 0.1 mm resampling step. A wider
+    # window tilts the plane less with centerline jitter (fewer oblique, oversized cuts) but turns
+    # late in tight bends.
+    "CROSS_SECTION_TANGENT_HALF_WINDOW_MM": 1.0,
+
     # ── Skeleton / tree / donut-loop handling ────────────────────────────────
     "ENABLE_TREE_MODE": True,
     "MIN_TREE_ENDPOINTS_FOR_TREE_MODE": 3,
@@ -314,6 +322,11 @@ class MorphometricsConfig:
             raise ValueError(
                 f"CENTERLINE_BACKEND must be one of {CENTERLINE_BACKENDS}, "
                 f"got {self.params['CENTERLINE_BACKEND']!r}."
+            )
+        if not float(self.params["CROSS_SECTION_TANGENT_HALF_WINDOW_MM"]) >= 0.0:
+            raise ValueError(
+                "CROSS_SECTION_TANGENT_HALF_WINDOW_MM must be ≥ 0 mm, "
+                f"got {self.params['CROSS_SECTION_TANGENT_HALF_WINDOW_MM']!r}."
             )
         if str(self.params["ENLARGEMENT_RADIUS_SOURCE"]).lower() not in ENLARGEMENT_RADIUS_SOURCES:
             raise ValueError(

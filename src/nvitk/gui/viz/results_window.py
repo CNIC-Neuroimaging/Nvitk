@@ -36,6 +36,13 @@ with ``(None, {}, colormap, None)`` when the labels take their own colours back.
 A result may also tint its rows (``row_colours``: row key → colour, e.g. a lesion's confidence
 class) and bring its own controls (``controls``: a factory returning a widget shown above the
 table while that result is on screen, e.g. a filter of what the viewer shows).
+
+The window is an nvitk panel (``nvitk:results``) with the panels' title bar: ⧉ docks it in the
+main window with the other panels or pops it out again, ⛶ fills the screen, ✕ closes it, and the
+panel manager moves it into any panel window (:mod:`nvitk.gui.core.workspace`), where it is
+remembered across sessions. It opens as a window of its own; once docked it stays docked while it
+is open. Closed, it comes back — a pop-up again — with the next result or the *Results* button
+(:func:`results_button`, on the Imaging panel's title bar).
 """
 
 from __future__ import annotations
@@ -43,14 +50,14 @@ from __future__ import annotations
 import weakref
 from typing import Any, Callable, Mapping, Sequence
 
-from qtpy.QtCore import Qt
+from qtpy.QtCore import QEvent, QObject, Qt, QTimer
 from qtpy.QtGui import QBrush, QColor, QIcon, QImage, QPixmap
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QCheckBox,
     QComboBox,
-    QDialog,
+    QDockWidget,
     QDoubleSpinBox,
     QHBoxLayout,
     QHeaderView,
@@ -58,6 +65,7 @@ from qtpy.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -66,13 +74,16 @@ from nvitk.gui.core.design import (
     COLOR_ACCENT,
     COLOR_MUTED,
     SPACE_TIGHT,
-    apply_theme,
+    bar_tool_button,
     fmt_number,
     mono_font,
 )
 
 #: Kept on the viewer so a second measurement re-uses the window.
 _WINDOW_ATTR = "_nvitk_results_window"
+#: The Results panel's dock name — what a saved layout knows it by.
+RESULTS_DOCK_NAME = "nvitk:results"
+RESULTS_TITLE = "Results"
 
 #: How many past results stay in the picker before the oldest is dropped.
 _HISTORY_LIMIT = 25
@@ -251,19 +262,17 @@ class _Result:
         return columns
 
 
-class ResultsWindow(QDialog):
-    """A reusable table view for measurement output."""
+class ResultsWindow(QWidget):
+    """A reusable table view for measurement output (the Results panel's contents)."""
 
     def __init__(self, parent: Any = None) -> None:
         """Build the table and its toolbar."""
         super().__init__(parent)
-        self.setWindowTitle("Results")
-        self.setMinimumSize(560, 340)
-        # Roomy enough for a per-label overlap table (a handful of rows, a dozen
-        # metric columns) without the user having to resize it on every launch.
-        self.resize(900, 460)
-        # Modeless: results are read while carrying on with the viewer.
-        self.setModal(False)
+        self.setWindowTitle(RESULTS_TITLE)
+        # Small enough to sit in the panel sidebar when docked there; wide tables scroll.
+        self.setMinimumSize(280, 200)
+        #: The dock holding this window (see :func:`results_dock`).
+        self.dock: QDockWidget | None = None
 
         self._results: list[_Result] = []
         self._shown: _Result | None = None
@@ -631,10 +640,9 @@ class ResultsWindow(QDialog):
         self._filling = False
         self._notify_row(self._shown, None)
 
-    def hideEvent(self, event: Any) -> None:  # noqa: N802 — Qt naming
-        """A closed window leaves nothing highlighted."""
+    def panel_closed(self) -> None:
+        """A closed window leaves nothing highlighted (tabbed away, it keeps its highlight)."""
         self._notify_row(self._shown, None)
-        super().hideEvent(event)
 
     def _show(self, result: _Result) -> None:
         """Lay *result* out in the table."""
@@ -643,7 +651,6 @@ class ResultsWindow(QDialog):
         self._shown = result
         self._clear_highlight.setVisible(result.on_select is not None)
         self._filling = True
-        self.setWindowTitle(result.title or "Results")
         self._heading.setText(result.title)
         self._subtitle.setText(result.subtitle)
         self._subtitle.setVisible(bool(result.subtitle))
@@ -705,35 +712,139 @@ def _item(text: str, *, align_left: bool = False) -> QTableWidgetItem:
     return item
 
 
-def results_window(viewer: Any) -> ResultsWindow | None:
-    """The viewer's results window, created on first use.
+class _PanelCloseWatcher(QObject):
+    """The Results dock being closed (✕, the Panels menu, its window): drop the highlight, and
+    hide the panel window it popped out into when nothing else is open there."""
 
-    ``None`` when no Qt application is running — a headless call site should get
-    the log line and nothing else rather than an exception.
+    def __init__(self, window: ResultsWindow, viewer: Any) -> None:
+        super().__init__(window)
+        self._window = window
+        self._viewer = viewer
+
+    def eventFilter(self, obj: Any, event: Any) -> bool:  # noqa: N802 — Qt naming
+        if event.type() == QEvent.Type.Close:
+            self._window.panel_closed()
+            QTimer.singleShot(0, self._hide_empty_window)
+        return False
+
+    def _hide_empty_window(self) -> None:
+        manager = _panel_manager(self._viewer)
+        dock = self._window.dock
+        if manager is None or dock is None or not dock.isHidden():
+            return
+        home = manager.window_of(dock)
+        if home is not None and not any(not d.isHidden() for d in manager.docks_in(home)):
+            home.hide()
+
+
+def _panel_manager(viewer: Any) -> Any:
+    return getattr(viewer, "_nvitk_panel_manager", None)
+
+
+def _main_window(viewer: Any) -> Any:
+    try:
+        return viewer.window._qt_window
+    except Exception:  # noqa: BLE001 — a viewer without Qt window
+        return None
+
+
+def results_dock(viewer: Any) -> QDockWidget | None:
+    """The viewer's Results panel (dock + :class:`ResultsWindow`), created closed on first use.
+
+    It is added, hidden, to the main window's right edge, so the panel manager can move it like
+    any panel and a saved layout can put it back — the app creates it before restoring the layout.
+    ``None`` when no Qt application is running.
     """
     if QApplication.instance() is None:
         return None
     window = getattr(viewer, _WINDOW_ATTR, None)
     if window is not None:
         try:
-            window.isVisible()  # a window closed by Qt leaves a dead wrapper
+            window.isVisible()  # a window deleted by Qt leaves a dead wrapper
+            if window.dock is not None:
+                window.dock.isHidden()
+                return window.dock
         except RuntimeError:
             window = None
-    if window is None:
-        parent = None
-        try:
-            parent = viewer.window._qt_window
-        except Exception:  # noqa: BLE001 — a parentless dialog still works
-            parent = None
-        window = ResultsWindow(parent)
-        window._viewer = viewer
-        apply_theme(window)
-        try:
-            setattr(viewer, _WINDOW_ATTR, window)
-        except Exception:  # noqa: BLE001 — a viewer that rejects attributes just
-            # gets a fresh window each time, which still shows the result.
-            pass
-    return window
+    from nvitk.gui.core.workspace import make_panel_dock
+
+    window = ResultsWindow()
+    window._viewer = viewer
+    dock = make_panel_dock(viewer, window, object_name=RESULTS_DOCK_NAME, title=RESULTS_TITLE)
+    window.dock = dock
+    dock.installEventFilter(_PanelCloseWatcher(window, viewer))
+    # Closing its own pop-up window closes it (it reopens on demand) rather than docking it in
+    # the main window, as other panels' windows do.
+    dock._nvitk_close_with_window = True
+    dock._nvitk_open = lambda: open_results(viewer)
+    main = _main_window(viewer)
+    if main is not None:
+        main.addDockWidget(Qt.RightDockWidgetArea, dock)
+    dock.hide()
+    manager = _panel_manager(viewer)
+    if manager is not None:
+        manager.watch_dock(dock)
+    try:
+        setattr(viewer, _WINDOW_ATTR, window)
+    except Exception:  # noqa: BLE001 — a viewer that rejects attributes just
+        # gets a fresh window each time, which still shows the result.
+        pass
+    return dock
+
+
+def results_window(viewer: Any) -> ResultsWindow | None:
+    """The viewer's results window (the Results panel's contents), created on first use.
+
+    ``None`` when no Qt application is running — a headless call site should get
+    the log line and nothing else rather than an exception.
+    """
+    dock = results_dock(viewer)
+    return None if dock is None else dock.widget()
+
+
+def open_results(viewer: Any) -> ResultsWindow | None:
+    """Bring the Results panel on screen: where it is when open (docked or in a window), raised;
+    closed, in the window it was closed in, or — docked or never shown — a window of its own."""
+    dock = results_dock(viewer)
+    if dock is None:
+        return None
+    manager = _panel_manager(viewer)
+    home = manager.window_of(dock) if manager is not None else None
+    if home is not None:
+        home.show()
+        dock.show()
+        dock.raise_()
+        home.raise_()
+        manager._tab_timer.start()
+    elif not dock.isHidden():
+        dock.raise_()  # its tab, or its floating window
+    elif manager is not None:
+        manager.pop_out(dock)
+    else:
+        _float_alone(viewer, dock)
+    return dock.widget()
+
+
+def _float_alone(viewer: Any, dock: QDockWidget) -> None:
+    """Without a panel manager: a floating window over the viewer, sized for a metrics table."""
+    dock.setFloating(True)
+    dock.resize(900, 460)
+    main = _main_window(viewer)
+    if main is not None:
+        centre = main.frameGeometry().center()
+        dock.move(centre.x() - 450, centre.y() - 230)
+    dock.show()
+    dock.raise_()
+
+
+def results_button(viewer: Any) -> QToolButton:
+    """A title-bar button that opens the Results window — after it was closed, too."""
+    button = bar_tool_button("nvitkResultsButton", min_width=78)
+    button.setText("▤  Results")
+    button.setToolTip("Show the Results window (the measurement tables): a window of its own, or "
+                      "wherever it was docked while open.")
+    button.clicked.connect(lambda: open_results(viewer))
+    return button
 
 
 def show_results(
@@ -771,9 +882,18 @@ def show_results(
     window.add_result(title, payload, subtitle=subtitle, row_header=row_header, note=note, on_select=on_select,
                       label_layer=label_layer, row_labels=row_labels, on_colour=on_colour,
                       row_colours=row_colours, controls=controls)
-    window.show()
-    window.raise_()
+    open_results(viewer)
     return text
 
 
-__all__ = ["COUNT_METRICS", "VALUE_COLORMAPS", "ResultsWindow", "results_window", "show_results"]
+__all__ = [
+    "COUNT_METRICS",
+    "RESULTS_DOCK_NAME",
+    "VALUE_COLORMAPS",
+    "ResultsWindow",
+    "open_results",
+    "results_button",
+    "results_dock",
+    "results_window",
+    "show_results",
+]

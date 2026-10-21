@@ -971,27 +971,35 @@ def stored_theme() -> str:
     return name if name in THEMES else "dark"
 
 
+def bar_tool_button(object_name: str, parent: QWidget | None = None, *, min_width: int = 78) -> QToolButton:
+    """A labelled button for someone else's bar — a tab corner, a dock header.
+
+    Its geometry is set explicitly: a host stylesheet that clamps button sizes
+    otherwise leaves it laid out, clickable and blank.
+    """
+    button = QToolButton(parent)
+    button.setObjectName(object_name)
+    button.setCursor(Qt.PointingHandCursor)
+    button.setFocusPolicy(Qt.NoFocus)
+    button.setMinimumSize(min_width, 22)
+    button.setStyleSheet(
+        f"QToolButton#{object_name} {{ padding: 2px 8px; margin: 0px 2px;"
+        f" min-width: {min_width}px; min-height: 22px; max-height: 26px;"
+        f" background-color: {COLOR_CONTROL}; color: {COLOR_TEXT};"
+        f" border: 1px solid {COLOR_BORDER}; border-radius: 4px; font-size: 11px; }}"
+        f"QToolButton#{object_name}:hover {{ background-color: {COLOR_CONTROL_HOVER};"
+        f" border-color: {COLOR_BORDER_STRONG}; }}"
+    )
+    return button
+
+
 def theme_toggle_button(viewer: Any = None, parent: QWidget | None = None) -> QToolButton:
     """A button that flips the interface between the dark and light themes.
 
     Labelled with the theme it would switch *to*, so it reads as an action rather
-    than as a status. Its geometry is set explicitly: this control is meant to sit
-    in someone else's bar — a tab corner, a dock header — and a host stylesheet
-    that clamps button sizes otherwise leaves it laid out, clickable and blank.
+    than as a status (:func:`bar_tool_button`).
     """
-    button = QToolButton(parent)
-    button.setObjectName("nvitkThemeToggle")
-    button.setCursor(Qt.PointingHandCursor)
-    button.setFocusPolicy(Qt.NoFocus)
-    button.setMinimumSize(78, 22)
-    button.setStyleSheet(
-        f"QToolButton#nvitkThemeToggle {{ padding: 2px 8px; margin: 0px 2px;"
-        f" min-width: 78px; min-height: 22px; max-height: 26px;"
-        f" background-color: {COLOR_CONTROL}; color: {COLOR_TEXT};"
-        f" border: 1px solid {COLOR_BORDER}; border-radius: 4px; font-size: 11px; }}"
-        f"QToolButton#nvitkThemeToggle:hover {{ background-color: {COLOR_CONTROL_HOVER};"
-        f" border-color: {COLOR_BORDER_STRONG}; }}"
-    )
+    button = bar_tool_button("nvitkThemeToggle", parent)
 
     def _sync() -> None:
         """Label and tooltip for the theme this would switch to."""
@@ -1307,6 +1315,7 @@ __all__ = [
     "Card",
     "active_theme",
     "apply_theme",
+    "bar_tool_button",
     "cell",
     "chip",
     "clear_layout",

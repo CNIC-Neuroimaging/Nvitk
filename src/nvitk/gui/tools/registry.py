@@ -2159,7 +2159,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
                       "bool", False),
             ParamSpec("case_id", "Case id (empty = the layer name)", "str", ""),
             ParamSpec("show_lesions", "Show lesions as points", "bool", True),
-            ParamSpec("n_workers", "Workers", "int", 1, min=1, max=64),
+            ParamSpec("n_workers", "Parallel vessel jobs (1 = one at a time)", "int", 1, min=1, max=64),
             ParamSpec("skip_existing", "Skip if Excel exists", "bool", False),
             ParamSpec(
                 "input_already_smoothed",
@@ -2181,6 +2181,8 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "centerlines, calibrated siphon mask; the legacy switch restores cow's); "
             "bridging same-label gaps departs from that tuning. Enlargement radius and the "
             "cross-section median override the profile's enlargement test, for comparison. "
+            "Parallel vessel jobs > 1 measures that many vessels (label / component jobs) at "
+            "once, one process each (VMTK is memory-hungry: a few is plenty). "
             "Shows the centerlines, "
             "the vessel surfaces and the lesions (orange stenoses, blue enlargements, "
             "opaque by confidence, sized by severity; hover one for its details, click it "

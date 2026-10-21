@@ -275,19 +275,40 @@ def _polygon_area_3d(pts3d: np.ndarray, normal: np.ndarray) -> float:
     return abs(area) * 0.5
 
 
+def cross_section_tangents(pts: np.ndarray, half_window_mm: Optional[float] = None) -> np.ndarray:
+    """Unit tangent at each centerline point, the normal of its cross-section plane: the chord from
+    the point *half_window_mm* upstream to the one *half_window_mm* downstream, by arc length
+    (default ``CROSS_SECTION_TANGENT_HALF_WINDOW_MM``). At least the neighbouring point on each side
+    is used, and the window is one-sided at the ends, so a window up to one resampling step is
+    cow_morpho's ``pts[i + 1] − pts[i − 1]``. Zero where the chord is degenerate."""
+    pts = np.asarray(pts, dtype=float)
+    n = len(pts)
+    out = np.zeros((n, 3))
+    if n < 2:
+        return out
+    half = float(_cfg.CROSS_SECTION_TANGENT_HALF_WINDOW_MM if half_window_mm is None else half_window_mm)
+    s = cumulative_s(pts)
+    tol = 1e-6  # floating-point slack: a point exactly half_window_mm away is inside
+    idx = np.arange(n)
+    lo = np.searchsorted(s, s - half - tol, side="left")
+    hi = np.searchsorted(s, s + half + tol, side="right") - 1
+    lo = np.minimum(lo, np.maximum(idx - 1, 0))
+    hi = np.maximum(hi, np.minimum(idx + 1, n - 1))
+    chord = pts[hi] - pts[lo]
+    norm = np.linalg.norm(chord, axis=1)
+    ok = norm > 1e-10
+    out[ok] = chord[ok] / norm[ok, None]
+    return out
+
+
 def compute_cross_section_radius(surface, pts: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """Effective vessel radius at each centerline point: cut *surface* by the local normal plane,
-    take the largest closed cross-section loop's area, and convert area → equivalent-circle radius.
+    """Effective vessel radius at each centerline point: cut *surface* by the local normal plane
+    (normal from :func:`cross_section_tangents`), take the largest closed cross-section loop's area,
+    and convert area → equivalent-circle radius.
     """
     n = len(pts)
     areas = np.full(n, np.nan)
-    tangents = np.zeros((n, 3))
-    for i in range(n):
-        a, b = max(0, i - 1), min(n - 1, i + 1)
-        t = pts[b] - pts[a]
-        tn = np.linalg.norm(t)
-        if tn > 1e-10:
-            tangents[i] = t / tn
+    tangents = cross_section_tangents(pts)
     plane = vtk.vtkPlane()
     cutter = vtk.vtkCutter(); cutter.SetInputData(surface); cutter.SetCutFunction(plane)
     stripper = vtk.vtkStripper(); stripper.SetInputConnection(cutter.GetOutputPort())

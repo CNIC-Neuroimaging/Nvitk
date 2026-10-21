@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import shlex
+from dataclasses import replace
 from pathlib import Path
 from typing import TextIO
 
@@ -165,10 +166,14 @@ def _subject_sge_spec(
         log_dir=cfg.SGE_LOG_DIR,
         err_dir=cfg.SGE_ERR_DIR,
     )
+    resources = sge_qvtpy_stage_resources(backend)
+    if n_workers is not None and int(n_workers) > 1:
+        # One CPU slot per parallel vessel job (qsub -pe smp N).
+        resources = replace(resources, pe_smp=max(int(resources.pe_smp or 1), int(n_workers)))
     spec = StageSpec(
         job_name=f"{cfg.SGE_JOB_PREFIX}_stage7_{subject}",
         python_cmd=python_cmd,
-        resources=sge_qvtpy_stage_resources(backend),
+        resources=resources,
         binds=binds,
         use_nv=sge_stage_use_nv(backend),
         extra_env=sge_stage_extra_env(binds.src, backend),
@@ -283,7 +288,13 @@ def submit_subject_sge(
     default=False,
     help="Skip Taubin smoothing (input is already smoothed).",
 )
-@click.option("--n-workers", type=int, default=None, help="Parallel label/component workers.")
+@click.option(
+    "--n-workers",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Vessels measured in parallel: one process per label/component job (1 = one at a time; "
+         "default min(4, CPUs/2)). On SGE, N > 1 requests -pe smp N.",
+)
 def main(
     backend: str,
     subject: str,

@@ -18,7 +18,7 @@ panels, each its own dock, tabbed together:
 
 | Panel | What it's for |
 |---|---|
-| **Imaging** | The full tool catalog (below), form-driven via magicgui, with the tool search bar. The theme toggle sits on its title bar (the light theme also turns the canvas behind the images white; the dark one keeps it black). |
+| **Imaging** | The full tool catalog (below), form-driven via magicgui, with the tool search bar. Its title bar carries **▤ Results**, which opens the results window (below) at any time, closed or not, and the theme toggle (the light theme also turns the canvas behind the images white; the dark one keeps it black). |
 | **Labels** | Label selection for any label layer, whatever tool is selected (below). |
 | **Meshlab** | Meshes and point clouds, MeshLab/ParaView style (below): surfaces from labels, click-to-edit, clean/repair, smoothing, remeshing, alignment, measurements, vessel centerlines, image ↔ mesh ↔ points conversion, colouring, mesh time series. |
 | **Image properties** | Spacing, affine, orientation, and other metadata for the active layer. |
@@ -118,6 +118,8 @@ mix of panels, tabbed or side by side.
   the main window*, *Dock all floating panels*.
 - Closing a panel window gives its panels back to the main window; a window whose last
   panel leaves closes itself. Dragging a title bar moves that panel only, not its tab group.
+  The results window is the exception: closing its own window just closes it, and it comes
+  back there (below).
 
 The layout is remembered in `gui.json`: the main window's dock state, plus every panel
 window's panels, dock state, geometry and whether it was open (`panel_windows`; the single
@@ -721,7 +723,16 @@ works for all four tools (the `fsl_anat` folder is uploaded with the job).
 ### Measurement results: colouring the labels
 
 Measurements open the **results window** (`nvitk.gui.viz.results_window`): one table per run,
-earlier runs kept in *History*, *Copy* as text. When a measurement was taken label by label
+earlier runs kept in *History*, *Copy* as text. It is a panel (*Results*) with the panels' title
+bar, and it opens as a window of its own. ⧈ docks it with the nvitk panels, and it can be moved
+into any panel window, tabbed or beside other panels. ⛶ fills the screen with it, and ✕ closes
+it. While it is open, new results appear wherever it is. Once closed, the next measurement or
+**▤ Results** on the Imaging title bar brings it back:
+- in the window it was closed in, when it was in a panel window;
+- as a window of its own, when it was docked in the main window or has never been shown.
+
+Its place is remembered with the rest of the layout. Closing it clears any row highlight in the
+viewer. When a measurement was taken label by label
 — volumes, intensity statistics, Dice / Jaccard / surface metrics against a reference,
 centerline arc length, mask hemodynamics — each label row carries a swatch of its label's
 colour, and **Colour labels by** colours the measured layer's labels by any measured column,
@@ -769,6 +780,8 @@ Further options:
 - the enlargement radius: the profile's value (`cow`: cross-section, inscribed on re-measured
   paths), the cross-section on every path, or the inscribed radius on every path;
 - a running median of the cross-section radius for enlargements;
+- *Parallel vessel jobs*: how many vessels (label / component jobs) are measured at once, one
+  process each. The default is 1, one at a time. The results do not depend on it.
 - whether to show the lesions.
 
 ### Background phase correction

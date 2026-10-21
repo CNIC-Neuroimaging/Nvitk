@@ -256,9 +256,17 @@ class PanelWindow(QMainWindow):
     def closeEvent(self, event: Any) -> None:
         """Closing a panel window gives its panels back to the main window, so
         nothing is lost behind a window nobody can see. Quitting the app does not:
-        the layout was already saved and is restored next launch."""
+        the layout was already saved and is restored next launch.
+
+        A window showing only panels that reopen on demand (``_nvitk_close_with_window``:
+        the Results window) closes them instead, and stays theirs to reopen in."""
         if not self._quitting:
-            self._manager.return_window(self)
+            shown = [d for d in self._manager.docks_in(self) if not d.isHidden()]
+            if shown and all(getattr(d, "_nvitk_close_with_window", False) for d in shown):
+                for dock in shown:
+                    dock.close()
+            else:
+                self._manager.return_window(self)
         super().closeEvent(event)
 
 
@@ -814,7 +822,14 @@ class PanelManager(QObject):
         return menu
 
     def show_dock(self, dock: QDockWidget) -> None:
-        """Make *dock* the one on screen in its tab group, and its window visible."""
+        """Make *dock* the one on screen in its tab group, and its window visible.
+
+        A closed panel with its own way of opening (``_nvitk_open``: the Results window, which
+        reopens as a window of its own) opens that way."""
+        opener = getattr(dock, "_nvitk_open", None)
+        if opener is not None and dock.isHidden():
+            opener()
+            return
         window = self.window_of(dock)
         if window is not None:
             window.show()
