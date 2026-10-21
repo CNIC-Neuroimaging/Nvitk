@@ -766,6 +766,9 @@ Lesions can be analysed in the viewer:
 Further options:
 - the case id (default: the layer name);
 - cow_morpho's legacy siphon mask;
+- the enlargement radius: the profile's value (`cow`: cross-section, inscribed on re-measured
+  paths), the cross-section on every path, or the inscribed radius on every path;
+- a running median of the cross-section radius for enlargements;
 - whether to show the lesions.
 
 ### Background phase correction

@@ -9,6 +9,7 @@ from nvitk.gui.pipeline.catalog import PIPELINE_TOOLS
 from nvitk.measure.morpho.anatomy_axes import SPECIES_AUTO, SPECIES_CHOICES
 from nvitk.measure.morpho.topology_io import topology_choices as _morpho_topology_choices
 from nvitk.measure.morphometrics_config import DEFAULT_PROFILE as _MORPHO_DEFAULT_PROFILE
+from nvitk.measure.morphometrics_config import ENLARGEMENT_RADIUS_SOURCE_LABELS as _ENLARGEMENT_RADIUS_LABELS
 from nvitk.measure.morphometrics_config import PROFILES as _MORPHO_PROFILE_MAP
 from nvitk.morphology.skeleton_methods import (
     SKELETON_METHOD_CHOICES,
@@ -18,6 +19,9 @@ from nvitk.morphology.skeleton_methods import (
 )
 
 _MORPHO_PROFILES: tuple[str, ...] = tuple(sorted(_MORPHO_PROFILE_MAP))
+#: "Enlargement radius" picker: the profile's own ENLARGEMENT_RADIUS_SOURCE, or an override.
+MORPHO_PROFILE_VALUE = "profile value"
+_ENLARGEMENT_RADIUS_CHOICES: tuple[str, ...] = (MORPHO_PROFILE_VALUE, *_ENLARGEMENT_RADIUS_LABELS.values())
 
 ParamKind = Literal[
     "int",
@@ -2149,6 +2153,10 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
                       min=0, max=50),
             ParamSpec("siphon_legacy", "cow_morpho's siphon mask (legacy, covers whole vessels)", "bool",
                       False),
+            ParamSpec("enlargement_radius", "Enlargement radius", "choice", MORPHO_PROFILE_VALUE,
+                      choices=_ENLARGEMENT_RADIUS_CHOICES),
+            ParamSpec("smooth_cross_section", "Running median of the cross-section radius (enlargements)",
+                      "bool", False),
             ParamSpec("case_id", "Case id (empty = the layer name)", "str", ""),
             ParamSpec("show_lesions", "Show lesions as points", "bool", True),
             ParamSpec("n_workers", "Workers", "int", 1, min=1, max=64),
@@ -2171,7 +2179,9 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "Species 'auto' reads the topology's _meta block. The profile 'eicab_cw' "
             "is tuned for eICAB Circle-of-Willis masks (cow_morpho parity, VMTK "
             "centerlines, calibrated siphon mask; the legacy switch restores cow's); "
-            "bridging same-label gaps departs from that tuning. Shows the centerlines, "
+            "bridging same-label gaps departs from that tuning. Enlargement radius and the "
+            "cross-section median override the profile's enlargement test, for comparison. "
+            "Shows the centerlines, "
             "the vessel surfaces and the lesions (orange stenoses, blue enlargements, "
             "opaque by confidence, sized by severity; hover one for its details, click it "
             "for its calibre profile in the Lesion inspector), and opens the results window: "

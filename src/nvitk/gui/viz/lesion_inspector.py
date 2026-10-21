@@ -226,16 +226,20 @@ def draw_profile(ax: Any, run: LesionRun, i: int) -> str:
     r_det = pd.to_numeric(pts.get("stenosis_detection_radius_mm", pts.get("radius_mm")), errors="coerce").to_numpy(float)
     r_cs = pd.to_numeric(pts.get("radius_mm"), errors="coerce").to_numpy(float)
     # The radius this kind of lesion was tested on: stenoses on the detection (inscribed) radius;
-    # enlargements on their own (cow: cross-section on a path's first measurement, the detection
-    # radius on re-measured paths; outputs without the column used the cross-section).
+    # enlargements on their own (ENLARGEMENT_RADIUS_SOURCE; cow: cross-section on a path's first
+    # measurement, the detection radius on re-measured paths; outputs without the column used the
+    # cross-section). Anything else than the detection radius is the cross-section one, possibly
+    # its running median (ENLARGEMENT_SMOOTH_CROSS_SECTION).
     if kind == "enlargement":
         tested = (pd.to_numeric(pts["enlargement_radius_mm"], errors="coerce").to_numpy(float)
                   if "enlargement_radius_mm" in pts.columns else r_cs)
     else:
         tested = r_det
-    on_cs = bool(np.allclose(tested, r_cs, equal_nan=True)) and not np.allclose(r_cs, r_det, equal_nan=True)
+    on_cs = (not np.allclose(tested, r_det, equal_nan=True)) or bool(np.allclose(r_cs, r_det, equal_nan=True))
+    smoothed = on_cs and not np.allclose(tested, r_cs, equal_nan=True)
     alt_r, alt_name = (r_det, "inscribed radius") if on_cs else (r_cs, "cross-section radius")
-    tested_name = ("cross-section" if on_cs else "inscribed") + " radius (tested)"
+    tested_name = ("cross-section radius, median" if smoothed else "cross-section radius" if on_cs
+                   else "inscribed radius") + " (tested)"
 
     # Context first (underneath): siphon mask, the path's other lesions, the reference window.
     if "siphon_mask_point" in pts.columns:
@@ -254,13 +258,15 @@ def draw_profile(ax: Any, run: LesionRun, i: int) -> str:
                    lw=0, label="other lesions" if first_other else None)
         first_other = False
     lo, hi = (float(v) for v in run.param("LESION_PROXIMAL_REFERENCE_WINDOW_MM", (2.0, 10.0)))
+    end_ex = float(run.param("LESION_REFERENCE_EXCLUDE_END_MM", 0.0) or 0.0)  # older runs: none
     ref_where = str(row.get("reference", ""))
     if ref_where in ("proximal", "distal"):
         w0, w1 = ((s[a] - hi, s[a] - lo) if ref_where == "proximal" else (s[b] + lo, s[b] + hi))
-        ax.axvspan(max(w0, s[0]), min(w1, s[-1]), color=COLOR_OK, alpha=0.16, lw=0, label=f"{ref_where} reference window")
+        w0, w1 = max(w0, s[0] + end_ex), min(w1, s[-1] - end_ex)
+        ax.axvspan(w0, w1, color=COLOR_OK, alpha=0.16, lw=0, label=f"{ref_where} reference window")
         ref_r = _num(row, "reference_radius_mm")
         if np.isfinite(ref_r):
-            ax.hlines(ref_r, max(w0, s[0]), min(w1, s[-1]), colors=COLOR_OK, lw=1.4)
+            ax.hlines(ref_r, w0, w1, colors=COLOR_OK, lw=1.4)
     ax.axvspan(s[a], s[b], color=colour, alpha=0.30, lw=0, label="this lesion")
 
     ax.plot(s, alt_r, color=COLOR_MUTED, lw=0.8, label=alt_name)
@@ -375,11 +381,14 @@ def _make_inspector(viewer: Any) -> Any:
                 note = draw_profile(self._ax, run, self.index)
                 style_image_figure(self._fig)
                 self._canvas.draw_idle()
+            kind = str(run.lesions.iloc[self.index].get("kind", "stenosis"))
+            pct = float(run.param("STENOSIS_THRESHOLD_PCT" if kind == "stenosis" else "ENLARGEMENT_THRESHOLD_PCT",
+                                  10.0))
             self._note.setText(
                 (note + " " if note else "")
-                + "The lesion is the run where the tested radius crosses the dotted threshold (10 % off the "
-                  "dashed taper reference); its diameter / area % compare its extreme radius with the green "
-                  "reference window."
+                + f"The lesion is the run where the tested radius crosses the dotted threshold ({pct:g} % off "
+                  "the dashed taper reference); its diameter / area % compare its extreme radius with the "
+                  "green reference window."
             )
 
     return LesionInspector()

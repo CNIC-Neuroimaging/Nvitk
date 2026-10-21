@@ -47,7 +47,7 @@ run_morphometrics_case(seg, out_dir, config=cfg)
 
 | Profile | Masks | Status |
 |---|---|---|
-| `eicab_cw` (default) | eICAB circle-of-Willis crops | cow_morpho's tuned values, plus the calibrated siphon fix |
+| `eicab_cw` (default) | eICAB circle-of-Willis crops | cow_morpho's tuned values, with the calibrated siphon fix, 20 % lesion thresholds (cow: 10 %) and an enlargement minimum length in mm (§5.2) |
 | *(WB)* | eICAB whole-brain masks | pending: needs its own tuning (longer vessels, more distal branches) |
 
 `with_params(NAME=value)` validates names, so a typo fails instead of being silently ignored.
@@ -77,7 +77,7 @@ lengths within −1…+3 %. The same centring runs when a GUI tool uses the `nat
 |---|---|
 | Centerline call, resampling, seeds, trimmed-seed retries | identical (VMTK backend) |
 | Taper reference, two-pass refit, outlier iterations | identical |
-| Stenosis / enlargement detection rules (§5.2) | identical — cow's code, reproduced to the index by a test against cow's own module |
+| Stenosis / enlargement detection rules (§5.2) | cow's code. With cow's values it reproduces cow's segments to the index (checked against cow's own module). `eicab_cw` now differs in two values: 20 % thresholds (cow: 10 %) and a 1.5 mm enlargement floor instead of cow's "3 consecutive points" |
 | Overlap pruning of shared trunks before detection | identical (`PRUNE_OVERLAPPING_FINAL_CENTERLINE_PREFIXES`, no kept prefix) |
 | Fragments | identical: largest component per label, no gap bridging (`PROCESS_ALL_CONNECTED_COMPONENTS = False`, `BRIDGE_LABEL_GAPS_BEFORE_CENTERLINES = False`) |
 | Siphon mask | **fixed** by default (§4); `SIPHON_LEGACY_MASK = True` reproduces cow exactly |
@@ -169,8 +169,9 @@ compute, no longer the flat median the bug left behind. On the 20 calibration su
 Against a flat median, the wide proximal stretch of a tapering vessel reads as "enlarged", and
 narrowings are measured against a radius that is too low. The new stenoses are corroborated by the
 independent proximal / distal reference of the lesion table: 88 % are ≥ 10 % narrower in diameter
-(median 30 %). The 10 % detection thresholds were kept, not retuned to reproduce counts that came
-from the broken reference.
+(median 30 %). These counts were measured with the 10 % detection thresholds in use at the time.
+The thresholds were not retuned then to reproduce counts that came from the broken reference;
+they have since been raised to 20 % (§5.2).
 
 ---
 
@@ -191,28 +192,71 @@ cannot drag its own denominator down.
 | 6. Outlier iterations | points beyond 0.60 × the lesion threshold leave the fit, ≤ 3×, never below 45 % of the fit points | `TAPER_FIT_OUTLIER_FRACTION`, `TAPER_FIT_MAX_ITERATIONS`, `TAPER_FIT_MIN_HEALTHY_FRACTION` |
 | 7. Two-pass refit | detected lesions leave the fit and detection re-runs until stable, ≤ 5× | `TAPER_TWO_PASS`, `TAPER_TWO_PASS_MAX_ITERATIONS` |
 
-### 5.2 Detection (cow_morpho's rules)
+### 5.2 Detection (cow_morpho's rules, `eicab_cw` values)
 
 ```
-stenosis     pct(i) = (1 − r(i)/r_ref(i)) · 100        on the detection (MIS) radius
-enlargement  pct(i) = (r(i)/r_ref(i) − 1) · 100        on the cross-section radius
+stenosis     pct(i) = (1 − r(i)/r_ref(i)) · 100        on the detection (inscribed) radius
+enlargement  pct(i) = (r(i)/r_ref(i) − 1) · 100        on the cross-section radius (see below)
 ```
 
 Flagged runs are merged across gaps ≤ 1.5 mm and kept when long enough:
 
 | Parameter | Stenosis | Enlargement |
 |---|---|---|
-| Threshold | 10 % | 10 % |
-| Support threshold | `min(25 %, threshold)` = 10 % | same |
-| Minimum length | 3.0 mm | 5.0 mm **or** ≥ 3 consecutive points |
+| Threshold | **20 %** (`STENOSIS_THRESHOLD_PCT`; cow: 10 %) | **20 %** (`ENLARGEMENT_THRESHOLD_PCT`; cow: 10 %) |
+| Support threshold | `min(25 %, threshold)` = 20 % | same |
+| Minimum length | 3.0 mm (`STENOSIS_MIN_LEN_MM`) | 5.0 mm (`ENLARGEMENT_MIN_LEN_MM`) **or** ≥ **1.5 mm** (`ENLARGEMENT_MIN_SUPPORT_LENGTH_MM`), i.e. 1.5 mm |
 | End exclusion (detection) | 2.0 mm | 3.0 mm |
 | End exclusion (candidate arrays) | 5.0 mm | 5.0 mm |
+| Max internal gap merged | 1.5 mm | 1.5 mm |
+| Radius tested | detection (`RADIUS_SOURCE_FOR_CALIBER_DETECTION`) | `cow` (`ENLARGEMENT_RADIUS_SOURCE`): cross-section, or detection on re-measured paths |
+| Cross-section smoothing | — | off (`ENLARGEMENT_SMOOTH_CROSS_SECTION = False`; window `ENLARGEMENT_CROSS_SECTION_MEDIAN_MM` = 1.0 mm) |
 
-Two cow behaviours to be aware of:
-- The support threshold (25 %) is **above** the core one, so the `min()` collapses the hysteresis
-  into a single 10 % contour.
-- The enlargement "3 consecutive points" alternative accepts runs of 0.2 mm at the 0.1 mm step.
-  The lesion table flags such runs as `short` (§6.3) and does not remove them.
+Notes on these rules:
+- **The support tier is inactive.** The support threshold (25 %) is **above** the core one, so the
+  `min()` collapses the hysteresis into a single 20 % contour. A support below the core (say 5 %)
+  would grow each lesion into its shoulders and bridge dips between them.
+- **Enlargement floor in mm.** cow's alternative acceptance was "≥ 3 consecutive points", which
+  at the 0.1 mm step accepted 0.2 mm runs: single cross-section spikes, far below TOF resolution.
+  It is replaced by a floor in arc length, `ENLARGEMENT_MIN_SUPPORT_LENGTH_MM` = 1.5 mm, which is 3
+  voxels at 0.5 mm. As the shorter of the two rules, it is the effective minimum. On the 342 paths
+  of the 20 calibration subjects at 20 %:
+
+  | Rule | Enlargements | Per subject |
+  |---|---|---|
+  | cow's 3-point rule | 205 | 10.3 |
+  | 1.0 mm floor | 127 | 6.3 |
+  | **1.5 mm floor** | **98** | **4.9** |
+  | 2.0 mm floor | 79 | 4.0 |
+  | 5.0 mm only | 27 | 1.4 |
+
+- **Which radius enlargements are tested on** (`ENLARGEMENT_RADIUS_SOURCE`). The default,
+  `"cow"`, keeps cow's choice, which depends on the code path:
+  - a path's first measurement uses the **cross-section** radius;
+  - a path re-measured after its shared trunk was pruned, and a donut arm, use the **detection**
+    (inscribed) radius.
+
+  The same bulge can therefore pass on one path and fail on another. `"cross_section"` or
+  `"detection"` tests every path on that one radius; the default stays `"cow"` until they are
+  compared. Tested alone on each radius, the 342 calibration paths give (20 %, 1.5 mm floor):
+
+  | Radius | Enlargements | Per subject | Median peak |
+  |---|---|---|---|
+  | cross-section | 98 | 4.9 | +65 % |
+  | cross-section, 1 mm median | 89 | 4.5 | +50 % |
+  | detection (inscribed) | 29 | 1.4 | +40 % |
+
+  `enlargement_radius_mm` (point tables, VTPs) records the radius each path used, and the lesion
+  table measures each enlargement's severity on it. The VTP arrays `EnlargementBinaryCS` /
+  `EnlargementBinaryMIS` are diagnostic flags from each radius alone.
+- **Cross-section smoothing (off by default).** The cross-section radius spikes for one or two
+  0.1 mm samples wherever a cut catches a branch opening or sits obliquely in a bend. Its
+  sample-to-sample change reaches 11 % (95th percentile), against 5 % for the inscribed radius.
+  `ENLARGEMENT_SMOOTH_CROSS_SECTION = True` tests a running median over
+  `ENLARGEMENT_CROSS_SECTION_MEDIAN_MM` instead, so a bulge longer than half the window survives.
+  With the 1.5 mm floor it changes 98 → 89 enlargements on the calibration paths. It applies
+  wherever an enlargement test reads the cross-section radius: under `"cow"`, on re-measured
+  paths only when `RADIUS_SOURCE_FOR_CALIBER_DETECTION` is `"cross_section"`.
 
 Enlargements near the start of another centerline are suppressed
 (`SUPPRESS_ENLARGEMENT_NEAR_CENTERLINE_STARTS`). Shared trunks are pruned from arms before the
@@ -283,7 +327,7 @@ measure twice is counted once, and is named after the segment containing its mid
 | `kind` | `stenosis` / `enlargement` |
 | `segment`, `path_id`, `point_start` / `point_end` (indices on that path's point table), `start_s_from_vessel_origin_mm`, `length_mm`, `x/y/z_mm` | location |
 | `taper_percent` | peak severity against the taper reference (the detection measure) |
-| `reference_radius_mm`, `reference` | the healthy reference: median radius 2–10 mm **upstream** (`proximal`), else downstream (`distal`), else `none` |
+| `reference_radius_mm`, `reference` | the healthy reference: median radius 2–10 mm **upstream** (`proximal`, `LESION_PROXIMAL_REFERENCE_WINDOW_MM`), else downstream (`distal`), else `none`. The window never reaches into the first or last 3 mm of the path (`LESION_REFERENCE_EXCLUDE_END_MM`), where the seed point and the end taper sit; it needs ≥ 3 points left |
 | `extreme_radius_mm` | minimum (stenosis) / maximum (enlargement) radius in the lesion |
 
 Each kind is measured on the radius its test used. Stenoses use the detection (inscribed) radius.
@@ -301,7 +345,7 @@ change unreliable:
 | `reference_distal` / `reference_none` | 0.8 | no proximal reference window |
 | `in_siphon` | 0.7 | overlaps the siphon mask |
 | `near_vessel_end` | 0.6 | within 5 mm of a path end (`LESION_NEAR_END_MM`) |
-| `short` | 0.8 | shorter than 1.5 × the detection minimum length |
+| `short` | 0.8 | shorter than 1.5 × the detection minimum length (stenoses 3 mm → < 4.5 mm; enlargements 1.5 mm → < 2.25 mm) |
 | `near_bifurcation` | 0.5 | within 3 mm of a junction (`LESION_NEAR_BIFURCATION_MM`) |
 | `radius_disagreement` | 0.7 | the cross-section/MIS ratio inside the lesion departs > 20 % from the path's own median ratio: one estimator sees the lesion, the other doesn't |
 | `cross_section_gaps` | 0.8 | > 20 % of the lesion has no valid cross-section |
@@ -417,23 +461,29 @@ The parameters that move the numbers most (change them with `with_params`):
 |---|---|---|
 | `CENTERLINE_RESAMPLE_STEP_MM` | 0.10 | point density → every per-point array |
 | `RADIUS_SOURCE_FOR_CALIBER_DETECTION` | `maximum_inscribed_sphere` | which radius stenosis is judged on |
-| `STENOSIS_THRESHOLD_PCT` / `ENLARGEMENT_THRESHOLD_PCT` | 10 / 10 | lesion sensitivity |
+| `STENOSIS_THRESHOLD_PCT` / `ENLARGEMENT_THRESHOLD_PCT` | 20 / 20 | lesion sensitivity (cow: 10 / 10) |
+| `STENOSIS_SUPPORT_THRESHOLD_PCT` / `ENLARGEMENT_SUPPORT_THRESHOLD_PCT` | 25 / 25 | hysteresis tier; inactive at or above the threshold (§5.2) |
 | `STENOSIS_MIN_LEN_MM` / `ENLARGEMENT_MIN_LEN_MM` | 3 / 5 | shortest accepted lesion |
+| `ENLARGEMENT_MIN_SUPPORT_LENGTH_MM` | 1.5 | shorter enlargement floor; the effective minimum (cow: "3 consecutive points") |
+| `ENLARGEMENT_RADIUS_SOURCE` | `cow` | which radius enlargements are tested on: `cow` (path-dependent), `cross_section` or `detection` (§5.2) |
+| `ENLARGEMENT_SMOOTH_CROSS_SECTION` / `ENLARGEMENT_CROSS_SECTION_MEDIAN_MM` | False / 1.0 | running median of the cross-section radius enlargements are tested on |
 | `TAPER_REFERENCE_PERCENTILE` / `_WINDOW_MM` | 85 / 20 | how generous the healthy reference is |
 | `SIPHON_LEGACY_MASK` | False | True = cow's (100 %-coverage) siphon mask |
+| `LESION_PROXIMAL_REFERENCE_WINDOW_MM` / `LESION_REFERENCE_EXCLUDE_END_MM` | (2, 10) / 3 | the lesion table's healthy reference (§6), kept clear of the path ends |
 | `SIPHON_CURVATURE_SMOOTH_MM` / `SIPHON_KAPPA_THRESHOLD` / `SIPHON_DILATION_MM` | 3 / 0.20 / 5 | the siphon mask (§4) |
 | `MIN_CENTERLINE_PATH_LENGTH_MM` | 7.5 | which paths exist at all |
 | `PROCESS_ALL_CONNECTED_COMPONENTS` / `BRIDGE_LABEL_GAPS_BEFORE_CENTERLINES` | False / False | fragment handling (cow parity) |
 
-The GUI's *TOF morphometrics* tool exposes the profile, the backend and an optional same-label gap
-bridge (`bridge_gaps_vox`, default 0 = off).
+The GUI's *TOF morphometrics* tool exposes the profile, the backend, an optional same-label gap
+bridge (`bridge_gaps_vox`, default 0 = off) and, for comparison, overrides of the enlargement
+radius and the cross-section median.
 
 ---
 
 ## 11 · In the GUI
 
 Measure → *Morphometrics* runs the same pipeline on a Labels layer, with the same profile,
-backend and the legacy-siphon switch. The case id defaults to the layer name. It shows the
+backend, the legacy-siphon switch and the enlargement-radius / cross-section-median overrides. The case id defaults to the layer name. It shows the
 centerlines, the vessel surfaces (one Mesh-panel surface whose vertices carry their `label`) and
 the lesions as points (orange stenoses, blue enlargements, opaque by confidence, sized by severity).
 

@@ -21,6 +21,7 @@ import numpy as np
 
 from nvitk.measure import morphometrics_config as _cfg
 
+from .caliber import enlargement_min_length_mm
 from .metrics import discrete_torsion, smooth_polyline, smoothed_curvature
 
 
@@ -260,10 +261,12 @@ def lesion_rows(
     midpoint. Severity is reported three ways: against the taper reference (``taper_percent``, the
     detection measure) and against the **proximal healthy reference** — the median radius over
     ``LESION_PROXIMAL_REFERENCE_WINDOW_MM`` upstream on the same path (downstream when there is no
-    upstream room) — as diameter and area stenosis (NASCET-like); for enlargements both are signed
+    upstream room), never within ``LESION_REFERENCE_EXCLUDE_END_MM`` of either path end — as diameter
+    and area stenosis (NASCET-like); for enlargements both are signed
     so that positive means wider than the reference. Each kind is measured on the radius its test
     used: stenoses on the detection (inscribed) radius, enlargements on ``enlargement_radius_mm``
-    (cow tests them on the cross-section radius, or on the detection radius on re-measured paths).
+    (``ENLARGEMENT_RADIUS_SOURCE``; cow tests them on the cross-section radius, or on the detection
+    radius on re-measured paths).
 
     Confidence ∈ [0, 1] multiplies a penalty for each condition that makes a calibre change
     unreliable (the applied ones are listed in ``confidence_flags``):
@@ -274,7 +277,9 @@ def lesion_rows(
     reference_distal/none 0.8     no proximal reference window (distal one used, or none)
     in_siphon             0.7     overlaps the siphon (high-curvature) mask
     near_vessel_end       0.6     within ``LESION_NEAR_END_MM`` of a path end
-    short                 0.8     shorter than 1.5 × the detection minimum length
+    short                 0.8     shorter than 1.5 × the detection minimum length (stenoses:
+                                  ``STENOSIS_MIN_LEN_MM``; enlargements: the shorter of
+                                  ``ENLARGEMENT_MIN_LEN_MM`` / ``ENLARGEMENT_MIN_SUPPORT_LENGTH_MM``)
     near_bifurcation      0.5     within ``LESION_NEAR_BIFURCATION_MM`` of a junction
     radius_disagreement   0.7     cross-section / inscribed radius ratio departs from the path's
                                   median ratio by more than ``LESION_RADIUS_DISAGREEMENT_FRACTION``
@@ -285,6 +290,7 @@ def lesion_rows(
     Classes: high ≥ 0.7 (at most one mild penalty), moderate ≥ 0.4, low below.
     """
     lo_w, hi_w = (float(v) for v in _cfg.LESION_PROXIMAL_REFERENCE_WINDOW_MM)
+    end_ex = float(_cfg.LESION_REFERENCE_EXCLUDE_END_MM or 0.0)
     rows: list[dict[str, Any]] = []
     seen: dict[str, list[np.ndarray]] = {"stenosis": [], "enlargement": []}
     tree = None
@@ -310,11 +316,12 @@ def lesion_rows(
         with np.errstate(divide="ignore", invalid="ignore"):
             ratio = np.where(mis > 0, cs / mis, np.nan)
         path_ratio = _stat(ratio, np.median)
+        ref_ok = (s >= end_ex) & (s <= s[-1] - end_ex)  # where a reference window may lie
         for kind, runs_key, pct_key, min_len, kind_r in (
             ("stenosis", "stenosis_segments_point_idx", "stenosis_percent_point", float(_cfg.STENOSIS_MIN_LEN_MM),
              det_r),
             ("enlargement", "enlargement_segments_point_idx", "enlargement_percent_point",
-             float(_cfg.ENLARGEMENT_MIN_LEN_MM), enl_r),
+             enlargement_min_length_mm(), enl_r),
         ):
             pct = np.asarray(path.get(pct_key, np.full(n, np.nan)), dtype=float)
             for a, b in _parse_runs(path.get(runs_key)):
@@ -329,11 +336,11 @@ def lesion_rows(
                 extreme_r = _stat(kind_r[sl], np.min) if kind == "stenosis" else _stat(kind_r[sl], np.max)
                 flags: list[str] = []
                 conf = 1.0
-                up = (s >= s[a] - hi_w) & (s <= s[a] - lo_w)
+                up = (s >= s[a] - hi_w) & (s <= s[a] - lo_w) & ref_ok
                 if up.sum() >= 3:
                     ref_r, ref_where = _stat(kind_r[up], np.median), "proximal"
                 else:
-                    down = (s >= s[b] + lo_w) & (s <= s[b] + hi_w)
+                    down = (s >= s[b] + lo_w) & (s <= s[b] + hi_w) & ref_ok
                     ref_r, ref_where = (_stat(kind_r[down], np.median), "distal") if down.sum() >= 3 else (np.nan, "none")
                 if ref_where != "proximal":
                     conf *= 0.8

@@ -3692,7 +3692,11 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
     from nvitk.gui.viz.morpho_viz import DEFAULT_MORPHO_POINT_SIZE, install_morphometrics_viz
     from nvitk.io import imsave
     from nvitk.measure.morphometrics import run_morphometrics_case
-    from nvitk.measure.morphometrics_config import DEFAULT_PROFILE, morphometrics_config
+    from nvitk.measure.morphometrics_config import (
+        DEFAULT_PROFILE,
+        ENLARGEMENT_RADIUS_SOURCE_LABELS,
+        morphometrics_config,
+    )
     from nvitk.measure.morpho.anatomy_axes import SPECIES_AUTO
     from nvitk.measure.morpho.topology_io import TOPOLOGY_NONE
     from nvitk.morphology.skeleton_methods import normalize_skeleton_method
@@ -3734,6 +3738,12 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
     config = morphometrics_config(str(params.get("profile") or "") or DEFAULT_PROFILE, n_workers=n_workers)
     if bool(params.get("siphon_legacy")):
         config = config.with_params(SIPHON_LEGACY_MASK=True)
+    enl_label = str(params.get("enlargement_radius") or "").strip()
+    enl_source = next((k for k, v in ENLARGEMENT_RADIUS_SOURCE_LABELS.items() if v == enl_label), None)
+    if enl_source is not None:
+        config = config.with_params(ENLARGEMENT_RADIUS_SOURCE=enl_source)
+    if bool(params.get("smooth_cross_section")):
+        config = config.with_params(ENLARGEMENT_SMOOTH_CROSS_SECTION=True)
     case_id = re.sub(r"[^\w.-]+", "_", str(params.get("case_id") or "").strip() or str(layer.name)).strip("_")
 
     if persist:
