@@ -241,8 +241,61 @@ they have since been raised to 20 % (§5.2).
 
 ### 5.1 The taper reference (`_compute_vessel_taper`)
 
-The reference is a **healthy-caliber envelope**, not a least-squares baseline, so a long stenosis
-cannot drag its own denominator down.
+The taper reference is the expected healthy radius at every point of the path, the denominator
+of detection: a stenosis is a run below `reference × (1 − 20 %)`, an enlargement a run above
+`reference × (1 + 20 %)`. "Taper" is the vessel's natural narrowing along its length. It is a
+**healthy-calibre envelope** rather than a least-squares baseline, so a long stenosis cannot drag
+its own denominator down. Two methods (`TAPER_REFERENCE_METHOD`):
+
+**`stretch` (default).** The path is cut at the **junctions** it passes through (the component's
+skeleton branch points, the `02_Branchpoints` rows), and each junction-to-junction stretch gets its
+own reference:
+- **Natural taper, locally:** the envelope below (steps 3–7) made **local-linear**. Every 0.5 mm,
+  it fits the 85th-percentile *line* of the stretch's radius within ±10 mm, its decline capped at
+  `TAPER_STRETCH_MAX_DECLINE_PCT_PER_MM` (2 % of the local calibre per mm; natural taper is
+  ≈ 1 %/mm, and the cap keeps a long narrowing from passing as "taper"). A local percentile on a
+  sloping vessel leads the taper by ~7 mm; the local line does not, and it follows a vessel that is
+  flat and then declines.
+- **Junctions:** the bifurcation blanking zones (`BLANKING_MM`, `BLANKING_RADIUS_FACTOR`) stay out
+  of the fit, and the reference may **step** at a junction, where a branch leaving lowers the
+  calibre (Murray). A stretch shorter than `TAPER_STRETCH_MIN_LENGTH_MM` (10 mm) joins a
+  neighbour, because two branch points close together would otherwise give a few millimetres
+  (often exactly a narrowing) a reference of their own. A whole vessel shorter than
+  `TAPER_STRETCH_SHORT_VESSEL_MM` (20 mm: A1s, PComms, AChAs, which ramp near their origin) gets
+  its median, as with the `envelope` method, whose 10 mm end exclusions leave it nothing to fit.
+- **Path ends and gaps:** the fit uses the whole stretch but its tips (no 10 mm end exclusion).
+  Distally the reference continues the local decline into the vessel's end instead of freezing at
+  the calibre 10 mm upstream. Proximally it is held, never extrapolated upwards past any measured
+  healthy calibre. Gaps inside a stretch that the fit skips (siphon, detected lesions, junction
+  zones) are bridged linearly from both sides.
+- **Inspection:** the point tables carry the stretch of every point (`taper_stretch`), and the
+  lesion inspector draws a dashed line where the reference may step.
+
+**`envelope` (cow_morpho).** One envelope along the whole path (steps 1–7), blind to junctions. It
+smears a calibre step at a bifurcation over ±10 mm and flags the daughter as a stenosis, and over
+the last 10 mm it stays at the calibre measured further upstream.
+
+On a synthetic vessel with a calibre step at a junction (2.0 → 1.5 mm), a 2 %/mm natural taper
+after it and a real 4 mm, 50 % stenosis before it:
+- `envelope` stays at 2.0 mm across the junction and flags the whole tapering daughter as one
+  23 mm stenosis.
+- `stretch` follows the true healthy calibre (1.42 / 1.22 / 0.96 mm against 1.44 / 1.20 / 0.90)
+  and finds only the real stenosis.
+
+On the 20 calibration subjects:
+
+| | `envelope` | `stretch` |
+|---|---|---|
+| Stenoses | 99 | 62 (40 removed, 3 added) |
+| … ending within 10 mm of the path end | 67 | 32 |
+| … within 3 mm of a junction | 34 | 19 |
+| … confidence high / moderate / low | 14 / 44 / 41 | 12 / 23 / 27 |
+| Enlargements | 28 | 25 |
+
+Of the 40 stenoses no longer called, 32 were distal fade-outs that the frozen end zone counted
+against the calibre upstream, and 14 sat at junctions: a bifurcation flare taken as healthy, or a
+daughter measured against its parent. The 3 new ones are borderline (20–30 % against a reference
+within a few percent of the old one).
 
 | Step | Rule | Constant |
 |---|---|---|
@@ -585,6 +638,8 @@ The parameters that move the numbers most (change them with `with_params`):
 | `ENLARGEMENT_MIN_SUPPORT_LENGTH_MM` | 1.5 | shorter enlargement floor; the effective minimum (cow: "3 consecutive points") |
 | `ENLARGEMENT_RADIUS_SOURCE` | `cow` | which radius enlargements are tested on: `cow` (path-dependent), `cross_section` or `detection` (§5.2) |
 | `ENLARGEMENT_SMOOTH_CROSS_SECTION` / `ENLARGEMENT_CROSS_SECTION_MEDIAN_MM` | False / 1.0 | running median of the cross-section radius enlargements are tested on |
+| `TAPER_REFERENCE_METHOD` | `stretch` | detection's healthy reference: junction-to-junction stretches with a capped natural taper, or cow's whole-path `envelope` (§5.1) |
+| `TAPER_STRETCH_MAX_DECLINE_PCT_PER_MM` / `TAPER_STRETCH_MIN_LENGTH_MM` / `TAPER_STRETCH_SHORT_VESSEL_MM` | 2 / 10 / 20 | steepest natural taper a stretch may follow; shortest stretch with a reference of its own; shorter vessels use their median |
 | `TAPER_REFERENCE_PERCENTILE` / `_WINDOW_MM` | 85 / 20 | how generous the healthy reference is |
 | `SIPHON_LEGACY_MASK` | False | True = cow's (100 %-coverage) siphon mask |
 | `LESION_REFERENCE_METHOD` | `interpolated` | the lesion table's healthy reference: proximal + distal windows interpolated, or `proximal` (§6.3) |

@@ -120,6 +120,199 @@ def compute_siphon_mask(
     return ndi.binary_dilation(high_k, structure=struct)
 
 
+# The junctions (branch points, mm) of the component being measured: set by the orchestration
+# around one component, read by the stretch-wise taper reference of every path measured in it.
+_JUNCTIONS: dict = {"points": None}
+
+
+def set_detection_junctions(points_mm: Optional[np.ndarray]) -> None:
+    """Install the junctions of the component about to be measured (``None`` clears them)."""
+    pts = None if points_mm is None else np.asarray(points_mm, dtype=float).reshape(-1, 3)
+    _JUNCTIONS["points"] = pts if pts is not None and len(pts) else None
+
+
+def detection_junctions() -> Optional[np.ndarray]:
+    """The junctions installed by :func:`set_detection_junctions` (``None`` when none)."""
+    return _JUNCTIONS["points"]
+
+
+def blanking_mask(points: np.ndarray, radius: np.ndarray, junctions: Optional[np.ndarray]) -> np.ndarray:
+    """True where a point lies within the bifurcation blanking zone of any junction:
+    ``max(BLANKING_MM, BLANKING_RADIUS_FACTOR × local radius)``."""
+    n = len(points)
+    if junctions is None or len(junctions) == 0 or n == 0:
+        return np.zeros(n, dtype=bool)
+    from scipy.spatial import cKDTree
+
+    d, _ = cKDTree(np.asarray(junctions, dtype=float)).query(np.asarray(points, dtype=float))
+    r = np.where(np.isfinite(radius), radius, 0.0)
+    zone = np.maximum(float(_cfg.BLANKING_MM), float(_cfg.BLANKING_RADIUS_FACTOR) * r)
+    return d <= zone
+
+
+def junction_crossings(points: np.ndarray, radius: np.ndarray, junctions: Optional[np.ndarray]) -> np.ndarray:
+    """Sorted indices of the path points nearest each junction the path passes through (the
+    junction lies within that point's blanking zone)."""
+    pts = np.asarray(points, dtype=float)
+    if junctions is None or len(junctions) == 0 or len(pts) == 0:
+        return np.empty(0, dtype=int)
+    from scipy.spatial import cKDTree
+
+    d, idx = cKDTree(pts).query(np.asarray(junctions, dtype=float))
+    r = np.where(np.isfinite(radius), radius, 0.0)
+    zone = np.maximum(float(_cfg.BLANKING_MM), float(_cfg.BLANKING_RADIUS_FACTOR) * r[idx])
+    return np.unique(idx[d <= zone])
+
+
+def path_stretches(pts: Optional[np.ndarray], r: np.ndarray) -> Tuple[Optional[np.ndarray], np.ndarray]:
+    """``(stretch id per point, blanking mask)`` for the ``stretch`` taper reference: the path cut
+    at the installed junctions it passes through. A stretch shorter than
+    ``TAPER_STRETCH_MIN_LENGTH_MM`` joins its upstream neighbour (the first one, its downstream
+    neighbour): two branch points close together would otherwise give a few millimetres — often
+    exactly a narrowing — a reference of their own. ``(None, all-False)`` for the ``envelope``
+    method or without points."""
+    n = len(r)
+    if str(_cfg.TAPER_REFERENCE_METHOD).lower() != "stretch" or pts is None or len(pts) != n:
+        return None, np.zeros(n, dtype=bool)
+    pts = np.asarray(pts, dtype=float)
+    junctions = detection_junctions()
+    cuts = list(junction_crossings(pts, r, junctions))
+    s = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))]) if n > 1 else np.zeros(n)
+    min_len = float(_cfg.TAPER_STRETCH_MIN_LENGTH_MM)
+    while cuts:
+        bounds = [0, *cuts, n - 1]
+        lengths = [s[bounds[k + 1]] - s[bounds[k]] for k in range(len(bounds) - 1)]
+        k = int(np.argmin(lengths))
+        if lengths[k] >= min_len:
+            break
+        cuts.pop(k - 1 if k > 0 else 0)  # drop the cut upstream of it (the first: downstream)
+    stretch = np.searchsorted(np.asarray(cuts, dtype=int), np.arange(n), side="left").astype(int)
+    return stretch, blanking_mask(pts, r, junctions)
+
+
+def taper_stretch_ids(pts: Optional[np.ndarray], r: np.ndarray) -> np.ndarray:
+    """Per-point stretch ids of :func:`path_stretches` as floats for the point tables (all 0 for
+    the ``envelope`` method): where the taper reference may step (lesion inspection)."""
+    stretch, _ = path_stretches(pts, np.asarray(r, dtype=float))
+    return np.zeros(len(r)) if stretch is None else stretch.astype(float)
+
+
+def _quantile_line(s: np.ndarray, r: np.ndarray, tau: float) -> Tuple[float, float]:
+    """``(a, b)`` of the τ-quantile line ``r ≈ a + b·s`` (pinball loss), its slope limited to
+    ``[−TAPER_STRETCH_MAX_DECLINE_PCT_PER_MM % × level, 0]`` (non-increasing when
+    ``TAPER_FIT_ENFORCE_NONINCREASING``; ``level`` = the τ-quantile radius)."""
+    level = float(np.quantile(r, tau))
+    cap = _cfg.TAPER_STRETCH_MAX_DECLINE_PCT_PER_MM
+    span = float(s.max() - s.min())
+    b_min = -(float(cap) / 100.0) * level if cap is not None else (-(float(np.ptp(r)) / span * 2.0 if span > 0 else 0.0))
+    b_max = 0.0 if _cfg.TAPER_FIT_ENFORCE_NONINCREASING else -b_min
+    if span <= 1e-6 or b_min >= b_max:
+        return level, 0.0
+    best = (np.inf, level, 0.0)
+    lo, hi = b_min, b_max
+    for _ in range(2):  # a coarse grid, then a finer one around the best slope
+        slopes = np.linspace(lo, hi, 41)
+        resid = r[None, :] - slopes[:, None] * s[None, :]
+        a = np.quantile(resid, tau, axis=1)
+        u = resid - a[:, None]
+        loss = np.sum(np.where(u >= 0, tau * u, (tau - 1.0) * u), axis=1)
+        k = int(np.argmin(loss))
+        if loss[k] < best[0]:
+            best = (float(loss[k]), float(a[k]), float(slopes[k]))
+        step = (hi - lo) / 40.0
+        lo, hi = max(b_min, slopes[k] - step), min(b_max, slopes[k] + step)
+    return best[1], best[2]
+
+
+def _local_linear_envelope(s_fit: np.ndarray, r_fit: np.ndarray, knots: np.ndarray, tau: float) -> np.ndarray:
+    """At each knot, the τ-quantile line of the fit points within ±``TAPER_REFERENCE_WINDOW_MM``/2
+    evaluated there (NaN with fewer than 3 points): a local-*linear* envelope, which follows a
+    taper without the lead a local percentile has on a sloping vessel, and continues the local
+    slope past the last point."""
+    half = max(float(_cfg.TAPER_REFERENCE_WINDOW_MM) * 0.5, 1e-6)
+    out = np.full(len(knots), np.nan)
+    for j, c in enumerate(knots):
+        local = np.abs(s_fit - c) <= half
+        if local.sum() >= 3:
+            out[j] = _quantile_line(s_fit[local] - c, r_fit[local], tau)[0]
+    return out
+
+
+def _stretch_reference(
+    s: np.ndarray,
+    r: np.ndarray,
+    valid_mask: np.ndarray,
+    fit_mask: np.ndarray,
+    stretch: np.ndarray,
+    *,
+    envelope: bool = True,
+) -> np.ndarray:
+    """Healthy calibre stretch by stretch (``TAPER_REFERENCE_METHOD = "stretch"``).
+
+    In each junction-to-junction stretch, the reference is the envelope method's local
+    ``TAPER_REFERENCE_PERCENTILE`` envelope made **local-linear** (:func:`_local_linear_envelope`,
+    every 0.5 mm): at each place, the upper-quantile line of the stretch's fit points within
+    ``TAPER_REFERENCE_WINDOW_MM``, its decline capped at ``TAPER_STRETCH_MAX_DECLINE_PCT_PER_MM``.
+    It follows a natural taper (and a flat-then-declining vessel) without the ~7 mm lead a local
+    percentile has on a slope, and is then smoothed and kept non-increasing. At the path's distal
+    end it continues the local decline into the vessel's end instead of freezing (before a junction
+    it is held); gaps inside the stretch (siphon,
+    excluded lesions, junction zones) are bridged linearly from both sides; upstream of the first
+    fitted point it is held, never extrapolated upwards. *envelope* False gives the outlier pre-pass its centre
+    line (the local median). A stretch whose fit points span less than
+    ``TAPER_STRETCH_MIN_LENGTH_MM`` gets the median of its valid radius, and so does a whole vessel
+    shorter than ``TAPER_STRETCH_SHORT_VESSEL_MM`` (the envelope method's fallback when nothing is
+    left to fit); a stretch with fewer than 3 fit points is left NaN (filled from its neighbours by
+    :func:`fill_reference_gaps`). The reference may step at a junction.
+    """
+    tau = float(_cfg.TAPER_REFERENCE_PERCENTILE) / 100.0 if envelope else 0.5
+    out = np.full_like(r, np.nan, dtype=float)
+    finite = np.isfinite(s) & np.isfinite(r)
+    if len(s) and float(np.nanmax(s) - np.nanmin(s)) < float(_cfg.TAPER_STRETCH_SHORT_VESSEL_MM):
+        # A short vessel (A1, PComm, AChA…) has no taper to fit: its median, as the envelope
+        # method (whose 10 mm end exclusions leave such a vessel nothing to fit).
+        vals = r[valid_mask & finite]
+        out[:] = float(np.median(vals)) if vals.size else np.nan
+        return np.where(valid_mask, np.clip(out, 1e-6, None), np.nan).astype(float)
+    for k in np.unique(stretch):
+        in_k = stretch == k
+        fk = in_k & fit_mask & finite
+        if fk.sum() < 3:
+            continue
+        idx = np.flatnonzero(in_k)
+        if float(s[fk].max() - s[fk].min()) < float(_cfg.TAPER_STRETCH_MIN_LENGTH_MM):
+            # Too little vessel for a taper (a short vessel on its own): the median of its valid
+            # radius, as the envelope method falls back to when nothing is left to fit.
+            vals = r[in_k & valid_mask & finite]
+            out[idx] = float(np.median(vals)) if vals.size else np.nan
+            continue
+        s_k = s[idx]
+        knots = np.arange(s_k[0], s_k[-1] + 0.5, 0.5)
+        env = _local_linear_envelope(s[fk], r[fk], knots, tau)
+        # Only where the radius was fitted, and past the last fitted point of the path's last
+        # stretch (the natural decline into the vessel's end; before a junction the reference is
+        # held). Gaps inside the stretch (siphon, excluded lesions,
+        # junction zones) are bridged linearly from both sides rather than by one side's slope;
+        # upstream of the first fitted point the reference is held, never extrapolated upwards.
+        s_fit = np.sort(s[fk])
+        near = np.abs(s_fit[np.clip(np.searchsorted(s_fit, knots), 0, len(s_fit) - 1)] - knots)
+        near = np.minimum(near, np.abs(s_fit[np.clip(np.searchsorted(s_fit, knots) - 1, 0, len(s_fit) - 1)] - knots))
+        last = k == stretch.max()  # only the vessel's own end declines on; a junction is held
+        covered = (near <= 1.0) | ((knots > s_fit[-1]) & last)
+        env[~covered | (knots < s_fit[0])] = np.nan
+        ok = np.isfinite(env)
+        ref_k = np.interp(s_k, knots[ok], env[ok])  # bridges gaps; holds past the end knots
+        if envelope and _cfg.TAPER_REFERENCE_SMOOTH_MM > 0 and len(idx) >= 3:
+            ds = float(np.nanmedian(np.diff(s_k))) if len(idx) > 1 else 1.0
+            win = max(3, int(round(float(_cfg.TAPER_REFERENCE_SMOOTH_MM) / ds))) if ds > 1e-6 else 3
+            win = min(win | 1, (len(idx) - 1) | 1 if len(idx) > 3 else 3)
+            ref_k = smooth_1d(ref_k, win=win)
+        if _cfg.TAPER_FIT_ENFORCE_NONINCREASING:
+            ref_k = _enforce_nonincreasing_reference(ref_k, np.ones(len(idx), dtype=bool))
+        out[idx] = ref_k
+    return np.where(valid_mask, np.clip(out, 1e-6, None), np.nan).astype(float)
+
+
 def _pava_nondecreasing(y: np.ndarray, w: Optional[np.ndarray] = None) -> np.ndarray:
     """Pool-adjacent-violators fit for a nondecreasing 1D sequence."""
     y = np.asarray(y, dtype=float)
@@ -248,9 +441,14 @@ def _compute_vessel_taper(
     low_outlier_pct: Optional[float] = None,
     high_outlier_pct: Optional[float] = None,
     fit_basis: Optional[np.ndarray] = None,
+    stretch: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """
     Reference radius via an iterative healthy-caliber envelope.
+
+    stretch: per-point junction-to-junction stretch ids (``TAPER_REFERENCE_METHOD = "stretch"``,
+        :func:`path_stretches`): the line pre-fit and the envelope are then computed stretch by
+        stretch (:func:`_stretch_reference`); ``None`` keeps cow_morpho's whole-path envelope.
 
     A stenosis should be judged against the expected healthy caliber, not
     against a regression line pulled downward by the stenosis itself.  The
@@ -287,7 +485,16 @@ def _compute_vessel_taper(
     high_cut = None if high_outlier_pct is None else float(high_outlier_pct) * float(_cfg.TAPER_FIT_OUTLIER_FRACTION)
     min_fit_points = max(3, int(np.ceil(float(_cfg.TAPER_FIT_MIN_HEALTHY_FRACTION) * float(original_fit_mask.sum()))))
 
-    pre_ref = _linear_taper_reference(s, r, valid_mask, fit_mask)
+    if stretch is not None:
+        def _envelope(fm: np.ndarray) -> np.ndarray:
+            return fill_reference_gaps(_stretch_reference(s, r, valid_mask, fm, stretch))
+
+        pre_ref = fill_reference_gaps(_stretch_reference(s, r, valid_mask, fit_mask, stretch, envelope=False))
+    else:
+        def _envelope(fm: np.ndarray) -> np.ndarray:
+            return _healthy_radius_envelope(s, r, valid_mask, fm)
+
+        pre_ref = _linear_taper_reference(s, r, valid_mask, fit_mask)
     pre_deviation_pct = (r / pre_ref - 1.0) * 100.0
     prehealthy = original_fit_mask.copy()
     if low_cut is not None:
@@ -297,14 +504,14 @@ def _compute_vessel_taper(
     if prehealthy.sum() >= min_fit_points:
         fit_mask = prehealthy
 
-    ref = _healthy_radius_envelope(s, r, valid_mask, fit_mask)
+    ref = _envelope(fit_mask)
     for _ in range(max(1, int(_cfg.TAPER_FIT_MAX_ITERATIONS))):
         if fit_mask.sum() < min_fit_points:
             fit_mask = original_fit_mask.copy()
         if fit_mask.sum() < 3:
             return _constant_ref()
 
-        ref = _healthy_radius_envelope(s, r, valid_mask, fit_mask)
+        ref = _envelope(fit_mask)
         deviation_pct = (r / ref - 1.0) * 100.0
         healthy = original_fit_mask.copy()
         if low_cut is not None:
@@ -434,6 +641,12 @@ def detect_stenosis_segments(
     # cannot pull the local percentile envelope down toward the lesion radius.
     fit_excl = float(_cfg.STENOSIS_TAPER_FIT_EXCLUDE_END_MM) if taper_fit_exclude_end_mm is None else float(taper_fit_exclude_end_mm)
     fit_core = stenosis_valid_mask_from_ends(s, fit_excl) if fit_excl > float(exclude_end_mm) else valid_core
+    # TAPER_REFERENCE_METHOD = "stretch": junction-to-junction stretches, junction zones unfitted.
+    stretch, blank = path_stretches(None if pts is None else np.asarray(pts), r)
+    if stretch is not None:
+        # The local-linear envelope sees the whole stretch but its tips and junction zones: it
+        # carries the local decline into the end zones rather than freezing there.
+        fit_core = valid_core & ~blank
 
     r_ref_per_point = _compute_vessel_taper(
         s, r, valid_core,
@@ -441,6 +654,7 @@ def detect_stenosis_segments(
         fit_basis=fit_core,
         low_outlier_pct=threshold_pct,
         high_outlier_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT,
+        stretch=stretch,
     )
     r_ref_per_point = fill_reference_gaps(r_ref_per_point)
 
@@ -472,6 +686,7 @@ def detect_stenosis_segments(
                 fit_basis=fit_core & ~lesion_mask,
                 low_outlier_pct=threshold_pct,
                 high_outlier_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT,
+                stretch=stretch,
             )
             r_ref_per_point = fill_reference_gaps(r_ref_per_point)
 
@@ -578,6 +793,12 @@ def detect_enlargement_segments(
     # cannot pull the local percentile envelope up toward the lesion radius.
     fit_excl = float(_cfg.ENLARGEMENT_TAPER_FIT_EXCLUDE_END_MM) if taper_fit_exclude_end_mm is None else float(taper_fit_exclude_end_mm)
     fit_core = stenosis_valid_mask_from_ends(s, fit_excl) if fit_excl > float(exclude_end_mm) else valid_core
+    # TAPER_REFERENCE_METHOD = "stretch": junction-to-junction stretches, junction zones unfitted.
+    stretch, blank = path_stretches(None if pts is None else np.asarray(pts), r)
+    if stretch is not None:
+        # The local-linear envelope sees the whole stretch but its tips and junction zones: it
+        # carries the local decline into the end zones rather than freezing there.
+        fit_core = valid_core & ~blank
 
     r_ref_per_point = _compute_vessel_taper(
         s, r, valid_core,
@@ -585,6 +806,7 @@ def detect_enlargement_segments(
         fit_basis=fit_core,
         low_outlier_pct=_cfg.STENOSIS_THRESHOLD_PCT,
         high_outlier_pct=threshold_pct,
+        stretch=stretch,
     )
     r_ref_per_point = fill_reference_gaps(r_ref_per_point)
     detect_core = (
@@ -625,6 +847,7 @@ def detect_enlargement_segments(
                 fit_basis=fit_core & ~lesion_mask,
                 low_outlier_pct=_cfg.STENOSIS_THRESHOLD_PCT,
                 high_outlier_pct=threshold_pct,
+                stretch=stretch,
             )
             r_ref_per_point = fill_reference_gaps(r_ref_per_point)
 

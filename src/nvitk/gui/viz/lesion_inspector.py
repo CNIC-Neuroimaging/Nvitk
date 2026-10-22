@@ -294,6 +294,11 @@ def draw_profile(ax: Any, run: LesionRun, i: int) -> str:
         if np.isfinite(ref_r):
             ax.hlines(ref_r, w0, w1, colors=COLOR_OK, lw=1.4)
     ax.axvspan(s[a], s[b], color=colour, alpha=0.30, lw=0, label="this lesion")
+    if "taper_stretch" in pts.columns:  # TAPER_REFERENCE_METHOD = "stretch": where it may step
+        cuts = np.flatnonzero(np.diff(pts["taper_stretch"].to_numpy(dtype=float)) != 0)
+        for k, c in enumerate(cuts):
+            ax.axvline(s[c + 1], color=COLOR_MUTED, lw=1.0, ls=(0, (4, 3)),
+                       label="junction (taper reference may step)" if k == 0 else None)
 
     ax.plot(s, alt_r, color=COLOR_MUTED, lw=0.8, label=alt_name)
     ax.plot(s, tested, color=COLOR_TEXT, lw=1.3, label=tested_name)

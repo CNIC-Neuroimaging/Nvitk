@@ -71,6 +71,10 @@ CENTERLINE_BACKENDS: tuple[str, ...] = ("vmtk", "native", "raycast")
 #: re-measured after trunk pruning and on donut arms. ``cross_section`` and ``detection`` use that
 #: one radius on every path (``detection`` = the stenosis radius, RADIUS_SOURCE_FOR_CALIBER_DETECTION).
 ENLARGEMENT_RADIUS_SOURCES: tuple[str, ...] = ("cow", "cross_section", "detection")
+#: Detection's healthy-calibre (taper) reference (``TAPER_REFERENCE_METHOD``): ``stretch`` — per
+#: junction-to-junction stretch, a capped natural decline plus the local envelope, stepping at
+#: junctions; ``envelope`` — cow_morpho's one envelope along the whole path.
+TAPER_REFERENCE_METHODS: tuple[str, ...] = ("stretch", "envelope")
 #: Cross-section radius estimators (``CROSS_SECTION_RADIUS_METHOD``): ``ray_median`` — the median
 #: in-plane distance from the centerline point to the wall over ``CROSS_SECTION_RAYS`` rays;
 #: ``largest_loop`` — cow_morpho's equivalent-circle radius of the largest loop of the cut.
@@ -236,6 +240,24 @@ _EICAB_CW: dict[str, Any] = {
     # Iterative taper reference: refit without the detected lesions until stable.
     "TAPER_TWO_PASS": True,
     "TAPER_TWO_PASS_MAX_ITERATIONS": 5,
+    # How the healthy-calibre (taper) reference is built (TAPER_REFERENCE_METHODS).
+    # "stretch": the path is cut at the junctions it passes through (the component's skeleton branch
+    # points; stretches shorter than TAPER_STRETCH_MIN_LENGTH_MM join a neighbour), and each stretch
+    # gets its own reference: the envelope below made local-linear — at each place the
+    # TAPER_REFERENCE_PERCENTILE line of the stretch's radius within TAPER_REFERENCE_WINDOW_MM, its
+    # decline capped at TAPER_STRETCH_MAX_DECLINE_PCT_PER_MM % of the local calibre per mm — so it
+    # follows the natural taper without lagging. The bifurcation blanking zones (BLANKING_MM) stay
+    # out of the fit and the reference may step at a junction; the distal end continues the local
+    # decline instead of freezing, interior gaps (siphon, lesions) are bridged, and the proximal
+    # end is held (never extrapolated upwards). A vessel shorter than the minimum gets its median.
+    # "envelope" (cow_morpho): one envelope along the whole path, blind to junctions; it smears a
+    # calibre step at a bifurcation over ±10 mm and stays flat over the last 10 mm.
+    "TAPER_REFERENCE_METHOD": "stretch",
+    "TAPER_STRETCH_MAX_DECLINE_PCT_PER_MM": 2.0,
+    "TAPER_STRETCH_MIN_LENGTH_MM": 10.0,
+    # A vessel shorter than this gets its median as the reference, as with "envelope" (whose 10 mm
+    # end exclusions leave it nothing to fit): A1s, PComms and AChAs ramp near their origin.
+    "TAPER_STRETCH_SHORT_VESSEL_MM": 20.0,
     # Healthy-calibre envelope (local high-percentile radius, smoothed, non-increasing).
     "TAPER_FIT_OUTLIER_FRACTION": 0.60,
     "TAPER_FIT_MAX_ITERATIONS": 3,
@@ -364,6 +386,11 @@ class MorphometricsConfig:
             raise ValueError(
                 "CROSS_SECTION_TANGENT_HALF_WINDOW_MM must be ≥ 0 mm, "
                 f"got {self.params['CROSS_SECTION_TANGENT_HALF_WINDOW_MM']!r}."
+            )
+        if str(self.params["TAPER_REFERENCE_METHOD"]).lower() not in TAPER_REFERENCE_METHODS:
+            raise ValueError(
+                f"TAPER_REFERENCE_METHOD must be one of {TAPER_REFERENCE_METHODS}, "
+                f"got {self.params['TAPER_REFERENCE_METHOD']!r}."
             )
         if str(self.params["CROSS_SECTION_RADIUS_METHOD"]).lower() not in CROSS_SECTION_RADIUS_METHODS:
             raise ValueError(

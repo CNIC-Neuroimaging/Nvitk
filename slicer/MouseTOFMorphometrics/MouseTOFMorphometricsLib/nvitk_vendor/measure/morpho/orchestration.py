@@ -16,6 +16,7 @@ import pandas as pd
 
 from nvitk_vendor.measure.morpho.anatomy import choose_root_endpoint, make_path_id
 from nvitk_vendor.measure.morpho.anatomy_axes import MorphoContext, default_morpho_context
+from nvitk_vendor.measure.morpho.caliber import set_detection_junctions
 from nvitk_vendor.measure.morpho.centerlines import (
     analyze_centerline_poly,
     centerline_poly_length_mm,
@@ -67,7 +68,17 @@ from nvitk_vendor.measure.morpho.tree_segments import (
     save_recursive_labeled_tree_path_centerlines,
 )
 
-def process_component_tree_vmtk(
+def process_component_tree_vmtk(*args, **kwargs):
+    """Full per-component morphometrics pipeline — see :func:`_process_component_tree_vmtk`. The
+    component's junctions are installed for detection (stretch-wise taper reference) only for the
+    duration of the call."""
+    try:
+        return _process_component_tree_vmtk(*args, **kwargs)
+    finally:
+        set_detection_junctions(None)
+
+
+def _process_component_tree_vmtk(
     label: int,
     component_id: int,
     mask_cc: np.ndarray,
@@ -117,6 +128,11 @@ def process_component_tree_vmtk(
         raise RuntimeError("Skeleton too short.")
 
     print(f"    Skeleton: {len(tree.pts_vox)} voxels, {len(tree.endpoints)} endpoints, {len(tree.branchpoints)} branchpoints")
+    # Junctions of this component (as 02_Branchpoints): where the stretch-wise taper reference
+    # lets the healthy calibre step down.
+    set_detection_junctions(
+        np.asarray([tree.pts_vox[bp] for bp in tree.branchpoints], dtype=float).reshape(-1, 3) * spacing
+    )
 
     base_tree_name = safe_filename(f"{label}_{vessel_info.name}_comp{component_id:02d}")
     pre_refined_surface_path = (

@@ -357,6 +357,8 @@ def build_vessel_points_dataframe(case_id: str, label: int, vessel_info: VesselI
         ),
         # The radius the enlargement test was run on (cross-section or detection radius).
         "enlargement_radius_mm": np.asarray(res.get("enlargement_radius_mm", res["radius_mm"]), dtype=float),
+        # Junction-to-junction stretch of the taper reference (TAPER_REFERENCE_METHOD = "stretch").
+        "taper_stretch": np.asarray(res.get("taper_stretch_point", np.zeros(len(res["s_mm"]))), dtype=float).astype(int),
     })
     # Scanner RAS (the frame of the written VTPs) next to the computation frame (x/y/z_mm).
     from nvitk.measure.morpho.surface import to_world

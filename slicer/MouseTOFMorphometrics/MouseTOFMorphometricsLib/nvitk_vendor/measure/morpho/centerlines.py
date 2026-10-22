@@ -33,6 +33,7 @@ from .caliber import (
     stenosis_raw_percent,
     stenosis_total_length,
     stenosis_valid_mask_from_ends,
+    taper_stretch_ids,
 )
 from nvitk_vendor.measure import morphometrics_config as _cfg
 from .geometry import (
@@ -338,6 +339,7 @@ def refresh_centerline_result_metrics(res: dict) -> None:
         is_enlarged_mis = _enlargement_flags_on(s, radius, pts, is_stenotic)
     siphon_mask = compute_siphon_mask(pts, s)
     res["siphon_mask_point"] = siphon_mask.astype(float)
+    res["taper_stretch_point"] = taper_stretch_ids(pts, radius)
     res["stenosis_percent_point"] = sten_pct_point
     res["stenosis_raw_percent_point"] = sten_raw_pct_point
     res["stenosis_core_candidate_point"] = (
@@ -506,7 +508,7 @@ def slice_centerline_result(res: dict, start_idx: int, *, redetect: bool = True)
         "enlargement_support_candidate_point", "enlargement_percent_point",
         "is_enlarged", "is_enlarged_cs", "is_enlarged_mis",
         "enlargement_reference_radius_point", "enlargement_threshold_radius_point",
-        "siphon_mask_point",
+        "siphon_mask_point", "taper_stretch_point",
         "donut_loop_indices", "donut_arm_indices", "donut_arm_labels",
         "tree_point_labels", "tree_point_paths", "tree_point_depths",
     ]
@@ -1155,6 +1157,8 @@ def analyze_centerline_poly(
         "enlargement_percent_point": enlargement_pct_point, "is_enlarged": is_enlarged,
         "is_enlarged_cs": is_enlarged_cs, "is_enlarged_mis": is_enlarged_mis,
         "siphon_mask_point": siphon_mask.astype(float),
+        # Where the stretch-wise taper reference may step (junction-to-junction stretch ids).
+        "taper_stretch_point": taper_stretch_ids(pts, detection_radius),
         "enlargement_reference_radius_point": enlarg.r_ref_per_point,
         "enlargement_threshold_radius_point": (1.0 + _cfg.ENLARGEMENT_THRESHOLD_PCT / 100.0) * enlarg.r_ref_per_point,
         # The radius the enlargement test used (cow: cross-section here, the detection radius when

@@ -27,7 +27,7 @@ import numpy as np
 
 from nvitk_vendor.measure import morphometrics_config as _cfg
 
-from .caliber import enlargement_min_length_mm
+from .caliber import blanking_mask, enlargement_min_length_mm, junction_crossings
 from .metrics import discrete_torsion, smooth_polyline, smoothed_curvature
 
 
@@ -76,20 +76,6 @@ def bending_length(points: np.ndarray) -> float:
     proj = (rel @ ab) / n
     perp = np.sqrt(np.maximum((rel ** 2).sum(axis=1) - proj ** 2, 0.0))
     return float(perp.max())
-
-
-def blanking_mask(points: np.ndarray, radius: np.ndarray, junctions: np.ndarray | None) -> np.ndarray:
-    """True where a point lies within the bifurcation blanking zone of any junction:
-    ``max(BLANKING_MM, BLANKING_RADIUS_FACTOR × local radius)``."""
-    n = len(points)
-    if junctions is None or len(junctions) == 0 or n == 0:
-        return np.zeros(n, dtype=bool)
-    from scipy.spatial import cKDTree
-
-    d, _ = cKDTree(np.asarray(junctions, dtype=float)).query(points)
-    r = np.where(np.isfinite(radius), radius, 0.0)
-    zone = np.maximum(float(_cfg.BLANKING_MM), float(_cfg.BLANKING_RADIUS_FACTOR) * r)
-    return d <= zone
 
 
 def _direction_angles(vec: np.ndarray, axes: Any | None) -> tuple[float, float]:
@@ -259,18 +245,6 @@ def _window_span(mask: np.ndarray) -> tuple[float, float]:
     return (float(idx[0]), float(idx[-1])) if idx.size else (np.nan, np.nan)
 
 
-def _junction_positions(pts: np.ndarray, radius: np.ndarray, junctions: np.ndarray | None) -> np.ndarray:
-    """Arc-length index of every junction the path passes through (within its blanking zone)."""
-    if junctions is None or len(junctions) == 0 or len(pts) == 0:
-        return np.empty(0, dtype=int)
-    from scipy.spatial import cKDTree
-
-    d, idx = cKDTree(pts).query(np.asarray(junctions, dtype=float))
-    r = np.where(np.isfinite(radius), radius, 0.0)
-    zone = np.maximum(float(_cfg.BLANKING_MM), float(_cfg.BLANKING_RADIUS_FACTOR) * r[idx])
-    return np.unique(idx[d <= zone])
-
-
 def _lesion_reference(
     s: np.ndarray,
     kind_r: np.ndarray,
@@ -436,7 +410,7 @@ def lesion_rows(
             for p, q in _parse_runs(path.get(key)):
                 lesioned[max(0, min(p, q)):min(n, max(p, q) + 1)] = True
         healthy = ~lesioned & ~blanking_mask(pts, det_r, junctions)
-        junction_idx = _junction_positions(pts, det_r, junctions)
+        junction_idx = junction_crossings(pts, det_r, junctions)
         for kind, runs_key, pct_key, min_len, kind_r in (
             ("stenosis", "stenosis_segments_point_idx", "stenosis_percent_point", float(_cfg.STENOSIS_MIN_LEN_MM),
              det_r),
