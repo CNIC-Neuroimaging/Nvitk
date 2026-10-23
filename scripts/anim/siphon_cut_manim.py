@@ -9,10 +9,11 @@ Every state comes from ``siphon_cut_stages.npz``, which ``siphon_cut_precompute.
 running the library and recording what it hands its own helpers. This file only draws; it needs
 numpy and manim, not nvitk.
 
-Render::
+Render (manim environment; ``--no-text`` drops every caption, title, legend and badge)::
 
-    SC_FAST=1 manim -ql --fps 15 scripts/anim/siphon_cut_manim.py SiphonMinCut
-    manim -qh --fps 30 scripts/anim/siphon_cut_manim.py SiphonMinCut
+    SC_FAST=1 python scripts/anim/siphon_cut_manim.py -ql --fps 15
+    python scripts/anim/siphon_cut_manim.py -qh --fps 30              # → siphon_mincut.mp4
+    python scripts/anim/siphon_cut_manim.py -qh --fps 30 --no-text    # → siphon_mincut_notext.mp4
 """
 
 from __future__ import annotations
@@ -46,7 +47,7 @@ from manim import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from anim_voxels import FONT, INK, INK_FAINT, INK_SOFT, CaptionScene, VoxelField, ramp3, rgb  # noqa: E402
+from anim_voxels import FONT, INK, INK_FAINT, INK_SOFT, CaptionScene, VoxelField, ramp3, rgb, run_scene  # noqa: E402
 
 DATA_PATH = Path(os.environ.get("SC_STAGES", str(Path(__file__).with_name("siphon_cut_stages.npz"))))
 FAST = os.environ.get("SC_FAST", "0") == "1"
@@ -168,7 +169,7 @@ class SiphonMinCut(CaptionScene):
 
         def set_beta(value: int, color: str) -> None:
             new = Text(str(value), font=FONT, weight=BOLD, color=color, font_size=34).move_to(beta[1])
-            self.add_fixed_in_frame_mobjects(new)
+            self.fixed(new)
             self.play(FadeOut(beta[1]), FadeIn(new), run_time=T(0.6))
             beta.remove(beta[1])
             beta.add(new)
@@ -338,3 +339,7 @@ class SiphonMinCut(CaptionScene):
         self.stop_ambient_camera_rotation()
         self.play(FadeOut(end), FadeOut(beta), FadeOut(before2), FadeOut(after), run_time=T(1.0))
         self.wait(T(0.5))
+
+
+if __name__ == "__main__":
+    run_scene(__file__, "SiphonMinCut", "siphon_mincut")

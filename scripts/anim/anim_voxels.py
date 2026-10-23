@@ -9,9 +9,19 @@ caption per step.
 
 Scenes import this module from their own folder (``sys.path`` is set by the scene file), so it
 needs nothing but numpy and manim.
+
+Text-free renders
+-----------------
+:func:`no_text` (``--no-text`` on a scene script, see :func:`run_scene`, or ``ANIM_NO_TEXT=1`` with
+the plain ``manim`` command) keeps every on-screen text element — captions, title cards, legends,
+badges, insets — but fully transparent. The timing does not change, so the commented and the
+text-free versions stay frame for frame in step.
 """
 
 from __future__ import annotations
+
+import os
+import sys
 
 import numpy as np
 from manim import (
@@ -33,6 +43,16 @@ from manim import (
 )
 
 FONT = "DejaVu Sans"
+
+
+
+def no_text() -> bool:
+    """Whether to render without any text (captions, titles, legends, badges, insets).
+
+    Read at call time, not import time: a scene script imports this module before
+    :func:`run_scene` has seen ``--no-text``.
+    """
+    return os.environ.get("ANIM_NO_TEXT", "0") == "1"
 
 INK = "#1B1D23"
 INK_SOFT = "#8B9199"
@@ -190,9 +210,14 @@ class CaptionScene(ThreeDScene):
     """ThreeDScene with the shared caption helpers."""
 
     def fixed(self, *mobs: Mobject) -> None:
-        """Pin mobjects to the camera frame without showing them yet."""
+        """Pin on-screen (text) mobjects to the camera frame without showing them yet; with
+        :func:`no_text` they are made fully transparent, so fading them in shows nothing and the
+        timing stays the same."""
         self.add_fixed_in_frame_mobjects(*mobs)
         self.remove(*mobs)
+        if no_text():
+            for m in mobs:
+                m.set_opacity(0.0)
 
     def swap(self, old: Mobject | None, new: Mobject | None, run_time: float = 0.85) -> None:
         """Fade *old* out (down) and *new* in (up)."""
@@ -215,8 +240,30 @@ class CaptionScene(ThreeDScene):
         return block
 
 
+def run_scene(script: str, scene: str, output: str) -> None:
+    """Command line of a scene script: manim's own render options plus ``--no-text``.
+
+    ``python <scene>_manim.py [--no-text] [manim options]`` renders *scene* to *output* (with a
+    ``_notext`` suffix for the text-free version) unless ``-o`` is given. Run it with the manim
+    environment's Python.
+    """
+    args = sys.argv[1:]
+    no_text = "--no-text" in args
+    args = [a for a in args if a != "--no-text"]
+    if no_text:
+        os.environ["ANIM_NO_TEXT"] = "1"  # read by no_text() while the scene builds
+        output += "_notext"
+    if "-o" not in args and "--output_file" not in args:
+        args += ["-o", output]
+    from manim.__main__ import main
+
+    sys.argv = ["manim", "render", *args, str(script), scene]
+    main()
+
+
 __all__ = [
     "CUBE_FILL_RATIO",
+    "no_text",
     "CaptionScene",
     "FONT",
     "INK",
@@ -224,6 +271,7 @@ __all__ = [
     "INK_SOFT",
     "VoxelField",
     "hex_of",
+    "run_scene",
     "ramp",
     "ramp3",
     "rgb",

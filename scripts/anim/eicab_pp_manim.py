@@ -10,10 +10,11 @@ Every state comes from ``eicab_pp_stages.npz``, which ``eicab_pp_precompute.py``
 running the post-process and recording each step's output. This file only draws; it needs numpy
 and manim, not nvitk.
 
-Render::
+Render (manim environment; ``--no-text`` drops every caption, title, legend and inset)::
 
-    EP_FAST=1 manim -ql --fps 15 scripts/anim/eicab_pp_manim.py EicabPostProcess
-    manim -qh --fps 30 scripts/anim/eicab_pp_manim.py EicabPostProcess
+    EP_FAST=1 python scripts/anim/eicab_pp_manim.py -ql --fps 15
+    python scripts/anim/eicab_pp_manim.py -qh --fps 30              # → eicab_postprocess.mp4
+    python scripts/anim/eicab_pp_manim.py -qh --fps 30 --no-text    # → eicab_postprocess_notext.mp4
 """
 
 from __future__ import annotations
@@ -48,7 +49,7 @@ from manim import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from anim_voxels import FONT, INK, INK_FAINT, INK_SOFT, CaptionScene, VoxelField, rgb  # noqa: E402
+from anim_voxels import FONT, INK, INK_FAINT, INK_SOFT, CaptionScene, VoxelField, no_text, rgb, run_scene  # noqa: E402
 
 DATA_PATH = Path(os.environ.get("EP_STAGES", str(Path(__file__).with_name("eicab_pp_stages.npz"))))
 FAST = os.environ.get("EP_FAST", "0") == "1"
@@ -158,7 +159,11 @@ class EicabPostProcess(CaptionScene):
             self.fixed(g)
             return g
 
-        def inset(key: str, width: float = 6.0) -> ImageMobject:
+        def inset(key: str, width: float = 6.0):
+            if no_text():  # the insets are annotated plots: an invisible stand-in keeps the timing
+                img = Rectangle(width=width, height=1.0, stroke_width=0, fill_opacity=0).to_corner(UR, buff=0.35)
+                self.fixed(img)
+                return img
             img = ImageMobject(np.asarray(data[key], np.uint8))
             img.width = width
             img.to_corner(UR, buff=0.35)
@@ -370,3 +375,7 @@ class EicabPostProcess(CaptionScene):
         self.stop_ambient_camera_rotation()
         self.play(FadeOut(end), FadeOut(legend), run_time=T(1.0))
         self.wait(T(0.5))
+
+
+if __name__ == "__main__":
+    run_scene(__file__, "EicabPostProcess", "eicab_postprocess")

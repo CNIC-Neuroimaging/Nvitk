@@ -32,6 +32,23 @@ mamba create -y -n manim -c conda-forge python=3.12 manim numpy scipy
 
 Manim writes into `./media` unless given `--media_dir`.
 
+## Commented and text-free versions
+
+The two newer scenes render either way: with every step commented (captions, title card,
+legends, the β₁ badge, the 2D insets), or as the bare animation with `--no-text`. In the text-free
+version those elements are still there but fully transparent, so both versions have the same
+length and stay frame for frame in step (one can be cut against the other, or voiced over).
+
+Run the scene script itself with the manim environment's Python: it takes manim's own options
+plus `--no-text`, and names the output `<name>.mp4` / `<name>_notext.mp4`:
+
+```bash
+mamba run -n manim python scripts/anim/siphon_cut_manim.py -qh --fps 30             # siphon_mincut.mp4
+mamba run -n manim python scripts/anim/siphon_cut_manim.py -qh --fps 30 --no-text   # siphon_mincut_notext.mp4
+```
+
+With the plain `manim` command (which rejects unknown options), set `ANIM_NO_TEXT=1` instead.
+
 ## ICA siphon correction — `siphon_cut_*.py`
 
 Steps shown, all from one `repair_loops` run on PESA13727025's right ICA (β₁ = 1):
@@ -54,8 +71,8 @@ fills); the cut and the pretess voxels at 0.5 mm.
 
 ```bash
 python scripts/anim/siphon_cut_precompute.py -o scripts/anim/siphon_cut_stages.npz   # nvitk env
-SC_FAST=1 mamba run -n manim manim -ql --fps 15 scripts/anim/siphon_cut_manim.py SiphonMinCut     # ~5 min
-mamba run -n manim manim -qh --fps 30 -o siphon_mincut scripts/anim/siphon_cut_manim.py SiphonMinCut
+SC_FAST=1 mamba run -n manim python scripts/anim/siphon_cut_manim.py -ql --fps 15    # preview, ~5 min
+mamba run -n manim python scripts/anim/siphon_cut_manim.py -qh --fps 30 [--no-text]
 ```
 
 `--eicab-dir` / `--label` pick another subject or ICA; `SC_STAGES` overrides the input arrays.
@@ -82,8 +99,8 @@ frequent label of each block, size by occupancy), about 1,600 cubes.
 
 ```bash
 python scripts/anim/eicab_pp_precompute.py -o scripts/anim/eicab_pp_stages.npz   # nvitk env
-EP_FAST=1 mamba run -n manim manim -ql --fps 15 scripts/anim/eicab_pp_manim.py EicabPostProcess   # ~5 min
-mamba run -n manim manim -qh --fps 30 -o eicab_postprocess scripts/anim/eicab_pp_manim.py EicabPostProcess
+EP_FAST=1 mamba run -n manim python scripts/anim/eicab_pp_manim.py -ql --fps 15    # preview, ~5 min
+mamba run -n manim python scripts/anim/eicab_pp_manim.py -qh --fps 30 [--no-text]
 ```
 
 `--eicab-dir` / `--block` pick another subject or block size; `EP_STAGES` overrides the input
