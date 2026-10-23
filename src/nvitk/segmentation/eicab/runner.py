@@ -494,7 +494,7 @@ def run_eicab(
     whole-brain (WB) flood fill, so no ``*_eICAB_WB`` mask.
 
     *vasculature_host_path* should be the **host** directory bind-mounted to
-    ``/programs/Neuro/vasculature2`` (see ``run_eicab_inference.sh``). When
+    ``/programs/Neuro/vasculature2``. When
     omitted and the path does not exist, the vasculature bind is skipped (only
     sensible for debugging).
     """

@@ -2,8 +2,8 @@
 
 4D-flow MRI hemodynamics and TOF morphometrics — a from-scratch Python port of the
 measurement concepts in the original MATLAB [QVTplus](https://github.com/ABI-Animus-Laboratory)
-tool (format-compatible LOC output, not a wrapper around it: `nvitk.pipes.qvtpy` has no code
-dependency on the vendored `qvtplus/` MATLAB tree).
+tool (format-compatible LOC output, not a wrapper around it: `nvitk.pipes.qvtpy` needs no
+MATLAB).
 
 ```{code-block} bash
 nvitk-qvtpy --subject-dir /data/subj01 --stages stage0_c,stage1,stage2,stage3,stage4,stage5,stage6 \
@@ -138,7 +138,7 @@ defaults live in `.nvitk/sge.json` under `pipelines.qvtpy` / `pipelines.qvtpy_pa
 |---|---|
 | **FSL FLIRT** | Yes — stage 2's registration is a direct `nipype` FSL FLIRT call. Needs FSL on `PATH`, see {doc}`../installation`. |
 | **FreeSurfer / Desikan atlas** | No — despite being a general nvitk prerequisite (used elsewhere for ASL/T1/brain-parcellation work, see {doc}`../stats-gui/index`), QVTPy itself has no FreeSurfer dependency. |
-| **SPM12 / MATLAB QVTplus** | No code dependency — the vendored `src/nvitk/pipes/qvtplus/` tree is the original MATLAB reference implementation kept for provenance; `nvitk.pipes.qvtpy` reimplements the measurement concepts in Python independently. |
+| **SPM12 / MATLAB QVTplus** | No — `nvitk.pipes.qvtpy` reimplements the measurement concepts in Python independently. |
 
 ## Related commands
 

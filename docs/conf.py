@@ -107,7 +107,6 @@ autoapi_options = [
 autoapi_ignore = [
     "*/values.py",       # empty (0-byte) placeholder file
     "*__pycache__*",
-    "*/pipes/qvtplus/*",  # vendored third-party MATLAB reference implementation
     # Numeric-prefixed one-off validation scripts and a Singularity sitecustomize hook —
     # not part of the documented public API, and their names (leading digits) don't nest
     # cleanly into the package toctree anyway.

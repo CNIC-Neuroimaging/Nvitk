@@ -208,8 +208,8 @@ def main(
         if not vas_host.is_dir():
             raise click.ClickException(
                 f"Vasculature tools directory not found or not a directory: {vas_host}. "
-                "eICAB requires this tree on PATH inside the container (see legacy "
-                "run_eicab_inference.sh). Pass --vasculature-dir or set "
+                "eICAB requires this tree on PATH inside the container. "
+                "Pass --vasculature-dir or set "
                 "pipelines.eicab.default_vasculature_host_dir in .nvitk/sge.json."
             )
         tmp = Path(tmp_dir) if tmp_dir is not None else cfg.DEFAULT_TMP_DIR

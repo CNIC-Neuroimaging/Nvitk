@@ -85,12 +85,7 @@ confirm they're on `PATH`/the relevant env var. nvitk's CLIs will notify for any
 |---|---|---|---|
 | **FSL** | 6.0.7.19 | `nvitk-flirt`, registration CLIs, `QVTPy` pipeline | [fsl.fmrib.ox.ac.uk/fsldownloads](https://fsl.fmrib.ox.ac.uk/fsldownloads/) — official `fslinstaller.py`; non-commercial license required |
 | **FreeSurfer** | 7.x | Desikan atlas lookups (`$FREESURFER_HOME`) | [surfer.nmr.mgh.harvard.edu](https://surfer.nmr.mgh.harvard.edu/fswiki/DownloadAndInstall) — free registration required |
-| **SPM12** | r7771 | QVT+ pipeline, via MATLAB Runtime | [fil.ion.ucl.ac.uk/spm/software/spm12](https://www.fil.ion.ucl.ac.uk/spm/software/spm12/) |
-<!-- | **MATLAB Runtime** | R2023a | QVT+ pipeline | [mathworks.com/products/compiler/matlab-runtime](https://www.mathworks.com/products/compiler/matlab-runtime.html) — MathWorks EULA |
-| **MATLAB (full)** | R2025b (`matlabengine==25.2.2`, `pip install "nvitk[matlab]"`) | Python↔MATLAB engine bridge | requires a full MATLAB R2025b install; MathWorks EULA | -->
- 
-<!-- > The MATLAB Runtime (R2023a) and full MATLAB (R2025b) entries are two separate
-> requirements for two separate purposes, not a typo. -->
+<!-- | **MATLAB (full)** | R2025b (`matlabengine==25.2.2`, `pip install "nvitk[matlab]"`) | Python↔MATLAB engine bridge | requires a full MATLAB R2025b install; MathWorks EULA | -->
  
 ---
 

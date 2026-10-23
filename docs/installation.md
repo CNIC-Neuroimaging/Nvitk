@@ -288,7 +288,6 @@ needed-but-missing external tool is required for the operation you're running.
 |---|---|---|---|
 | **FSL** (full suite) | 6.0.7.x | anything beyond nvitk's FSL core (FEAT GUI, FSLeyes …) | [fsl.fmrib.ox.ac.uk/fsldownloads](https://fsl.fmrib.ox.ac.uk/fsldownloads/) — official `fslinstaller.py`; non-commercial license required. `nvitk-fsl install` covers the tools nvitk wraps. |
 | **FreeSurfer** | 7.4.1 | FastSurfer surfaces / longitudinal, Desikan atlas lookups (`$FREESURFER_HOME`) | `nvitk-fastsurfer install-freesurfer`, or [surfer.nmr.mgh.harvard.edu](https://surfer.nmr.mgh.harvard.edu/fswiki/DownloadAndInstall) — free registration (license file) required |
-| **SPM12** | r7771 | The QVT+ MATLAB reference pipeline | [fil.ion.ucl.ac.uk/spm/software/spm12](https://www.fil.ion.ucl.ac.uk/spm/software/spm12/) |
 
 ```{seealso}
 The full CLI catalog is in {doc}`api/cli-catalog`, and every command's `--help` output is
