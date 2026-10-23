@@ -1,9 +1,13 @@
 """TOF morphometrics results in the measurement results window.
 
 A morphometrics run (the GUI *Morphometrics* tool, or a stage-7 folder loaded for viewing) is
-shown as four results, like every other measurement:
+shown as five results, like every other measurement:
 
 ``Morphometrics — vessels``
+    one row per vessel with the stage-7 report's columns (``morphometrics_report.csv``): the
+    selected features and the high-confidence lesion flags, the same table the pipeline writes and
+    the database imports. Built from the run's tables when the file is missing (older runs).
+``Morphometrics — all vessel measures``
     one row per vessel: every column of ``vessel_summary.csv`` (calibre, end-window diameters,
     bifurcation blanking, tortuosity of the first / last N mm, curvature integrals, direction
     angles, branching, lesion counts and the worst lesion's severity / confidence…), then the
@@ -11,8 +15,8 @@ shown as four results, like every other measurement:
     ``00_Path_Summary`` aggregated per vessel, the label volumetry and the literature tortuosity
     workbook. A name that already means something else in ``vessel_summary.csv`` gets the suffix
     ``_legacy`` (``tortuosity_dm_legacy`` is cow's length-weighted mean over segments; the
-    unsuffixed one is the main path's). The rows are label rows: *Colour labels by* colours the
-    measured labels **and** the vessel surfaces by any column.
+    unsuffixed one is the main path's). Both vessel tables are label rows: *Colour labels by*
+    colours the measured labels **and** the vessel surfaces by any column.
 ``Morphometrics — lesions``
     one row per stenosis / enlargement: location, length, severity (taper %, diameter and area %
     against the proximal reference) and confidence with its flags. Clicking a row shows that
@@ -35,133 +39,28 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
+# The per-vessel merge is shared with the pipeline's report (Qt-free); re-exported here.
+from nvitk.measure.morpho.export_utils.report import (  # noqa: F401
+    LEGACY_PATH_COLUMNS,
+    REPORT_CSV,
+    TORTUOSITY_COLUMNS,
+    VOLUMETRY_COLUMNS,
+    _read_csv,
+    morphometrics_report,
+    vessel_table,
+)
+
 #: Columns that name a row rather than measure it.
 _IDENTITY = ("case_id", "label", "vessel_name", "full_name", "component_id", "side", "pair", "territory")
 
-#: cow_morpho path metrics (``00_Path_Summary``), aggregated per vessel by
-#: :func:`nvitk.gui.viz.morpho_viz._aggregate_summary_by_vessel`.
-LEGACY_PATH_COLUMNS: tuple[str, ...] = (
-    "length_mm", "n_paths",
-    "radius_mean_mm", "radius_std_mm", "radius_cv", "radius_p05_mm", "radius_p50_mm", "radius_p95_mm",
-    "radius_min_stenotic_mm", "taper_slope_mm_per_mm", "tortuosity_dm",
-    "curvature_mean_1_per_mm", "curvature_median_1_per_mm", "curvature_p95_1_per_mm", "curvature_max_1_per_mm",
-    "stenosis_percent_max", "degree_of_stenosis_pct", "stenosis_length_total_mm", "stenosis_segments_n",
-    "radius_max_enlarged_mm", "enlargement_percent_max", "enlargement_length_total_mm", "enlargement_segments_n",
-)
-#: Label volumetry (``volumetry.csv`` / ``06_Volumetry``).
-VOLUMETRY_COLUMNS: tuple[str, ...] = (
-    "n_voxels", "volume_mm3", "volume_ul", "mesh_volume_mm3", "surface_area_mm2", "skeleton_length_mm",
-    "equivalent_radius_mm", "input_volume_mm3", "measured_volume_fraction",
-)
-#: Same quantity under the same name in ``vessel_summary.csv``: kept once.
-_SAME_MEANING = frozenset({"volume_mm3", "surface_area_mm2", "mesh_volume_mm3"})
-#: Literature tortuosity (``centerlines/tortuosity_metrics.csv``) → how it is combined per vessel.
-TORTUOSITY_COLUMNS: dict[str, str] = {
-    "tortuosity_index": "weighted", "inflection_count_metric": "weighted",
-    "sum_of_angles_metric_deg_per_mm": "weighted", "total_curvature_deg_per_mm": "weighted",
-    "bend_count": "sum", "bend_angle_sum_deg": "sum", "bending_length_mm": "max",
-}
-
 VESSELS_TITLE = "Morphometrics — vessels"
+#: Every per-vessel measure (the vessels table shows the report's columns only).
+VESSELS_ALL_TITLE = "Morphometrics — all vessel measures"
 LESIONS_TITLE = "Morphometrics — lesions"
 SEGMENTS_TITLE = "Morphometrics — segments"
 SUBJECT_TITLE = "Morphometrics — subject"
 #: Field of the surface layer that holds the colouring by a measurement.
 SURFACE_VALUE_FIELD = "measurement (by label)"
-
-
-def _read_csv(path: Path) -> pd.DataFrame:
-    try:
-        return pd.read_csv(path) if path.is_file() else pd.DataFrame()
-    except Exception:  # noqa: BLE001 — an unreadable table is an absent one
-        return pd.DataFrame()
-
-
-def _volumetry(stage7_dir: Path) -> pd.DataFrame:
-    vol = _read_csv(stage7_dir / "volumetry.csv")
-    if vol.empty:
-        try:
-            vol = pd.read_excel(stage7_dir / "case_metrics_donut_tree.xlsx", sheet_name="06_Volumetry")
-        except Exception:  # noqa: BLE001
-            return pd.DataFrame()
-    if "label" in vol.columns:
-        vol = vol[vol["label"].astype(str) != "TOTAL"]
-    return vol
-
-
-def _vessel_of(name: str, vessel_names: list[str]) -> str:
-    """The vessel a centerline file name belongs to (``LPCA_P2_M2i`` → ``LPCA_P2``)."""
-    matches = [v for v in vessel_names if name == v or name.startswith(v + "_")]
-    return max(matches, key=len) if matches else ""
-
-
-def _tortuosity_by_vessel(stage7_dir: Path, vessel_names: list[str]) -> pd.DataFrame:
-    tort = _read_csv(stage7_dir / "centerlines" / "tortuosity_metrics.csv")
-    if tort.empty or "centerline" not in tort.columns:
-        return pd.DataFrame()
-    tort = tort.assign(vessel_name=[_vessel_of(str(n), vessel_names) for n in tort["centerline"]])
-    tort = tort[tort["vessel_name"] != ""]
-    rows = []
-    for name, g in tort.groupby("vessel_name", sort=False):
-        w = pd.to_numeric(g.get("length_mm"), errors="coerce").fillna(0.0).to_numpy(dtype=float)
-        row: dict[str, Any] = {"vessel_name": name}
-        for col, how in TORTUOSITY_COLUMNS.items():
-            if col not in g.columns:
-                continue
-            v = pd.to_numeric(g[col], errors="coerce").to_numpy(dtype=float)
-            ok = np.isfinite(v)
-            if not ok.any():
-                row[col] = np.nan
-            elif how == "sum":
-                row[col] = float(v[ok].sum())
-            elif how == "max":
-                row[col] = float(v[ok].max())
-            else:
-                row[col] = float(np.average(v[ok], weights=w[ok])) if w[ok].sum() > 0 else float(v[ok].mean())
-        rows.append(row)
-    return pd.DataFrame(rows)
-
-
-def _merge_extra(base: pd.DataFrame, extra: pd.DataFrame, columns: Any) -> pd.DataFrame:
-    """*base* + the *columns* of *extra* (joined on ``vessel_name``); a name *base* already uses for
-    something else gets ``_legacy``, one meaning the same is kept once."""
-    if extra.empty or "vessel_name" not in extra.columns:
-        return base
-    cols = [c for c in columns if c in extra.columns and not (c in _SAME_MEANING and c in base.columns)]
-    if not cols:
-        return base
-    part = extra[["vessel_name", *cols]].drop_duplicates("vessel_name")
-    part = part.rename(columns={c: f"{c}_legacy" for c in cols if c in base.columns})
-    return base.merge(part, on="vessel_name", how="left")
-
-
-def vessel_table(stage7_dir: Path | str) -> pd.DataFrame:
-    """One row per vessel: ``vessel_summary.csv`` + the earlier path, volumetry and tortuosity
-    measures (module docstring). Falls back to ``00_Path_Summary`` for older outputs."""
-    from nvitk.gui.viz.morpho_viz import _aggregate_summary_by_vessel
-
-    d = Path(stage7_dir)
-    base = _read_csv(d / "vessel_summary.csv")
-    try:
-        paths = pd.read_excel(d / "case_metrics_donut_tree.xlsx", sheet_name="00_Path_Summary")
-        legacy = _aggregate_summary_by_vessel(paths)
-        if "n_paths" not in legacy.columns and "vessel_name" in legacy.columns:
-            legacy = legacy.assign(n_paths=1)
-    except Exception:  # noqa: BLE001
-        legacy = pd.DataFrame()
-    if base.empty:
-        if legacy.empty:
-            return pd.DataFrame()
-        keep = [c for c in ("label", "vessel_name", "full_name", *LEGACY_PATH_COLUMNS) if c in legacy.columns]
-        base = legacy[keep].drop_duplicates("vessel_name").assign(present=True)
-        if "label" not in base.columns and {"label", "vessel_name"} <= set(paths.columns):
-            label_of = paths.drop_duplicates("vessel_name").set_index("vessel_name")["label"]
-            base.insert(0, "label", base["vessel_name"].map(label_of))
-    else:
-        base = _merge_extra(base, legacy, LEGACY_PATH_COLUMNS)
-    base = _merge_extra(base, _volumetry(d), VOLUMETRY_COLUMNS)
-    names = [str(v) for v in base.get("vessel_name", pd.Series(dtype=str)).dropna().unique()]
-    return _merge_extra(base, _tortuosity_by_vessel(d, names), tuple(TORTUOSITY_COLUMNS))
 
 
 def _is_count(column: str) -> bool:
@@ -297,15 +196,19 @@ def lesion_highlighter(viewer: Any, lesion_layer: Any, keys: list[str]) -> Calla
             layer.selected_data = set()
             return
         i = index[key]
-        layer.selected_data = {i}
-        world = np.asarray(layer.data_to_world(np.asarray(layer.data[i], dtype=float)), dtype=float)
-        nd = len(viewer.dims.point)
-        for axis, value in zip(range(nd - len(world), nd), world):
-            viewer.dims.set_point(axis, float(value))
-        try:
-            viewer.camera.center = tuple(float(v) for v in world[-3:])
-        except Exception:  # noqa: BLE001
-            pass
+        shown = np.asarray(getattr(layer, "shown", np.ones(len(layer.data), dtype=bool)), dtype=bool)
+        if i < len(shown) and shown[i]:  # a hypoplasia (absent vessel) has no place to go to
+            layer.selected_data = {i}
+            world = np.asarray(layer.data_to_world(np.asarray(layer.data[i], dtype=float)), dtype=float)
+            nd = len(viewer.dims.point)
+            for axis, value in zip(range(nd - len(world), nd), world):
+                viewer.dims.set_point(axis, float(value))
+            try:
+                viewer.camera.center = tuple(float(v) for v in world[-3:])
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            layer.selected_data = set()
         try:
             from nvitk.gui.viz.lesion_inspector import inspect_lesion
 
@@ -371,13 +274,27 @@ def show_morphometrics_results(
 
     table = vessel_table(d)
     rows, row_labels = vessel_payload(table, key_of)
+    if rows:
+        show_results(
+            viewer, VESSELS_ALL_TITLE, rows, subtitle=subtitle, row_header="Vessel",
+            note=("Every per-vessel measure of the run. Colour labels by: any column colours the measured "
+                  "labels and the vessel surfaces. Columns ending in _legacy are cow_morpho's path metrics, "
+                  "whose names the compact table uses for something else (see M-Morphometrics.md)."),
+            label_layer=label_layer if row_labels else None, row_labels=row_labels,
+            on_colour=surface_colourer(surface_layer),
+        )
+    # The main table: the stage-7 report's columns, as the pipeline writes them and the DB imports them.
+    report_csv = d / REPORT_CSV
+    report = _read_csv(report_csv) if report_csv.is_file() else morphometrics_report(d)
+    rows, row_labels = vessel_payload(report, key_of)
     counts["vessels"] = len(rows)
     if rows:
         show_results(
             viewer, VESSELS_TITLE, rows, subtitle=subtitle, row_header="Vessel",
-            note=("Colour labels by: any column colours the measured labels and the vessel surfaces. "
-                  "Columns ending in _legacy are cow_morpho's path metrics, whose names the compact "
-                  "table uses for something else (see M-Morphometrics.md)."),
+            note=("The stage-7 report (morphometrics_report.csv), the columns the pipeline publishes to the "
+                  "database: the selected features and the high-confidence lesion flags. Every measure is in "
+                  f"'{VESSELS_ALL_TITLE}'. Colour labels by: any column colours the measured labels and the "
+                  "vessel surfaces."),
             label_layer=label_layer if row_labels else None, row_labels=row_labels,
             on_colour=surface_colourer(surface_layer),
         )

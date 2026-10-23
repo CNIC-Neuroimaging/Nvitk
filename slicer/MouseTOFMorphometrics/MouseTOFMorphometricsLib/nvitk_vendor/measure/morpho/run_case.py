@@ -50,7 +50,13 @@ from nvitk_vendor.measure.morpho.labels_util import (
 )
 from nvitk_vendor.measure.morpho.orchestration import process_component_tree_vmtk
 from nvitk_vendor.measure.morpho.surface import set_world_transform
-from nvitk_vendor.measure.morpho.export_utils.vessel_tables import component_tables, subject_summary, vessel_summary
+from nvitk_vendor.measure.morpho.export_utils.vessel_tables import (
+    add_hypoplasia_columns,
+    component_tables,
+    hypoplasia_rows,
+    subject_summary,
+    vessel_summary,
+)
 from nvitk_vendor.measure.morpho.export_utils.summaries import (
     branchpoint_export_dataframe,
     compute_volumetry_summary,
@@ -554,6 +560,10 @@ def _run_case(
     vessels_df = vessel_summary(vessel_rows, lesion_rows, mapping=resolved_mapping)
     if not vessels_df.empty:
         vessels_df["case_id"] = case_id
+    # Absent main vessels → "hypoplasia" lesions (no location), flagged per vessel too.
+    hypoplasia = hypoplasia_rows(vessels_df, resolved_mapping, input_volumetry)
+    lesion_rows.extend(hypoplasia)
+    vessels_df = add_hypoplasia_columns(vessels_df, hypoplasia)
     compact_tables = {
         "vessels": vessels_df,
         "segments": pd.DataFrame(segment_rows),

@@ -130,6 +130,7 @@ _CATEGORY_ORDER = (
     "Centerline",
     "Segmentation",
     "FastSurfer",
+    "FreeSurfer",
     "FSL",
     "ASL perfusion",
     "Registration",
@@ -735,11 +736,20 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         (
             ParamSpec("reference_layer", "TOF / MRA image layer", "layer", ""),
             _CORRECTION_IDS,
+            ParamSpec("siphon_pretess", "Pretess: remove edge / corner-only contacts", "bool", True),
+            ParamSpec("siphon_resegment", "Re-segment both ICAs with one threshold", "choice", "none",
+                      choices=("none", "common")),
+            ParamSpec("siphon_max_cut_mm3", "Largest cut, mm³", "float", 20.0, min=0.5, max=200.0),
             _OUTPUT_DIR,
         ),
         needs_reference_layer=True,
         needs_3d=True,
         run_mode="notify",
+        description=(
+            "Opens the ICA siphon where its two limbs touch on TOF and closes a loop. The segmentation "
+            "is kept and only the contact is removed (an intensity-weighted minimum cut). Adds the "
+            "corrected labels, the removed voxels and the centerlines as layers."
+        ),
     ),
     GuiToolSpec(
         "mask_genus",
@@ -1171,6 +1181,35 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         "eICAB cluster (CLI)",
         (_OUTPUT_DIR,),
         run_mode="notify",
+    ),
+    GuiToolSpec(
+        "seg_eicab_postprocess",
+        "Segmentation",
+        "eICAB post-process (refine, extend, grow, siphon)",
+        (
+            ParamSpec("reference_layer", "TOF / MRA image layer", "layer", ""),
+            ParamSpec("eicab_pp_remove_acha", "Drop the anterior choroidal arteries (17, 18)", "bool", True),
+            ParamSpec("eicab_pp_resegment", "Re-segment every label at its local half maximum", "bool", True),
+            ParamSpec("eicab_pp_extend", "ICAs / basilar down to the image floor (multi-scale Frangi)", "bool", True),
+            ParamSpec("eicab_pp_vertebrals", "Split the vertebral arteries off the basilar (LVA 19, RVA 20)", "bool", True),
+            ParamSpec("eicab_pp_distal", "Grow ACAs / MCAs / PCAs / SCAs along the Frangi tree", "bool", True),
+            ParamSpec("eicab_pp_aca_guard", "ACAs: AComm sides + midline guard", "bool", True),
+            ParamSpec("eicab_pp_siphon", "ICA siphon correction (minimum cut)", "bool", True),
+            ParamSpec("eicab_pp_trunks", "Trunk label ids (to the floor)", "str", "1,2,3"),
+            ParamSpec("eicab_pp_distal_ids", "Label ids grown distally", "str", "5,6,7,8,13,14,15,16"),
+            ParamSpec("eicab_pp_icas", "ICA label ids (siphon)", "str", "1,2"),
+            _OUTPUT_DIR,
+        ),
+        needs_reference_layer=True,
+        needs_3d=True,
+        run_mode="notify",
+        description=(
+            "Stage 1's eICAB post-process on a label layer: the anterior choroidals dropped, each label re-drawn "
+            "at its local half maximum, the ICAs and basilar followed to the image floor along a multi-scale "
+            "Frangi tree (the vertebrals split off), the ACAs / MCAs / PCAs / SCAs grown distally in competition, "
+            "and the ICA siphon loops cut. Adds the result as a Labels layer; the table lists, per label, the "
+            "voxels before / after, each extension, the distal growth and the siphon cuts."
+        ),
     ),
     GuiToolSpec(
         "viz_vessel_cpr",
@@ -2517,6 +2556,80 @@ _FASTSURFER_TOOLS: tuple[GuiToolSpec, ...] = (
 
 _TOOLS = _TOOLS + _FASTSURFER_TOOLS
 
+
+# ── FreeSurfer topology tools (nvitk.gui.tools.freesurfer_tools) ─────────────
+# Listed only when FreeSurfer (and each tool's programs) is found; see visible_tool_ids().
+
+
+def _fs_license_default() -> str:
+    try:
+        from nvitk.gui.tools.freesurfer_tools import default_license
+
+        return default_license()
+    except Exception:  # noqa: BLE001 — the registry must import regardless
+        return ""
+
+
+_FS_LICENSE_PARAM = ParamSpec("freesurfer_license", "FreeSurfer license file (blank = found one)", "str",
+                              _fs_license_default())
+_FS_LABEL = ParamSpec("freesurfer_label", "Label (0 = every nonzero voxel)", "int", 0, min=0, max=9999)
+_FS_REF = ParamSpec("reference_layer", "Image the mask came from (TOF, T1; optional)", "layer", "")
+
+
+def _fs(tool_id: str, label: str, params: tuple[ParamSpec, ...], description: str, *, category: str = "FreeSurfer",
+        license_param: bool = True) -> GuiToolSpec:
+    return GuiToolSpec(tool_id, category, label, (*params, *((_FS_LICENSE_PARAM,) if license_param else ()), _OUTPUT_DIR),
+                       run_mode="notify", needs_3d=tool_id not in _FS_SURFACE_TOOLS, description=description,
+                       cli_command="nvitk-freesurfer" if category == "FreeSurfer" else "")
+
+
+_FS_SURFACE_TOOLS = frozenset({"freesurfer_main_component", "freesurfer_euler", "freesurfer_smooth",
+                               "freesurfer_inflate", "freesurfer_qsphere", "fastsurfer_spectral_sphere"})
+_FS_CHAIN = (_FS_LABEL, _FS_REF,
+             ParamSpec("freesurfer_defect_seg", "Defects as a volume (defect-seg)", "bool", True))
+
+_FREESURFER_TOOLS: tuple[GuiToolSpec, ...] = (
+    _fs("freesurfer_pretess", "Pretess (mri_pretess)", (_FS_LABEL, _FS_REF),
+        "mri_pretess: makes the label's edge / corner-only contacts face contacts (it adds the brighter voxel), "
+        "so marching cubes sees the same topology as a 26-connected count. nvitk's own pretess removes instead "
+        "(ICA siphon correction)."),
+    _fs("freesurfer_mc", "Marching cubes (mri_mc)", (_FS_LABEL, ParamSpec(
+        "freesurfer_connectivity", "Connectivity (1 = 6+, 2 = 18, 3 = 6, 4 = 26)", "int", 1, min=1, max=4)),
+        "mri_mc: the label's surface, as FreeSurfer and FastSurfer tessellate (Surface layer, scanner RAS)."),
+    _fs("freesurfer_main_component", "Main component (surface)", (),
+        "mris_extract_main_component on the active Surface layer."),
+    _fs("freesurfer_euler", "Euler number / defects (surface)", (),
+        "mris_euler_number on the active Surface layer: Euler number, holes (handles) and defect index, beside "
+        "nvitk's own V − E + F count."),
+    _fs("freesurfer_smooth", "Smooth (mris_smooth)", (ParamSpec("freesurfer_iterations", "Iterations", "int", 10,
+                                                                min=1, max=500),),
+        "mris_smooth -nw on the active Surface layer."),
+    _fs("freesurfer_inflate", "Inflate (mris_inflate)", (), "mris_inflate on the active Surface layer."),
+    _fs("freesurfer_qsphere", "Quick sphere (mris_sphere -q)", (),
+        "mris_sphere -q on the active (inflated, genus-0) Surface layer: the map the topology fixers start from."),
+    _fs("freesurfer_fix_topology", "Fix topology (mris_fix_topology)", (*_FS_CHAIN, ParamSpec(
+        "freesurfer_sphere", "Sphere", "choice", "qsphere", choices=("qsphere", "spectral"))),
+        "The whole chain on a mask, in recon-all order: pretess → mri_mc → main component → smooth → inflate → "
+        "sphere → mris_fix_topology (genetic search) → remove intersections, then defect-seg. Opens the surface "
+        "before and after, the defects and an Euler report. Built for the cortex: offered to test and compare "
+        "(e.g. with the ICA siphon correction)."),
+    _fs("freesurfer_topo_fixer", "Topology fixer (mris_topo_fixer)", (*_FS_CHAIN, ParamSpec(
+        "freesurfer_sphere", "Sphere", "choice", "qsphere", choices=("qsphere", "spectral"))),
+        "As Fix topology, with mris_topo_fixer (recon-all's fallback when mris_fix_topology leaves defects)."),
+    _fs("fastsurfer_spectral_sphere", "Spectral sphere (FastSurfer)", (),
+        "FastSurfer's spectral spherical projection (lapy) of the active genus-0 Surface layer: what FastSurfer "
+        "uses instead of mris_sphere -q. No FreeSurfer needed.", category="FastSurfer", license_param=False),
+    _fs("fastsurfer_topology_chain", "Topology chain (recon-surf order)", _FS_CHAIN,
+        "FastSurfer's recon-surf surface stream on a mask: pretess → mri_mc → main component → smooth → inflate → "
+        "spectral sphere → mris_fix_topology → orientation rewrite. Needs FastSurfer and FreeSurfer.",
+        category="FastSurfer"),
+)
+
+_TOOLS = _TOOLS + _FREESURFER_TOOLS
+
+#: Tools shown only when their external software is found (nvitk.gui.tools.freesurfer_tools).
+_GATED_TOOL_IDS = frozenset(t.id for t in _FREESURFER_TOOLS)
+
 # ── FSL (nvitk.gui.tools.fsl_tools) ──────────────────────────────────────────
 
 
@@ -2832,14 +2945,29 @@ _TOOLS = _TOOLS + _ASL_TOOLS
 
 
 
+def visible_tool_ids() -> set[str]:
+    """The gated tools that can run here (FreeSurfer found, its programs, FastSurfer + lapy)."""
+    try:
+        from nvitk.gui.tools.freesurfer_tools import available_tool_ids
+
+        return available_tool_ids()
+    except Exception:  # noqa: BLE001
+        return set()
+
+
 def categories() -> list[str]:
-    """Display order of tool categories."""
-    return list(_CATEGORY_ORDER)
+    """Display order of tool categories; *FreeSurfer* only when an installation is found."""
+    shown = visible_tool_ids()
+    return [c for c in _CATEGORY_ORDER if c != "FreeSurfer" or any(t.startswith("freesurfer_") for t in shown)]
 
 
 def tools_for_category(category: str) -> list[GuiToolSpec]:
-    """All registered tool specs belonging to *category*."""
-    return [t for t in _TOOLS if t.category == category]
+    """The registered tool specs of *category* (gated tools only when they can run here)."""
+    tools = [t for t in _TOOLS if t.category == category]
+    if any(t.id in _GATED_TOOL_IDS for t in tools):
+        shown = visible_tool_ids()
+        tools = [t for t in tools if t.id not in _GATED_TOOL_IDS or t.id in shown]
+    return tools
 
 
 def all_tools() -> tuple[GuiToolSpec, ...]:
@@ -2931,6 +3059,7 @@ SGE_BLOCKLIST: frozenset[str] = frozenset({
     "viz_pwv",
     "viz_tof_morphometrics",
     "seg_eicab",
+    "seg_eicab_postprocess",
     "orient_volume",
     "reorient_volume",
     "seg_mouse_brain",
@@ -2949,6 +3078,9 @@ SGE_BLOCKLIST: frozenset[str] = frozenset({
     "siphon_correct",
     "pet_ureter_seg",
 })
+
+# The FreeSurfer topology tools run on this machine's FreeSurfer / FastSurfer (no cluster staging yet).
+SGE_BLOCKLIST = SGE_BLOCKLIST | _GATED_TOOL_IDS
 
 SGE_BLOCKLIST_PREFIXES: tuple[str, ...] = ("qvtpy_stage",)
 

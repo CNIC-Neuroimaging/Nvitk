@@ -134,6 +134,8 @@ class OrthoLabelEditor:
                     "draw on it in the main canvas, or show it in the views by selecting it.")
         if panel.is_oblique():
             return "The views are turned: reset the orientation to draw in them."
+        if panel._active_projection() is not None:
+            return "The views show a projection: turn it off to draw in them."
         return None
 
     # ── voxels ───────────────────────────────────────────────────────────────

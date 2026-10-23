@@ -255,6 +255,20 @@ it needs conda, which is why the conda package's post-link step does not create 
 overrides `$FSLDIR`. FSL is free for non-commercial use only — see its
 [license](https://fsl.fmrib.ox.ac.uk/fsl/docs/license.html).
 
+### FreeSurfer topology tools
+
+`nvitk-freesurfer` and the GUI's *FreeSurfer* category wrap FreeSurfer's topology programs
+(`mri_pretess`, `mri_mc`, `mris_euler_number`, `mris_sphere`, `mris_fix_topology`,
+`mris_topo_fixer`, `defect-seg` …) for any mask. They use whichever FreeSurfer is found:
+`$FREESURFER_HOME`, then `freesurfer_home` in `external_tools.json`, `/usr/local/freesurfer`,
+`/opt/freesurfer`, `~/.local/opt/freesurfer`, `~/freesurfer` or FastSurfer's installer folder. Any
+version that has the programs works, 5.3 included. `nvitk-freesurfer info` reports the
+installation, its version, its license and the programs present. FreeSurfer's programs need its
+(free) license file: `$FS_LICENSE`, `nvitk-freesurfer use --license FILE`, or `license.txt` in the
+installation. FreeSurfer 5.x reads only the latter, so nvitk links a license kept elsewhere into
+an overlay of the installation under `~/.cache/nvitk`. FastSurfer's surface pipelines keep
+looking only for FreeSurfer 7.4.1, as before.
+
 ### On the cluster
 
 FastSurfer and FSL jobs (`--submit sge`, the GUI's *Run SGE*) run in the nvitk Singularity

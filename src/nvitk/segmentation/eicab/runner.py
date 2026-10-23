@@ -32,7 +32,17 @@ _EICAB_SH = f"{_EICAB_EXPRESS_HOME}/eICAB.sh"
 _CPU_LIMIT_SITE = (
     f"{_NVITK_SRC_BIND}/nvitk/segmentation/eicab/cpu_limit_site"
 )
-_EICAB_PYTHONPATH = f"{_CPU_LIMIT_SITE}:{_EICAB_EXPRESS_HOME}"
+# The image's own default PYTHONPATH (its env script only applies it when PYTHONPATH is
+# unset): keep it, VTK lives there.
+_EICAB_IMAGE_PYTHONPATH = "/usr/lib/x86_64-linux-gnu/python3.7/site-packages/:/usr/bin/"
+_EICAB_PYTHONPATH = f"{_CPU_LIMIT_SITE}:{_EICAB_EXPRESS_HOME}:{_EICAB_IMAGE_PYTHONPATH}"
+#: Host ``sitecustomize`` directory (CPU cap + CW-only hook) and its mount point for local
+#: runs, which do not bind the whole nvitk source tree.
+_EICAB_SITE_HOST = Path(__file__).resolve().parent / "cpu_limit_site"
+_EICAB_SITE_BIND = "/nvitk/eicab_site"
+#: Environment switch read by the ``sitecustomize`` hook: stop eICAB once the CW mask and
+#: ``TOF_resampled`` are written (no CW metrics, no whole-brain flood fill).
+CW_ONLY_ENV = "NVITK_EICAB_CW_ONLY"
 # ComputeVED writes Scale_*/Ved_* into process CWD, then moves them. Parallel SGE
 # jobs must not share a CWD (home / SGE_O_WORKDIR) or they steal each other's files.
 # Cluster node-local scratch is /data_tmp (no $TMPDIR on this site).
@@ -199,8 +209,13 @@ def build_eicab_singularity_argv(
     attention: bool = False,
     device: str = "cpu",
     vasculature_host_path: str | Path | None = None,
+    cw_only: bool = False,
 ) -> list[str]:
-    """Build ``singularity run`` argv for eICAB on the cluster host (host paths)."""
+    """Build ``singularity run`` argv for eICAB on the cluster host (host paths).
+
+    *cw_only*: bind nvitk's ``sitecustomize`` hook and set :data:`CW_ONLY_ENV`, so eICAB stops
+    once the CW mask and ``TOF_resampled`` are written (no whole-brain flood fill).
+    """
     input_p = Path(input_nii).resolve()
     output_p = Path(output_dir).resolve()
     tmp_p = Path(tmp_dir).resolve()
@@ -244,6 +259,17 @@ def build_eicab_singularity_argv(
     vhp = Path(vasculature_host_path) if vasculature_host_path else None
     if vhp and vhp.is_dir():
         cmd.extend(["--bind", f"{vhp}:/programs/Neuro/vasculature2"])
+    if cw_only:
+        cmd.extend(
+            [
+                "--bind",
+                f"{_EICAB_SITE_HOST}:{_EICAB_SITE_BIND}:ro",
+                "--env",
+                f"PYTHONPATH={_EICAB_SITE_BIND}:{_EICAB_EXPRESS_HOME}:{_EICAB_IMAGE_PYTHONPATH}",
+                "--env",
+                f"{CW_ONLY_ENV}=1",
+            ]
+        )
 
     cmd.extend(
         [
@@ -327,6 +353,7 @@ def build_eicab_singularity_shell_cmd(
     nvitk_src_dir: str | Path | None = None,
     local_metric_scratch: bool = False,
     metric_scratch_root: str | None = None,
+    cw_only: bool = False,
 ) -> str:
     """Shell command string for eICAB ``singularity run`` or ``exec``.
 
@@ -336,6 +363,9 @@ def build_eicab_singularity_shell_cmd(
 
     Always passes ``--pwd /tmp/ved_cwd`` so ComputeVED's CWD-relative Scale_*
     globs stay isolated under the per-subject ``/tmp`` bind.
+
+    *cw_only* sets :data:`CW_ONLY_ENV` for the same ``sitecustomize`` hook, so eICAB stops once
+    the CW mask and ``TOF_resampled`` are written (no whole-brain flood fill).
     """
     needs_custom = bool(cpu_limit_shell_expr) or local_metric_scratch or (
         nvitk_src_dir is not None
@@ -353,6 +383,7 @@ def build_eicab_singularity_shell_cmd(
                 attention=attention,
                 device=device,
                 vasculature_host_path=vasculature_host_path,
+                cw_only=cw_only,
             )
         )
 
@@ -363,7 +394,10 @@ def build_eicab_singularity_shell_cmd(
     container_input = _eicab_container_input_path(input_p)
     device_arg, use_nv = _eicab_device_arg(device)
 
-    use_cpu_runner = bool(cpu_limit_shell_expr) and nvitk_src_dir is not None
+    # The sitecustomize hook (CPU cap and / or CW-only) comes from the bound nvitk source tree;
+    # without one, a CW-only run binds the hook directory on its own.
+    use_cpu_runner = (bool(cpu_limit_shell_expr) or cw_only) and nvitk_src_dir is not None
+    bind_site = cw_only and not use_cpu_runner
     parts: list[str] = [
         "singularity",
         "exec" if use_cpu_runner else "run",
@@ -379,11 +413,24 @@ def build_eicab_singularity_shell_cmd(
                 "--env",
                 f"EXPRESS_HOME={_EICAB_EXPRESS_HOME}",
                 "--env",
-                f"PYTHONPATH={_EICAB_PYTHONPATH}",
-                "--env",
-                f"NVITK_CPU_LIMIT={cpu_limit_shell_expr}",
+                shlex.quote(f"PYTHONPATH={_EICAB_PYTHONPATH}"),
             ]
         )
+        if cpu_limit_shell_expr:
+            parts.extend(["--env", f"NVITK_CPU_LIMIT={cpu_limit_shell_expr}"])
+    if bind_site:
+        parts.extend(
+            [
+                "--bind",
+                shlex.quote(f"{_EICAB_SITE_HOST}:{_EICAB_SITE_BIND}:ro"),
+                "--env",
+                shlex.quote(
+                    f"PYTHONPATH={_EICAB_SITE_BIND}:{_EICAB_EXPRESS_HOME}:{_EICAB_IMAGE_PYTHONPATH}"
+                ),
+            ]
+        )
+    if cw_only:
+        parts.extend(["--env", f"{CW_ONLY_ENV}=1"])
     if use_nv:
         parts.append("--nv")
     parts.extend(
@@ -439,8 +486,12 @@ def run_eicab(
     vasculature_host_path: str | Path | None = None,
     check: bool = True,
     capture_output: bool = True,
+    cw_only: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Run eICAB via ``singularity run`` (same contract as legacy BioImaging).
+
+    *cw_only*: stop once the CW mask and ``TOF_resampled`` are written; no CW metrics and no
+    whole-brain (WB) flood fill, so no ``*_eICAB_WB`` mask.
 
     *vasculature_host_path* should be the **host** directory bind-mounted to
     ``/programs/Neuro/vasculature2`` (see ``run_eicab_inference.sh``). When
@@ -478,8 +529,11 @@ def run_eicab(
         attention=attention,
         device=device,
         vasculature_host_path=vasculature_host_path,
+        cw_only=cw_only,
     )
 
+    if cw_only:
+        log.info("eICAB CW only: the run stops after the CW mask (no whole-brain flood fill)")
     log.info("Running eICAB: %s", " ".join(cmd))
     proc = subprocess.run(
         cmd,
@@ -507,6 +561,7 @@ def run_eicab(
 
 
 __all__ = [
+    "CW_ONLY_ENV",
     "build_eicab_singularity_argv",
     "metric_scratch_bind_args",
     "metric_scratch_cleanup_shell",

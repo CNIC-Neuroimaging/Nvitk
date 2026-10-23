@@ -150,15 +150,18 @@ def build_eicab_postprocess_shell_cmd(
     src_dir: Path,
     data_root: Path,
     backend: str,
+    siphon: bool = True,
+    distal: bool = True,
 ) -> str:
-    """ICA post-process step inside the nvitk container."""
+    """The eICAB post-process step inside the nvitk container (*siphon*: include the ICA siphon
+    correction)."""
     binds = SingularityBinds()
     rel_out = _require_under(output_dir, output_root, "output")
     c_out = f"{binds.output}{rel_out.as_posix()}"
     py_cmd = (
         "from pathlib import Path; "
         "from nvitk.pipes.qvtpy.util.eicab.eicab_postprocess import postprocess_eicab_directory; "
-        f"postprocess_eicab_directory(Path({json.dumps(c_out)}))"
+        f"postprocess_eicab_directory(Path({json.dumps(c_out)}), siphon={bool(siphon)}, distal={bool(distal)})"
     )
     inner = (
         f"export PYTHONPATH={binds.src} && "
@@ -171,6 +174,19 @@ def build_eicab_postprocess_shell_cmd(
         data_root=data_root,
         output_root=output_root,
         python_cmd=inner,
+    )
+
+
+def existing_eicab_shell_test(output_dir: Path) -> str:
+    """POSIX shell test: true when *output_dir* already holds a non-empty eICAB CW mask and
+    ``*_resampled`` TOF (the post-process inputs)."""
+    out_q = shlex.quote(str(output_dir.resolve()))
+    has = (
+        "_nvitk_has() { for _f in \"$@\"; do [ -s \"$_f\" ] && return 0; done; return 1; }"
+    )
+    return (
+        f"{has}; _nvitk_has {out_q}/*_eICAB_CW.nii.gz {out_q}/*_eICAB_CW.nii "
+        f"&& _nvitk_has {out_q}/*_resampled.nii.gz {out_q}/*_resampled.nii"
     )
 
 
@@ -192,11 +208,21 @@ def build_eicab_host_shell_cmd(
     keep_aux_outputs: bool,
     post_process_eicab: bool,
     backend: str,
+    pp_siphon: bool = True,
+    pp_distal: bool = True,
     thread_limit: int | None = None,
     sge_pe_smp: int | None = None,
     local_metric_scratch: bool = False,
+    whole_brain: bool = True,
+    reuse_existing: bool = False,
 ) -> str:
-    """Full stage1 host command: eICAB ``singularity run`` + optional nvitk follow-ups."""
+    """Full stage1 host command: eICAB ``singularity run`` + optional nvitk follow-ups.
+
+    *whole_brain* False stops eICAB once the CW mask is written (no WB flood fill).
+    *reuse_existing* checks at run time for an existing CW mask + ``TOF_resampled`` in
+    *output_dir*: when found, eICAB and the prune are skipped and only the post-process runs.
+    Either branch is announced on the job's stdout.
+    """
     dev = device.lower()
     if dev == "gpu":
         dev = "cuda"
@@ -239,6 +265,7 @@ def build_eicab_host_shell_cmd(
             nvitk_src_dir=src_dir,
             local_metric_scratch=local_metric_scratch,
             metric_scratch_root=scratch_root,
+            cw_only=not whole_brain,
         )
     ]
     if not keep_aux_outputs:
@@ -251,6 +278,22 @@ def build_eicab_host_shell_cmd(
                 data_root=input_root,
             )
         )
+    scope = "CW only, no whole-brain flood fill" if not whole_brain else "CW + whole brain"
+    eicab_msg = shlex.quote(f"[nvitk stage1] running eICAB ({scope}) -> {output_dir}")
+    if reuse_existing:
+        found_msg = shlex.quote(
+            f"[nvitk stage1] existing eICAB CW mask + TOF_resampled in {output_dir}: "
+            "eICAB skipped, post-process only"
+        )
+        missing_msg = shlex.quote(
+            f"[nvitk stage1] no eICAB CW mask in {output_dir}: falling back to eICAB ({scope})"
+        )
+        steps = [
+            f"if {existing_eicab_shell_test(output_dir)}; then echo {found_msg}; "
+            f"else echo {missing_msg} && {' && '.join(steps)}; fi"
+        ]
+    else:
+        steps.insert(0, f"echo {eicab_msg}")
     if post_process_eicab:
         steps.append(
             build_eicab_postprocess_shell_cmd(
@@ -260,6 +303,8 @@ def build_eicab_host_shell_cmd(
                 src_dir=src_dir,
                 data_root=input_root,
                 backend=backend,
+                siphon=pp_siphon,
+                distal=pp_distal,
             )
         )
     body = " && ".join(steps)
@@ -318,16 +363,23 @@ def submit_eicab_job(
     attention: bool,
     keep_aux_outputs: bool,
     post_process_eicab: bool = True,
+    pp_siphon: bool = True,
+    pp_distal: bool = True,
     backend: str = "gpu",
     resources: SgeResources,
     thread_limit: int | None = None,
     sge_pe_smp: int | None = None,
     local_metric_scratch: bool = False,
+    whole_brain: bool = True,
+    reuse_existing: bool = False,
     hold_jid: str | None = None,
     dry_run: bool = False,
     emit: TextIO | None = None,
 ) -> str:
-    """Submit one eICAB job on the cluster host (or emit a bash block when *emit* is set)."""
+    """Submit one eICAB job on the cluster host (or emit a bash block when *emit* is set).
+
+    *whole_brain* / *reuse_existing*: see :func:`build_eicab_host_shell_cmd`.
+    """
     dev = device.lower()
     if dev == "gpu":
         dev = "cuda"
@@ -360,10 +412,14 @@ def submit_eicab_job(
         attention=attention,
         keep_aux_outputs=keep_aux_outputs,
         post_process_eicab=post_process_eicab,
+        pp_siphon=pp_siphon,
+        pp_distal=pp_distal,
         backend=backend,
         thread_limit=thread_limit,
         sge_pe_smp=sge_pe_smp,
         local_metric_scratch=local_metric_scratch,
+        whole_brain=whole_brain,
+        reuse_existing=reuse_existing,
     )
 
     paths = cluster_paths(
@@ -393,6 +449,7 @@ def submit_eicab_job(
 
 __all__ = [
     "build_eicab_host_shell_cmd",
+    "existing_eicab_shell_test",
     "build_run_job_python_cmd",
     "cluster_paths",
     "submit_eicab_job",

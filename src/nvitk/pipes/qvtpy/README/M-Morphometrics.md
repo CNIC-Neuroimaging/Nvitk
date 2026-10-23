@@ -20,8 +20,9 @@ per label job
 per root→terminal path ──► geometry · radii · lesions
    │  split into non-overlapping connected segments
    ▼
+├─► morphometrics_report.csv       (the final report: selected features + high-confidence lesions)
 ├─► vessel_summary.csv · segments.csv · lesions.csv · subject_summary.csv   (compact tables)
-├─► case_metrics_donut_tree.xlsx   (compact sheets + cow-style sheets + per-point sheets)
+├─► case_metrics_donut_tree.xlsx   (Report + compact sheets + cow-style sheets + per-point sheets)
 ├─► points/<path_id>.csv           (per-point tables)
 ├─► centerlines/*.vtp, surfaces/*.vtp   (scanner RAS)
 ├─► centerlines/tortuosity_metrics.{csv,xlsx}, radius_histograms/
@@ -412,7 +413,7 @@ root→terminal path of the vessel's largest component.
 | shape | `tortuosity_dm`, `tortuosity_first_10mm`, `tortuosity_last_10mm`, `tortuosity_last_20mm`, `bending_length_mm`, `curvature_{mean,p95,max}_1_per_mm`, `total_curvature_rad` (∫κ ds), `curvature_energy_1_per_mm` (∫κ² ds), `sum_of_angles_deg_per_mm`, `torsion_mean_abs_1_per_mm`, `n_turns` |
 | direction | `chord_polar_angle_deg`, `chord_azimuth_angle_deg`, `polar_angle_min_deg`, `polar_angle_accumulated_change_deg` (in anatomical axes) |
 | branching | `branching_angle_min_deg`, `branching_angle_max_deg`, `murray_area_ratio_median` |
-| lesions | `n_stenosis`, `n_stenosis_high_confidence`, `stenosis_taper_percent_max`, `stenosis_diameter_percent_max`, `stenosis_length_total_mm`, `stenosis_worst_segment`, `stenosis_worst_from_origin_mm`, `stenosis_worst_confidence`, and the `enlargement_*` mirror |
+| lesions | `n_stenosis`, `n_stenosis_high_confidence`, `stenosis_taper_percent_max`, `stenosis_diameter_percent_max`, `stenosis_length_total_mm`, `stenosis_worst_segment`, `stenosis_worst_from_origin_mm`, `stenosis_worst_confidence`, and the `enlargement_*` mirror; `hypoplasia`, `hypoplasia_confidence_class` (main vessels, §6.3) |
 
 Notes on the definitions:
 - **Calibre statistics skip the tips**, the first and last max(`FEATURE_TIP_EXCLUDE_MM` = 1 mm,
@@ -439,7 +440,7 @@ measure twice is counted once, and is named after the segment containing its mid
 
 | Column | Meaning |
 |---|---|
-| `kind` | `stenosis` / `enlargement` |
+| `kind` | `stenosis` / `enlargement` / `hypoplasia` (an absent main vessel, below) |
 | `segment`, `path_id`, `point_start` / `point_end` (indices on that path's point table), `start_s_from_vessel_origin_mm`, `length_mm`, `x/y/z_mm` | location |
 | `taper_percent` | peak severity against the taper reference (the detection measure) |
 | `reference_radius_mm`, `reference` | the healthy reference radius at the lesion (below) and how it was obtained: `interpolated`, `proximal`, `distal` or `none` |
@@ -518,6 +519,32 @@ change unreliable:
 Classes: **high** ≥ 0.7 (at most one mild penalty), **moderate** ≥ 0.4, **low** below. The class is
 a reliability grade for the geometric measurement, not a clinical grade.
 
+**Hypoplasia rows.** Each **absent main vessel** gets one `kind = hypoplasia` row. The main vessels
+are `HYPOPLASIA_MAIN_VESSELS`: both ICAs, the basilar, both MCAs, both ACAs, and each PCA's P1 and
+P2 as separate vessels. Other absent vessels (PComms, AComm, SCAs, …) are normal variants and get
+no row. The rows have no location (`path_id`, `x/y/z_mm` and the reference columns are empty).
+
+On TOF, *absent* means **no flow signal in the eICAB mask**: aplasia, a hypoplasia below the
+resolution, or an occlusion look the same. The calibre-based statuses of §6.4 (`hypoplastic` below
+1 mm median diameter) are a separate, unchanged measure.
+
+The confidence comes from the vessel's topological neighbours: its `flow_from` / `flow_to` vessels
+and the vessels naming it in theirs.
+
+| Flag | Factor | Condition |
+|---|---|---|
+| `absent` / `too_small` | — | no voxels of the label / voxels, but too few for a centerline (one of the two is always set) |
+| `neighbours_absent` | 0.3 | no neighbour is present either: more likely the field of view or a segmentation dropout than a missing vessel |
+| `fetal_pca` | — | a P1 absent while the same side's PComm and P2 are present (fetal PCA variant) |
+| `a1_aplasia` | — | an ACA absent while the AComm and the other ACA are present |
+
+So an absent vessel next to present ones is **high** (1.0), and a whole territory missing is
+**low** (0.3). A mask with fewer than half of the main vessels present is taken for a part of the
+circle (a label selection, a crop), not a whole one, and gets no hypoplasia rows at all
+(`HYPOPLASIA_MIN_PRESENT_FRACTION`). With the profile's `PROCESS_SELECTED_TAGS_ONLY`, only the
+selected tags are checked. In the GUI the rows are listed in the lesions table and shown in the lesion
+inspector (card and flags, no profile); they have no point or extent in the viewer.
+
 ### 6.4 `subject_summary.csv` / `Subject` — one row per subject
 
 | Columns | Meaning |
@@ -526,7 +553,32 @@ a reliability grade for the geometric measurement, not a clinical grade.
 | `…_diameter_median_mm` | that vessel's median diameter |
 | `cow_variant_segments_present`, `cow_complete` | completeness of the circle |
 | `{pair}_{metric}_asymmetry_index` | 2·|L − R| / (L + R) for `main_length_mm`, `diameter_median_mm`, `tortuosity_dm`, `curvature_mean_1_per_mm` |
-| `n_vessels_present`, `total_centerline_length_mm`, `total_n_stenosis[_high_confidence]`, `total_n_enlargement[_high_confidence]` | totals |
+| `n_vessels_present`, `total_centerline_length_mm`, `total_n_stenosis[_high_confidence]`, `total_n_enlargement[_high_confidence]`, `total_n_hypoplasia[_high_confidence]` | totals |
+
+### 6.5 `morphometrics_report.csv` / `Report` — the final report, one row per vessel
+
+The final per-vessel output of stage 7, and what reaches the database (§9). It is written by
+[report.py](src/nvitk/measure/morpho/export_utils/report.py) at the end of every run, as a CSV and as
+the **first** workbook sheet. Every topology vessel has a row; absent ones have `present = False`
+and empty features.
+
+| Group | Columns |
+|---|---|
+| identity | `case_id`, `label`, `vessel_name`, `side`, `present` |
+| features | `centerline_length_mm`, `diameter_median_mm`, `diameter_mean_mm`, `volume_mm3`, `surface_area_mm2`, `radius_mean_mm`, `tortuosity_dm`, `curvature_mean_1_per_mm`, `total_curvature_rad`, `inflection_count_metric`, `chord_azimuth_angle_deg`, `diameter_mean_blanked_mm`, `chord_polar_angle_deg`, `polar_angle_accumulated_change_deg` |
+| lesions (**high confidence only**) | `has_stenosis`, `stenosis_diameter_percent_max`, `has_enlargement`, `enlargement_diameter_percent_max`, `has_hypoplasia` |
+
+- The features are the GUI's vessel table columns of the same name: `vessel_summary.csv` (§6.1),
+  `volume_mm3` from the label volumetry, `inflection_count_metric` from the tortuosity table.
+- **`radius_mean_mm` is not half of `diameter_mean_mm`.** It is cow_morpho's mean cross-section
+  radius (`00_Path_Summary`, length-weighted over the vessel's paths), while the diameters are the
+  inscribed-sphere (MIS) ones.
+- **The lesion columns count only `high` lesions** (§6.3). A vessel whose lesions are all moderate or
+  low has `has_stenosis = False`, and a `*_percent_max` is empty without a high-confidence lesion.
+  The full lesion list stays in `lesions.csv`.
+- `has_hypoplasia` is set for the main vessels only.
+- Older run folders get a report built on the fly from their tables, by the GUI and by the DB
+  publish; hypoplasia then comes from the topology's absent main vessels, with the same rule.
 
 ---
 
@@ -596,13 +648,22 @@ differ only rigidly.
 ## 9 · What reaches the database
 
 [morpho_db_publish.py](src/nvitk/pipes/qvtpy/common/morpho_db_publish.py) writes
-`image_measurements` rows (modality `tof`, pipeline `tof_morpho`):
-- every numeric column of `vessel_summary.csv`, with `region_id` = the vessel name, for present
-  vessels only;
-- every numeric column of `subject_summary.csv`, with `region_id = "subject"`.
+`image_measurements` rows (modality `tof`, pipeline `tof_morpho`) **from the report only** (§6.5),
+with `region_id` = the vessel name:
+- the 14 report features, for present vessels;
+- `has_stenosis` / `has_enlargement` (unit `boolean`, 1/0) and the two `*_diameter_percent_max`
+  (`%`, only when there is a high-confidence lesion), for present vessels;
+- `has_hypoplasia` (1/0) for every main vessel, present or not.
 
-Units follow the column suffix (`_mm`, `_mm2`, `_mm3`, `_deg`, `_1_per_mm`, `_percent`). Older runs
-without the compact tables fall back to the previous aggregation of `00_Path_Summary`.
+A run without `morphometrics_report.csv` gets one built on the fly. Runs older than
+`vessel_summary.csv` fall back to the previous aggregation of `00_Path_Summary`.
+
+**Re-publishing replaces.** Publishing a subject first deletes all of that subject's `tof_morpho`
+rows (`DataRepo.replace_rows`), so variables from earlier publishes that the report no longer has
+(the full `vessel_summary` / `subject_summary` sets of before 2026-10-22) do not linger. Other
+subjects and pipelines are untouched.
+
+Units follow the column suffix (`_mm`, `_mm2`, `_mm3`, `_deg`, `_1_per_mm`, `_percent`).
 
 ---
 
@@ -615,7 +676,7 @@ Stage-7 CLI:
 | `--eicab-mask-preference` | `cw` | `cw` / `wb` eICAB mask (the profile is tuned on CW) |
 | `--profile` | `eicab_cw` | morphometrics profile |
 | `--centerline-backend` | profile (`vmtk`) | `vmtk` / `native` / `raycast` |
-| `--use-postprocessed-mask/--no-…` | on | prefer `*_eICAB_CW_pp.nii.gz` |
+| `--use-postprocessed-mask/--no-…` | on | prefer `*_eICAB_CW_pp.nii.gz`, stage 1's post-process (docs/pipelines/qvtpy.md): no anterior choroidals; labels re-drawn at their local half maximum; ICAs / basilar to the image floor, with the vertebrals as their own vessels (LVA / RVA, labels 19 / 20 of `eicab_topology.json`); ACAs / MCAs / PCAs / SCAs grown distally along the Frangi tree; siphon loops cut. The `eicab_cw` thresholds were calibrated on eICAB's own, thicker masks |
 | `--input-already-smoothed` | off | skip Taubin smoothing |
 | `--n-workers N` | min(4, CPUs/2) | vessels measured in parallel: one process per label/component job, 1 = one at a time (VMTK is memory-hungry). On SGE, N > 1 requests `-pe smp N` |
 | `--skip-existing` | off | skip when `case_metrics_donut_tree.xlsx` exists |
@@ -645,6 +706,7 @@ The parameters that move the numbers most (change them with `with_params`):
 | `LESION_REFERENCE_METHOD` | `interpolated` | the lesion table's healthy reference: proximal + distal windows interpolated, or `proximal` (§6.3) |
 | `LESION_PROXIMAL_REFERENCE_WINDOW_MM` / `LESION_REFERENCE_EXCLUDE_END_MM` | (2, 10) / 3 | the reference windows' distance from the lesion (mirrored downstream), kept clear of the path ends |
 | `LESION_REFERENCE_DISAGREEMENT_FRACTION` | 0.25 | proximal vs distal median gap that flags `reference_inconsistent` |
+| `HYPOPLASIA_MAIN_VESSELS` | ICAs, BASILAR, MCAs, ACAs, PCA P1/P2 | the vessels whose absence is a `hypoplasia` lesion (§6.3) |
 | `SIPHON_CURVATURE_SMOOTH_MM` / `SIPHON_KAPPA_THRESHOLD` / `SIPHON_DILATION_MM` | 3 / 0.20 / 5 | the siphon mask (§4) |
 | `MIN_CENTERLINE_PATH_LENGTH_MM` | 7.5 | which paths exist at all |
 | `PROCESS_ALL_CONNECTED_COMPONENTS` / `BRIDGE_LABEL_GAPS_BEFORE_CENTERLINES` | False / False | fragment handling (cow parity) |

@@ -50,6 +50,8 @@ FASTSURFER_TOOL_IDS: frozenset[str] = frozenset({
     "fastsurfer_reduce_aseg",
     "fastsurfer_conform",
     "fastsurfer_install_freesurfer",
+    "fastsurfer_spectral_sphere",
+    "fastsurfer_topology_chain",
 })
 
 #: Tools that only make sense in this GUI session (they read local folders or install
@@ -311,6 +313,13 @@ def load_subject(viewer: Any, subject_dir: Path, *, keys: tuple[str, ...] | None
 
 def run_fastsurfer_tool(tool_id: str, viewer: Any, layer: Any, params: dict[str, Any]) -> None:
     """Run one FastSurfer tool of the Tools panel; outputs are added to *viewer*."""
+    from nvitk.gui.tools.freesurfer_tools import FASTSURFER_TOPOLOGY_IDS
+
+    if tool_id in FASTSURFER_TOPOLOGY_IDS:
+        from nvitk.gui.tools.freesurfer_tools import run_freesurfer_tool
+
+        run_freesurfer_tool(tool_id, viewer, layer, params)
+        return
     if tool_id == "fastsurfer_install_freesurfer":
         _install_freesurfer(params)
         return

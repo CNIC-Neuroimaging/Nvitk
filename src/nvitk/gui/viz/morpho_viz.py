@@ -19,6 +19,7 @@ from nvitk.core.logger import Logger
 from nvitk.gui.core.spatial import layer_spacing, layer_spatial_kwargs
 from nvitk.gui.viz.layers import install_points_style_sync
 from nvitk.gui.viz.left_dock import attach_left_inspection_dock
+from nvitk.measure.morpho.export_utils.report import aggregate_summary_by_vessel as _aggregate_summary_by_vessel
 from nvitk.pipes.qvtpy.util.eicab.morpho_paths import STAGE7_SKIP_MARKER
 
 log = Logger()
@@ -32,6 +33,7 @@ MORPHO_LESIONS_LAYER = "Morpho lesions"
 LESION_COLOURS: dict[str, tuple[float, float, float]] = {
     "stenosis": (0.93, 0.33, 0.10),
     "enlargement": (0.20, 0.50, 0.95),
+    "hypoplasia": (0.62, 0.40, 0.85),  # an absent vessel: no point is drawn (lesions table only)
 }
 
 _COLOR_BY_ARRAYS: dict[str, tuple[str, ...]] = {
@@ -83,39 +85,6 @@ _VOLUMETRY_MERGE_COLS: tuple[str, ...] = (
     "surface_area_mm2",
     "equivalent_radius_mm",
     "input_volume_mm3",
-)
-
-# Aggregation: length-weighted means for continuous metrics; max / sum for stenosis.
-_AGG_MEAN_COLS: tuple[str, ...] = (
-    "radius_mean_mm",
-    "radius_std_mm",
-    "radius_cv",
-    "radius_p05_mm",
-    "radius_p50_mm",
-    "radius_p95_mm",
-    "taper_slope_mm_per_mm",
-    "tortuosity_dm",
-    "curvature_mean_1_per_mm",
-    "curvature_median_1_per_mm",
-    "curvature_p95_1_per_mm",
-    "curvature_mean",
-)
-_AGG_MAX_COLS: tuple[str, ...] = (
-    "curvature_max_1_per_mm",
-    "stenosis_percent_max",
-    "degree_of_stenosis_pct",
-    "stenosis_percent",
-    "radius_max_enlarged_mm",
-    "enlargement_percent_max",
-)
-_AGG_MIN_COLS: tuple[str, ...] = (
-    "radius_min_stenotic_mm",
-)
-_AGG_SUM_COLS: tuple[str, ...] = (
-    "stenosis_length_total_mm",
-    "stenosis_segments_n",
-    "enlargement_length_total_mm",
-    "enlargement_segments_n",
 )
 
 
@@ -310,77 +279,7 @@ def _merge_volumetry(summary: pd.DataFrame, excel: Path) -> pd.DataFrame:
     return summary[keep].merge(vol[cols].drop_duplicates("vessel_name"), on="vessel_name", how="left")
 
 
-def _aggregate_summary_by_vessel(df: pd.DataFrame) -> pd.DataFrame:
-    """Collapse multiple path / component rows into one row per vessel_name.
 
-    Morphometrics can emit several paths (tree arms) or CCs for the same vessel
-    id; the GUI table should show one measure set per vessel.
-    """
-    if df.empty or "vessel_name" not in df.columns:
-        return df
-    key = "vessel_name"
-    if df[key].astype(str).nunique(dropna=False) == len(df):
-        return df
-
-    rows: list[dict[str, Any]] = []
-    for name, g in df.groupby(key, dropna=False, sort=False):
-        row: dict[str, Any] = {key: name}
-        if "full_name" in g.columns:
-            fn = g["full_name"].dropna().astype(str)
-            row["full_name"] = fn.iloc[0] if len(fn) else str(name)
-        length = pd.to_numeric(g.get("length_mm"), errors="coerce")
-        length_sum = float(length.fillna(0.0).sum())
-        row["length_mm"] = length_sum
-        weights = length.fillna(0.0).to_numpy(dtype=np.float64)
-        w_sum = float(weights.sum())
-
-        def _weighted_mean(col: str) -> float:
-            """Length-weighted mean of *col* over the group (plain nanmean if weights sum to ~0)."""
-            if col not in g.columns:
-                return float("nan")
-            vals = pd.to_numeric(g[col], errors="coerce").to_numpy(dtype=np.float64)
-            if w_sum > 1e-9 and np.isfinite(vals).any():
-                m = np.isfinite(vals) & (weights > 0)
-                if m.any():
-                    return float(np.average(vals[m], weights=weights[m]))
-            return float(np.nanmean(vals)) if np.isfinite(vals).any() else float("nan")
-
-        def _max(col: str) -> float:
-            """Max finite value of *col* over the group, or NaN if none are finite."""
-            if col not in g.columns:
-                return float("nan")
-            vals = pd.to_numeric(g[col], errors="coerce").to_numpy(dtype=np.float64)
-            return float(np.nanmax(vals)) if np.isfinite(vals).any() else float("nan")
-
-        def _min(col: str) -> float:
-            """Min finite value of *col* over the group, or NaN if none are finite."""
-            if col not in g.columns:
-                return float("nan")
-            vals = pd.to_numeric(g[col], errors="coerce").to_numpy(dtype=np.float64)
-            return float(np.nanmin(vals)) if np.isfinite(vals).any() else float("nan")
-
-        def _sum(col: str) -> float:
-            """Sum of finite values of *col* over the group, or NaN if none are finite."""
-            if col not in g.columns:
-                return float("nan")
-            vals = pd.to_numeric(g[col], errors="coerce").to_numpy(dtype=np.float64)
-            return float(np.nansum(vals)) if np.isfinite(vals).any() else float("nan")
-
-        for col in _AGG_MEAN_COLS:
-            if col in g.columns:
-                row[col] = _weighted_mean(col)
-        for col in _AGG_MAX_COLS:
-            if col in g.columns:
-                row[col] = _max(col)
-        for col in _AGG_MIN_COLS:
-            if col in g.columns:
-                row[col] = _min(col)
-        for col in _AGG_SUM_COLS:
-            if col in g.columns:
-                row[col] = _sum(col)
-        row["n_paths"] = int(len(g))
-        rows.append(row)
-    return pd.DataFrame(rows)
 
 
 def _load_vtp_surface(path: Path) -> tuple[np.ndarray, np.ndarray]:
@@ -544,7 +443,13 @@ def add_morpho_lesion_points(
     for lyr in list(viewer.layers):
         if lyr.name == MORPHO_LESIONS_LAYER:
             viewer.layers.remove(lyr)
-    data = _vtp_mm_to_data(df[["x_mm", "y_mm", "z_mm"]].to_numpy(dtype=float), reference_layer)
+    xyz = np.array(df[["x_mm", "y_mm", "z_mm"]].apply(pd.to_numeric, errors="coerce"), dtype=float)  # writable
+    # One point per lesions.csv row (the index is the lesion's); a hypoplasia — an absent vessel — has
+    # no position: it sits hidden on a finite placeholder so the layer's extent stays sound.
+    located = np.isfinite(xyz).all(axis=1)
+    if not located.all():
+        xyz[~located] = xyz[located].mean(axis=0) if located.any() else 0.0
+    data = _vtp_mm_to_data(xyz, reference_layer)
     conf = pd.to_numeric(df.get("confidence"), errors="coerce").fillna(0.5).to_numpy(dtype=float)
     kind = df.get("kind", pd.Series(["stenosis"] * len(df))).astype(str).to_numpy()
     rgba = np.asarray([[*LESION_COLOURS.get(k, (0.6, 0.6, 0.6)), 0.35 + 0.65 * float(np.clip(c, 0, 1))]
@@ -566,10 +471,13 @@ def add_morpho_lesion_points(
         **_overlay_kwargs(reference_layer),
     }
     try:
-        return viewer.add_points(data.astype(np.float64), **kwargs)
+        layer = viewer.add_points(data.astype(np.float64), **kwargs)
     except TypeError:
         kwargs.pop("border_color", None)
-        return viewer.add_points(data.astype(np.float64), **kwargs)
+        layer = viewer.add_points(data.astype(np.float64), **kwargs)
+    if not located.all():
+        layer.shown = located
+    return layer
 
 
 def install_morphometrics_viz(

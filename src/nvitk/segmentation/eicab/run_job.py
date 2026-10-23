@@ -37,7 +37,19 @@ def main(argv: list[str] | None = None) -> int:
         "--post-process-eicab",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Otsu ICA resegment + region growing after eICAB.",
+        help="eICAB post-process after eICAB (re-segment, extend the trunks, siphon cuts).",
+    )
+    p.add_argument(
+        "--eicab-pp-siphon",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Include the ICA siphon correction in the post-process.",
+    )
+    p.add_argument(
+        "--eicab-pp-distal",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Grow the ACAs / MCAs / PCAs / SCAs distally in the post-process.",
     )
     p.add_argument(
         "--backend",
@@ -63,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.post_process_eicab:
             from nvitk.pipes.qvtpy.util.eicab.eicab_postprocess import postprocess_eicab_directory
 
-            postprocess_eicab_directory(args.output)
+            postprocess_eicab_directory(args.output, siphon=args.eicab_pp_siphon, distal=args.eicab_pp_distal)
     except Exception as exc:
         log.error("run_job failed: %s", exc)
         raise

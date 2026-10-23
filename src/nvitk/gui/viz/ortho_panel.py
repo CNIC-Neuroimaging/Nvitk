@@ -16,13 +16,19 @@ The four panes are resizable (:class:`PaneGrid`): drag the gap between two rows
 or two columns, double-click a gap to even them out, double-click a view's title
 to see that view alone (and again to come back). The sizes are kept for the next
 session.
+
+A 2D image (a plain 2D layer, or a positioned slice one voxel thick) is shown in
+the first (axial) view when it is the active layer, with the layers on its grid
+drawn over it; the other two views stand empty. ``Projection`` swaps the slices of
+a volume for a maximum / minimum / mean intensity projection along each view's
+axis, over the whole volume or a slab centred on the crosshair.
 """
 
 from __future__ import annotations
 
 import functools
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import Any, Sequence
 
 import numpy as np
@@ -32,6 +38,7 @@ from qtpy.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -121,6 +128,19 @@ _VIEW_CELLS = ((0, 0), (0, 1), (1, 0))
 
 #: Default cine rate of the time/energy play button.
 _PLAY_FPS = 8
+
+#: Projections the views can show instead of a slice (key → description).
+PROJECTIONS: dict[str, str] = {
+    "max": "Maximum intensity projection",
+    "min": "Minimum intensity projection",
+    "mean": "Average intensity projection",
+}
+#: Short names, for the menu and the view titles.
+_PROJECTION_SHORT: dict[str, str] = {"max": "MIP", "min": "MinIP", "mean": "AIP"}
+#: Projections kept per layer (axis × slab), oldest dropped first.
+_PROJECTION_CACHE_SIZE = 12
+#: Above this many voxels a projection is reduced in parallel chunks.
+_PROJECTION_CHUNK_VOXELS = 16_000_000
 
 #: How close to a crosshair line a press must be to grab it, and how far from the
 #: centre it must be for that grab to mean "rotate" rather than "move".
@@ -457,6 +477,10 @@ class RenderSource:
     #: ``(max_id + 1, 4)`` uint8 lookup built once per style refresh, so a slice
     #: render is a single fancy-index instead of a per-slice unique + rebuild.
     label_table: np.ndarray | None = None
+    #: Projections of ``data`` by ``(axis, kind, slab start, slab end)``. Kept here so
+    #: they live exactly as long as the data they were made from: an edit or a new time
+    #: point builds a new source, and with it an empty cache.
+    projections: dict[tuple, np.ndarray] = field(default_factory=dict)
 
 
 #: The only layer types the panel draws. Shapes, Points, Vectors, Surfaces and
@@ -548,7 +572,40 @@ def is_drawable_layer(layer: Any) -> bool:
     if _PLANE_LAYER_SUFFIX in name or _BOX_LAYER_SUFFIX in name:
         return False
     shape = _layer_shape(layer)
-    return shape is not None and len(shape) >= 3
+    # Two axes: a plain 2D image, drawn as a one-slice stack (see _is_plain_2d).
+    return shape is not None and len(shape) >= 2
+
+
+def _is_plain_2d(layer: Any) -> bool:
+    """A plain 2D image or labels layer, with no third axis at all: a photo, a plain TIFF,
+    a 2D tool output. A 2D slice with a real position is a one-voxel-thick 3D layer
+    instead (see :func:`flat_axis`)."""
+    if type(layer).__name__ not in DRAWN_LAYER_TYPES or bool(getattr(layer, "rgb", False)):
+        return False
+    shape = _layer_shape(layer)
+    return shape is not None and len(shape) == 2
+
+
+def flat_axis(layer: Any) -> int | None:
+    """The axis a 2D image lies across in the panel's 3D layout; ``None`` for a volume.
+
+    ``0`` for a plain 2D layer (drawn as a one-slice stack); for a positioned slice — one
+    spatial axis one voxel thick, a 2D+t series included — that axis.
+    """
+    if _is_plain_2d(layer):
+        return 0
+    if not is_drawable_layer(layer):
+        return None
+    spatial = _spatial_shape(layer)
+    if spatial is None:
+        return None
+    thin = [i for i, n in enumerate(spatial) if int(n) == 1]
+    return thin[0] if len(thin) == 1 else None
+
+
+def is_flat_layer(layer: Any) -> bool:
+    """Whether *layer* is a 2D image the panel shows in its first view (:func:`flat_axis`)."""
+    return flat_axis(layer) is not None
 
 
 def is_volume_layer(layer: Any) -> bool:
@@ -582,6 +639,8 @@ def _layer_volume(layer: Any, time_index: int = 0) -> np.ndarray | None:
         arr = to_numpy(label_source_data(layer) if is_label_like_layer(layer) else layer.data)
     except Exception:  # noqa: BLE001
         return None
+    if arr.ndim == 2 and _is_plain_2d(layer):
+        return arr[None]  # a one-slice stack: a view, axis 0 across the image
     if arr.ndim == 4:
         axis = layer_time_axis(layer)
         axis = arr.ndim - 1 if axis is None else axis
@@ -674,6 +733,66 @@ def _slice_of(data: np.ndarray, axis: int, index: int) -> np.ndarray:
     n = int(data.shape[axis])
     idx = int(np.clip(index, 0, max(n - 1, 0)))
     return data[_axis_index(data.ndim, axis, idx)]
+
+
+def project_volume(
+    data: np.ndarray,
+    axis: int,
+    kind: str,
+    lo: int | None = None,
+    hi: int | None = None,
+    *,
+    label: bool = False,
+) -> np.ndarray:
+    """*data* projected along *axis* over the slab ``[lo, hi)`` (the whole axis when ``None``).
+
+    *kind*: ``"max"`` (MIP), ``"min"`` (MinIP) or ``"mean"`` (average). A label volume
+    (*label*) always takes the highest id along the ray, so a projected mask shows every
+    structure in it. Large slabs are reduced in parallel chunks across the plane.
+    """
+    axis = int(axis)
+    n = int(data.shape[axis])
+    lo = 0 if lo is None else int(np.clip(lo, 0, max(n - 1, 0)))
+    hi = n if hi is None else int(np.clip(hi, lo + 1, n))
+    slab = data[tuple(slice(lo, hi) if d == axis else slice(None) for d in range(data.ndim))]
+    mode = "max" if label else str(kind)
+
+    def _reduce(block: np.ndarray) -> np.ndarray:
+        """One block's projection along *axis*."""
+        if mode == "max":
+            return block.max(axis=axis)
+        if mode == "min":
+            return block.min(axis=axis)
+        return block.mean(axis=axis, dtype=np.float32)
+
+    if slab.size <= _PROJECTION_CHUNK_VOXELS:
+        return _reduce(slab)
+    # Split across the plane's first axis: the reductions release the GIL, so the
+    # chunks run concurrently.
+    split = next(d for d in range(slab.ndim) if d != axis)
+    edges = np.linspace(0, int(slab.shape[split]), 9).astype(int)
+    blocks = [
+        slab[tuple(slice(a, b) if d == split else slice(None) for d in range(slab.ndim))]
+        for a, b in zip(edges[:-1], edges[1:]) if b > a
+    ]
+    parts = parallel_map(_reduce, blocks)
+    return np.concatenate(parts, axis=split - (1 if split > axis else 0))
+
+
+def _flat_views(layer: Any, axis: int, viewer: Any = None) -> list[AxisView]:
+    """The views for a 2D image: its own plane first (drawn in the first, axial pane),
+    then the two views that stand empty."""
+    if _is_plain_2d(layer):
+        # Drawn as stored, the way Napari shows a 2D layer: rows down, columns across.
+        return [
+            AxisView(axis=0, title="2D image", rows=1, cols=2),
+            AxisView(axis=1, title="—", rows=0, cols=2),
+            AxisView(axis=2, title="—", rows=0, cols=1),
+        ]
+    views = _axis_views(layer, viewer)
+    head = next(v for v in views if v.axis == axis)
+    rest = [v for v in views if v.axis != axis]
+    return [replace(head, title=f"2D image  ·  {head.title}"), *rest]
 
 
 #: Guards every panel's shared reordered-slice budget across render threads.
@@ -2530,6 +2649,9 @@ class OrthoViewerPanel(QWidget):
         #: Current time point for 3D+t layers, and how many the drawn layers have.
         self._time = 0
         self._n_time = 1
+        #: The axis a bound 2D image lies across (shown in the first view only), or
+        #: ``None`` for a volume.
+        self._flat_axis: int | None = None
         #: Per-layer choices from the layers table, keyed by ``id(layer)``:
         #: which layers get a slice image in 3D, and which ones the cut opens.
         self._plane_choice: dict[int, bool] = {}
@@ -2648,6 +2770,53 @@ class OrthoViewerPanel(QWidget):
         self._time_box = QWidget()
         self._time_box.setLayout(time_row)
         self._time_box.setVisible(False)
+
+        # Projection row: the three views show a projection of the volume along their
+        # own axis instead of a slice — the whole volume, or a slab on the crosshair.
+        proj_row = QHBoxLayout()
+        proj_row.setContentsMargins(0, 0, 0, 0)
+        proj_row.setSpacing(SPACE_TIGHT)
+        self._proj_btn = QPushButton("Projection")
+        self._proj_btn.setCheckable(True)
+        self._proj_btn.setToolTip(
+            "Show a projection of the volume in the three views instead of slices: along "
+            "each view's own axis, with the type picked next to it. Label layers are "
+            "projected by their highest id. Drawing in the views is off meanwhile."
+        )
+        self._proj_kind = QComboBox()
+        for key, text in PROJECTIONS.items():
+            self._proj_kind.addItem(_PROJECTION_SHORT[key], key)
+            self._proj_kind.setItemData(self._proj_kind.count() - 1, text, Qt.ItemDataRole.ToolTipRole)
+        self._proj_kind.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        stored_kind = str(stored.get("projection", "max"))
+        self._proj_kind.setCurrentIndex(max(self._proj_kind.findData(stored_kind), 0))
+        self._proj_kind.setToolTip("Projection type: MIP (maximum), MinIP (minimum), AIP (average).")
+        self._proj_slab = QDoubleSpinBox()
+        self._proj_slab.setRange(0.0, 1000.0)
+        self._proj_slab.setDecimals(1)
+        self._proj_slab.setSingleStep(1.0)
+        self._proj_slab.setSuffix(" mm")
+        self._proj_slab.setSpecialValueText("full")
+        self._proj_slab.setMinimumWidth(self._proj_slab.fontMetrics().horizontalAdvance("000.0 mm") + 40)
+        self._proj_slab.setValue(float(stored.get("projection_slab_mm", 0.0) or 0.0))
+        self._proj_slab.setToolTip(
+            "Slab thickness, centred on the crosshair (a thin-slab projection that follows "
+            "the slice). 0 (full): the whole volume along the view's axis."
+        )
+        self._proj_btn.toggled.connect(self._on_projection_changed)
+        self._proj_kind.currentIndexChanged.connect(lambda _i: self._on_projection_changed())
+        self._proj_slab.valueChanged.connect(lambda _v: self._on_projection_changed())
+        # The panel docks as narrow as 360 px: the button keeps its full text.
+        self._proj_btn.setMinimumWidth(self._proj_btn.sizeHint().width())
+        proj_row.addWidget(self._proj_btn)
+        proj_row.addWidget(self._proj_kind)
+        slab_label = QLabel("slab")
+        slab_label.setStyleSheet(f"color: {COLOR_MUTED};")
+        proj_row.addWidget(slab_label)
+        proj_row.addWidget(self._proj_slab)
+        proj_row.addStretch(1)
+        self._proj_box = QWidget()
+        self._proj_box.setLayout(proj_row)
         try:
             viewer.dims.events.current_step.connect(self._on_viewer_dims)
         except Exception:  # noqa: BLE001 — a viewer without dims events has no time to follow
@@ -2721,6 +2890,7 @@ class OrthoViewerPanel(QWidget):
         root.setSpacing(SPACE_TIGHT)
         root.addWidget(self._status)
         root.addWidget(self._draw_hint)
+        root.addWidget(self._proj_box)
         root.addWidget(self._time_box)
         root.addWidget(self._panes, stretch=1)
 
@@ -2884,14 +3054,15 @@ class OrthoViewerPanel(QWidget):
     def refresh_from_layer(self, layer: Any | None) -> None:
         """Bind *layer* and redraw all three views, or show why it cannot be shown."""
         usable = layer is not None and getattr(layer, "data", None) is not None
-        if usable and int(getattr(layer.data, "ndim", 0)) not in (3, 4):
+        if usable and int(getattr(layer.data, "ndim", 0)) not in (3, 4) and not _is_plain_2d(layer):
             usable = False
         if not usable:
             if self._play_btn.isChecked():
                 self._play_btn.setChecked(False)
             self._layer = None
             self._data = None
-            self._status.setText("Select a 3D or 3D+t image or labels layer.")
+            self._flat_axis = None
+            self._status.setText("Select a 2D, 3D or 3D+t image or labels layer.")
             for view in self._slice_views:
                 view.set_slice(None, index=0, count=1)
             return
@@ -2915,9 +3086,18 @@ class OrthoViewerPanel(QWidget):
         self._data = _layer_volume(layer, self._time)
         if self._data is None:
             self._layer = None
-            self._status.setText("This layer has no 3D volume to show.")
+            self._flat_axis = None
+            self._status.setText("This layer has no image to show.")
             return
-        self._views = _axis_views(layer, self._viewer)
+        # A 2D image goes in the first (axial) view; the other two stand empty.
+        self._flat_axis = flat_axis(layer)
+        self._views = (
+            _flat_views(layer, self._flat_axis, self._viewer)
+            if self._flat_axis is not None
+            else _axis_views(layer, self._viewer)
+        )
+        # A projection needs a volume.
+        self._proj_box.setEnabled(self._flat_axis is None)
         # Keep what stays valid. On the same grid the rendered slices are the
         # ones already on screen, so clearing them would force a redraw that
         # reproduces them exactly — and resetting the crosshair below would
@@ -2998,7 +3178,14 @@ class OrthoViewerPanel(QWidget):
         far too heavy to run per slice, and this way hiding and re-showing an
         off-grid mask costs nothing.
         """
-        if self._layer is None or _same_grid(layer, self._layer):
+        if self._layer is None:
+            return data, False
+        if _is_plain_2d(layer) or _is_plain_2d(self._layer):
+            # A plain 2D image has no placement to align by: it overlays only another
+            # plain 2D image of the same size, and is never resampled (nor reported).
+            same = _is_plain_2d(layer) and _is_plain_2d(self._layer) and data.shape == self._data.shape
+            return (data if same else None), False
+        if _same_grid(layer, self._layer):
             return data, False
         if not self._resample_offgrid:
             self._offgrid_skipped.append(str(getattr(layer, "name", "?")))
@@ -3451,10 +3638,20 @@ class OrthoViewerPanel(QWidget):
         interpolation (see :func:`composite_runs`)."""
         index = self._position[view.axis]
         oblique = self.is_oblique()
+        projection = self._active_projection()
         drawn = [source for source in self._sources if source.opacity > 0.0]
 
         def _rgba(source: RenderSource) -> np.ndarray:
             """One layer's slice for this view, as RGBA (thread-safe: pure NumPy)."""
+            if projection is not None:
+                plane = _oriented(self._projected(source, view.axis, index, projection), view.axis, view)
+                if source.is_label:
+                    return _label_rgba(plane, source.layer, source.lut, source.label_table)
+                table = (
+                    source.table if source.table is not None
+                    else colormap_table(layer_colormap(source.layer), source.gamma)
+                )
+                return image_rgba(plane, source.contrast, table)
             if oblique:
                 plane = self._resample(view, view_index, source.data, source.order)
                 return (
@@ -3502,18 +3699,33 @@ class OrthoViewerPanel(QWidget):
             self._label_editor.overlays()
         except Exception:  # noqa: BLE001 — an overlay must never stop the views
             pass
+        flat = self._flat_axis is not None
+        projection = self._active_projection()
+        suffix = "  ·  oblique" if oblique else ""
+        if projection is not None:
+            suffix = f"  ·  {self._projection_label(projection)}"
         todo: list[int] = []
         for position, (widget, view) in enumerate(zip(self._slice_views, self._views)):
             widget._view = view
-            widget._title.setText(view.title + ("  ·  oblique" if oblique else ""))
+            if flat and position > 0:
+                # A 2D image has a single plane, drawn in the first view.
+                widget._title.setText("—  (2D image)")
+                widget.set_lines([])
+                if force or self._rendered.get(view.axis) != -1:
+                    self._rendered[view.axis] = -1
+                    widget.set_slice(None, index=0, count=1)
+                continue
+            widget._title.setText(view.title + suffix)
             index = self._position[view.axis]
-            widget.set_lines(self._crosshair_lines(position))
+            widget.set_lines([] if flat else self._crosshair_lines(position))
+            # A whole-volume projection is the same picture at every index.
+            key = -2 if projection is not None and self._proj_slab.value() <= 0 else index
             # A turned plane moves with the crosshair in every direction, so the
             # "same index, skip the redraw" shortcut no longer holds.
-            if force or oblique or self._rendered.get(view.axis) != index:
-                self._rendered[view.axis] = index
+            if force or oblique or self._rendered.get(view.axis) != key:
+                self._rendered[view.axis] = key
                 todo.append(position)
-            else:
+            elif not flat:
                 # Same slice, new crosshair: repaint the lines, keep the image.
                 widget.set_crosshair(view.to_pixel(self._position, self._data.shape))
         if not todo:
@@ -3534,8 +3746,57 @@ class OrthoViewerPanel(QWidget):
                 index=self._position[view.axis],
                 count=int(self._data.shape[view.axis]),
                 aspect=aspect,
-                crosshair=view.to_pixel(self._position, self._data.shape),
+                crosshair=None if flat else view.to_pixel(self._position, self._data.shape),
             )
+
+    # ── projection ───────────────────────────────────────────────────────────
+
+    def _active_projection(self) -> str | None:
+        """The projection the views show (``"max"`` / ``"min"`` / ``"mean"``), or ``None``
+        for slices — always ``None`` on a 2D image."""
+        if self._flat_axis is not None or not self._proj_btn.isChecked():
+            return None
+        return str(self._proj_kind.currentData() or "max")
+
+    def _projection_label(self, kind: str) -> str:
+        """View-title wording: ``MIP``, or ``MIP 10 mm`` for a slab."""
+        slab = float(self._proj_slab.value())
+        short = _PROJECTION_SHORT.get(kind, kind)
+        return f"{short} {slab:g} mm" if slab > 0 else short
+
+    def _projected(self, source: RenderSource, axis: int, index: int, kind: str) -> np.ndarray:
+        """*source* projected along *axis*: the whole axis, or the slab on *index*.
+
+        Cached on the source, so a whole-volume projection is computed once per layer and
+        axis, and scrolling a slab recomputes only that slab.
+        """
+        n = int(source.data.shape[axis])
+        lo = hi = None
+        slab_mm = float(self._proj_slab.value())
+        if slab_mm > 0:
+            count = max(1, int(round(slab_mm / max(float(self._spacing[axis]), 1e-6))))
+            lo = int(np.clip(int(index) - count // 2, 0, max(n - 1, 0)))
+            hi = int(min(lo + count, n))
+        key = (int(axis), kind, lo, hi)
+        cache = source.projections
+        hit = cache.get(key)
+        if hit is None:
+            hit = project_volume(source.data, axis, kind, lo, hi, label=source.is_label)
+            while len(cache) >= _PROJECTION_CACHE_SIZE:
+                cache.pop(next(iter(cache)))
+            cache[key] = hit
+        return hit
+
+    def _on_projection_changed(self, *_args: Any) -> None:
+        """Projection on / off, or its type or slab changed: redraw the three views."""
+        _save_ortho_pref("projection", str(self._proj_kind.currentData() or "max"))
+        _save_ortho_pref("projection_slab_mm", float(self._proj_slab.value()))
+        if self._active_projection() is not None and self.is_oblique():
+            # A projection runs along the volume's own axes.
+            self._frames = list(self._base_frames)
+        self._rendered.clear()
+        self._redraw(force=True)
+        self._label_editor.refresh()
 
     # ── interaction ──────────────────────────────────────────────────────────
 
@@ -3552,6 +3813,8 @@ class OrthoViewerPanel(QWidget):
         """Place the crosshair from a click inside the view at *view_index*."""
         if self._data is None or view_index >= len(self._views):
             return
+        if self._flat_axis is not None and view_index > 0:
+            return  # an empty view of a 2D image
         view = self._views[view_index]
         row_axis, row_value, col_axis, col_value = view.to_voxel(row, col, self._data.shape)
         self._position[row_axis] = row_value
@@ -3593,6 +3856,8 @@ class OrthoViewerPanel(QWidget):
         """
         if self._data is None or view_index >= len(self._frames):
             return
+        if self._flat_axis is not None or self._active_projection() is not None:
+            return  # a 2D image has no planes to turn; a projection runs along the axes
         others = self._other_views(view_index)
         if line >= len(others):
             return
@@ -3707,7 +3972,7 @@ class OrthoViewerPanel(QWidget):
 
     def _on_show_planes(self, enabled: bool) -> None:
         """Add or remove the 3D cut layers on the canvas."""
-        if self._layer is None:
+        if self._layer is None or _is_plain_2d(self._layer):
             return
         if not enabled:
             self._remove_all_planes()
@@ -3926,7 +4191,7 @@ class OrthoViewerPanel(QWidget):
 
     def _sync_planes(self) -> None:
         """Move the 3D cuts to the crosshair, if they are showing."""
-        if self._layer is None or not self._show_planes.isChecked():
+        if self._layer is None or not self._show_planes.isChecked() or _is_plain_2d(self._layer):
             return
         try:
             self._draw_cuts()
@@ -3941,8 +4206,8 @@ class OrthoViewerPanel(QWidget):
         covering the very interior the cut was made to expose. The layers table
         takes any of them out — keep a mask whole while the CT around it opens.
         """
-        if self._layer is None:
-            return
+        if self._layer is None or _is_plain_2d(self._layer):
+            return  # a plain 2D image has nothing to cut in 3D
         side = str(self._clip_side.currentData() or "off")
         axis_data = self._clip_axis.currentData()
         axis = int(axis_data) if axis_data is not None else 0
@@ -4058,6 +4323,13 @@ class OrthoViewerPanel(QWidget):
         if self._layer is None or self._data is None:
             return
         name = getattr(self._layer, "name", "layer")
+        if self._flat_axis is not None:
+            plane = [int(v) for i, v in enumerate(self._data.shape) if i != self._flat_axis]
+            extra = ""
+            if layer_time_axis(self._layer) is not None:
+                extra = f"  ·  2D+t, {layer_time_count(self._layer)} time points"
+            self._status.setText(f"{name} - 2D image, {' x '.join(map(str, plane))} pixels{extra}")
+            return
         shape = " x ".join(str(int(v)) for v in self._data.shape)
         extra = ""
         if layer_time_axis(self._layer) is not None:
@@ -4207,14 +4479,15 @@ def attach_ortho_dock(viewer: Any, panel: OrthoViewerPanel) -> Any:
         # rotation every time those were drawn.
         if active is None and panel.bound_layer() is not None:
             return
-        # Nor is selecting something that is not a volume — a localizer, a single
-        # tracker slice, a screen capture. Binding one makes it the grid every
-        # other layer is resampled onto (a one-voxel slab), or blanks the panel;
-        # the volume already on screen is what the user still wants to look at.
+        # Nor is selecting something that is neither a volume nor a 2D image —
+        # shapes, points, a mesh, a colour capture: the volume already on screen is
+        # what the user still wants to look at. A 2D image (a plain 2D layer, a
+        # localizer, a single tracker slice) is shown in the first view.
         bound = panel.bound_layer()
         if (
             active is not None
             and not is_volume_layer(active)
+            and not is_flat_layer(active)
             and bound is not None
             and bound in viewer.layers
         ):
@@ -4245,7 +4518,11 @@ def attach_ortho_dock(viewer: Any, panel: OrthoViewerPanel) -> Any:
 
 
 __all__ = [
+    "PROJECTIONS",
     "copy_plane_style",
+    "flat_axis",
+    "is_flat_layer",
+    "project_volume",
     "layer_time_axis",
     "layer_time_count",
     "colormap_table",

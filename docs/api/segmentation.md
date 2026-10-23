@@ -12,6 +12,7 @@ lightweight in-process algorithms to external-tool wrappers.
 | `mask_ops` | Boolean algebra over masks (union, intersection, subtract, xor, complement), and keeping or removing an image's voxels by a mask's labels (`apply_mask_to_image`: fill with a value, the image minimum or NaN; margin in mm; 3D mask over 3D+t images). |
 | `region_growing` | Seeded region growing. |
 | `blood_flood` | Flood-fill style vessel/blood-pool segmentation. |
+| `vessel_refine` | Refine a multilabel vessel mask against its image, vessel by vessel. `resegment_local` re-draws each label at its local half maximum (its own centreline and surrounding intensities, the other labels as barriers). `extend_trunks` takes a trunk to the image's floor along the minimum-cost path through a multi-scale Frangi tree (several branches allowed, e.g. both vertebrals), falling back to tube following. `grow_distal` grows several labels along the Frangi tree at once, in competition, with an optional hemisphere guard for paired vessels (`head_midplane_from_image`). `frangi_vesselness` is the same measure as scikit-image's Frangi, ~6× faster on the CPU (threaded Hessian, closed-form eigenvalues). GPU-aware (`setup()` backend): volume work runs with CuPy when the backend is GPU, the minimum-cost paths and skeletons on the host; label volumes come back on the active backend. Stage 1's eICAB post-process is built on these. |
 | `hull_edt` | Convex-hull / Euclidean-distance-transform based segmentation helpers. |
 | `protrusion_filter` | Removes small protrusions from a label. |
 
