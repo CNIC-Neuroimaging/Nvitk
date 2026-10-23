@@ -127,6 +127,6 @@ flood read as growth.
 ## Render times
 
 Manim re-rasterises every cube each frame, and the slow camera rotation means no frame can
-be cached. At 1080p30: blood flood (~1,800 cubes) ~45 min; siphon (~1,460 cubes, ~70 s) and
-eICAB post-process (~1,600 cubes, ~95 s) about an hour each. The `*_FAST=1` previews decimate the
+be cached. At 1080p30: blood flood (~1,800 cubes) ~45 min; siphon (~1,460 cubes, 58 s of video)
+and eICAB post-process (~1,600 cubes, 64 s) about 35 min each (both can render in parallel). The `*_FAST=1` previews decimate the
 cubes and shorten every beat.
