@@ -4,6 +4,3 @@
 [submodule "registry/models"]
 	path = registry/models
 	url = git@bioinfo-git.cnic.es:imarcoss/bioimaging-models.git
-[submodule ".nvitk"]
-	path = .nvitk
-	url = git@github.com:ignacio-ms/nvitk-config.git
