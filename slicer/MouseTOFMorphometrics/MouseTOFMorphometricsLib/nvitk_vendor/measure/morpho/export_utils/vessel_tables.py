@@ -176,6 +176,99 @@ def vessel_summary(
     return df[lead + [c for c in df.columns if c not in lead]].sort_values("label").reset_index(drop=True)
 
 
+def _neighbours(name: str, infos: Mapping[str, Any]) -> set[str]:
+    """The vessels *name* is joined to in the topology: its ``flow_from`` / ``flow_to`` and those
+    naming it in theirs."""
+    info = infos.get(name)
+    out: set[str] = set()
+    if info is not None:
+        out |= {str(getattr(info, "flow_from", "") or "")} | {str(v) for v in (getattr(info, "flow_to", None) or [])}
+    for other, oi in infos.items():
+        if other != name and (name == str(getattr(oi, "flow_from", "") or "")
+                              or name in [str(v) for v in (getattr(oi, "flow_to", None) or [])]):
+            out.add(other)
+    return {n for n in out if n and n != "systemic"}
+
+
+#: Below this fraction of the main vessels present, a mask is a part of the circle (a selection,
+#: a crop), not a whole one, and its absent vessels say nothing: no hypoplasia rows.
+HYPOPLASIA_MIN_PRESENT_FRACTION = 0.5
+
+
+def hypoplasia_rows(
+    vessels: pd.DataFrame,
+    mapping: Mapping[int, Any] | None,
+    voxels: Mapping[int, Any] | None = None,
+    *,
+    min_present_fraction: float = HYPOPLASIA_MIN_PRESENT_FRACTION,
+) -> list[dict[str, Any]]:
+    """One ``kind = "hypoplasia"`` lesion row per main vessel (``HYPOPLASIA_MAIN_VESSELS``) without
+    a measured mask / mesh: ``absent`` from the mask, or ``too_small`` when it has voxels (*voxels*,
+    label → input volumetry) but too few for a centerline.
+
+    Confidence 1.0 (high) when a topological neighbour is present — the territory is still
+    reached, so the absence is local — and 0.3 (low, ``neighbours_absent``) when none is, which
+    suggests a field-of-view or segmentation dropout. Flags name the common variants:
+    ``fetal_pca`` (a P1 absent, its PComm and P2 present) and ``a1_aplasia`` (an ACA absent, the
+    AComm and the other ACA present). The rows carry no location or path.
+
+    With fewer than *min_present_fraction* of the main vessels present the mask is taken for a
+    part of the circle (a label selection, a crop) and no row is made. With the profile's
+    ``PROCESS_SELECTED_TAGS_ONLY``, only the selected tags are checked.
+    """
+    if vessels.empty or not mapping:
+        return []
+    infos = {str(getattr(info, "name", f"label_{lid}")): info for lid, info in mapping.items()}
+    labels = {str(getattr(info, "name", f"label_{lid}")): int(lid) for lid, info in mapping.items()}
+    present = {str(n) for n, p in zip(vessels.get("vessel_name", []), vessels.get("present", [])) if bool(p)}
+    case_id = str(vessels["case_id"].dropna().iloc[0]) if "case_id" in vessels and vessels["case_id"].notna().any() else ""
+    main = [n for n in _cfg.HYPOPLASIA_MAIN_VESSELS if n in infos]
+    if getattr(_cfg, "PROCESS_SELECTED_TAGS_ONLY", False):
+        selected = {int(t) for t in getattr(_cfg, "SELECTED_TAGS", ())}
+        main = [n for n in main if labels[n] in selected]
+    if not main or sum(n in present for n in main) < float(min_present_fraction) * len(main):
+        return []
+    rows: list[dict[str, Any]] = []
+    for name in main:
+        if name in present:
+            continue
+        neigh = _neighbours(name, infos)
+        info_vox = (voxels or {}).get(labels[name]) or {}
+        n_vox = int(info_vox.get("n_voxels", 0)) if isinstance(info_vox, Mapping) else int(info_vox or 0)
+        flags = ["too_small" if n_vox > 0 else "absent"]
+        conf = 1.0 if neigh & present else 0.3
+        if conf < 1.0:
+            flags.append("neighbours_absent")
+        side = name[0] if name[:1] in ("L", "R") else ""
+        other = {"L": "R", "R": "L"}.get(side, "")
+        if name.endswith("PCA_P1") and {f"{side}PCOMM", f"{side}PCA_P2"} <= present:
+            flags.append("fetal_pca")
+        if name.endswith("ACA") and {"ACOMM", f"{other}ACA"} <= present:
+            flags.append("a1_aplasia")
+        rows.append({
+            **_identity(case_id, labels[name], infos[name]),
+            "kind": "hypoplasia", "segment": "", "path_id": "",
+            "length_mm": np.nan, "taper_percent": np.nan, "extreme_radius_mm": np.nan,
+            "reference_radius_mm": np.nan, "reference": "none",
+            "diameter_percent": np.nan, "area_percent": np.nan,
+            "confidence": conf, "confidence_class": "high" if conf >= 0.7 else ("moderate" if conf >= 0.4 else "low"),
+            "confidence_flags": ";".join(flags),
+            "x_mm": np.nan, "y_mm": np.nan, "z_mm": np.nan,
+        })
+    return rows
+
+
+def add_hypoplasia_columns(vessels: pd.DataFrame, rows: Iterable[Mapping[str, Any]]) -> pd.DataFrame:
+    """``hypoplasia`` (bool) and ``hypoplasia_confidence_class`` per vessel, from *rows*."""
+    if vessels.empty:
+        return vessels
+    by_name = {str(r["vessel_name"]): str(r["confidence_class"]) for r in rows}
+    out = vessels.copy()
+    out["hypoplasia"] = out["vessel_name"].astype(str).isin(by_name)
+    out["hypoplasia_confidence_class"] = out["vessel_name"].astype(str).map(by_name).fillna("")
+    return out
+
+
 #: Circle-of-Willis variant segments of the eICAB topology (vessel_name → variant name).
 _COW_VARIANT_VESSELS = {
     "LACA": "left_A1", "RACA": "right_A1", "ACOMM": "AComm",
@@ -211,6 +304,11 @@ def subject_summary(vessels: pd.DataFrame) -> pd.DataFrame:
     for kind in ("stenosis", "enlargement"):
         for col in (f"n_{kind}", f"n_{kind}_high_confidence"):
             row[f"total_{col}"] = int(np.nansum(present.get(col, pd.Series(dtype=float))))
+    if "hypoplasia" in vessels:
+        hyp = vessels["hypoplasia"].fillna(False).astype(bool)
+        row["total_n_hypoplasia"] = int(hyp.sum())
+        row["total_n_hypoplasia_high_confidence"] = int(
+            (hyp & (vessels.get("hypoplasia_confidence_class", pd.Series("", index=vessels.index)) == "high")).sum())
     for metric in ("main_length_mm", "diameter_median_mm", "tortuosity_dm", "curvature_mean_1_per_mm"):
         for pair, grp in present.groupby("pair"):
             if not pair or len(grp) != 2 or metric not in grp:
@@ -222,4 +320,4 @@ def subject_summary(vessels: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame([row])
 
 
-__all__ = ["component_tables", "subject_summary", "vessel_summary"]
+__all__ = ["add_hypoplasia_columns", "component_tables", "hypoplasia_rows", "subject_summary", "vessel_summary"]

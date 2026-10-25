@@ -22,7 +22,8 @@ from __future__ import annotations
 
 import re
 import sys
-from typing import Any
+import weakref
+from typing import Any, Callable
 
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QColor, QFont, QPalette
@@ -928,6 +929,35 @@ def _set_napari_theme(viewer: Any, name: str) -> None:
         pass
 
 
+#: Called after every theme switch: what restyling widget stylesheets cannot reach (Matplotlib
+#: canvases, custom-painted views). Weakly held, so a bound method dies with its widget.
+_THEME_LISTENERS: list[Any] = []
+
+
+def add_theme_listener(callback: Callable[[], Any]) -> None:
+    """Call *callback()* after every :func:`switch_theme` — for content drawn with the colour
+    tokens but outside any stylesheet, such as a Matplotlib figure that must be redrawn. A bound
+    method is held weakly (it goes with its object); a plain function is kept."""
+    if hasattr(callback, "__self__") and hasattr(callback, "__func__"):
+        _THEME_LISTENERS.append(weakref.WeakMethod(callback))
+    else:
+        _THEME_LISTENERS.append(lambda cb=callback: cb)
+
+
+def _notify_theme_listeners() -> None:
+    alive = []
+    for ref in _THEME_LISTENERS:
+        callback = ref()
+        if callback is None:
+            continue
+        alive.append(ref)
+        try:
+            callback()
+        except Exception:  # noqa: BLE001 — a listener on a widget mid-destruction
+            continue
+    _THEME_LISTENERS[:] = alive
+
+
 def switch_theme(name: str, *, viewer: Any = None, remember: bool = True) -> str:
     """Switch to *name* and repaint everything already on screen.
 
@@ -944,6 +974,7 @@ def switch_theme(name: str, *, viewer: Any = None, remember: bool = True) -> str
         mapping = _hex_mapping(THEMES[_ACTIVE_THEME], THEMES[target])
         set_theme(target)
         _restyle_live_widgets(mapping)
+        _notify_theme_listeners()
     _set_napari_theme(viewer, target)
     if remember:
         try:
@@ -1275,6 +1306,7 @@ def style_image_figure(fig: Any) -> None:
 
 __all__ = [
     "AXIS_COLORS",
+    "add_theme_listener",
     "COLOR_ACCENT",
     "COLOR_ACCENT_DEEP",
     "COLOR_ALT_ROW",

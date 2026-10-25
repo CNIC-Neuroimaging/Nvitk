@@ -22,16 +22,8 @@ from .centerline import (
 )
 from .centerline_siphon import (
     GenusReport,
-    SiphonCorrectionResult,
-    clean_ica_mask_after_centerline,
-    clean_mask_geodesic_cl,
-    compute_corrected_centerline,
     compute_mask_genus,
     correct_siphon_centerlines,
-    prune_skeleton_shortest_arc,
-    recover_lumen_thickness,
-    recover_lumen_thickness_symmetric,
-    refine_mask_lumen_gaps,
 )
 from .components import (
     keep_component_closest_to_center,
@@ -49,14 +41,10 @@ from .mst_bridge import (
 
 __all__ = [
     "GenusReport",
-    "SiphonCorrectionResult",
-    "clean_ica_mask_after_centerline",
-    "clean_mask_geodesic_cl",
     "close",
     "compute_centerline_branches",
     "compute_centerlines",
     "compute_connected_centerline_tree",
-    "compute_corrected_centerline",
     "unique_skeleton_edge_polylines",
     "compute_mask_genus",
     "correct_siphon_centerlines",
@@ -72,10 +60,6 @@ __all__ = [
     "draw_tube_3d",
     "fill_multilabel_gaps_mst",
     "open",
-    "prune_skeleton_shortest_arc",
-    "recover_lumen_thickness",
-    "recover_lumen_thickness_symmetric",
-    "refine_mask_lumen_gaps",
     "remove_small_components",
     "remove_small_components_by_fraction",
     "skeletonize_binary",

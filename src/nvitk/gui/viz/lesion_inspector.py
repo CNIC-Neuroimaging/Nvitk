@@ -63,6 +63,12 @@ FLAG_TEXT: dict[str, tuple[str, float]] = {
     "near_bifurcation": ("within {near_bif:g} mm of a junction", 0.5),
     "radius_disagreement": ("cross-section and inscribed radii disagree", 0.7),
     "cross_section_gaps": ("> 20 % of it has no cross-section", 0.8),
+    # Hypoplasia (absent main vessels): what was missing, and what the topology says.
+    "absent": ("absent from the mask (no flow signal: aplasia, severe hypoplasia or occlusion)", None),
+    "too_small": ("in the mask but too small for a centerline", None),
+    "neighbours_absent": ("its neighbouring vessels are absent too (field of view / segmentation?)", 0.3),
+    "fetal_pca": ("fetal-type PCA: PComm and P2 present", None),
+    "a1_aplasia": ("A1 aplasia: AComm and the other ACA present", None),
 }
 
 
@@ -151,7 +157,8 @@ def flag_lines(row: Any, run: LesionRun | None = None) -> list[str]:
     out = []
     for flag in [f for f in str(row.get("confidence_flags", "") or "").split(";") if f and f != "nan"]:
         text, factor = FLAG_TEXT.get(flag, (flag, float("nan")))
-        out.append(f"{text.format(near_end=near_end, near_bif=near_bif)} ×{factor:g}")
+        text = text.format(near_end=near_end, near_bif=near_bif)
+        out.append(text if factor is None else f"{text} ×{factor:g}")
     return out
 
 
@@ -163,6 +170,13 @@ def lesion_card(row: Any, run: LesionRun | None = None, *, html: bool = True) ->
     ref, ext = _num(row, "reference_radius_mm"), _num(row, "extreme_radius_mm")
     conf = _num(row, "confidence")
     sev = "wider" if wider else "narrower"
+    if kind == "hypoplasia":
+        lines = [f"{row.get('vessel_name', '')} — hypoplasia",
+                 f"confidence {conf:.2f} ({row.get('confidence_class', '')})"]
+        flags = flag_lines(row, run)
+        if not html:
+            return "\n".join(lines + [f"  – {f}" for f in flags])
+        return f"<b>{lines[0]}</b><br>{lines[1]}" + "".join(f"<br>&nbsp;&nbsp;– {f}" for f in flags)
     lines = [
         f"{row.get('vessel_name', '')} — {kind}" + (f" · segment {row.get('segment')}" if row.get("segment") else ""),
         (f"{d_pct:.0f} % {sev} in diameter, {a_pct:.0f} % in area vs the {row.get('reference', '')} reference "
@@ -212,11 +226,17 @@ def _reference(pts: pd.DataFrame, kind: str) -> np.ndarray | None:
 
 def draw_profile(ax: Any, run: LesionRun, i: int) -> str:
     """Plot lesion *i*'s calibre profile on *ax*; returns a note (empty when all went well)."""
-    from nvitk.gui.core.design import COLOR_MUTED, COLOR_OK, COLOR_TEXT
+    from nvitk.gui.core.design import COLOR_MUTED, COLOR_OK, COLOR_SURFACE, COLOR_TEXT
     from nvitk.gui.viz.morpho_viz import LESION_COLOURS
 
     ax.clear()
     row = run.lesions.iloc[int(i)]
+    if str(row.get("kind", "")) == "hypoplasia":
+        ax.text(0.5, 0.5, "No calibre profile: the vessel has no measured centerline.", ha="center", va="center",
+                transform=ax.transAxes, fontsize=9, color=COLOR_MUTED)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        return "A hypoplasia is an absent main vessel; see the flags above."
     found = run.span(i)
     if found is None:
         ax.text(0.5, 0.5, "Point table of this path not found", ha="center", va="center", color=COLOR_MUTED,
@@ -325,7 +345,7 @@ def draw_profile(ax: Any, run: LesionRun, i: int) -> str:
     leg = ax.legend(fontsize=6.5, loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=3, framealpha=0.6)
     for text in leg.get_texts():
         text.set_color(COLOR_TEXT)
-    leg.get_frame().set_facecolor("#323232")
+    leg.get_frame().set_facecolor(COLOR_SURFACE)
     return "" if ref is not None else "This output has no taper reference for enlargements (re-run to plot it)."
 
 
@@ -380,6 +400,10 @@ def _make_inspector(viewer: Any) -> Any:
             root.addWidget(self._note)
             self._prev.clicked.connect(lambda: self.step(-1))
             self._next.clicked.connect(lambda: self.step(+1))
+            # The plot is drawn with the colour tokens, which a theme switch rebinds: redraw then.
+            from nvitk.gui.core.design import add_theme_listener
+
+            add_theme_listener(self._on_theme)
             self._centre.clicked.connect(lambda: _centre_on(viewer, self.index))
 
         def step(self, direction: int) -> None:
@@ -397,6 +421,12 @@ def _make_inspector(viewer: Any) -> Any:
                 if j in visible:
                     self.show_lesion(j)
                     return
+
+        def _on_theme(self) -> None:
+            """Redraw the current lesion in the new theme's colours."""
+            state = getattr(self._viewer_ref(), _STATE_ATTR, None)
+            if state and state.get("run") is not None:
+                self.show_lesion(self.index)
 
         def show_lesion(self, i: int) -> None:
             state = getattr(self._viewer_ref(), _STATE_ATTR, None)
@@ -416,6 +446,9 @@ def _make_inspector(viewer: Any) -> Any:
                 style_image_figure(self._fig)
                 self._canvas.draw_idle()
             kind = str(run.lesions.iloc[self.index].get("kind", "stenosis"))
+            if kind == "hypoplasia":
+                self._note.setText(note)
+                return
             pct = float(run.param("STENOSIS_THRESHOLD_PCT" if kind == "stenosis" else "ENLARGEMENT_THRESHOLD_PCT",
                                   10.0))
             self._note.setText(
@@ -468,6 +501,9 @@ def _centre_on(viewer: Any, i: int) -> None:
     layer = state["layer"]() if state and state.get("layer") is not None else None
     if layer is None or layer not in viewer.layers or not (0 <= int(i) < len(layer.data)):
         return
+    run = state.get("run")
+    if run is not None and int(i) < len(run.lesions) and not located(run.lesions)[int(i)]:
+        return  # a hypoplasia has nowhere to go
     layer.selected_data = {int(i)}
     world = np.asarray(layer.data_to_world(np.asarray(layer.data[int(i)], dtype=float)), dtype=float)
     nd = len(viewer.dims.point)
@@ -624,12 +660,21 @@ def _confidences(run: LesionRun) -> np.ndarray:
     return conf.fillna(0.0).to_numpy(dtype=float) if conf is not None else np.zeros(len(run.lesions))
 
 
+def located(lesions: pd.DataFrame) -> np.ndarray:
+    """The lesions with a position (``x/y/z_mm``); a hypoplasia — an absent vessel — has none."""
+    if lesions.empty or not {"x_mm", "y_mm", "z_mm"} <= set(lesions.columns):
+        return np.zeros(len(lesions), dtype=bool)
+    xyz = lesions[["x_mm", "y_mm", "z_mm"]].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)
+    return np.isfinite(xyz).all(axis=1)
+
+
 def visible_lesions(state: dict[str, Any] | None) -> set[int]:
-    """Indices of the lesions the confidence filter shows."""
+    """Indices of the lesions the confidence filter shows (and that have a place to be shown at)."""
     run = state.get("run") if state else None
     if run is None:
         return set()
-    return set(np.flatnonzero(_confidences(run) >= float(state.get("min_confidence", 0.0)) - 1e-9).tolist())
+    keep = (_confidences(run) >= float(state.get("min_confidence", 0.0)) - 1e-9) & located(run.lesions)
+    return set(np.flatnonzero(keep).tolist())
 
 
 def apply_confidence_filter(viewer: Any, min_confidence: float) -> tuple[int, int]:
@@ -640,7 +685,7 @@ def apply_confidence_filter(viewer: Any, min_confidence: float) -> tuple[int, in
     if run is None:
         return 0, 0
     state["min_confidence"] = float(min_confidence)
-    keep = _confidences(run) >= float(min_confidence) - 1e-9
+    keep = (_confidences(run) >= float(min_confidence) - 1e-9) & located(run.lesions)
     layer = state["layer"]() if state.get("layer") is not None else None
     if layer is not None and layer in viewer.layers and len(layer.data) == len(keep):
         layer.shown = keep

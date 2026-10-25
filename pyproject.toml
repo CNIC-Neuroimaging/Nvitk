@@ -190,6 +190,7 @@ nikon2nifti = "nvitk.io.conversors.nikon2nifti:main"
 nvitk-totalseg = "nvitk.segmentation.total_segmentator.cli:main"
 nvitk-fastsurfer = "nvitk.segmentation.fastsurfer.cli:main"
 nvitk-fsl = "nvitk.fsl.cli:main"
+nvitk-freesurfer = "nvitk.freesurfer.cli:main"
 nvitk-eicab = "nvitk.segmentation.eicab.cli:main"
 nvitk-seg = "nvitk.cli.segmentation:main"
 

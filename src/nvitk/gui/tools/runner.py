@@ -580,6 +580,12 @@ def _run_gui_tool(
         run_fastsurfer_tool(tool_id, viewer, layer, params)
         return None
 
+    if tool_id.startswith("freesurfer_"):
+        from nvitk.gui.tools.freesurfer_tools import run_freesurfer_tool
+
+        run_freesurfer_tool(tool_id, viewer, layer, params)
+        return None
+
     if tool_id.startswith("fsl_"):
         from nvitk.gui.tools.fsl_tools import run_fsl_tool
 
@@ -1293,16 +1299,23 @@ def _run_gui_tool(
         if not ids:
             ids = [1, 2]
         out_dir = str(params.get("output_dir") or "").strip() or None
-        notify("Running ICA siphon correction (CPU, may take a while)…")
+        notify("Running ICA siphon correction (minimum cut, CPU)…")
         result = correct_siphon_centerlines(
             tof_img,
             img,
             correction_ids=ids,
             out_dir=out_dir,
             save_qc=bool(out_dir),
+            pretess=bool(params.get("siphon_pretess", True)),
+            resegment=str(params.get("siphon_resegment") or "none"),
+            max_cut_mm3=float(params.get("siphon_max_cut_mm3") or 20.0),
         )
-        n_cl = len(result.get("centerlines", {}))
-        notify(f"Siphon correction done. Centerline sets: {n_cl}. Outputs: {out_dir or '(none)'}")
+        _add_siphon_layers(viewer, layer, result, ids)
+        _notify_results(
+            viewer, _tool_label(tool_id), _siphon_rows(result, ids),
+            subtitle=getattr(layer, "name", ""), row_header="label",
+            note=f"Outputs: {out_dir}" if out_dir else "",
+        )
         return None
 
     if tool_id == "mask_genus":
@@ -1763,6 +1776,10 @@ def _run_gui_tool(
             "eICAB is cluster-oriented. Use: nvitk-eicab --help "
             "or run the QVTpy / PESA-FAT pipeline stages with eICAB enabled."
         )
+        return None
+
+    if tool_id == "seg_eicab_postprocess":
+        _run_eicab_postprocess(viewer, layer, params)
         return None
 
     if tool_id.startswith("reg_"):
@@ -4851,6 +4868,123 @@ def _notify_results(
     except Exception:  # noqa: BLE001 — a window failure must not lose the numbers
         text = _format_metrics(payload) if isinstance(payload, dict) else str(payload)
     notify(text)
+
+
+def _run_eicab_postprocess(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
+    """Stage 1's eICAB post-process on *layer* (a label map) against the reference TOF layer."""
+    import json
+
+    import numpy as numpy_host  # module ``np`` may be a CuPy proxy via ``setup(globals())``
+
+    from nvitk.gui.core.spatial import layer_spatial_kwargs
+    from nvitk.pipes.qvtpy.util.eicab.eicab_postprocess import postprocess_eicab_labels
+
+    tof_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
+    tof_img = layer_to_image(tof_layer)
+    lab_img = layer_to_image(layer)
+    labels = numpy_host.rint(to_numpy(lab_img.data)).astype(numpy_host.int32)
+    intensity = to_numpy(tof_img.data).astype(numpy_host.float64, copy=False)
+    if labels.shape != intensity.shape:
+        raise ValueError(f"Label layer {labels.shape} and TOF layer {intensity.shape} are not on one grid.")
+    ids = lambda key, default: parse_label_ids(str(params.get(key) or default)) or parse_label_ids(default)  # noqa: E731
+    notify("Running the eICAB post-process (CPU)…")
+    before = labels.copy()
+    summary = postprocess_eicab_labels(
+        intensity, labels, affine=lab_img.affine if lab_img.affine is not None else tof_img.affine,
+        remove_ids=(17, 18) if bool(params.get("eicab_pp_remove_acha", True)) else (),
+        resegment=bool(params.get("eicab_pp_resegment", True)), extend=bool(params.get("eicab_pp_extend", True)),
+        vertebrals=bool(params.get("eicab_pp_vertebrals", True)), distal=bool(params.get("eicab_pp_distal", True)),
+        aca_guard=bool(params.get("eicab_pp_aca_guard", True)), siphon=bool(params.get("eicab_pp_siphon", True)),
+        trunk_ids=ids("eicab_pp_trunks", "1,2,3"), distal_ids=ids("eicab_pp_distal_ids", "5,6,7,8,13,14,15,16"),
+        ica_ids=ids("eicab_pp_icas", "1,2"),
+    )
+    kw = layer_spatial_kwargs(layer)
+    pp_layer = viewer.add_labels(labels, name=f"{getattr(layer, 'name', 'labels')} pp", opacity=0.7, **kw)
+    try:  # name the new vertebral labels like the eICAB ones
+        from nvitk.gui.labels.catalog import LABEL_NAMES_KEY
+        from nvitk.pipes.qvtpy.labels import EICAB_ID_TO_NAME
+
+        meta = dict(pp_layer.metadata or {})
+        meta[LABEL_NAMES_KEY] = {int(k): v for k, v in EICAB_ID_TO_NAME.items() if int(k) > 0}
+        pp_layer.metadata = meta
+    except Exception:  # noqa: BLE001 — names are cosmetic
+        pass
+    ext = (summary.get("extension") or {}).get("labels", {})
+    dist = (summary.get("distal_growth") or {}).get("labels", {})
+    sip = summary.get("siphon_correction") or {}
+    rows: dict[str, dict[str, Any]] = {}
+    for lid in sorted({int(v) for v in numpy_host.unique(before) if v > 0} | {int(v) for v in numpy_host.unique(labels) if v > 0}):
+        n0, n1 = int((before == lid).sum()), int((labels == lid).sum())
+        row: dict[str, Any] = {"voxels before": n0, "voxels after": n1,
+                               "change %": round(100.0 * (n1 - n0) / n0, 1) if n0 else None}
+        e = ext.get(str(lid))
+        if e:
+            row.update({"extension mm": e.get("length_mm"), "extension stop": e.get("stop")})
+        dg = dist.get(str(lid))
+        if dg:
+            row["distal growth mm³"] = dg.get("volume_added_mm3", 0)
+        sp_ = sip.get(str(lid))
+        if sp_:
+            row.update({"β₁ before siphon": sp_["genus_before"]["beta1"], "β₁ after": sp_["genus_after"]["beta1"],
+                        "siphon cuts": sp_.get("loops_cut"), "cut mm³": sp_.get("cut_mm3")})
+        rows[f"label {lid}"] = row
+    out_dir = str(params.get("output_dir") or "").strip()
+    note = ""
+    if out_dir:
+        from nvitk.io import imsave
+
+        out = Path(out_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        imsave(out / "eicab_pp.nii.gz", labels, metadata=dict(lab_img.metadata or {}))
+        (out / "eicab_postprocess.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+        note = f"Written to {out}"
+    _notify_results(viewer, _tool_label("seg_eicab_postprocess"), rows, subtitle=getattr(layer, "name", ""),
+                    row_header="label", note=note)
+
+
+def _add_siphon_layers(viewer: Any, layer: Any, result: dict[str, Any], ids: list[int]) -> None:
+    """The siphon correction's outputs as layers on *layer*'s grid: the corrected label map, every
+    voxel the correction removed (pretess and cuts) and the corrected centerlines."""
+    import numpy as numpy_host  # module ``np`` may be a CuPy proxy via ``setup(globals())``
+
+    from nvitk.gui.core.spatial import layer_spatial_kwargs
+
+    kw = layer_spatial_kwargs(layer)
+    base = getattr(layer, "name", "vessels")
+    corrected = to_numpy(result["vessel_mask_corrected"]).astype(numpy_host.int32)
+    viewer.add_labels(corrected, name=f"{base} siphon-corrected", opacity=0.7, **kw)
+    removed = to_numpy(result.get("cleared_bridge_region_mask"))
+    if removed.size and removed.any():
+        viewer.add_labels(removed.astype(numpy_host.int32), name=f"{base} siphon removed voxels", opacity=0.9, **kw)
+    paths = [to_numpy(result["centerlines"][lid]).astype(numpy_host.float32)
+             for lid in ids if lid in result.get("centerlines", {})]
+    paths = [p for p in paths if len(p) >= 2]
+    if paths:
+        viewer.add_shapes(paths, shape_type="path", name=f"{base} siphon centerlines", edge_width=0.4,
+                          edge_color="#ffd34d", opacity=0.95, **kw)
+
+
+def _siphon_rows(result: dict[str, Any], ids: list[int]) -> dict[str, dict[str, Any]]:
+    """One results-window row per corrected label."""
+    rows: dict[str, dict[str, Any]] = {}
+    for lid in ids:
+        d = (result.get("details") or {}).get(lid)
+        if not d:
+            continue
+        rep = d.get("repair") or {}
+        g0, g1 = d.get("genus_before") or {}, d.get("genus_after") or {}
+        rows[f"label {lid}"] = {
+            "β₁ before": g0.get("beta1"), "β₁ after": g1.get("beta1"),
+            "loops cut": rep.get("n_cut_loops"), "loops left": rep.get("unresolved"),
+            "pretess voxels": (d.get("pretess") or {}).get("n_removed"),
+            "cut mm³": d.get("cut_mm3"), "removed mm³": d.get("removed_mm3"),
+            "volume change %": d.get("volume_change_vs_input_pct"),
+            "centerline mm": (d.get("centerline") or {}).get("length_mm"),
+        }
+    summary = result.get("summary") or {}
+    if summary.get("asymmetry_change_pct") is not None:
+        rows["|ΔL − ΔR| volume %"] = {"volume change %": summary["asymmetry_change_pct"]}
+    return rows
 
 
 def _run_measure_per_label(

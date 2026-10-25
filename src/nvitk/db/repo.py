@@ -1511,6 +1511,35 @@ class DataRepo:
         self.write_table(table, combined, provenance=provenance, build_sqlite_index=build_sqlite_index)
         return combined
 
+    def replace_rows(
+        self,
+        table: str,
+        df: pd.DataFrame,
+        *,
+        scope: dict[str, Any],
+        provenance: dict[str, Any] | None = None,
+        build_sqlite_index: bool = False,
+    ) -> pd.DataFrame:
+        """Replace every existing row of *table* matching *scope* (column → value) with *df*.
+
+        For a publisher whose variable set can shrink between runs: an upsert keeps the
+        variables it no longer writes, this drops them. Rows outside *scope* are untouched.
+        Returns the combined frame after :meth:`write_table`.
+        """
+        df = self._enforce_measurement_columns(table, df)
+        existing = self.get(table, cohort_id=False, use_sqlite=False)
+        if not existing.empty:
+            inside = pd.Series(True, index=existing.index)
+            for column, value in scope.items():
+                if column not in existing.columns:
+                    inside &= False
+                    continue
+                inside &= existing[column].astype(str) == str(value)
+            existing = existing[~inside]
+        combined = self._enforce_measurement_columns(table, pd.concat([existing, df], ignore_index=True))
+        self.write_table(table, combined, provenance=provenance, build_sqlite_index=build_sqlite_index)
+        return combined
+
     def build_sqlite_index(self, *, tables: list[str] | None = None) -> Path:
         """Rebuild the SQLite index from Parquet (all tables or the subset *tables*)."""
         return self.sqlite.build(self.catalog, tables=tables)

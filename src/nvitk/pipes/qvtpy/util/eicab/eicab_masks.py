@@ -97,6 +97,17 @@ def _glob_first(eicab_dir: Path, patterns: tuple[str, ...]) -> Path | None:
     return None
 
 
+def find_eicab_cw_mask(eicab_dir: Path) -> Path | None:
+    """eICAB's own (not post-processed) Circle-of-Willis mask under *eicab_dir*, when present
+    and non-empty; else ``None``."""
+    if not Path(eicab_dir).is_dir():
+        return None
+    cw = _glob_first(Path(eicab_dir), _CW_PATTERNS)
+    if cw is None or cw.stat().st_size == 0:
+        return None
+    return cw
+
+
 def _resolve_base_mask(
     eicab_dir: Path,
     preference: EicabMaskKind,
@@ -232,6 +243,7 @@ __all__ = [
     "EicabMaskKind",
     "EicabMaskResolution",
     "eicab_pp_path",
+    "find_eicab_cw_mask",
     "find_tof_resampled_volume",
     "resolve_eicab_mask",
 ]

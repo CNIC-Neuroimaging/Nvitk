@@ -398,12 +398,20 @@ def relabel_consecutive(layer: Any) -> dict[int, int]:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def writable(work: Any, label_id: int, *, preserve: bool, over: Sequence[int] | None = None) -> Any:
+def writable(
+    work: Any, label_id: int, *, preserve: bool, over: Sequence[int] | None = None, over_mode: str = "inside"
+) -> Any:
     """Where *label_id* may be written: background and itself when other labels
-    are preserved; over the labels in *over* (0 is the background) and itself
-    when given; everywhere otherwise."""
+    are preserved; with *over* (0 is the background), over those labels and itself
+    (*over_mode* ``"inside"``) or anywhere but over them (``"outside"``);
+    everywhere otherwise."""
     work = as_backend_array(work)
     if over is not None:
+        if over_mode == "outside":
+            avoid = sorted({int(i) for i in over} - {int(label_id)})
+            if not avoid:
+                return np.ones(work.shape, dtype=bool)
+            return ~np.isin(work, as_backend_array(avoid))
         ids = as_backend_array(sorted({int(i) for i in over} | {int(label_id)}))
         return np.isin(work, ids)
     if not preserve:
@@ -866,10 +874,10 @@ class PaintGuard:
     Napari's own *preserve labels* keeps other labels intact; this adds what it
     cannot: paint only where a reference image's intensity lies in a range, only
     inside a mask, only inside a box (:attr:`box`, an index of slices into the
-    layer's data), and only over some of the layer's own labels (:attr:`over`,
-    preserve labels the other way round). Erasing is not restricted, except
-    under :attr:`over`, where it clears only the active label, as with preserve
-    labels.
+    layer's data), and only over — or never over — some of the layer's own labels
+    (:attr:`over`, :attr:`over_mode` ``"inside"`` / ``"outside"``). Erasing is not
+    restricted, except by :attr:`over`: "inside" clears only the active label, as
+    with preserve labels; "outside" never clears the protected labels.
 
     Every write through the layer's ``data_setitem`` (Napari's brush, bucket and
     polygon, the orthogonal views' strokes) is trimmed as it is made, so what is
@@ -885,8 +893,10 @@ class PaintGuard:
         self.high = float("inf")
         self.inside: Any | None = None
         self.box: tuple[slice, ...] | None = None
-        #: The labels painting may cover (0 is the background); ``None``: any.
+        #: The labels the rule is about (0 is the background); ``None``: no rule.
         self.over: tuple[int, ...] | None = None
+        #: ``"inside"``: paint only over :attr:`over`; ``"outside"``: never over them.
+        self.over_mode = "inside"
         #: Edits made by the tools are already constrained: they pass through.
         self.suspended = False
         layer.events.paint.connect(self._on_paint)
@@ -938,8 +948,12 @@ class PaintGuard:
             for (lo, hi), ix in zip(bounds, indices):
                 bad |= painting & ((ix < lo) | (ix >= hi))
         if self.over is not None:
-            bad |= painting & ~np.isin(old, np.array(self.over, dtype=np.int64))
-            bad |= ~painting & (old != self.erase_label())
+            ids = np.array(self.over, dtype=np.int64)
+            if self.over_mode == "outside":
+                bad |= np.isin(old, ids)  # neither painted over nor erased
+            else:
+                bad |= painting & ~np.isin(old, ids)
+                bad |= ~painting & (old != self.erase_label())
         return bad
 
     def trim(self, indices: Any, value: Any) -> tuple[Any, Any]:

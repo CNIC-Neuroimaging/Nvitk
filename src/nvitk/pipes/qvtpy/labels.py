@@ -46,6 +46,9 @@ EICAB_LSCA: int = 15
 EICAB_RSCA: int = 16
 EICAB_LACHA: int = 17
 EICAB_RACHA: int = 18
+# Added by the eICAB post-process (not eICAB outputs): the vertebral arteries below the basilar.
+EICAB_LVA: int = 19
+EICAB_RVA: int = 20
 
 EICAB_BASI: int = EICAB_BASILAR
 EICAB_LABEL_4_UNDOCUMENTED: int = EICAB_ACOMM
@@ -70,9 +73,11 @@ EICAB_ID_TO_NAME: dict[int, str] = {
     EICAB_RSCA: "RSCA",
     EICAB_LACHA: "LACHA",
     EICAB_RACHA: "RACHA",
+    EICAB_LVA: "LVA",
+    EICAB_RVA: "RVA",
 }
 
-EICAB_VESSEL_LABEL_IDS: frozenset[int] = frozenset(range(1, 19))
+EICAB_VESSEL_LABEL_IDS: frozenset[int] = frozenset(range(1, 21))
 
 EICAB_QVTPLUS_DOCUMENTED_COW: frozenset[int] = frozenset(
     {
@@ -110,6 +115,8 @@ _EICAB_NAME_TO_ID_RAW: dict[str, int] = {
     "RSCA": EICAB_RSCA,
     "LACHA": EICAB_LACHA,
     "RACHA": EICAB_RACHA,
+    "LVA": EICAB_LVA,
+    "RVA": EICAB_RVA,
 }
 
 EICAB_NAME_TO_ID: dict[str, int] = {k.upper(): v for k, v in _EICAB_NAME_TO_ID_RAW.items()}
@@ -276,6 +283,9 @@ EICAB_TO_QVTPY_LABEL: dict[int, int] = {
     EICAB_RSCA: QVTPY_BACKGROUND,
     EICAB_LACHA: QVTPY_BACKGROUND,
     EICAB_RACHA: QVTPY_BACKGROUND,
+    # The post-process's vertebrals stay out of stages 2–4, which grow and split their own.
+    EICAB_LVA: QVTPY_BACKGROUND,
+    EICAB_RVA: QVTPY_BACKGROUND,
 }
 
 QVTPY_TO_EICAB_LABELS: dict[int, tuple[int, ...]] = {
@@ -424,6 +434,7 @@ __all__ = [
     "EICAB_LABEL_IDS_OMITTED",
     "EICAB_LACA",
     "EICAB_LACHA",
+    "EICAB_LVA",
     "EICAB_LICA",
     "EICAB_LMCA",
     "EICAB_LPCA_P1",
@@ -434,6 +445,7 @@ __all__ = [
     "EICAB_QVTPLUS_DOCUMENTED_COW",
     "EICAB_RACA",
     "EICAB_RACHA",
+    "EICAB_RVA",
     "EICAB_RICA",
     "EICAB_RMCA",
     "EICAB_RPCA_P1",

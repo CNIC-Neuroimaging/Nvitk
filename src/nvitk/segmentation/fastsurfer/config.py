@@ -110,7 +110,9 @@ def missing_checkpoints(home: Path | None = None) -> list[Path]:
 
 
 def _is_freesurfer(path: Path | None) -> bool:
-    return path is not None and (path / "SetUpFreeSurfer.sh").is_file()
+    from nvitk.freesurfer.env import is_freesurfer
+
+    return is_freesurfer(path)
 
 
 def default_freesurfer_dest() -> Path:
@@ -119,10 +121,12 @@ def default_freesurfer_dest() -> Path:
 
 
 def freesurfer_home() -> Path | None:
-    """A FreeSurfer installation.
+    """A FreeSurfer installation for FastSurfer's surface stream.
 
     ``$FREESURFER_HOME``, then ``freesurfer_home`` in ``external_tools.json``, then the
-    conventional locations and the default destination of the opt-in installer.
+    conventional locations and the default destination of the opt-in installer. Narrower than
+    :func:`nvitk.freesurfer.env.freesurfer_home`, which also finds the older installations the
+    FreeSurfer tools can use: recon-surf needs FreeSurfer 7.4.1.
     """
     for candidate in (
         _expand(os.environ.get("FREESURFER_HOME")),
@@ -139,15 +143,10 @@ def freesurfer_home() -> Path | None:
 
 def freesurfer_version(home: Path | None = None) -> str | None:
     """The version FreeSurfer stamps into ``build-stamp.txt`` (e.g. ``7.4.1``), when readable."""
-    home = home or freesurfer_home()
-    stamp = (home / "build-stamp.txt") if home is not None else None
-    if stamp is None or not stamp.is_file():
-        return None
-    text = stamp.read_text(encoding="utf-8", errors="replace").strip()
-    import re
+    from nvitk.freesurfer.env import freesurfer_version as _version
 
-    match = re.search(r"(\d+\.\d+\.\d+)", text)
-    return match.group(1) if match else text or None
+    home = home or freesurfer_home()
+    return _version(home) if home is not None else None
 
 
 def fs_license(fs_home: Path | None = None) -> Path | None:

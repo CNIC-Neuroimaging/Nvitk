@@ -163,20 +163,35 @@ def cmd_centerline(input_path, output_path, mask_path, backend, submit, emit_scr
 @backend_option(False)
 @submit_options
 @click.option("--tof", "tof_path", type=click.Path(path_type=Path, exists=True), required=True, help="TOF MRA volume (same grid as mask).")
-def cmd_siphon(input_path, output_path, mask_path, tof_path, backend, submit, emit_script, direct_submit, no_remote, dry_run):
-    """Correct ICA siphon centerline geometry using a TOF MRA reference volume."""
+@click.option("--ids", "correction_ids", default="1,2", show_default=True, help="ICA label ids to correct.")
+@click.option("--no-pretess", is_flag=True, help="Skip the edge / corner-only contact repair.")
+@click.option("--resegment", type=click.Choice(["none", "common"]), default="none", show_default=True,
+              help="Re-threshold all corrected labels with one shared Otsu threshold first.")
+@click.option("--max-cut-mm3", type=float, default=None, help="Largest accepted cut (default 20 mm³).")
+@click.option("--max-cost-ratio", type=float, default=None,
+              help="Largest accepted cut cost, as a fraction of a lumen slice (default 0.6).")
+@click.option("--out-dir", type=click.Path(path_type=Path), default=None,
+              help="Also write centerlines, removed voxels, siphon_correction.json and QC figures here.")
+def cmd_siphon(input_path, output_path, mask_path, tof_path, correction_ids, no_pretess, resegment, max_cut_mm3,
+               max_cost_ratio, out_dir, backend, submit, emit_script, direct_submit, no_remote, dry_run):
+    """Correct ICA siphon loops (and their centerlines) using a TOF MRA reference volume: only the
+    contact that closes each loop is removed (minimum cut)."""
     from nvitk.io import imread, imsave
 
     if submit.lower() != "local":
         raise click.ClickException("siphon-correct supports --submit local only in this version.")
     tof = imread(tof_path)
     vessel = imread(mask_path or input_path)
-    result = correct_siphon_centerlines(tof, vessel)
-    corrected = result.get("vessel_mask_corrected") or result.get("mask")
+    ids = [int(v) for v in str(correction_ids).replace(" ", "").split(",") if v]
+    result = correct_siphon_centerlines(
+        tof, vessel, correction_ids=ids, pretess=not no_pretess, resegment=resegment,
+        max_cut_mm3=max_cut_mm3, max_cost_ratio=max_cost_ratio, out_dir=out_dir, save_qc=out_dir is not None,
+    )
+    corrected = result.get("vessel_mask_corrected")
     if corrected is None:
         raise click.ClickException("siphon-correct did not return vessel_mask_corrected")
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    imsave(output_path, corrected)
+    imsave(output_path, corrected, metadata=dict(getattr(tof, "metadata", None) or {}))
 
 
 if __name__ == "__main__":

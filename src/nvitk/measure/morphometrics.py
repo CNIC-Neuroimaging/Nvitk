@@ -315,4 +315,19 @@ def run_morphometrics_case(
 
     if not excel_path.is_file():
         raise FileNotFoundError(f"Morphometrics Excel not produced: {excel_path}")
+    # The final report, last: it reads the tortuosity metrics written just above.
+    try:
+        from nvitk.measure.morpho.export_utils.report import REPORT_FEATURES, write_morphometrics_report
+
+        report_csv = write_morphometrics_report(case_dir)
+        print(f"  [report] {report_csv.name} (+ 'Report' sheet) → {case_dir}")
+        prov = case_dir / PROVENANCE_FILE
+        if prov.is_file():
+            payload = json.loads(prov.read_text(encoding="utf-8"))
+            payload["report"] = {"file": report_csv.name, "features": list(REPORT_FEATURES),
+                                 "lesions": "high confidence only"}
+            prov.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001 — the run's tables are written; the report is a summary
+        print(f"  WARNING [report]: {exc}")
+        traceback.print_exc()
     return excel_path

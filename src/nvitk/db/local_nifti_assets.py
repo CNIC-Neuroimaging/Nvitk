@@ -1,6 +1,6 @@
 """Register reorganized local NIfTI files (``subject/TOF``, ``subject/4DFlow``) into ``assets``.
 
-Expected layout (same as QVT+/eICAB pipelines)::
+Expected layout (same as qvtpy/eICAB pipelines)::
 
     {nifti_root}/{subject_uid}/TOF/*.nii[.gz]
     {nifti_root}/{subject_uid}/4DFlow/**/*.nii[.gz]

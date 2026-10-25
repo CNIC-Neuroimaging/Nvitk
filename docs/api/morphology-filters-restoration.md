@@ -16,11 +16,15 @@ extraction:
 | `skeleton_methods` | The skeletonization methods: `vmtk`, `native` (scikit-image thinning, re-centred) and `raycast` (experimental). `centerline_network()` returns sub-voxel branch polylines with radii; `method_skeleton()` rasterizes them to a 1-voxel skeleton so voxel-graph tools work with any method. |
 | `centering` | Re-centres skeleton paths on the lumen (cross-section centroid + inscribed-radius ascent) and measures the inscribed radius as the distance to the surface. The GUI's *Centre centerline on the lumen* tools (Tools and Mesh panels) apply it to any centerline layer. |
 | `raycast_skeleton` | **Experimental.** EXPIGEO ray-cast skeletonization (inverted-normal ray probing, spatial-median vertices, MST, spur pruning) and its geometric descriptors (radius gradient, termination likelihood, blockage, sphericity, projected flow). |
-| `centerline_siphon` | ICA siphon-specific centerline correction — see the worked methodology in the repo's `notebooks/exploration/pesabrain-anatomy/methods.md`. |
+| `centerline_siphon` | ICA siphon correction entry point: `correct_siphon_centerlines(tof, labels)` runs the minimum cut (`siphon_cut` below). The earlier Otsu + erosion + ball-cut correction was removed on 2026-10-23. Also `compute_mask_genus`, the β₁ / skeleton-cycle check. |
+| `siphon_cut` | Siphon loop repair that keeps the segmentation's boundary. `pretess` repairs edge- and corner-only contacts (an `mri_pretess`-like step, with local topology numbers so it opens no tunnel). `repair_loops` finds each skeleton loop (mm, world-superior anchors), locates the contact where intensity × radius dips, and removes the minimum-cost voxel cut there (`scipy.sparse.csgraph.maximum_flow`). A cut is kept only if β₁ drops, the components stay, and it is cheap relative to a lumen slice. Also `betti` (26/6 Betti numbers), `siphon_centerline`, and `common_resegment` (one Otsu threshold for both ICAs). Host-bound by design (per-voxel topology tests, networkx, SciPy max flow): it takes NumPy or CuPy input, runs on the CPU backend, and `repair_label` writes its in-place edit back into a CuPy label volume. |
 | `polyline_graph`, `mst_bridge` | Graph representations of centerlines and minimum-spanning-tree bridging between disconnected segments. |
+
+`nvitk.freesurfer` (not under `morphology`) wraps FreeSurfer's own topology programs for comparison: `topology.fix_topology` builds a minimal subject from a mask and runs the `recon-all` tessellation → sphere → `mris_fix_topology` / `mris_topo_fixer` chain; `topology.surface_euler` counts V − E + F without FreeSurfer; `env` finds the installation and its license (see {doc}`../installation`).
 
 ```{code-block} bash
 nvitk-morph dilate -i mask.nii.gz -o mask_dil.nii.gz --footprint 2
+nvitk-morph siphon-correct --tof TOF.nii.gz -i eicab_cw.nii.gz -o eicab_cw_siphon.nii.gz --out-dir siphon_qc
 ```
 
 ### Skeletonization methods

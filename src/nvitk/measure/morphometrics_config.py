@@ -298,6 +298,12 @@ _EICAB_CW: dict[str, Any] = {
     # ── Circle-of-Willis variants (subject table) ────────────────────────────
     # A present A1 / PComm / P1 / AComm thinner than this (median diameter) is "hypoplastic".
     "HYPOPLASIA_DIAMETER_MM": 1.0,
+    # Main vessels whose absence from the mask is a "hypoplasia" lesion (lesions table). On TOF an
+    # absent vessel has no flow signal: aplasia, severe hypoplasia or occlusion. The confidence is
+    # high when a topological neighbour (flow_from / flow_to) is present, low when none is — a
+    # whole region missing suggests a field-of-view or segmentation dropout instead.
+    "HYPOPLASIA_MAIN_VESSELS": ("LICA", "RICA", "BASILAR", "LMCA", "RMCA", "LACA", "RACA",
+                                "LPCA_P1", "RPCA_P1", "LPCA_P2", "RPCA_P2"),
 
     # ── Lesion severity / confidence (lesions table) ─────────────────────────
     # Healthy reference radius of the lesion table's diameter / area % (LESION_REFERENCE_METHODS).

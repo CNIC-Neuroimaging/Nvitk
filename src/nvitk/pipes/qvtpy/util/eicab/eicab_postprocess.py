@@ -1,21 +1,65 @@
-"""ICA Otsu resegmentation and region growing after eICAB (stage 1)."""
+"""eICAB post-process (stage 1): fit the labels to the TOF, recover the vessels' missing stretches,
+and open the ICA siphon loops. Writes the ``*_pp`` mask stage 7 prefers.
+
+On TOF, eICAB's circle-of-Willis labels are too thick and stop short. The post-process runs, in
+order (each step can be switched off):
+
+1. **Drop the anterior choroidal arteries** (``remove_ids``, default LACHA / RACHA).
+2. **Local re-segmentation** (``resegment``). Each label is re-drawn at its local half maximum,
+   from the intensities of that vessel and its surroundings only, with the other labels as
+   barriers (:func:`nvitk.segmentation.vessel_refine.resegment_local`).
+3. **Trunks to the floor** (``extend``). eICAB's box cuts the ICAs and the basilar at its lower
+   face while the lumen goes on. Each trunk follows the minimum-cost path through a multi-scale
+   Frangi tree down to the image's last slices
+   (:func:`nvitk.segmentation.vessel_refine.extend_trunks`). The basilar follows up to two
+   branches, the vertebral arteries. They are then split off with the 4D-flow pipeline's
+   vertebral logic (:func:`nvitk.pipes.qvtpy.util.segmentation.vertebral_split.split_vertebral_from_basilar`:
+   a centerline Y below the confluence, L/R by side) as LVA / RVA (eICAB ids 19 / 20, new).
+4. **Distal growth** (``distal``). The ACAs, MCAs, PCAs (P2) and SCAs grow along the Frangi tree
+   beyond eICAB's box, all at once and in competition, each voxel going to the vessel that
+   reaches it first (:func:`nvitk.segmentation.vessel_refine.grow_distal`). The fronts advance
+   together, step for step, so each of the two A2s, running side by side, is reached first by its
+   own ACA (``aca_guard``):
+   - each side of the AComm starts that side's front;
+   - neither ACA may grow more than 5 mm past a midline plane oriented as the head's mid-sagittal
+     plane and anchored at the AComm.
+5. **Siphon correction** (``siphon``). Where an ICA siphon's limbs touch and close a loop, only
+   the contact is cut (:mod:`nvitk.morphology.siphon_cut`).
+
+``postprocess_eicab_directory`` writes ``eicab_postprocess.json`` beside the mask: per label, the
+voxels before and after, and the log of each step.
+"""
 
 from __future__ import annotations
 
+import json
+import time
 from pathlib import Path
 from typing import Any, Sequence
 
 from nvitk.core.array import as_backend_array, to_numpy
-from nvitk.core.backend import setup
+from nvitk.core.backend import is_cupy_array, setup, using
 from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread, imsave
 from nvitk.morphology.centerline import compute_centerlines
-from nvitk.morphology.centerline_siphon import (
-    EROSION_ITERS,
-    compute_mask_genus,
-    ica_otsu_mask,
+from nvitk.pipes.qvtpy.labels import (
+    EICAB_ACOMM,
+    EICAB_BASILAR,
+    EICAB_LACA,
+    EICAB_LACHA,
+    EICAB_LICA,
+    EICAB_LMCA,
+    EICAB_LPCA_P2,
+    EICAB_LSCA,
+    EICAB_LVA,
+    EICAB_RACA,
+    EICAB_RACHA,
+    EICAB_RICA,
+    EICAB_RMCA,
+    EICAB_RPCA_P2,
+    EICAB_RSCA,
+    EICAB_RVA,
 )
-from nvitk.pipes.qvtpy.labels import EICAB_LICA, EICAB_RICA
 from nvitk.pipes.qvtpy.util.centerline.centerline_io import rasterize_centerlines_mask
 from nvitk.pipes.qvtpy.util.eicab.eicab_masks import (
     CENTERLINES_MASK_PP_NIFTI,
@@ -23,146 +67,20 @@ from nvitk.pipes.qvtpy.util.eicab.eicab_masks import (
     find_tof_resampled_volume,
     resolve_eicab_mask,
 )
-from nvitk.pipes.qvtpy.util.segmentation.vessel_cd_segmentation import _dilated_other_segmentation_barrier
-from nvitk.segmentation.region_growing import region_grow_into_label_volume
 
 setup(globals())
 
 log = Logger()
 
 _DEFAULT_ICA_IDS: tuple[int, ...] = (EICAB_LICA, EICAB_RICA)
-_ICA_RG_INTENSITY_FRAC: float = 0.75
-_ICA_RG_BARRIER_RADIUS: int = 3
-_OTSU_MAX_VOLUME_RATIO: float = 3.0
-
-
-def _merge_ica_masks_into_labels(
-    labels: np.ndarray,
-    ica_masks: dict[int, np.ndarray],
-    ica_ids: Sequence[int],
-) -> None:
-    """Replace each ICA label id's voxels in *labels* (in place) with its re-segmented mask from
-    *ica_masks*, skipping any id with no (or an empty) replacement."""
-    for lid in ica_ids:
-        rep = ica_masks.get(int(lid))
-        if rep is None:
-            continue
-        rep_np = as_backend_array(rep).astype(bool)
-        if not rep_np.any():
-            continue
-        labels[labels == int(lid)] = 0
-        labels[rep_np] = int(lid)
-
-
-def _seed_centerline_mask(
-    labels: np.ndarray,
-    ica_ids: Sequence[int],
-    *,
-    min_points: int = 5,
-) -> np.ndarray:
-    """Rasterize centerlines through the ICA label ids into a seed mask for genus/siphon analysis."""
-    shape = tuple(int(s) for s in labels.shape[:3])
-    seed_cls = compute_centerlines(
-        labels.astype(np.int32, copy=False),
-        labels=[int(lid) for lid in ica_ids],
-        min_points=int(min_points),
-    )
-    return rasterize_centerlines_mask(shape, seed_cls)
-
-
-def _filter_otsu_by_volume(
-    ica_masks: dict[int, np.ndarray],
-    labels: np.ndarray,
-    ica_ids: Sequence[int],
-    *,
-    max_volume_ratio: float = _OTSU_MAX_VOLUME_RATIO,
-) -> tuple[dict[int, np.ndarray], dict[str, str]]:
-    """Drop Otsu masks larger than *max_volume_ratio* × original ICA mask."""
-    seg_np = as_backend_array(labels).astype(np.int32, copy=False)
-    kept: dict[int, np.ndarray] = {}
-    rejected: dict[str, str] = {}
-    ratio = float(max_volume_ratio)
-    for lid in ica_ids:
-        otsu = ica_masks.get(int(lid))
-        if otsu is None:
-            continue
-        raw_n = int(np.count_nonzero(seg_np == int(lid)))
-        otsu_n = int(np.count_nonzero(otsu))
-        if raw_n > 0 and otsu_n > ratio * raw_n:
-            msg = (
-                f"Otsu voxels ({otsu_n}) > {ratio:.0f}× raw ICA ({raw_n}) — keeping original"
-            )
-            log.warning(f"[ICA id={lid}] {msg}")
-            rejected[str(int(lid))] = msg
-            continue
-        kept[int(lid)] = otsu
-    return kept, rejected
-
-
-def resegment_icas_otsu(
-    intensity: Any,
-    labels: np.ndarray,
-    *,
-    ica_ids: Sequence[int] = _DEFAULT_ICA_IDS,
-    cl_mask: np.ndarray | None = None,
-) -> dict[int, np.ndarray]:
-    """Otsu-resegment each ICA; erode only when the raw eICAB ICA mask is suspect."""
-    wvi = as_backend_array(intensity)
-    seg_np = as_backend_array(labels).astype(np.int32)
-    clm = cl_mask if cl_mask is not None else _seed_centerline_mask(seg_np, ica_ids)
-
-    out: dict[int, np.ndarray] = {}
-    for lid in ica_ids:
-        name = f"ICA_{int(lid)}"
-        raw = as_backend_array(seg_np == int(lid)).astype(bool)
-        if not raw.any():
-            log.warning(f"[{name}] empty eICAB mask — skipping Otsu")
-            continue
-        rep = compute_mask_genus(raw, label_name=name)
-        erode_iters = int(EROSION_ITERS) if rep.suspect else 0
-        log.step(
-            f"[{name}] Otsu resegment erode_iters={erode_iters} "
-            f"(raw β₁={rep.beta1} suspect={rep.suspect})"
-        )
-        eroded, _pre, info = ica_otsu_mask(
-            wvi, clm, int(lid), erode_iters=erode_iters
-        )
-        if info.get("warning"):
-            log.warning(f"[{name}] Otsu: {info['warning']}")
-            continue
-        out[int(lid)] = to_numpy(eroded).astype(bool)
-    return out
-
-
-def region_grow_icas(
-    intensity: Any,
-    labels: np.ndarray,
-    *,
-    ica_ids: Sequence[int] = _DEFAULT_ICA_IDS,
-    rg_barrier_radius: int = _ICA_RG_BARRIER_RADIUS,
-    intensity_frac: float = _ICA_RG_INTENSITY_FRAC,
-) -> dict[int, int]:
-    """Grow ICA labels into empty voxels; barriers are other labels dilated by *rg_barrier_radius*."""
-    int_np = as_backend_array(intensity).astype(np.float64)
-    seg_np = as_backend_array(labels).astype(np.int32)
-    added: dict[int, int] = {}
-    for lid in ica_ids:
-        if not np.any(seg_np == int(lid)):
-            continue
-        forbidden = _dilated_other_segmentation_barrier(
-            seg_np, int(lid), radius=int(rg_barrier_radius)
-        )
-        n = region_grow_into_label_volume(
-            seg_np,
-            int_np,
-            int(lid),
-            intensity_frac=float(intensity_frac),
-            forbidden=forbidden,
-            polarity="hyperintense",
-        )
-        added[int(lid)] = int(n)
-        log.step(f"[ICA id={lid}] region growing added {n} voxels")
-    return added
+#: The trunks eICAB's box cuts at its lower face: both ICAs and the basilar.
+_DEFAULT_TRUNK_IDS: tuple[int, ...] = (EICAB_LICA, EICAB_RICA, EICAB_BASILAR)
+#: Labels dropped first: the anterior choroidal arteries.
+_DEFAULT_REMOVE_IDS: tuple[int, ...] = (EICAB_LACHA, EICAB_RACHA)
+#: Labels grown distally along the Frangi tree: ACAs, MCAs, PCAs (P2) and SCAs.
+_DEFAULT_DISTAL_IDS: tuple[int, ...] = (EICAB_LACA, EICAB_RACA, EICAB_LMCA, EICAB_RMCA, EICAB_LPCA_P2,
+                                        EICAB_RPCA_P2, EICAB_LSCA, EICAB_RSCA)
+PP_REPORT_JSON = "eicab_postprocess.json"
 
 
 def _compute_pp_centerlines(labels: np.ndarray, *, min_points: int = 5) -> np.ndarray:
@@ -180,45 +98,127 @@ def _compute_pp_centerlines(labels: np.ndarray, *, min_points: int = 5) -> np.nd
     return rasterize_centerlines_mask(shape, seed_cls)
 
 
+def _isin(arr: Any, ids: Sequence[int]) -> Any:
+    """``np.isin`` against a list of ids (CuPy needs an array, not a list)."""
+    if not len(ids):
+        return np.zeros(arr.shape, dtype=bool)
+    return np.isin(arr, as_backend_array([int(i) for i in ids]))
+
+
+def _label_counts(seg: Any) -> dict[str, int]:
+    """Voxels per non-zero label, as ``{"id": n}`` (one bincount, not one pass per label)."""
+    counts = to_numpy(np.bincount(seg.ravel()))
+    return {str(i): int(n) for i, n in enumerate(counts) if i > 0 and n > 0}
+
+
+def _repair_icas_mincut(
+    intensity: Any, labels: Any, ica_ids: Sequence[int], affine: Any, *, pretess: bool
+) -> dict[str, Any]:
+    """Pretess + loop cuts on each ICA of *labels* (in place, host or CuPy); compact per-ICA log.
+    The cuts run on the host (:mod:`nvitk.morphology.siphon_cut`); the TOF crosses once."""
+    from nvitk.morphology.siphon_cut import repair_label
+
+    inten = to_numpy(intensity)
+    out: dict[str, Any] = {}
+    for lid in ica_ids:
+        if not bool((labels == int(lid)).any()):
+            continue
+        _m, _cut, entry = repair_label(labels, int(lid), inten, affine=affine,
+                                       pretess_mode="remove" if pretess else None, label_name=f"ICA_{int(lid)}")
+        rep = entry.get("repair") or {}
+        out[str(int(lid))] = {
+            "genus_before": entry["genus_before"], "genus_after": entry["genus_after"],
+            "pretess": entry.get("pretess"), "loops_cut": rep.get("n_cut_loops", 0),
+            "loops_left": rep.get("unresolved", 0), "cut_mm3": entry.get("cut_mm3"),
+            "removed_mm3": entry.get("removed_mm3"), "volume_change_pct": entry.get("volume_change_pct"),
+        }
+    return out
+
+
+def split_vertebrals(labels: Any) -> tuple[Any, dict[str, Any]]:
+    """Split the vertebral arteries off the basilar with the 4D-flow pipeline's logic
+    (:func:`~nvitk.pipes.qvtpy.util.segmentation.vertebral_split.split_vertebral_from_basilar`) and
+    label them LVA / RVA (eICAB 19 / 20). The ICAs and the basilar share their ids with qvtpy's
+    labels, which the split reads for left / right. Nothing changes without a centerline Y."""
+    from nvitk.pipes.qvtpy.labels import QVTPY_LVA, QVTPY_RVA
+    from nvitk.pipes.qvtpy.util.segmentation.vertebral_split import split_vertebral_from_basilar
+
+    seg = as_backend_array(labels).astype(np.int32)
+    trunks = to_numpy(np.where(_isin(seg, [EICAB_LICA, EICAB_RICA, EICAB_BASILAR]), seg, 0))
+    with using("cpu"):  # qvtpy's split (skeleton graph) is host code
+        split, result = split_vertebral_from_basilar(trunks)
+        split = to_numpy(split)
+    split = as_backend_array(split)
+    out = seg.copy()
+    if result.split_applied:
+        out[(seg == EICAB_BASILAR) & (split == QVTPY_LVA)] = EICAB_LVA
+        out[(seg == EICAB_BASILAR) & (split == QVTPY_RVA)] = EICAB_RVA
+    info = {k: v for k, v in result.as_dict().items() if not k.endswith("_centerline")}
+    return out, info
+
+
 def postprocess_eicab_labels(
     intensity: Any,
     labels: np.ndarray,
     *,
+    affine: Any | None = None,
     ica_ids: Sequence[int] = _DEFAULT_ICA_IDS,
-    rg_barrier_radius: int = _ICA_RG_BARRIER_RADIUS,
-    rg_intensity_frac: float = _ICA_RG_INTENSITY_FRAC,
-    otsu_max_volume_ratio: float = _OTSU_MAX_VOLUME_RATIO,
+    trunk_ids: Sequence[int] = _DEFAULT_TRUNK_IDS,
+    distal_ids: Sequence[int] = _DEFAULT_DISTAL_IDS,
+    remove_ids: Sequence[int] = _DEFAULT_REMOVE_IDS,
+    resegment: bool = True,
+    extend: bool = True,
+    vertebrals: bool = True,
+    distal: bool = True,
+    aca_guard: bool = True,
+    siphon: bool = True,
+    pretess: bool = True,
 ) -> dict[str, Any]:
-    """Otsu ICA masks (volume guard) then hyperintense ICA region growing."""
-    seg_np = as_backend_array(labels).astype(np.int32, copy=True)
-    ica_masks_raw = resegment_icas_otsu(intensity, seg_np, ica_ids=ica_ids)
-    ica_masks, rejected = _filter_otsu_by_volume(
-        ica_masks_raw,
-        seg_np,
-        ica_ids,
-        max_volume_ratio=otsu_max_volume_ratio,
-    )
-    pp_applied = bool(ica_masks)
-    if not pp_applied:
-        log.warning("eICAB post-process: no ICA Otsu accepted — output equals original mask")
-    else:
-        _merge_ica_masks_into_labels(seg_np, ica_masks, ica_ids)
-    rg_added = region_grow_icas(
-        intensity,
-        seg_np,
-        ica_ids=ica_ids,
-        rg_barrier_radius=rg_barrier_radius,
-        intensity_frac=rg_intensity_frac,
-    )
-    labels[:] = to_numpy(seg_np)
-    return {
-        "pp_applied": pp_applied,
-        "ica_otsu_rejected": rejected,
-        "ica_otsu_voxels": {str(k): int(v.sum()) for k, v in ica_masks.items()},
-        "region_grow_added": {str(k): v for k, v in rg_added.items()},
-        "rg_intensity_frac": float(rg_intensity_frac),
-        "rg_barrier_radius": int(rg_barrier_radius),
-    }
+    """Post-process eICAB *labels* against the TOF *intensity* (module docstring); *labels* is
+    modified in place. *affine* (voxel → world) gives the voxel size and the superior direction.
+
+    Steps, each switchable: drop *remove_ids*; re-segment every label (*resegment*); extend
+    *trunk_ids* to the image floor (*extend*; the basilar into the vertebrals, split off when
+    *vertebrals*); grow *distal_ids* along the Frangi tree (*distal*; with *aca_guard*, the ACAs
+    start their A2s from their own side of the AComm and may not grow more than 5 mm past the
+    midline); siphon loop cuts on *ica_ids* (*siphon*; *pretess* first).
+
+    The volumes work on the active backend (:mod:`nvitk.segmentation.vessel_refine`); the result
+    is written back into *labels* whichever kind it is (NumPy or CuPy)."""
+    from nvitk.segmentation.vessel_refine import extend_trunks, grow_distal, resegment_local
+
+    t0 = time.time()
+    inten = as_backend_array(intensity).astype(np.float64, copy=False)
+    seg = as_backend_array(labels).astype(np.int32, copy=True)
+    before = _label_counts(seg)
+    summary: dict[str, Any] = {"resegment": bool(resegment), "extend": bool(extend), "vertebrals": bool(vertebrals),
+                               "distal": bool(distal), "siphon": bool(siphon),
+                               "removed_labels": [int(i) for i in remove_ids]}
+    if remove_ids:
+        seg[_isin(seg, remove_ids)] = 0
+    if resegment:
+        seg, summary["resegmentation"] = resegment_local(inten, seg, affine=affine)
+    if extend:
+        branches = {int(EICAB_BASILAR): 2} if vertebrals else {}
+        seg, summary["extension"] = extend_trunks(inten, seg, trunk_ids, affine=affine, floor_branches=branches,
+                                                  split_ratio={int(i): (0.5 if int(i) in ica_ids else 0.2)
+                                                               for i in trunk_ids})
+        if vertebrals and int(EICAB_BASILAR) in [int(i) for i in trunk_ids]:
+            seg, summary["vertebral_split"] = split_vertebrals(seg)
+    if distal:
+        pairs = [(int(EICAB_LACA), int(EICAB_RACA), int(EICAB_ACOMM))] if aca_guard else []
+        refs = [(int(EICAB_LICA), int(EICAB_RICA)), (int(EICAB_LMCA), int(EICAB_RMCA)),
+                (int(EICAB_LPCA_P2), int(EICAB_RPCA_P2)), (int(EICAB_LSCA), int(EICAB_RSCA))]
+        seg, summary["distal_growth"] = grow_distal(inten, seg, distal_ids, affine=affine, hemisphere_pairs=pairs,
+                                                    midline_refs=refs)
+    if siphon:
+        summary["siphon_correction"] = _repair_icas_mincut(inten, seg, ica_ids, affine, pretess=pretess)
+    after = _label_counts(seg)
+    summary["voxels"] = {k: {"before": before.get(k, 0), "after": after.get(k, 0)}
+                         for k in sorted(set(before) | set(after), key=int)}
+    summary["seconds"] = round(time.time() - t0, 1)
+    labels[...] = as_backend_array(seg, backend="cupy" if is_cupy_array(labels) else "numpy")
+    return summary
 
 
 def postprocess_eicab_directory(
@@ -226,12 +226,14 @@ def postprocess_eicab_directory(
     *,
     tof_path: Path | None = None,
     preference: str = "cw",
-    ica_ids: Sequence[int] = _DEFAULT_ICA_IDS,
-    rg_barrier_radius: int = _ICA_RG_BARRIER_RADIUS,
-    rg_intensity_frac: float = _ICA_RG_INTENSITY_FRAC,
-    otsu_max_volume_ratio: float = _OTSU_MAX_VOLUME_RATIO,
+    resegment: bool = True,
+    extend: bool = True,
+    distal: bool = True,
+    siphon: bool = True,
+    **kwargs: Any,
 ) -> dict[str, Any]:
-    """Load eICAB mask + TOF, write ``*_pp`` mask and ``centerlines_mask_pp.nii.gz``."""
+    """Load eICAB mask + TOF, write the ``*_pp`` mask, ``centerlines_mask_pp.nii.gz`` and
+    ``eicab_postprocess.json`` (:func:`postprocess_eicab_labels`; *kwargs* go there too)."""
     eicab_dir = Path(eicab_dir)
     res = resolve_eicab_mask(
         eicab_dir,
@@ -259,10 +261,12 @@ def postprocess_eicab_directory(
     summary = postprocess_eicab_labels(
         wvi,
         labels,
-        ica_ids=ica_ids,
-        rg_barrier_radius=rg_barrier_radius,
-        rg_intensity_frac=rg_intensity_frac,
-        otsu_max_volume_ratio=otsu_max_volume_ratio,
+        affine=seg_img.affine if seg_img.affine is not None else tof_img.affine,
+        resegment=resegment,
+        extend=extend,
+        distal=distal,
+        siphon=siphon,
+        **kwargs,
     )
     pp_path = eicab_pp_path(res.path)
     cl_pp_path = eicab_dir / CENTERLINES_MASK_PP_NIFTI
@@ -275,13 +279,16 @@ def postprocess_eicab_directory(
 
     imsave(pp_path, labels, metadata=dict(seg_img.metadata or {}))
     imsave(cl_pp_path, cl_pp, metadata=dict(seg_img.metadata or {}))
-    log.ok(f"eICAB post-process written: {pp_path} + {cl_pp_path.name}")
+    report = eicab_dir / PP_REPORT_JSON
+    report.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+    summary["report_path"] = str(report)
+    log.ok(f"eICAB post-process written: {pp_path} + {cl_pp_path.name} + {report.name}")
     return summary
 
 
 __all__ = [
+    "PP_REPORT_JSON",
     "postprocess_eicab_directory",
     "postprocess_eicab_labels",
-    "region_grow_icas",
-    "resegment_icas_otsu",
+    "split_vertebrals",
 ]

@@ -8,11 +8,12 @@ it lacks:
 * **Label** — the active label: id, name (named by hand, or picked from the
   layer's vocabulary), colour, a list of every label with its size, go-to;
 * **Draw** — Napari's paint / erase / fill / pick / polygon modes and the magic
-  wand, brush size, preserve-other-labels or its reverse (paint only over picked
-  labels of the layer), 2D or 3D brush, Undo / Redo — on the canvas and in the
-  orthogonal views (:mod:`nvitk.gui.labels.ortho_edit`);
+  wand, brush size, preserve-other-labels, or a rule on picked labels of the
+  layer (paint only over them, or never over them), 2D or 3D brush, Undo / Redo —
+  on the canvas and in the orthogonal views (:mod:`nvitk.gui.labels.ortho_edit`);
 * **Editable area** — paint only where the reference intensity is in a range
-  and/or inside a mask (brush, bucket and every tool here);
+  and/or only inside — or only outside — picked labels of another layer (brush,
+  bucket and every tool here);
 * **Refine** — grow, shrink, smooth, fill holes, keep the largest piece, drop
   small islands, threshold fill — on the slice on screen or the whole volume;
 * **Slices** — interpolate between drawn slices, copy a slice to the next one;
@@ -114,6 +115,36 @@ _TRACE_PREVIEW = "✎ vessel path (Labeling)"
 #: The key toggling between the tool in use and Pan, and where it is kept.
 _PAN_KEY_DEFAULT = "Q"
 _PAN_KEY_PREF = "labeling_pan_key"
+#: The label rules' modes ("inside" / "outside"), remembered across sessions.
+_OVER_MODE_PREF = "labeling_over_mode"
+_AREA_MODE_PREF = "labeling_area_mode"
+
+
+def _stored_mode(key: str) -> str:
+    try:
+        from nvitk.gui.core.prefs import load_prefs
+
+        mode = str(load_prefs().get(key) or "inside")
+    except Exception:  # noqa: BLE001 — an unreadable config falls back to the default
+        mode = "inside"
+    return mode if mode in ("inside", "outside") else "inside"
+
+
+def _store_mode(key: str, mode: str) -> None:
+    try:
+        from nvitk.gui.core.prefs import save_prefs
+
+        save_prefs({key: mode})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _mode_combo(items: tuple[tuple[str, str], ...], mode: str) -> QComboBox:
+    combo = QComboBox()
+    for text, value in items:
+        combo.addItem(text, value)
+    combo.setCurrentIndex(max(combo.findData(mode), 0))
+    return combo
 
 
 def _stored_pan_key() -> str:
@@ -622,11 +653,11 @@ class LabelingPanel(QWidget):
         lay = QVBoxLayout(outer)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(2)
-        self._over_on = QCheckBox("Paint only over")
+        self._over_on = QCheckBox("Restrict to this layer's labels")
         self._over_on.setToolTip(
-            "Preserve labels the other way round: brush, bucket and every tool here only write over the "
-            "ticked labels of this layer (and the background, when ticked). Erasing clears only the "
-            "active label."
+            "A rule on the ticked labels of this layer (and the background, when ticked), for the brush, "
+            "the bucket and every tool here. Only over them: preserve labels the other way round, erasing "
+            "clears only the active label. Never over them: they are protected from painting and erasing."
         )
         self._over_on.toggled.connect(self._on_over_toggled)
         self._preserve.toggled.connect(self._on_preserve_toggled)
@@ -639,9 +670,15 @@ class LabelingPanel(QWidget):
         box.setSpacing(2)
         self._over_list = QListWidget()
         self._over_list.setMaximumHeight(130)
-        self._over_list.setToolTip("Tick the labels to paint over; the others, and unticked background, are "
-                                   "left as they are.")
+        self._over_list.setToolTip("Tick the labels the rule is about: the ones to paint over, or the ones "
+                                   "to leave alone.")
         self._over_list.itemChanged.connect(self._on_over_ticked)
+        self._over_mode = _mode_combo(
+            (("Only over the ticked", "inside"), ("Never over the ticked", "outside")), _stored_mode(_OVER_MODE_PREF)
+        )
+        self._over_mode.setToolTip("Paint only over the ticked labels, or anywhere but over them.")
+        self._over_mode.activated.connect(lambda _i: self._on_over_mode())
+        box.addWidget(self._over_mode)
         box.addWidget(self._over_list)
         box.addLayout(_row(
             _button("All labels", "Every label of the layer, now and as new ones are drawn, not the "
@@ -1018,8 +1055,8 @@ class LabelingPanel(QWidget):
         self._range_on.toggled.connect(lambda _v: self._apply_guard())
         card.add(self._range_on)
         card.add_layout(_row(self._range_lo, "–", self._range_hi, from_view))
-        self._inside_on = QCheckBox("Only inside")
-        self._inside_on.setToolTip("Paint only where this mask is non-zero.")
+        self._inside_on = QCheckBox("Restrict to")
+        self._inside_on.setToolTip("Paint only inside — or only outside — the ticked labels of this layer.")
         self._inside_combo = QComboBox()
         self._inside_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._inside_on.toggled.connect(lambda _v: self._on_inside_changed())
@@ -1030,15 +1067,22 @@ class LabelingPanel(QWidget):
         box = QVBoxLayout(self._inside_box)
         box.setContentsMargins(0, 0, 0, 0)
         box.setSpacing(2)
+        self._inside_mode = _mode_combo(
+            (("Only inside the ticked", "inside"), ("Only outside the ticked", "outside")), _stored_mode(_AREA_MODE_PREF)
+        )
+        self._inside_mode.setToolTip("Paint only inside the ticked labels of that layer, or only outside them.")
+        self._inside_mode.activated.connect(lambda _i: self._on_inside_mode())
+        box.addWidget(self._inside_mode)
         self._inside_ids = QListWidget()
         self._inside_ids.setMaximumHeight(130)
-        self._inside_ids.setToolTip("Tick the labels of the mask to paint inside; the others are off limits.")
+        self._inside_ids.setToolTip("Tick the labels of that layer the area is made of (inside) or kept out of "
+                                    "(outside).")
         self._inside_ids.itemChanged.connect(self._on_inside_ticked)
         self._inside_count = QLabel("")
         self._inside_count.setStyleSheet(f"color: {COLOR_MUTED}; font-size: 10px;")
         box.addWidget(self._inside_ids)
         box.addLayout(_row(self._inside_count,
-                           _button("All", "Every label of the mask.", lambda: self._tick_inside(True)),
+                           _button("All", "Every label of that layer.", lambda: self._tick_inside(True)),
                            _button("None", "No label (nothing is editable).", lambda: self._tick_inside(False))))
         card.add(self._inside_box)
         self._inside_box.hide()
@@ -2398,6 +2442,7 @@ class LabelingPanel(QWidget):
         box = self.box()
         guard.box = box.index(layer) if (self._box_keep.isChecked() and box.applies(layer)) else None
         guard.over = self._over_ids()
+        guard.over_mode = self._over_mode_value()
         if self._range_on.isChecked() and ref is None:
             self._say("The intensity range needs a reference image on the labels' grid.", error=True)
 
@@ -2411,6 +2456,14 @@ class LabelingPanel(QWidget):
     def _on_preserve_toggled(self, on: bool) -> None:
         if on and self._over_on.isChecked():
             self._over_on.setChecked(False)
+
+    def _over_mode_value(self) -> str:
+        return str(self._over_mode.currentData() or "inside")
+
+    def _on_over_mode(self) -> None:
+        _store_mode(_OVER_MODE_PREF, self._over_mode_value())
+        self._update_over_count()
+        self._apply_over()
 
     def _over_ids(self) -> tuple[int, ...] | None:
         """The labels painting may cover (``None``: the rule is off)."""
@@ -2442,6 +2495,7 @@ class LabelingPanel(QWidget):
         guard = E.paint_guard(layer, create=over is not None)
         if guard is not None:
             guard.over = over
+            guard.over_mode = self._over_mode_value()
 
     def _refresh_over_ids(self) -> None:
         """List the background and the layer's labels, ticked as last left, and hand
@@ -2506,11 +2560,12 @@ class LabelingPanel(QWidget):
         if layer is None or not E.is_labels(layer):
             self._over_count.setText("")
         elif not ids:
-            self._over_count.setText("nothing ticked: nothing can be painted")
+            self._over_count.setText("nothing ticked: nothing can be painted" if self._over_mode_value() == "inside"
+                                     else "nothing ticked: no label protected")
         else:
             names = ["background" if i == 0 else (label_name(layer, i) or f"label {i}") for i in ids]
             shown = ", ".join(names[:4]) + (f" +{len(names) - 4}" if len(names) > 4 else "")
-            self._over_count.setText(shown)
+            self._over_count.setText(("never over: " if self._over_mode_value() == "outside" else "") + shown)
 
     # ── editable area: which labels of the mask ──────────────────────────────
 
@@ -2520,6 +2575,15 @@ class LabelingPanel(QWidget):
 
     def _on_inside_changed(self) -> None:
         self._refresh_inside_ids()
+        self._apply_guard()
+
+    def _inside_mode_value(self) -> str:
+        return str(self._inside_mode.currentData() or "inside")
+
+    def _on_inside_mode(self) -> None:
+        _store_mode(_AREA_MODE_PREF, self._inside_mode_value())
+        self._inside_cache = None
+        self._update_inside_count()
         self._apply_guard()
 
     def _refresh_inside_ids(self) -> None:
@@ -2576,26 +2640,32 @@ class LabelingPanel(QWidget):
     def _update_inside_count(self) -> None:
         n = self._inside_ids.count()
         k = len(self._inside_ticked())
-        self._inside_count.setText(f"{k} of {n} label(s)" if n else "No labels in the mask.")
+        where = "inside" if self._inside_mode_value() == "inside" else "outside"
+        self._inside_count.setText(f"{k} of {n} label(s), paint {where}" if n else "No labels in that layer.")
 
     def _inside_mask(self, other: Any) -> Any:
-        """Where painting is allowed: the mask's ticked labels (any non-zero when all are)."""
+        """Where painting is allowed: inside the layer's ticked labels (any non-zero when all
+        are), or — mode *outside* — everywhere but in them (its background when all are)."""
         data = label_source_data(other)
         n = self._inside_ids.count()
         ticked = self._inside_ticked()
-        if n == 0 or len(ticked) == n:
+        outside = self._inside_mode_value() == "outside"
+        if not outside and (n == 0 or len(ticked) == n):
             return data
-        key = (id(other), id(data), tuple(sorted(ticked)))
+        key = (id(other), id(data), tuple(sorted(ticked)), outside)
         if self._inside_cache is not None and self._inside_cache[0] == key:
             return self._inside_cache[1]
         if not ticked:
-            allowed = np.zeros(data.shape, dtype=bool)
+            allowed = np.ones(data.shape, dtype=bool) if outside else np.zeros(data.shape, dtype=bool)
+        elif outside and (n == 0 or len(ticked) == n):
+            allowed = to_numpy(as_backend_array(data) == 0)
         else:
             # On the backend; the guard checks Napari's (host) history items with it.
             from nvitk.core.backend import get_array_module
 
             ids = as_backend_array([int(x) for x in sorted(ticked)])
-            allowed = to_numpy(get_array_module(ids).isin(as_backend_array(data), ids))
+            inside = get_array_module(ids).isin(as_backend_array(data), ids)
+            allowed = to_numpy(~inside if outside else inside)
         self._inside_cache = (key, allowed)
         return allowed
 
@@ -2835,7 +2905,8 @@ class LabelingPanel(QWidget):
 
     def _allowed(self, layer: Any, index: tuple[Any, ...], work: Any) -> Any:
         """Where the active label may be written in ``data[index]``."""
-        allowed = E.writable(work, self.label_id(), preserve=self._preserve.isChecked(), over=self._over_ids())
+        allowed = E.writable(work, self.label_id(), preserve=self._preserve.isChecked(), over=self._over_ids(),
+                             over_mode=self._over_mode_value())
         guard = E.paint_guard(layer)
         if guard is not None and guard.active:
             extra = guard.allowed(index)

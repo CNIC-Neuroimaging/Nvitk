@@ -13,8 +13,15 @@
 
 - ``--submit local`` — :func:`nvitk.segmentation.eicab.runner.run_eicab` via Singularity.
 - ``--submit sge`` — host ``singularity run`` eICAB (+ optional nvitk post-steps) per subject.
-- ``--post-process-eicab`` (default on) — Otsu ICA resegment + ICA RG; writes ``*_pp`` mask and ``centerlines_mask_pp.nii.gz`` (originals unchanged).
+- ``--post-process-eicab`` (default on) — :mod:`~nvitk.pipes.qvtpy.util.eicab.eicab_postprocess`: local
+  re-segmentation of every label, extension of the ICAs / basilar below eICAB's box, and (with
+  ``--eicab-pp-siphon``, default on) the ICA siphon loop cuts; writes the ``*_pp`` mask,
+  ``centerlines_mask_pp.nii.gz`` and ``eicab_postprocess.json`` (originals unchanged).
 - ``--only-pp`` — skip eICAB inference; run ICA post-process on existing outputs only.
+- ``--reuse-eicab`` — reuse an existing eICAB CW mask (+ ``TOF_resampled``) and run the
+  post-process only; without one, fall back to eICAB in CW-only mode (the whole-brain flood
+  fill is skipped, see ``--eicab-wb``). The branch taken is logged; on SGE the check runs at
+  submit time (post-process-only job) and again inside the eICAB job.
 """
 
 from __future__ import annotations
@@ -46,7 +53,12 @@ from nvitk.segmentation.eicab.cluster import build_eicab_host_shell_cmd, submit_
 from nvitk.segmentation.eicab.runner import run_eicab
 
 from . import config as cfg
-from .util.eicab.eicab_masks import find_tof_resampled_volume, resolve_eicab_mask
+from .util.eicab.eicab_masks import (
+    eicab_pp_path,
+    find_eicab_cw_mask,
+    find_tof_resampled_volume,
+    resolve_eicab_mask,
+)
 from .util.eicab.eicab_postprocess import postprocess_eicab_directory
 from .util.io.sge_backend import (
     sge_backend_cli_args,
@@ -120,6 +132,29 @@ def _eicab_out_dir(
     return output_root / subject / subdir
 
 
+def find_existing_eicab(out_dir: Path) -> tuple[Path, Path] | None:
+    """The eICAB CW mask and ``TOF_resampled`` already in *out_dir* (the post-process inputs),
+    or ``None`` when either is missing."""
+    cw = find_eicab_cw_mask(out_dir)
+    if cw is None:
+        return None
+    tof_resampled = find_tof_resampled_volume(out_dir)
+    if tof_resampled is None:
+        return None
+    return cw, tof_resampled
+
+
+def _eicab_whole_brain(eicab_wb: bool | None, reuse_eicab: bool) -> bool:
+    """Whether eICAB runs its whole-brain flood fill: *eicab_wb* when given, else on unless
+    *reuse_eicab* (whose fallback run only needs the CW mask)."""
+    return (not reuse_eicab) if eicab_wb is None else bool(eicab_wb)
+
+
+def _eicab_scope(whole_brain: bool) -> str:
+    """Log wording for the eICAB run scope."""
+    return "CW + whole brain" if whole_brain else "CW only, whole-brain flood fill skipped"
+
+
 def _resolve_pipeline_container(pipeline_container: Path | None) -> Path:
     """Outer SGE image (Python 3 + singularity client); inner eICAB stays in eicab .sif."""
     if pipeline_container is not None:
@@ -146,14 +181,16 @@ def run_postprocess_only(
     *,
     output_root: Path,
     eicab_subdir: str | None = None,
+    pp_siphon: bool = True,
+    pp_distal: bool = True,
 ) -> Path:
-    """ICA Otsu resegment + region growing on existing eICAB outputs."""
+    """The eICAB post-process on existing eICAB outputs."""
     out_dir = _eicab_out_dir(output_root, subject, eicab_subdir)
     _require_eicab_for_postprocess(out_dir)
     log.info(f"qvtpy stage1 eICAB post-process only | subject={subject}")
     log.info(f"  output: {out_dir}")
     tof_resampled = find_tof_resampled_volume(out_dir)
-    postprocess_eicab_directory(out_dir, tof_path=tof_resampled)
+    postprocess_eicab_directory(out_dir, tof_path=tof_resampled, siphon=pp_siphon, distal=pp_distal)
     return out_dir
 
 
@@ -179,15 +216,49 @@ def run_subject(
     keep_aux_outputs: bool = False,
     post_process_eicab: bool = True,
     only_pp: bool = False,
+    pp_siphon: bool = True,
+    pp_distal: bool = True,
+    reuse_eicab: bool = False,
+    eicab_wb: bool | None = None,
 ) -> Path:
-    """Run eICAB locally for one subject. Returns the eICAB output directory."""
+    """Run eICAB locally for one subject. Returns the eICAB output directory.
+
+    *reuse_eicab*: when *out_dir* already holds the eICAB CW mask and ``TOF_resampled``, skip
+    eICAB and run the post-process only; otherwise fall back to eICAB. *eicab_wb*: run eICAB's
+    whole-brain flood fill (default: on, off for the *reuse_eicab* fallback).
+    """
     out_dir = _eicab_out_dir(output_root, subject, eicab_subdir)
+    whole_brain = _eicab_whole_brain(eicab_wb, reuse_eicab)
+
+    if reuse_eicab and not only_pp:
+        existing = find_existing_eicab(out_dir)
+        if existing is not None:
+            cw, tof_resampled = existing
+            log.info(
+                f"[{subject}] stage1: reusing the existing eICAB CW mask {cw.name} "
+                f"(+ {tof_resampled.name}) in {out_dir}: eICAB skipped"
+            )
+            if not post_process_eicab:
+                log.info(f"[{subject}] stage1: post-process disabled: nothing to do")
+                return out_dir
+            if skip_existing and eicab_pp_path(cw).is_file():
+                log.info(f"[{subject}] stage1: skipping the existing post-process -> {eicab_pp_path(cw).name}")
+                return out_dir
+            log.step(f"[{subject}] eICAB post-process (re-segment + extend + siphon → *_pp + centerlines_mask_pp)")
+            postprocess_eicab_directory(out_dir, tof_path=tof_resampled, siphon=pp_siphon, distal=pp_distal)
+            return out_dir
+        log.info(
+            f"[{subject}] stage1: no eICAB CW mask in {out_dir}: "
+            f"falling back to eICAB ({_eicab_scope(whole_brain)})"
+        )
 
     if only_pp:
         return run_postprocess_only(
             subject,
             output_root=output_root,
             eicab_subdir=eicab_subdir,
+            pp_siphon=pp_siphon,
+            pp_distal=pp_distal,
         )
 
     subj_nifti = nifti_root / subject
@@ -208,13 +279,15 @@ def run_subject(
         else Path(eicab_cfg.DEFAULT_VASCULATURE_HOST_DIR).expanduser()
     )
 
-    if skip_existing and _output_has_segmentation(out_dir):
+    # With --reuse-eicab, reaching this point means no usable CW mask: partial outputs are redone.
+    if skip_existing and not reuse_eicab and _output_has_segmentation(out_dir):
         log.info(f"[{subject}] stage1 eICAB: skipping existing output -> {out_dir}")
         return out_dir
 
     log.info(f"qvtpy stage1 eICAB (local) | subject={subject}")
     log.info(f"  input : {tof}")
     log.info(f"  output: {out_dir}")
+    log.info(f"  scope : {_eicab_scope(whole_brain)}")
 
     out_dir.mkdir(parents=True, exist_ok=True)
     run_eicab(
@@ -229,13 +302,23 @@ def run_subject(
         keep_aux_outputs=keep_aux_outputs,
         vasculature_host_path=vas_host,
         capture_output=False,
+        cw_only=not whole_brain,
     )
+    if not whole_brain:
+        if find_eicab_cw_mask(out_dir) is None:
+            raise FileNotFoundError(f"eICAB (CW only) wrote no *_eICAB_CW mask under {out_dir}")
+        log.info(
+            f"[{subject}] stage1: eICAB CW only: no *_eICAB_WB mask "
+            "(stage 3's venous exclusion falls back to the CW labels)"
+        )
     if post_process_eicab:
-        log.step(f"[{subject}] eICAB ICA post-process (Otsu + RG → *_pp + centerlines_mask_pp)")
+        log.step(f"[{subject}] eICAB post-process (re-segment + extend + siphon → *_pp + centerlines_mask_pp)")
         tof_resampled = find_tof_resampled_volume(out_dir)
         postprocess_eicab_directory(
             out_dir,
             tof_path=tof_resampled,
+            siphon=pp_siphon,
+            distal=pp_distal,
         )
     return out_dir
 
@@ -268,6 +351,8 @@ def _postprocess_only_sge_spec(
     src_dir: Path | None = None,
     backend: str = "gpu",
     job_name: str | None = None,
+    pp_siphon: bool = True,
+    pp_distal: bool = True,
 ) -> tuple[StageSpec, ClusterPaths]:
     """StageSpec/ClusterPaths for ``--only-pp`` inside the pipeline container."""
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
@@ -292,6 +377,10 @@ def _postprocess_only_sge_spec(
     ]
     if eicab_subdir:
         parts.extend(["--eicab-subdir", shlex.quote(eicab_subdir.strip())])
+    if not pp_siphon:
+        parts.append("--no-eicab-pp-siphon")
+    if not pp_distal:
+        parts.append("--no-eicab-pp-distal")
     python_cmd = " ".join(parts)
 
     paths = ClusterPaths(
@@ -342,15 +431,26 @@ def build_subject_sge_command(
     resources: SgeResources | None = None,
     backend: str = "gpu",
     job_name: str | None = None,
+    pp_siphon: bool = True,
+    pp_distal: bool = True,
+    reuse_eicab: bool = False,
+    eicab_wb: bool | None = None,
 ) -> str:
     """Return the host shell command for one stage1 array/SGE task.
 
     Normal eICAB path: host ``singularity run`` chain via
     :func:`~nvitk.segmentation.eicab.cluster.build_eicab_host_shell_cmd`.
     ``only_pp``: pipeline-container singularity command (same as
-    :func:`_submit_postprocess_only_sge`).
+    :func:`_submit_postprocess_only_sge`). *reuse_eicab*: an existing CW mask found now gives
+    the post-process-only command; otherwise the eICAB command checks again at run time.
     """
     del skip_existing, resources, log_dir, err_dir  # submit-only / unused for cmd build
+    whole_brain = _eicab_whole_brain(eicab_wb, reuse_eicab)
+    if reuse_eicab and not only_pp:
+        reuse = _reuse_at_submit(subject, _eicab_out_dir(output_root, subject, eicab_subdir), whole_brain)
+        if reuse and not post_process_eicab:
+            return shlex.join(["echo", f"[nvitk stage1] {subject}: existing eICAB CW mask, post-process disabled"])
+        only_pp = reuse
     if only_pp:
         from nvitk.cluster.sge import build_singularity_command
 
@@ -363,6 +463,8 @@ def build_subject_sge_command(
             src_dir=src_dir,
             backend=backend,
             job_name=job_name,
+            pp_siphon=pp_siphon,
+            pp_distal=pp_distal,
         )
         return build_singularity_command(spec, paths)
 
@@ -398,11 +500,32 @@ def build_subject_sge_command(
         attention=attention,
         keep_aux_outputs=keep_aux_outputs,
         post_process_eicab=post_process_eicab,
+        pp_siphon=pp_siphon,
+        pp_distal=pp_distal,
         backend=backend,
         thread_limit=thread_limit,
         sge_pe_smp=sge_pe_smp,
         local_metric_scratch=metric_scratch,
+        whole_brain=whole_brain,
+        reuse_existing=reuse_eicab,
     )
+
+
+def _reuse_at_submit(subject: str, out_dir: Path, whole_brain: bool) -> bool:
+    """Submit-time ``--reuse-eicab`` check (logged): True when *out_dir* already holds the CW
+    mask and ``TOF_resampled``, so a post-process-only job is enough."""
+    existing = find_existing_eicab(out_dir)
+    if existing is not None:
+        log.info(
+            f"[{subject}] stage1 (sge): reusing the existing eICAB CW mask {existing[0].name} "
+            f"in {out_dir}: post-process-only job, eICAB skipped"
+        )
+        return True
+    log.info(
+        f"[{subject}] stage1 (sge): no eICAB CW mask in {out_dir} yet: eICAB job "
+        f"({_eicab_scope(whole_brain)}); the job checks again at run time"
+    )
+    return False
 
 
 def submit_subject_sge(
@@ -435,8 +558,15 @@ def submit_subject_sge(
     dry_run: bool = False,
     emit: TextIO | None = None,
     job_name: str | None = None,
+    pp_siphon: bool = True,
+    pp_distal: bool = True,
+    reuse_eicab: bool = False,
+    eicab_wb: bool | None = None,
 ) -> str:
     """Submit one stage1 eICAB SGE job. Returns the qsub job id (or '' when *emit* is set).
+
+    *reuse_eicab* / *eicab_wb*: see :func:`run_subject`; an existing CW mask found at submit
+    time gives a post-process-only job, and the eICAB job checks again at run time.
 
     The local TOF file does not need to exist yet: when a stage0_c job is
     chained via ``hold_jid``, the TOF is produced on the cluster before this
@@ -447,6 +577,14 @@ def submit_subject_sge(
 
     out_dir = _eicab_out_dir(output_root, subject, eicab_subdir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    whole_brain = _eicab_whole_brain(eicab_wb, reuse_eicab)
+
+    if reuse_eicab and not only_pp:
+        reuse = _reuse_at_submit(subject, out_dir, whole_brain)
+        if reuse and not post_process_eicab:
+            log.info(f"[{subject}] stage1 (sge): post-process disabled: nothing to submit")
+            return ""
+        only_pp = reuse
 
     if only_pp:
         return _submit_postprocess_only_sge(
@@ -461,9 +599,11 @@ def submit_subject_sge(
             dry_run=dry_run,
             emit=emit,
             job_name=job_name,
+            pp_siphon=pp_siphon,
+            pp_distal=pp_distal,
         )
 
-    if skip_existing and _output_has_segmentation(out_dir):
+    if skip_existing and not reuse_eicab and _output_has_segmentation(out_dir):
         log.info(f"[{subject}] stage1 eICAB: skipping existing output -> {out_dir}")
         return ""
 
@@ -517,6 +657,7 @@ def submit_subject_sge(
         )
     log.info(f"  outer container (run_job): {pipeline_c}")
     log.info(f"  inner container (eICAB):   {eicab_c}")
+    log.info(f"  scope : {_eicab_scope(whole_brain)}")
 
     return submit_eicab_job(
         job_name=jn,
@@ -537,11 +678,15 @@ def submit_subject_sge(
         attention=attention,
         keep_aux_outputs=keep_aux_outputs,
         post_process_eicab=post_process_eicab,
+        pp_siphon=pp_siphon,
+        pp_distal=pp_distal,
         backend=backend,
         resources=res,
         thread_limit=thread_limit,
         sge_pe_smp=sge_pe_smp,
         local_metric_scratch=metric_scratch,
+        whole_brain=whole_brain,
+        reuse_existing=reuse_eicab,
         hold_jid=hold_jid,
         dry_run=dry_run,
         emit=emit,
@@ -561,6 +706,8 @@ def _submit_postprocess_only_sge(
     dry_run: bool,
     emit: TextIO | None,
     job_name: str | None,
+    pp_siphon: bool = True,
+    pp_distal: bool = True,
 ) -> str:
     """SGE job: ``python -m nvitk.pipes.qvtpy.stage1_eicab --only-pp`` inside pipeline container."""
     spec, paths = _postprocess_only_sge_spec(
@@ -572,6 +719,8 @@ def _submit_postprocess_only_sge(
         src_dir=src_dir,
         backend=backend,
         job_name=job_name,
+        pp_siphon=pp_siphon,
+        pp_distal=pp_distal,
     )
     log.info(f"qvtpy stage1 eICAB post-process only (sge) | subject={subject}")
     log.info(f"  output: {_eicab_out_dir(output_root, subject, eicab_subdir)}")
@@ -688,13 +837,39 @@ def _submit_postprocess_only_sge(
     "--post-process-eicab/--no-post-process-eicab",
     default=True,
     show_default=True,
-    help="After eICAB: Otsu ICA resegment + ICA RG; writes *_pp mask and centerlines_mask_pp.nii.gz.",
+    help="After eICAB: local re-segmentation of every label, extension of the ICAs / basilar below eICAB's box "
+         "and the ICA siphon cuts; writes the *_pp mask, centerlines_mask_pp.nii.gz and eicab_postprocess.json.",
+)
+@click.option(
+    "--eicab-pp-siphon/--no-eicab-pp-siphon",
+    default=True,
+    show_default=True,
+    help="Include the ICA siphon correction (minimum cut) in the eICAB post-process.",
+)
+@click.option(
+    "--eicab-pp-distal/--no-eicab-pp-distal",
+    default=True,
+    show_default=True,
+    help="Grow the ACAs / MCAs / PCAs / SCAs distally along the Frangi tree in the eICAB post-process.",
 )
 @click.option(
     "--only-pp",
     is_flag=True,
     default=False,
-    help="Skip eICAB inference; run ICA post-process on existing outputs in output-root/<subject>/eicab/.",
+    help="Skip eICAB inference; run the eICAB post-process on existing outputs in output-root/<subject>/eicab/.",
+)
+@click.option(
+    "--reuse-eicab/--no-reuse-eicab",
+    default=False,
+    show_default=True,
+    help="Reuse an existing eICAB CW mask (+ TOF_resampled) in output-root/<subject>/<eicab-subdir>/ and run "
+         "the post-process only; without one, fall back to eICAB (CW only unless --eicab-wb). Logged per subject.",
+)
+@click.option(
+    "--eicab-wb/--no-eicab-wb",
+    default=None,
+    help="Run eICAB's whole-brain (WB) flood fill after the CW mask. Default: on, off for the --reuse-eicab "
+         "fallback. Without it there is no *_eICAB_WB mask (stage 3's venous exclusion uses the CW labels).",
 )
 @click.option(
     "--emit-script",
@@ -732,12 +907,17 @@ def main(
     err_dir: Path | None,
     keep_aux_outputs: bool,
     post_process_eicab: bool,
+    eicab_pp_siphon: bool,
+    eicab_pp_distal: bool,
     only_pp: bool,
+    reuse_eicab: bool,
+    eicab_wb: bool | None,
     emit_script: Path | None,
     no_remote: bool,
     remote_host: str | None,
     remote_user: str | None,
     dry_run: bool,
+    backend: str = "gpu",
 ) -> None:
     """CLI entry point: run eICAB (and optional post-processing) for one or every subject under
     ``nifti_root``, either locally or by submitting SGE jobs."""
@@ -769,7 +949,11 @@ def main(
                     vasculature_dir=vasculature_dir,
                     keep_aux_outputs=keep_aux_outputs,
                     post_process_eicab=post_process_eicab,
+                    pp_siphon=eicab_pp_siphon,
+                    pp_distal=eicab_pp_distal,
                     only_pp=only_pp,
+                    reuse_eicab=reuse_eicab,
+                    eicab_wb=eicab_wb,
                 )
             except (FileNotFoundError, OSError) as exc:
                 log.warning(f"[{subj}] stage1 eICAB skipped: {exc}")
@@ -814,7 +998,11 @@ def main(
                     err_dir=err_dir,
                     keep_aux_outputs=keep_aux_outputs,
                     post_process_eicab=post_process_eicab,
+                    pp_siphon=eicab_pp_siphon,
+                    pp_distal=eicab_pp_distal,
                     only_pp=only_pp,
+                    reuse_eicab=reuse_eicab,
+                    eicab_wb=eicab_wb,
                     backend=backend,
                     dry_run=False,
                     emit=fh,
@@ -867,6 +1055,7 @@ def main(
 
 __all__ = [
     "build_subject_sge_command",
+    "find_existing_eicab",
     "find_tof_resampled_volume",
     "find_tof_volume",
     "run_postprocess_only",

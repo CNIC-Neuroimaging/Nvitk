@@ -37,6 +37,12 @@ A result may also tint its rows (``row_colours``: row key → colour, e.g. a les
 class) and bring its own controls (``controls``: a factory returning a widget shown above the
 table while that result is on screen, e.g. a filter of what the viewer shows).
 
+Every table has a search bar: *Find rows* keeps the rows whose cells contain every term typed
+(space-separated, case-insensitive) and *Find columns* the columns whose header contains any of the
+comma-separated terms (the key column always stays). Rows and columns are hidden, not removed, so
+sorting, row tints, the viewer highlight and *Colour labels by* keep working; the filter is kept
+when another result is shown.
+
 The window is an nvitk panel (``nvitk:results``) with the panels' title bar: ⧉ docks it in the
 main window with the other panels or pops it out again, ⛶ fills the screen, ✕ closes it, and the
 panel manager moves it into any panel window (:mod:`nvitk.gui.core.workspace`), where it is
@@ -62,6 +68,7 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -331,10 +338,65 @@ class ResultsWindow(QWidget):
         root.addWidget(self._heading)
         root.addWidget(self._subtitle)
         root.addLayout(toolbar)
+        root.addLayout(self._build_filter_row())
         root.addWidget(self._colour_row)
         root.addWidget(self._controls_box)
         root.addWidget(self._table, stretch=1)
         root.addWidget(self._note)
+
+    def _build_filter_row(self) -> QHBoxLayout:
+        """*Find rows* / *Find columns*: hide what does not match (see the module docstring)."""
+        self._row_filter = QLineEdit()
+        self._row_filter.setPlaceholderText("Find rows…")
+        self._row_filter.setClearButtonEnabled(True)
+        self._row_filter.setToolTip("Keep the rows whose cells contain every term (space-separated).")
+        self._col_filter = QLineEdit()
+        self._col_filter.setPlaceholderText("Find columns… (comma-separated)")
+        self._col_filter.setClearButtonEnabled(True)
+        self._col_filter.setToolTip("Keep the columns whose header contains any of the terms (comma-separated); "
+                                    "the first column always stays.")
+        self._filter_count = QLabel("")
+        self._filter_count.setStyleSheet(f"color: {COLOR_MUTED};")
+        for field in (self._row_filter, self._col_filter):
+            field.textChanged.connect(lambda _t: self._apply_filters())
+        # Sorting reorders the rows under the hidden-row flags: filter again once it is done.
+        self._table.horizontalHeader().sortIndicatorChanged.connect(
+            lambda *_a: QTimer.singleShot(0, self._apply_filters))
+        row = QHBoxLayout()
+        row.setSpacing(SPACE_TIGHT)
+        row.addWidget(self._row_filter, stretch=1)
+        row.addWidget(self._col_filter, stretch=1)
+        row.addWidget(self._filter_count)
+        return row
+
+    def _apply_filters(self) -> None:
+        """Hide the rows and columns that do not match the search fields."""
+        table = self._table
+        n_rows, n_cols = table.rowCount(), table.columnCount()
+        row_terms = [t for t in self._row_filter.text().lower().split() if t]
+        col_terms = [t.strip() for t in self._col_filter.text().lower().split(",") if t.strip()]
+        matrix = self._shown is not None and _is_matrix(self._shown.payload)
+        self._col_filter.setVisible(matrix)
+        if not matrix:
+            col_terms = []
+        shown_cols = 0
+        for c in range(n_cols):
+            header = table.horizontalHeaderItem(c)
+            name = header.text().lower() if header is not None else ""
+            hide = bool(col_terms) and c > 0 and not any(t in name for t in col_terms)
+            table.setColumnHidden(c, hide)
+            shown_cols += not hide
+        shown_rows = 0
+        for r in range(n_rows):
+            text = " ".join(table.item(r, c).text().lower() for c in range(n_cols) if table.item(r, c) is not None)
+            hide = bool(row_terms) and not all(t in text for t in row_terms)
+            table.setRowHidden(r, hide)
+            shown_rows += not hide
+        if row_terms or col_terms:
+            self._filter_count.setText(f"{shown_rows} / {n_rows} rows"
+                                       + (f" · {shown_cols} / {n_cols} columns" if matrix else ""))
+        else:
+            self._filter_count.setText("")
 
     def _build_colour_row(self) -> QWidget:
         """*Colour labels by*: a measured column, a colormap, the range, a legend."""
@@ -690,6 +752,7 @@ class ResultsWindow(QWidget):
         self._filling = False
         self._sync_colour_row(result)
         self._row_swatches(result)
+        self._apply_filters()
 
 
 def _tint(colour: Any) -> QColor:

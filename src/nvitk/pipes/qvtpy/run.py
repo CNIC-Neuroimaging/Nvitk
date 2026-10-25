@@ -333,7 +333,11 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     eicab_container: Path | None,
     vasculature_dir: Path | None,
     post_process_eicab: bool,
+    eicab_pp_siphon: bool,
+    eicab_pp_distal: bool,
     only_pp: bool,
+    reuse_eicab: bool,
+    eicab_wb: bool | None,
     stage2_reference: str,
     stage2_dof: int,
     stage2_cost: str,
@@ -480,8 +484,12 @@ def _emit_qvtpy_sge_subjects_for_chunk(
                             local_metric_scratch=eicab_local_metric_scratch,
                             vasculature_dir=vasculature_dir,
                             post_process_eicab=post_process_eicab,
+                            pp_siphon=eicab_pp_siphon,
+                            pp_distal=eicab_pp_distal,
                             backend=backend,
                             only_pp=only_pp,
+                            reuse_eicab=reuse_eicab,
+                            eicab_wb=eicab_wb,
                         ),
                     )
                 )
@@ -1079,15 +1087,41 @@ def _submit_qvtpy_sge_subjects_remote(
 )
 @click.option(
     "--post-process-eicab/--no-post-process-eicab",
-    default=False,
+    default=True,
     show_default=True,
-    help="Stage1: Otsu ICA resegment + ICA region growing after eICAB.",
+    help="Stage1: eICAB post-process: local re-segmentation of every label, extension of the ICAs / "
+         "basilar below eICAB's box, ICA siphon loop cuts; writes the *_pp mask stage 7 prefers.",
+)
+@click.option(
+    "--eicab-pp-siphon/--no-eicab-pp-siphon",
+    default=True,
+    show_default=True,
+    help="Stage1: include the ICA siphon correction (minimum cut) in the eICAB post-process.",
+)
+@click.option(
+    "--eicab-pp-distal/--no-eicab-pp-distal",
+    default=True,
+    show_default=True,
+    help="Stage1: grow the ACAs / MCAs / PCAs / SCAs distally along the Frangi tree in the eICAB post-process.",
 )
 @click.option(
     '--only-pp/--no-only-pp',
     default=False,
     show_default=True,
     help="Stage1: Only run ICA post-process on existing eICAB outputs.",
+)
+@click.option(
+    "--reuse-eicab/--no-reuse-eicab",
+    default=False,
+    show_default=True,
+    help="Stage1: reuse an existing eICAB CW mask (+ TOF_resampled) and run the post-process only; "
+         "without one, fall back to eICAB (CW only unless --eicab-wb). Logged per subject, local and SGE.",
+)
+@click.option(
+    "--eicab-wb/--no-eicab-wb",
+    default=None,
+    help="Stage1: run eICAB's whole-brain (WB) flood fill after the CW mask. Default: on, off for the "
+         "--reuse-eicab fallback. Without it stage 3's venous exclusion uses the CW labels.",
 )
 # --- stage 2 ---
 @click.option(
@@ -1374,7 +1408,11 @@ def main(
     eicab_sge_pe_smp: int | None,
     eicab_local_metric_scratch: bool | None,
     post_process_eicab: bool,
+    eicab_pp_siphon: bool,
+    eicab_pp_distal: bool,
     only_pp: bool,
+    reuse_eicab: bool,
+    eicab_wb: bool | None,
     stage2_reference: str,
     stage2_dof: int,
     stage2_cost: str,
@@ -1769,7 +1807,11 @@ def main(
                             eicab_container=eicab_container,
                             vasculature_dir=vasculature_dir,
                             post_process_eicab=post_process_eicab,
+                            pp_siphon=eicab_pp_siphon,
+                            pp_distal=eicab_pp_distal,
                             only_pp=only_pp,
+                            reuse_eicab=reuse_eicab,
+                            eicab_wb=eicab_wb,
                         ),
                     )
                 if run_s2 and _local_stage_pending(subj, STAGE_REG, **_local_skip):
@@ -2093,7 +2135,11 @@ def main(
         eicab_container=eicab_container,
         vasculature_dir=vasculature_dir,
         post_process_eicab=post_process_eicab,
+        eicab_pp_siphon=eicab_pp_siphon,
+        eicab_pp_distal=eicab_pp_distal,
         only_pp=only_pp,
+        reuse_eicab=reuse_eicab,
+        eicab_wb=eicab_wb,
         stage2_reference=stage2_reference,
         stage2_dof=stage2_dof,
         stage2_cost=stage2_cost,
