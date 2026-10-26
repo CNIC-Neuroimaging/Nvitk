@@ -8,16 +8,16 @@ extra space, below the layer item itself. Each label line shows:
     [✓]  ●  Left ICA (3)
 
 a show/hide box, the label's colour as drawn on the canvas, and its name in the
-layer's vocabulary — the one picked for it in a label picker, else the one
+layer's vocabulary: the one picked for it in a label picker, else the one
 guessed from its name, path and contents (:func:`~nvitk.gui.labels.catalog.layer_schema_key`).
 
-* click a line — show or hide that label; Alt+click — show only that label;
-* double-click a line — rename the label in place (Enter keeps, Esc cancels; an
-  empty name brings the vocabulary's back) — names given by hand are kept in the
+* click a line: show or hide that label; Alt+click: show only that label;
+* double-click a line: rename the label in place (Enter keeps, Esc cancels; an
+  empty name brings the vocabulary's back): names given by hand are kept in the
   layer's metadata (:func:`~nvitk.gui.labels.catalog.set_label_name`);
-* right-click a line — rename, colour, show only / all, go to the label, edit it
+* right-click a line: rename, colour, show only / all, go to the label, edit it
   in the Labeling tab, or delete it (Ctrl+Z restores it on a Labels layer);
-* click the colour dot — change the label's colour (Labels layers);
+* click the colour dot: change the label's colour (Labels layers);
 * **All** / **None** in the header; **Panel** opens the full Labels panel on the
   layer (filter box, vocabulary, colormaps);
 * a long list scrolls with the wheel inside it.
@@ -90,7 +90,7 @@ def _label_colour(layer: Any, lid: int) -> QColor:
         lo, hi = (float(v) for v in layer.contrast_limits)
         t = 0.0 if hi <= lo else min(max((lid - lo) / (hi - lo), 0.0), 1.0)
         return _rgba_qcolor(layer.colormap.map([t])[0])
-    except Exception:  # noqa: BLE001 — a colour is decoration
+    except Exception:  # noqa: BLE001 (a colour is decoration)
         return QColor(200, 200, 200)
 
 
@@ -151,7 +151,7 @@ def _delegate_class() -> type:
             hub.names_changed.connect(lambda _layer: self._repaint())
             hub.labels_changed.connect(lambda layer: self._relayout(layer) if self.is_expanded(layer) else None)
 
-        # -- folders ----------------------------------------------------------
+        # folders
         #
         # A row in a folder is a header band (one per folder that starts on it)
         # over the layer item, indented by its depth. Everything the label chips
@@ -254,7 +254,7 @@ def _delegate_class() -> type:
         def updateEditorGeometry(self, editor: Any, option: QStyleOptionViewItem, index: Any) -> None:
             super().updateEditorGeometry(editor, self._inner(option, index), index)
 
-        # -- state ------------------------------------------------------------
+        # state
 
         @staticmethod
         def _layer(index: Any) -> Any:
@@ -269,7 +269,7 @@ def _delegate_class() -> type:
         def _ids(self, layer: Any) -> list[int]:
             try:
                 return layer_label_ids(layer)
-            except Exception:  # noqa: BLE001 — a layer mid-removal
+            except Exception:  # noqa: BLE001 (a layer mid-removal)
                 return []
 
         def _expansion_height(self, layer: Any) -> int:
@@ -289,7 +289,7 @@ def _delegate_class() -> type:
             hint = index.data(Qt.ItemDataRole.SizeHintRole)
             return int(hint.height()) if hint is not None else 34
 
-        # -- geometry ---------------------------------------------------------
+        # geometry
 
         def _chip_rect(self, rect: QRect, index: Any) -> QRect:
             base = self._base_height(index)
@@ -337,7 +337,7 @@ def _delegate_class() -> type:
                 "footer": footer, "ids": ids, "offset": state.offset,
             }
 
-        # -- painting ---------------------------------------------------------
+        # painting
 
         def _paint_item(self, painter: QPainter, option: QStyleOptionViewItem, index: Any) -> None:
             if not self._has_chip(index):
@@ -365,9 +365,9 @@ def _delegate_class() -> type:
         def _item_option(self, option: QStyleOptionViewItem, index: Any) -> QStyleOptionViewItem:
             """*option* cut down to where Napari's item is drawn on a chip row: the
             top part, left of the chip. Events forwarded to Napari's delegate get
-            this rect too — Qt hit-tests the visibility box against the rect it is
+            this rect too: Qt hit-tests the visibility box against the rect it is
             given, and on an unfolded (taller) row the full rect put the box's hit
-            area mid-row, below the eye actually drawn, so the eye did nothing."""
+            area mid-row, below the eye drawn, so the eye did nothing."""
             top = QStyleOptionViewItem(option)
             top.rect = QRect(
                 option.rect.left(), option.rect.top(),
@@ -467,7 +467,7 @@ def _delegate_class() -> type:
                 )
             painter.restore()
 
-        # -- interaction ------------------------------------------------------
+        # interaction
 
         def _item_editor_event(self, event: Any, model: Any, option: QStyleOptionViewItem, index: Any) -> bool:
             if not self._has_chip(index) or not hasattr(event, "pos"):
@@ -544,7 +544,7 @@ def _delegate_class() -> type:
                 set_layer_visible_ids(layer, sorted(new), self._viewer, present=ids)
                 return
 
-        # -- rename -------------------------------------------------------------
+        # rename
 
         def _rename_from_double_click(self, layer: Any, lid: int) -> None:
             """Undo the show/hide the double-click's first click made, then rename."""
@@ -623,7 +623,7 @@ def _delegate_class() -> type:
                 label_filter_hub().names_changed.emit(layer)
                 self._repaint()
 
-        # -- right-click menu ---------------------------------------------------
+        # right-click menu
 
         def _label_menu(self, layer: Any, lid: int, global_pos: QPoint) -> None:
             """Rename, recolour, show/hide, find, edit or delete one label."""
@@ -678,7 +678,7 @@ def _delegate_class() -> type:
                     return 0
             try:
                 count = delete_label(layer, lid)
-            except Exception as exc:  # noqa: BLE001 — a read-only or multiscale layer
+            except Exception as exc:  # noqa: BLE001 (a read-only or multiscale layer)
                 self._status(f"Could not delete label {lid}: {exc}")
                 return 0
             label_filter_hub().labels_changed.emit(layer)
@@ -697,7 +697,7 @@ def _delegate_class() -> type:
             current = _label_colour(layer, lid)
             try:
                 options = QColorDialog.ColorDialogOption.ShowAlphaChannel
-            except AttributeError:  # pragma: no cover — older Qt bindings
+            except AttributeError:  # pragma: no cover: older Qt bindings
                 options = QColorDialog.ShowAlphaChannel  # type: ignore[attr-defined]
             chosen = QColorDialog.getColor(current, self.parent(), f"Label {lid} colour", options)
             if not chosen.isValid():
@@ -849,7 +849,7 @@ def install_layer_list_label_buttons(viewer: Any) -> Any | None:
     try:
         view = viewer.window._qt_viewer.layers
         delegate = _delegate_class()(viewer, view)
-    except Exception:  # noqa: BLE001 — the layer list keeps Napari's delegate
+    except Exception:  # noqa: BLE001 (the layer list keeps Napari's delegate)
         return None
     view.setItemDelegate(delegate)
     delegate.loading_frame_changed.connect(view.viewport().update)
@@ -868,7 +868,7 @@ def install_layer_list_label_buttons(viewer: Any) -> Any | None:
             try:
                 if is_label_like_layer(layer):
                     view.viewport().update()
-            except Exception:  # noqa: BLE001 — a layer mid-removal
+            except Exception:  # noqa: BLE001 (a layer mid-removal)
                 pass
 
         QTimer.singleShot(0, _run)

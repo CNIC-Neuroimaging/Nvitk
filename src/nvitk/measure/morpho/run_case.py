@@ -76,15 +76,13 @@ def _headless() -> None:
         pass
 
 
-# ---------------------------------------------------------------------------
 # Worker (must be a top-level function to be picklable for spawn)
-# ---------------------------------------------------------------------------
 
 def _worker(args: Tuple[Any, ...]) -> Dict[str, Any]:
     """Subprocess entry point: run the full VMTK morphometrics pipeline for one label/component.
 
     Must stay a top-level function (picklable) since workers are spawned, not
-    forked — VTK/VMTK are not reliably fork-safe. Catches all exceptions and
+    forked: VTK/VMTK are not reliably fork-safe. Catches all exceptions and
     returns them as a result dict (``ok=False``) so one failed job doesn't kill
     the pool.
     """
@@ -182,9 +180,7 @@ def _worker(args: Tuple[Any, ...]) -> Dict[str, Any]:
         }
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 def _output_dirs(case_out_dir: str) -> Dict[str, Optional[str]]:
     """Compute the (unconditional) output subdirectory paths for one case, per config flags."""
@@ -272,7 +268,7 @@ def _make_jobs(
 
 
 def unique_sheet_names(keys: List[str], prefix: str = "P") -> Dict[str, str]:
-    """Map each key to a unique Excel sheet name (≤ 31 characters): ``P001_<key…>``.
+    """Map each key to a unique Excel sheet name (<= 31 characters): ``P001_<key...>``.
 
     Truncating long path ids to Excel's 31-character limit made different paths collide (and
     overwrite one another's sheet); the numeric prefix keeps them apart, and the full ids are listed
@@ -312,13 +308,13 @@ def _write_excel(
 ) -> str:
     """Assemble every result table into ``case_metrics_donut_tree.xlsx`` (+ CSVs).
 
-    Sheet order: the compact tables first — ``Vessel_Summary`` (one row per vessel), ``Segments``,
+    Sheet order: the compact tables first; ``Vessel_Summary`` (one row per vessel), ``Segments``,
     ``Lesions``, ``Subject`` (also written as ``vessel_summary.csv``, ``segments.csv``,
-    ``lesions.csv``, ``subject_summary.csv``) — then the detailed cow_morpho-style sheets.
+    ``lesions.csv``, ``subject_summary.csv``), then the detailed cow_morpho-style sheets.
     ``00_Path_Summary`` holds the **non-overlapping** segment rows: each piece of vessel is measured
-    once. The raw root→terminal paths, which re-traverse every shared trunk, are kept in
-    ``07_Root_To_Terminal_Paths`` for traceability — summing their lengths overestimates the
-    vessel tree. Point-wise tables follow as ``P###_…`` sheets (``Sheet_Index`` maps them to path
+    once. The raw root->terminal paths, which re-traverse every shared trunk, are kept in
+    ``07_Root_To_Terminal_Paths`` for traceability: summing their lengths overestimates the
+    vessel tree. Point-wise tables follow as ``P###_...`` sheets (``Sheet_Index`` maps them to path
     ids) and as ``points/<path_id>.csv``.
     """
     compact = compact or {}
@@ -385,9 +381,7 @@ def _write_excel(
     return out_xlsx
 
 
-# ---------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
 
 def run_case(
     seg_path: str,
@@ -404,11 +398,11 @@ def run_case(
 ) -> str:
     """Process one segmentation file in parallel.  Returns the Excel path.
 
-    *case_id* labels every output row (default: the segmentation's file stem — give the subject
+    *case_id* labels every output row (default: the segmentation's file stem; give the subject
     id when several subjects share one file name, as stage 7's ``TOF_eICAB_CW.nii.gz`` do).
 
-    *config* (default: the ``eicab_cw`` profile) is installed for the run — here and in every
-    spawned worker — and the previous values are restored afterwards. *species* /
+    *config* (default: the ``eicab_cw`` profile) is installed for the run (here and in every
+    spawned worker), and the previous values are restored afterwards. *species* /
     *axes_override* / *length_scale* describe the subject the label ids belong to; they are
     normally taken from the topology JSON's ``_meta`` block by
     :func:`nvitk.measure.morphometrics.run_morphometrics_case`. They control how
@@ -554,7 +548,7 @@ def _run_case(
     vessels_df = vessel_summary(vessel_rows, lesion_rows, mapping=resolved_mapping)
     if not vessels_df.empty:
         vessels_df["case_id"] = case_id
-    # Absent main vessels → "hypoplasia" lesions (no location), flagged per vessel too.
+    # Absent main vessels -> "hypoplasia" lesions (no location), flagged per vessel too.
     hypoplasia = hypoplasia_rows(vessels_df, resolved_mapping, input_volumetry)
     lesion_rows.extend(hypoplasia)
     vessels_df = add_hypoplasia_columns(vessels_df, hypoplasia)

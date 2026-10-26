@@ -104,9 +104,9 @@ def submit_tool_job(
     SGE stage running *python_cmd* under Singularity, using default resources/binds for *gpu*.
 
     *models* adds a ``-B`` bind for a weights directory the tool needs, and
-    *extra_env* exports additional variables inside the container — a tool whose
+    *extra_env* exports additional variables inside the container: a tool whose
     weights live outside ``image_tools`` (TotalSegmentator) needs both. *extra_host_binds*
-    adds ``(host directory, container path)`` binds — the FSL / FastSurfer CLIs bind every
+    adds ``(host directory, container path)`` binds: the FSL / FastSurfer CLIs bind every
     folder their path arguments live in."""
     # No ensure_dirs() here: these are cluster paths and cluster storage is not mounted
     # locally. submit_stage() creates them on the direct (on-cluster) submission path, and

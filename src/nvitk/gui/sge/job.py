@@ -193,7 +193,7 @@ def tool_models_binding(tool_id: str) -> tuple[Path | None, dict[str, str]]:
     bind. TotalSegmentator's are under
     ``pipelines.totalsegmentator.default_sge_model_root``; without this the job got
     no ``-B`` for models at all, and ``TOTALSEG_HOME_DIR`` pointed at a *host* path
-    that does not exist inside the container — which is what made TotalSegmentator
+    that does not exist inside the container, which is what made TotalSegmentator
     try to create ``/models/imaging/...`` on the node and fail. ToPBrain's are
     under ``pipelines.topbrain_paths.cluster_model_root``.
     """
@@ -219,7 +219,7 @@ def tool_models_binding(tool_id: str) -> tuple[Path | None, dict[str, str]]:
         # Their common ancestor is bound instead, and each root is exported as the
         # path it landed on inside the container. Deriving those from the host
         # paths rather than assuming a tree shape means a reorganised results
-        # directory does not quietly point the job at nothing.
+        # directory does not silently point the job at nothing.
         try:
             from nvitk.pipes.topbrain.util.paths import layout_cluster
 
@@ -234,7 +234,7 @@ def tool_models_binding(tool_id: str) -> tuple[Path | None, dict[str, str]]:
         except Exception:
             return None, {}
         if str(common) in ("", "/"):
-            # No useful shared parent — binding "/" is not something to do quietly.
+            # No useful shared parent: binding "/" is not something to do silently.
             return None, {}
         container = SingularityBinds().models.rstrip("/") or "/models"
         env = {}

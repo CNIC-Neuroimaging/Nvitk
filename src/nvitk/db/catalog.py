@@ -88,7 +88,7 @@ class DatasetCatalog:
         (manifests + schema) and creating empty ``tables/``/``cache/`` directories."""
         destination = Path(root).expanduser().resolve()
         # Templates ship inside the package. They used to be read from
-        # ``<repo>/dataset/nvitk-dataset/catalog``, which only exists in a source checkout — so
+        # ``<repo>/dataset/nvitk-dataset/catalog``, which only exists in a source checkout, so
         # for a conda/pip install this produced an empty ``catalog/`` and no error, and the
         # resulting "dataset" failed later with a missing-manifest message that pointed nowhere.
         template_root = Path(__file__).resolve().parent / "catalog_templates"

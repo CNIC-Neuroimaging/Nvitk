@@ -104,7 +104,7 @@ def label_id_under_mouse(
     except Exception:
         pass
 
-    # Secondary: Napari Labels paint helper (ray → first nonzero voxel).
+    # Secondary: Napari Labels paint helper (ray -> first nonzero voxel).
     try:
         from napari.layers.labels._labels_utils import mouse_event_to_labels_coordinate
 

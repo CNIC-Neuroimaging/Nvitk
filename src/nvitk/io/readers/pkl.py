@@ -42,7 +42,7 @@ def read_pkl(path: str, *, axes: str | None = None, **kwargs: Any):
     """
     Load the volume a ``.pkl`` refers to: the sibling ``.b2nd`` if present, else a pickled array.
 
-    Extra keyword arguments (``channel``, ``squeeze_channel``, ``world``, …) are forwarded to
+    Extra keyword arguments (``channel``, ``squeeze_channel``, ``world``, ...) are forwarded to
     :func:`~nvitk.io.readers.read_b2nd` when delegating.
 
     Returns

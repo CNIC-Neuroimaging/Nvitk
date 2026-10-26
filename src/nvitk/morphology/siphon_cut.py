@@ -19,9 +19,9 @@ Here the segmentation's boundary is kept and only the contact is removed:
    split into a *bridge* arc (the shorter one between its anchors) and a *curl* arc. The anchors
    are the cycle's junctions, else its inferior / superior extremes in world space (from the
    affine, not the array's index axes).
-3. For each loop, a **minimum s–t vertex cut** on the whole vessel. The ring is opened opposite
+3. For each loop, a **minimum s-t vertex cut** on the whole vessel. The ring is opened opposite
    the bridge: a slab of the vessel around the far loop position leaves the graph, and the loop
-   just either side of it becomes the source and the sink, so every source → sink path runs
+   just either side of it becomes the source and the sink, so every source -> sink path runs
    through the bridge. Each voxel belongs to the loop position of its nearest skeleton voxel. A
    voxel costs its TOF intensity relative to the vessel's centerline intensity, times how close
    it is to a limb's centreline (the skeleton without the bridge arc) relative to the lumen
@@ -48,8 +48,8 @@ All lengths are in mm.
 Backend
 -------
 ``np`` / ``scipy`` / ``ndi`` come from ``setup(globals())``. The algorithms here are host-bound by
-design — per-voxel topology tests on 3×3×3 patches, networkx skeleton graphs, SciPy's
-``maximum_flow`` (no CuPy equivalent) — on small crops around one vessel, so the public functions
+design, per-voxel topology tests on 3×3×3 patches, networkx skeleton graphs, SciPy's
+``maximum_flow`` (no CuPy equivalent), on small crops around one vessel, so the public functions
 run under ``using("cpu")`` (:func:`_host`). They accept NumPy or CuPy inputs (:func:`to_numpy` at
 entry) and return host arrays; :func:`repair_label` writes its in-place result back into a CuPy
 label volume.
@@ -81,7 +81,7 @@ MAX_CUT_MM3 = 20.0
 MAX_CUT_FRACTION = 0.02
 LOCAL_ATTEMPTS = 3
 MAX_LOOPS = 8
-#: |ΔL − ΔR| (volume change %, both ICAs) above which the run is flagged.
+#: |ΔL - ΔR| (volume change %, both ICAs) above which the run is flagged.
 ASYMMETRY_TOLERANCE_PCT = 2.0
 RESEGMENT_MODES = ("none", "common")
 #: Pieces of at most this many voxels that pretess detaches from the vessel are dropped.
@@ -94,9 +94,7 @@ with using("cpu"):  # host constants: the structuring elements of the host-side 
 _FWD13 = [(dx, dy, dz) for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1) if (dx, dy, dz) > (0, 0, 0)]
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Small helpers
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _host(func: Any) -> Any:
@@ -167,7 +165,7 @@ class Betti:
 def betti(mask: Any) -> Betti:
     """β₀ (components), β₁ (loops) and β₂ (cavities) of *mask*.
 
-    β₁ = β₀ + β₂ − χ, with the Euler characteristic χ for a 26-connected foreground; cavities are
+    β₁ = β₀ + β₂ - χ, with the Euler characteristic χ for a 26-connected foreground; cavities are
     the 6-connected background components that do not reach the outside."""
     from skimage.measure import euler_number
 
@@ -184,9 +182,7 @@ def betti(mask: Any) -> Betti:
     return Betti(int(b0), max(0, int(b0) + b2 - chi), b2, n)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # pretess: critical configurations
-# ──────────────────────────────────────────────────────────────────────────────
 
 # Each critical configuration is a pair of voxels that touch only along an edge or at a corner:
 # (offset of the first, offset of the second, the offsets of the other voxels of its 2×2 square
@@ -221,7 +217,7 @@ _CUBES = _cube_configs()
 
 
 def _shifted(m: np.ndarray, off: tuple[int, ...]) -> np.ndarray:
-    """``m[p + off]`` for every base position *p* of a 2×2×2 window (shape − 1)."""
+    """``m[p + off]`` for every base position *p* of a 2×2×2 window (shape - 1)."""
     return m[tuple(slice(o, s - 1 + o) for o, s in zip(off, m.shape))]
 
 
@@ -277,8 +273,8 @@ def _patch(m: np.ndarray, v: tuple) -> np.ndarray:
 def topology_numbers(m: Any, v: tuple) -> tuple[int, int]:
     """Bertrand's topology numbers of voxel *v*: ``T26`` (26-components of the foreground in its
     26-neighbourhood) and ``T6bar`` (6-components of the background in its 18-neighbourhood that
-    touch it by a face). A voxel is simple — removable or addable without changing the
-    topology — iff both are 1. Removing a set voxel with ``T6bar != 1`` opens a tunnel or a
+    touch it by a face). A voxel is simple (removable or addable without changing the
+    topology) iff both are 1. Removing a set voxel with ``T6bar != 1`` opens a tunnel or a
     cavity; adding an unset one with ``T26 != 1`` closes a loop or merges components."""
     p = _patch(m, v)
     _, t26 = ndi.label(p & _N26, structure=_CUBE)
@@ -419,9 +415,7 @@ def pretess(
     return full, info
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Skeleton loops
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _skeleton(m: np.ndarray) -> np.ndarray:
@@ -570,9 +564,7 @@ def loop_candidates(
     return loops, info
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Weights and the minimum cut
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @_host
@@ -586,7 +578,7 @@ def voxel_weights(
     """Cost of removing each voxel of *mask*: ``clip(I / I_ref, 0.05, 4) · (0.25 + core)``.
 
     *centres* are the lumen centrelines: the skeleton without the bridge arc of the loop being
-    cut. ``core = clip(1 − d_c / R, 0, 1)``, with ``d_c`` the voxel's distance to the nearest
+    cut. ``core = clip(1 - d_c / R, 0, 1)``, with ``d_c`` the voxel's distance to the nearest
     centre voxel and ``R`` the lumen radius there (its distance to the wall): 1 on a centreline,
     0 at the wall and anywhere farther from a lumen centre than the lumen's radius, such as a
     contact between two limbs however deep inside the mask. ``I_ref`` is the median intensity on
@@ -620,7 +612,7 @@ def _min_vertex_cut(
 ) -> tuple[np.ndarray, float, bool]:
     """Minimum set of *region* voxels whose removal separates *source* from *sink* (26-adjacency).
 
-    Node-split graph: ``in(v) → out(v)`` carries the voxel's cost, ``out(u) → in(v)`` is unbounded
+    Node-split graph: ``in(v) -> out(v)`` carries the voxel's cost, ``out(u) -> in(v)`` is unbounded
     for 26-neighbours; the seeds and *uncuttable* voxels cannot be cut. Returns the cut (bool,
     *region*'s shape), its cost, and whether a finite cut exists."""
     # SciPy's max flow / BFS (no CuPy equivalent): always reached from a host region.
@@ -688,7 +680,7 @@ class _Context:
 
 
 def _attempt(ctx: _Context, loop: Loop, centre: float, half: float | None, where: str) -> dict[str, Any]:
-    """One cut attempt on *loop*: the ring is opened opposite *centre*, so every source → sink
+    """One cut attempt on *loop*: the ring is opened opposite *centre*, so every source -> sink
     path runs through *centre*. The opening removes the vessel's whole cross-section around the
     loop position ``centre + L/2`` (a ball one local radius plus a voxel wide, and the voxels of
     the loop positions within 1 mm); the loop positions just beyond it are the source and the
@@ -805,9 +797,9 @@ def repair_loops(
     are taken out of the lumen centrelines that make lumen expensive (:func:`voxel_weights`).
     Then, in order until one is accepted:
 
-    1. *contact window* — only the contact run (± the vessel radius) may be cut; without a
+    1. *contact window*: only the contact run (± the vessel radius) may be cut; without a
        contact dip, *bridge window*: the bridge arc;
-    2. *anywhere* — the cheapest cut anywhere on the loop away from the opening;
+    2. *anywhere*: the cheapest cut anywhere on the loop away from the opening;
     3. *local windows* at the *local_attempts* cheapest loop positions (cross-section cost),
        bridge positions first.
 
@@ -938,9 +930,6 @@ def repair_loops(
     return full, removed, report
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-
-
 @_host
 def siphon_centerline(
     mask: Any, *, affine: Any | None = None, spacing: Sequence[float] | None = None, min_loop_mm: float = 0.0
@@ -986,9 +975,7 @@ def siphon_centerline(
     return pts, info
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Common re-segmentation (both ICAs, one threshold)
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @_host
@@ -1056,9 +1043,7 @@ def common_resegment(
     return lab, info
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Outputs: label names, images, rasterised masks, QC figure
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def siphon_label_name(label_id: int) -> str:
@@ -1176,9 +1161,7 @@ def _save_qc_figure(
     plt.close(fig)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # End to end (:func:`nvitk.morphology.centerline_siphon.correct_siphon_centerlines`)
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def repair_label(
@@ -1279,7 +1262,7 @@ def correct_siphon_mincut(
     ``removed_bridges`` holds the cut voxels and ``cleared_bridge_region`` every voxel the
     correction removed (pretess and cuts). ``siphon_correction.json`` adds, per label, the pretess
     counts, the loop log, the volume before / after and its change, and over the corrected labels
-    ``asymmetry_change_pct`` = |ΔL − ΔR| (volume change %), flagged above
+    ``asymmetry_change_pct`` = |ΔL - ΔR| (volume change %), flagged above
     :data:`ASYMMETRY_TOLERANCE_PCT`."""
     from nvitk.morphology.centerline import compute_centerlines
 
@@ -1400,7 +1383,7 @@ def correct_siphon_mincut(
 
 
 def print_summary(details: dict[int, dict[str, Any]]) -> str:
-    """One line per corrected label: voxels, β₁ before → after, pretess, cuts, mm³, volume change."""
+    """One line per corrected label: voxels, β₁ before -> after, pretess, cuts, mm³, volume change."""
     lines = ["", f"{'label':10s} {'vox':>7s} {'→':>7s} {'β₁':>7s} {'pretess −/+':>12s} {'cuts':>5s} "
                  f"{'cut mm³':>8s} {'ΔV %':>7s} {'CL mm':>7s}"]
     for lid, d in details.items():

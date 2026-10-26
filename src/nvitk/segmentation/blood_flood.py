@@ -1,4 +1,4 @@
-"""Blood-vessel flood fill: Frangi vesselness → GMM hysteresis tree → watershed.
+"""Blood-vessel flood fill: Frangi vesselness -> GMM hysteresis tree -> watershed.
 
 Python-only analogue of eICAB whole-brain ``vessels_flood_filling`` (no vasculature /
 VED binaries). Designed as a reusable segmentation primitive for qvtpy distal
@@ -7,7 +7,7 @@ expansion and for standalone / GUI tools.
 Pipeline
 --------
 1. Tubular vesselness on an intensity volume (Frangi; fallback = normalized intensity)
-2. GMM + hysteresis → binary vessel tree
+2. GMM + hysteresis -> binary vessel tree
 3. Keep only connected components that touch marker seeds
 4. Optional lumen thicken / vesselness thinning
 5. Distance-transform watershed of markers into the tree
@@ -62,7 +62,7 @@ def _blas_thread_limit(n_threads: int = _BLAS_THREAD_CAP) -> Iterator[None]:
 
         with threadpool_limits(limits=n):
             yield
-    except Exception:  # noqa: BLE001 — optional dep / already-imported BLAS
+    except Exception:  # noqa: BLE001 (optional dep / already-imported BLAS)
         yield
 
 
@@ -449,7 +449,7 @@ def blood_flood(
     erode_markers: bool = False,
     connectivity: int = 3,
 ) -> BloodFloodResult:
-    """Run the full Frangi → hysteresis → marker-CC → watershed flood.
+    """Run the full Frangi -> hysteresis -> marker-CC -> watershed flood.
 
     Parameters
     ----------
@@ -588,7 +588,7 @@ def blood_flood_from_scratch(
 ) -> BloodFloodResult:
     """Segment vessels from an intensity volume with no seed / marker mask.
 
-    Same Frangi → hysteresis tree as :func:`blood_flood`, but labels are
+    Same Frangi -> hysteresis tree as :func:`blood_flood`, but labels are
     connected components of the tree (no watershed expansion from seeds).
     """
     vol = as_backend_array(intensity).astype(np.float64)
@@ -648,7 +648,7 @@ def blood_flood_from_scratch(
             tree = tree & ~as_backend_array(barrier).astype(bool)
         info["tree_thin"] = thin_meta
 
-    # Connected components of the tree (base tool); connectivity>=3 → 26-conn.
+    # Connected components of the tree (base tool); connectivity>=3 -> 26-conn.
     labels, n_lab = label_connected(tree, connectivity=int(connectivity))
     labels = as_backend_array(labels).astype(np.int32, copy=False)
     info["n_tree_voxels"] = int(np.count_nonzero(tree))

@@ -1,5 +1,5 @@
 """
-K-space — forward/inverse FFT of images and volumes, and k-space filtering.
+K-space: forward/inverse FFT of images and volumes, and k-space filtering.
 
 Description
 -----------
@@ -10,8 +10,8 @@ transformed over its **spatial** axes only, one transform per time point.
 
 Two transform modes:
 
-- ``"3d"`` — over every spatial axis (a 3D acquisition's k-space);
-- ``"2d"`` — over the two in-plane axes, slice by slice (a 2D multi-slice
+- ``"3d"``: over every spatial axis (a 3D acquisition's k-space);
+- ``"2d"``: over the two in-plane axes, slice by slice (a 2D multi-slice
   acquisition's k-space). The slice axis defaults to the spatial axis with the
   coarsest spacing, which is the through-plane axis of any 2D stack.
 
@@ -22,7 +22,7 @@ Convention
     k = fftshift(fftn(ifftshift(x)))        x = fftshift(ifftn(ifftshift(k)))
 
 so DC sits in the middle of the k-space grid *and* the image origin is taken as
-the grid centre — the phase of a centred object is then flat rather than a
+the grid centre: the phase of a centred object is then flat rather than a
 checkerboard. ``norm="ortho"`` keeps energy (Parseval) and makes the inverse the
 adjoint. The inverse reads every setting back from the k-space metadata, so a
 round trip needs no arguments.
@@ -39,7 +39,7 @@ Backends
 --------
 Host arrays use ``scipy.fft`` (pocketfft, multi-threaded with the shared worker
 budget of :mod:`nvitk.core.parallel`); CuPy arrays use ``cupyx.scipy.fft`` on the
-GPU. Single precision stays single precision (float32 → complex64).
+GPU. Single precision stays single precision (float32 -> complex64).
 """
 
 from __future__ import annotations
@@ -66,13 +66,11 @@ FILTER_KINDS: tuple[str, ...] = ("lowpass", "highpass", "bandpass", "bandstop")
 FILTER_WINDOWS: tuple[str, ...] = ("hann", "gaussian", "butterworth", "ideal")
 
 
-# ---------------------------------------------------------------------------
 # Axis roles
-# ---------------------------------------------------------------------------
 
 
 def _axes_string(image: Image) -> str:
-    """*image*'s axis labels, defaulting to NIfTI ``XYZ[T…]`` order."""
+    """*image*'s axis labels, defaulting to NIfTI ``XYZ[T...]`` order."""
     from nvitk.io._common import default_nifti_axes
 
     axes = str(image.axes or "").upper()
@@ -113,10 +111,10 @@ def kspace_axes(
     image
         Source image; ``image.axes`` decides which axes are spatial.
     mode
-        ``"3d"`` — every spatial axis; ``"2d"`` — the in-plane pair only.
+        ``"3d"``: every spatial axis; ``"2d"``: the in-plane pair only.
     slice_axis
         For ``"2d"``: the through-plane array axis. ``None`` picks the spatial
-        axis with the coarsest spacing (ties → the ``Z`` axis).
+        axis with the coarsest spacing (ties -> the ``Z`` axis).
 
     Raises
     ------
@@ -142,15 +140,13 @@ def kspace_axes(
     return tuple(ax for ax in spatial if ax != int(slice_axis))
 
 
-# ---------------------------------------------------------------------------
 # FFT backend
-# ---------------------------------------------------------------------------
 
 
 def _fft_ops() -> tuple[Any, dict[str, Any]]:
     """``(fft module, extra kwargs)`` for the active backend."""
     if get_current_backend() == "cupy":
-        # cupyx.scipy.fft: no ``workers`` — the GPU is already parallel.
+        # cupyx.scipy.fft: no ``workers``: the GPU is already parallel.
         return scipy.fft, {}
     from nvitk.core.parallel import get_worker_count
 
@@ -158,7 +154,7 @@ def _fft_ops() -> tuple[Any, dict[str, Any]]:
 
 
 def _as_float_or_complex(arr: Any) -> Any:
-    """Integers → float32 (FFT of a 16-bit CT in float64 doubles memory for nothing)."""
+    """Integers -> float32 (FFT of a 16-bit CT in float64 doubles memory for nothing)."""
     if np.iscomplexobj(arr):
         return arr
     if arr.dtype.kind in "iub":
@@ -182,9 +178,7 @@ def _inverse(arr: Any, axes: tuple[int, ...], centered: bool, norm: str) -> Any:
     return fft.fftshift(out, axes=axes) if centered else out
 
 
-# ---------------------------------------------------------------------------
 # Forward / inverse
-# ---------------------------------------------------------------------------
 
 
 def kspace(
@@ -264,9 +258,9 @@ def inverse_kspace(kimage: Image, *, real: bool | None = None) -> Image:
     Parameters
     ----------
     kimage
-        Output of :func:`kspace` (possibly modified — masked, filtered, edited).
+        Output of :func:`kspace` (possibly modified: masked, filtered, edited).
     real
-        Return the real part. ``None`` → real unless the original was complex.
+        Return the real part. ``None`` -> real unless the original was complex.
         The real part, not the magnitude: a filtered image legitimately has
         negative values (ringing, a high-pass), and ``abs`` would fold them up.
 
@@ -295,16 +289,14 @@ def inverse_kspace(kimage: Image, *, real: bool | None = None) -> Image:
                  orientation=kimage.orientation)
 
 
-# ---------------------------------------------------------------------------
 # Display components
-# ---------------------------------------------------------------------------
 
 
 def kspace_component(kimage: Image, component: str = "log_magnitude") -> Image:
     """
     One real-valued view of complex k-space, as float32.
 
-    ``log_magnitude`` is ``log1p(|k|)`` — the only one of these that shows the
+    ``log_magnitude`` is ``log1p(|k|)``: the only one of these that shows the
     periphery of k-space at all, since |k| spans many decades between DC and the
     edge. ``phase`` is in radians, ``(-π, π]``.
     """
@@ -329,9 +321,7 @@ def kspace_component(kimage: Image, component: str = "log_magnitude") -> Image:
                  name=f"{kimage.name or 'kspace'}_{key}", orientation=kimage.orientation)
 
 
-# ---------------------------------------------------------------------------
 # Filtering
-# ---------------------------------------------------------------------------
 
 
 def kspace_radius(kimage: Image) -> Any:
@@ -339,8 +329,8 @@ def kspace_radius(kimage: Image) -> Any:
     Normalised radial frequency of every k-space sample, broadcastable to the data.
 
     ``0`` at DC, ``1`` at the Nyquist frequency of each transformed axis (so an
-    anisotropic grid gets an elliptical, not a circular, pass band in index space
-    — circular in *normalised* frequency, which is what resolution means).
+    anisotropic grid gets an elliptical, not a circular, pass band in index space:
+circular in *normalised* frequency, which is what resolution means).
     """
     info = (kimage.metadata or {}).get(KSPACE_KEY)
     if not isinstance(info, dict):
@@ -351,7 +341,7 @@ def kspace_radius(kimage: Image) -> Any:
     radius2 = None
     for ax in axes:
         n = int(kimage.shape[ax])
-        # Cycles per sample in [-0.5, 0.5); ×2 → fraction of Nyquist.
+        # Cycles per sample in [-0.5, 0.5); ×2 -> fraction of Nyquist.
         f = fft.fftfreq(n) * 2.0
         if centered:
             f = fft.fftshift(f)
@@ -385,7 +375,7 @@ def kspace_filter_mask(
         Upper band edge (band filters only).
     window
         ``hann`` (raised-cosine roll-off over ±10 % of the cutoff), ``gaussian``
-        (σ = cutoff), ``butterworth`` (of *order*), or ``ideal`` (hard edge —
+        (σ = cutoff), ``butterworth`` (of *order*), or ``ideal`` (hard edge:
         rings, which is sometimes the point of showing it).
     """
     r = kspace_radius(kimage)
@@ -419,7 +409,7 @@ def kspace_filter_mask(
 
 
 def apply_kspace_mask(kimage: Image, mask: Any) -> Image:
-    """*kimage* multiplied by a real weighting (filter mask, painted ROI, …)."""
+    """*kimage* multiplied by a real weighting (filter mask, painted ROI, ...)."""
     weights = as_backend_array(mask)
     out = as_backend_array(kimage.data) * weights.astype(np.float32, copy=False)
     return kimage.with_data(out)
@@ -437,7 +427,7 @@ def kspace_filter(
     slice_axis: int | None = None,
 ) -> Image:
     """
-    Filter *image* in k-space: FFT → radial weighting → inverse FFT.
+    Filter *image* in k-space: FFT -> radial weighting -> inverse FFT.
 
     Returns a real image on the source grid (complex sources stay complex). See
     :func:`kspace_filter_mask` for the filter parameters and :func:`kspace_axes`

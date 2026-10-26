@@ -218,11 +218,11 @@ def run_morphometrics_case(
     Topology resolution order:
     1. Explicit ``mapping`` dict
     2. ``mapping_json`` path / basename under ``measure/morpho/topology/``
-    3. ``mapping_json="none"`` → vessel-wise only (no topology)
+    3. ``mapping_json="none"`` -> vessel-wise only (no topology)
     4. Default ``eicab_topology.json``
 
     Species resolution order (drives how ``no_upstream_start`` rules resolve onto
-    array axes — a mouse is a quadruped, so ``caudal`` lands on scanner A/P
+    array axes: a mouse is a quadruped, so ``caudal`` lands on scanner A/P
     rather than S/I):
     1. Explicit ``species`` argument (``"human"`` / ``"mouse"``)
     2. ``config.species`` when it is not ``"auto"``
@@ -333,7 +333,7 @@ def run_morphometrics_case(
             payload["report"] = {"file": report_csv.name, "features": list(REPORT_FEATURES),
                                  "lesions": "high confidence only"}
             prov.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
-    except Exception as exc:  # noqa: BLE001 — the run's tables are written; the report is a summary
+    except Exception as exc:  # noqa: BLE001 (the run's tables are written; the report is a summary)
         print(f"  WARNING [report]: {exc}")
         traceback.print_exc()
     return excel_path

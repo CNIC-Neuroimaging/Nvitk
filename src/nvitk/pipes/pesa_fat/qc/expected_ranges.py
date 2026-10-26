@@ -52,9 +52,7 @@ def _placeholder_map(columns: list[str]) -> dict[str, Threshold]:
 EXPECTED_RANGES_CTPET: dict[str, Threshold] = _placeholder_map(_ctpet_measurement_columns())
 EXPECTED_RANGES_DIXON: dict[str, Threshold] = _placeholder_map(_dixon_measurement_columns())
 
-# ---------------------------------------------------------------------------
 # Concrete thresholds requested (v2 incremental)
-# ---------------------------------------------------------------------------
 
 # Fat SUV thresholds (all SUV stats)
 _FAT_ROIS = ("GRASA_V", "GRASA_SC", "GRASA_V_BATCH", "GRASA_SC_BATCH")

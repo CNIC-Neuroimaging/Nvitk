@@ -3,7 +3,7 @@ CViT self-supervised trainers on the nnssl engine (SimMIM and MAE).
 
 Description
 -----------
-nnssl supplies the corpus handling — collection parsing, planning, preprocessing to blosc2,
+nnssl supplies the corpus handling: collection parsing, planning, preprocessing to blosc2,
 data loading with spatial augmentation, logging and checkpointing. These trainers only replace
 the network (:class:`nvitk.nn.cvit.CViTMIM`), the masking, the objective and the optimiser.
 
@@ -84,7 +84,7 @@ class CViTSimMIMTrainer(BaseMAETrainer):
         self.warmup_epochs = 50
         self.enable_deep_supervision = False
 
-    # ---- network + adaptation plan ---------------------------------------------------------
+    # network + adaptation plan
     def build_architecture_and_adaptation_plan(self, config_plan, num_input_channels, num_output_channels):
         arch = {k: v for k, v in dict(self.cvit_arch).items() if k != "input_shape"}
         net = CViTMIM(num_input_channels, method=self.method,
@@ -114,7 +114,7 @@ class CViTSimMIMTrainer(BaseMAETrainer):
                           skips="all", **downstream_kwargs)
         # strict=True raises on any pre-trained tensor that does not fit the downstream network.
         # Downstream tensors absent from pre-training are by construction parts the MIM network
-        # does not build — e.g. the linear tokenizer's skip stem, which only feeds decoder skips —
+        # does not build, e.g. the linear tokenizer's skip stem, which only feeds decoder skips,
         # and legitimately start from scratch.
         report = load_pretrained_encoder(downstream, state_dict, strict=True)
         self.print_to_log_file(
@@ -133,7 +133,7 @@ class CViTSimMIMTrainer(BaseMAETrainer):
         warmup = int(min(self.warmup_epochs, max(1, self.num_epochs // 10)))
         return optimizer, WarmupPolyLR(optimizer, self.initial_lr, self.num_epochs, warmup)
 
-    # ---- steps ---------------------------------------------------------------------------------
+    # steps
     def _masked_step(self, batch: dict) -> torch.Tensor:
         data = batch["data"].to(self.device, non_blocking=True)
         cfg = _unwrap(self.network).config
@@ -161,7 +161,7 @@ class CViTSimMIMTrainer(BaseMAETrainer):
     def validation_step(self, batch: dict) -> dict:
         return {"loss": self._masked_step(batch).detach().cpu().numpy()}
 
-    # ---- checkpoints carry the architecture ----------------------------------------------------
+    # checkpoints carry the architecture
     def save_checkpoint(self, filename: str, live_upload: bool = False) -> None:
         if self.local_rank != 0:
             return

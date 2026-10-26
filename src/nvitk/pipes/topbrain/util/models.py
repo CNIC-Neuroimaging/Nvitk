@@ -6,7 +6,7 @@ Description
 Every stage 2 run leaves a marker at ``<results_root>/stage2_train/<dataset>/topbrain_stage2.json``
 recording what it trained: the label set, the loss (hence the trainer class), the plans
 identifier, the configuration and the folds. That is exactly the set of facts inference needs,
-and **none of it can be reconstructed from flags** — the plans identifier embeds a spacing
+and **none of it can be reconstructed from flags**: the plans identifier embeds a spacing
 ``preprocess_like_nnssl`` only settles at run time, and the trainer family follows from the
 pre-trained checkpoint's architecture.
 
@@ -52,7 +52,7 @@ class TrainedModel:
     folds: tuple[str, ...]
     num_output_channels: int
     run_name: str
-    """``<trainer>__<plans>__<configuration>`` — the only portable part of ``results_dir``."""
+    """``<trainer>__<plans>__<configuration>``: the only portable part of ``results_dir``."""
 
     marker: Path
     created: str
@@ -65,13 +65,13 @@ class TrainedModel:
         return DATASET_IDS[self.label_set]
 
     def run_dir(self, nnunet_results: Path) -> Path:
-        """The run directory under *nnunet_results* — recomposed, never taken from the marker."""
+        """The run directory under *nnunet_results*: recomposed, never taken from the marker."""
         return Path(nnunet_results) / self.dataset / self.run_name
 
     def available_folds(
         self, nnunet_results: Path, *, checkpoint: str = "checkpoint_final.pth"
     ) -> list[str]:
-        """Folds whose training actually finished, in the order they were trained.
+        """Folds whose training finished, in the order they were trained.
 
         A fold that was queued but never completed has no ``checkpoint_final.pth``, and asking
         the predictor for it fails several layers down with a missing-file error that says
@@ -135,7 +135,7 @@ def resolve_model(results_root: Path, selector: str | None) -> TrainedModel:
 
     Accepted forms, in the order they are tried:
 
-    - a **label set** (``ta36``, ``binary``, …) — the usual case;
+    - a **label set** (``ta36``, ``binary``, ...): the usual case;
     - a **dataset folder name** (``Dataset504_TopBrainVesselBinary``);
     - a **path** to a marker file or to the directory holding one.
 

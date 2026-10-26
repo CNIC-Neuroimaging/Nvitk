@@ -22,7 +22,7 @@ from nvitk.gui.tools.registry import is_sge_capable, sge_block_reason, tool_by_i
 
 
 def _resolve_remote_job_root(user_root: str, job_id: str) -> str:
-    """``{root}/{job_id}`` — the staging directory for one GUI job.
+    """``{root}/{job_id}``: the staging directory for one GUI job.
 
     The job id is always appended, not only when the dialog still holds the
     configured base. Two launches sharing a directory would have the second
@@ -148,7 +148,7 @@ def submit_gui_sge(
         return False
     external = is_external_tool(tool_id)
     spec = tool_by_id(tool_id)
-    # FastSurfer / FSL tools that work from paths alone (TBSS, XTRACT, …) need no layer.
+    # FastSurfer / FSL tools that work from paths alone (TBSS, XTRACT, ...) need no layer.
     if not viewer.layers and not (external and spec is not None and not spec.requires_layer):
         notify("No layers loaded. Open an image first.", error=True)
         return False

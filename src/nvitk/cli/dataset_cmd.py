@@ -1,13 +1,13 @@
-"""``nvitk-dataset`` — fetch the nvitk dataset with DVC.
+"""``nvitk-dataset``: fetch the nvitk dataset with DVC.
 
 The dataset itself is not distributed with nvitk: it is research data, and it lives on a
 storage location only its owners can reach. What *is* public is the set of DVC pointer files
-committed in the repository — small text files naming a content hash. ``dvc get`` reads those
+committed in the repository: small text files naming a content hash. ``dvc get`` reads those
 straight out of the repository over HTTPS and then pulls the matching content from the
 configured remote, so a conda install with no checkout can still retrieve the data.
 
 Access control sits at the remote, not at the pointers: a hash reveals nothing, and someone
-without access to the storage location simply cannot download the content it names.
+without access to the storage location cannot download the content it names.
 
 .. code-block:: bash
 
@@ -62,7 +62,7 @@ def _dataset_root() -> Path:
     """Where the dataset should land.
 
     Uses the *same* resolution as :class:`~nvitk.db.repo.DataRepo` rather than reading
-    ``db.root`` directly — ``local_fallback_root`` takes precedence over ``root`` there, so
+    ``db.root`` directly: ``local_fallback_root`` takes precedence over ``root`` there, so
     resolving it independently here would download the data to one directory while the rest of
     nvitk read from another.
     """
@@ -109,17 +109,17 @@ def _is_populated(path: Path) -> bool:
 
     Counting *files* rather than entries matters: ``DatasetCatalog.create_scaffold`` leaves a
     ``catalog/schema/`` subdirectory behind, so an "is it empty" test based on directory
-    entries calls that tree populated and skips the download — the user then sees a confident
+    entries calls that tree populated and skips the download; the user then sees a confident
     "already present" over an empty dataset.
     """
     return _file_count(path) > 0
 
 
 def _nested_inside(path: Path, name: str) -> Path | None:
-    """The ``path/name`` directory when *path* holds only that — the shape a nested fetch leaves.
+    """The ``path/name`` directory when *path* holds only that: the shape a nested fetch leaves.
 
     ``dvc get -o DIR`` places the fetched directory *inside* ``DIR`` when ``DIR`` already
-    exists, producing ``tables/tables/…``. Detecting it lets the fetch repair itself and lets
+    exists, producing ``tables/tables/...``. Detecting it lets the fetch repair itself and lets
     :func:`status_cmd` report a tree left broken by an earlier run.
     """
     inner = path / name
@@ -213,7 +213,7 @@ def pull_cmd(want_all: bool, rev: str | None, force: bool, dry_run: bool, no_bui
             continue
 
         # Fetch into a staging path that cannot already exist. `dvc get -o DIR` puts the
-        # fetched directory *inside* DIR when DIR exists, which yields tables/tables/… and
+        # fetched directory *inside* DIR when DIR exists, which yields tables/tables/... and
         # leaves the data where nothing can find it. Staging also means a failed or partial
         # download never touches whatever is already in place.
         staging = root / f".{name}.incoming"
@@ -262,7 +262,7 @@ def pull_cmd(want_all: bool, rev: str | None, force: bool, dry_run: bool, no_bui
 
     # The SQLite index was not downloaded, so build it instead. It is derived entirely from
     # the tables and takes a few seconds, which is far less than transferring the ~1.3 GB it
-    # occupies — and leaving it absent would give a dataset that opens but answers no queries.
+    # occupies, and leaving it absent would give a dataset that opens but answers no queries.
     if skipped and not dry_run and not no_build:
         _build_index(root)
     elif skipped and dry_run:

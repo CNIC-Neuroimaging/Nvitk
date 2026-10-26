@@ -60,16 +60,12 @@ setup(globals())
 
 log = Logger()
 
-# ---------------------------------------------------------------------------
 # Defaults
-# ---------------------------------------------------------------------------
 
 _DEFAULT_RADIUS_VOX = 10.0
 
 
-# ---------------------------------------------------------------------------
 # Path helpers + contrast / phase I/O
-# ---------------------------------------------------------------------------
 
 
 def _default_nvitk_src_dir() -> Path:
@@ -124,7 +120,7 @@ def _voxel_spacing(ap_img_path: Path) -> tuple[float, float, float]:
 
 
 # Cardiac phase spacing is typically tens of ms. Used only to sanity-check
-# RR / n_phases (or NominalInterval) estimates — never to validate NIfTI t_res.
+# RR / n_phases (or NominalInterval) estimates, never to validate NIfTI t_res.
 _CARDIAC_FRAME_MIN_S = 0.015
 _CARDIAC_FRAME_MAX_S = 0.25
 
@@ -163,7 +159,7 @@ def _cardiac_frame_duration_s(
     ``pixdim[4]`` and DICOM ``RepetitionTime`` are MRI RF timing and must not
     be used. ``FrameTime`` is also unreliable when bins are RR-normalized.
 
-    Priority: ``HeartRate`` → ``NominalInterval`` → (last resort) ``FrameTime``.
+    Priority: ``HeartRate`` -> ``NominalInterval`` -> (last resort) ``FrameTime``.
 
     Returns ``(duration_s, source)``; ``duration_s`` is ``None`` when unresolved.
     """
@@ -465,9 +461,7 @@ def _save_measurement_plots(
         log.warning(f"[{subject}] stage6 PITC mask export failed: {exc}")
 
 
-# ---------------------------------------------------------------------------
 # Stage 6: per-LOC flow, PI, RI
-# ---------------------------------------------------------------------------
 
 
 def run_subject(
@@ -492,7 +486,7 @@ def run_subject(
     save_plots: bool = False,
 ) -> Path:
     """Measure flow metrics at each LOC; return stage-6 output directory."""
-    # ---- Prerequisites: stage5 locs.csv --------------------------------------
+    # Prerequisites: stage5 locs.csv
     loc_csv = _stage5_dir(output_root, subject) / "locs.csv"
     if not loc_csv.is_file():
         raise FileNotFoundError(f"Missing {loc_csv} (run stage5)")
@@ -503,7 +497,7 @@ def run_subject(
         log.info(f"[{subject}] stage6 measure: skip -> {out_dir}")
         return out_dir
 
-    # ---- Phase volumes → mm/s velocity time series ---------------------------
+    # Phase volumes -> mm/s velocity time series
     inputs = discover_phase_inputs(nifti_root / subject)
     voxel_spacing = _voxel_spacing(inputs.ap_phase_path)
     temporal_resolution_s = _phase_temporal_resolution_s(inputs.ap_phase_path)
@@ -542,7 +536,7 @@ def run_subject(
         *flow_cols,
     ]
 
-    # ---- Optional centerlines for QC -------------------------------------------
+    # Optional centerlines for QC
     arterial_cls: dict[int, np.ndarray] | None = None
     branch_cls_by_name: dict[str, np.ndarray] = {}
     qc_dir = out_dir / "cross-sections"
@@ -567,7 +561,7 @@ def run_subject(
         except FileNotFoundError:
             branch_cls_by_name = {}
 
-    # ---- Per-LOC: resegment, masked-plane flow, PI / RI ----------------------
+    # Per-LOC: resegment, masked-plane flow, PI / RI
     loc_rows: list[dict[str, str]] = []
     with loc_csv.open(newline="", encoding="utf-8") as fh:
         loc_rows = list(csv.DictReader(fh))
@@ -630,13 +624,13 @@ def run_subject(
                 traceback.print_exc()
                 log.warning(f"[{subject}] QC PNG failed for {vname}: {exc}")
 
-    # ---- Write loc_measurements.csv ------------------------------------------
+    # Write loc_measurements.csv
     with meas_csv.open("w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=fieldnames)
         w.writeheader()
         w.writerows(rows_out)
 
-    # ---- Dense PITC / PWV vessel hemodynamics --------------------------------
+    # Dense PITC / PWV vessel hemodynamics
     pitc_summary: dict[str, int] = {"n_profile_stations": 0, "n_regions": 0}
     if not skip_pitc:
         seg_metadata: dict | None = None
@@ -717,9 +711,7 @@ def run_subject(
     return out_dir
 
 
-# ---------------------------------------------------------------------------
 # CLI + SGE submission
-# ---------------------------------------------------------------------------
 
 
 def _subject_sge_spec(

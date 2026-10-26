@@ -40,11 +40,11 @@ _PATH = click.Path(path_type=Path)
 
 
 class _FslInput(click.ParamType):
-    """An existing file or folder — or, as FSL accepts, an image basename without ``.nii.gz``."""
+    """An existing file or folder, or, as FSL accepts, an image basename without ``.nii.gz``."""
 
     name = "path"
 
-    def convert(self, value, param, ctx):  # noqa: ANN001 — click's signature
+    def convert(self, value, param, ctx):  # noqa: ANN001 (click's signature)
         path = Path(value).expanduser()
         if path.exists():
             return path
@@ -79,7 +79,7 @@ def _table(rows: dict[str, Any]) -> None:
         click.echo(f"{key:24s} {json.dumps(value) if isinstance(value, dict) else value}")
 
 
-# ── set-up ───────────────────────────────────────────────────────────────────
+# set-up
 
 
 @main.command("info")
@@ -138,7 +138,7 @@ def use_cmd(fsldir: Path | None, clear: bool) -> None:
     click.echo(f"Saved in {external_tools.remember(fsldir=str(fsldir.resolve()))}")
 
 
-# ── structural ───────────────────────────────────────────────────────────────
+# structural
 
 
 @main.command("bet")
@@ -190,7 +190,7 @@ def first_cmd(input: Path, out_base: Path, structures: str, brain_extracted: boo
 @click.option("--no-subcortseg", is_flag=True)
 def anat_cmd(input: Path, out_base: Path, img_type: str, strong_bias: bool, no_crop: bool, no_reg: bool,
              no_nonlinreg: bool, no_seg: bool, no_subcortseg: bool) -> None:
-    """fsl_anat: reorient, crop, bias-correct, register to MNI, FAST and FIRST (→ <out>.anat)."""
+    """fsl_anat: reorient, crop, bias-correct, register to MNI, FAST and FIRST (-> <out>.anat)."""
     _run(structural.fsl_anat(input, out_base, img_type=img_type, strong_bias=strong_bias, no_crop=no_crop,
                              no_reg=no_reg, no_nonlinreg=no_nonlinreg, no_seg=no_seg, no_subcortseg=no_subcortseg))
 
@@ -261,7 +261,7 @@ def lesion_cmd(input: Path, lesion_mask: Path, output: Path, wm_mask: Path | Non
     _run(structural.lesion_filling(input, lesion_mask, output, wm_mask=wm_mask))
 
 
-# ── registration ─────────────────────────────────────────────────────────────
+# registration
 
 
 @main.command("fnirt")
@@ -347,12 +347,12 @@ def mcflirt_cmd(input: Path, out_base: Path, ref_vol: int | None, mean_vol: bool
 @click.option("--pedir", default=None)
 def epi_reg_cmd(epi: Path, t1: Path, t1brain: Path, out_base: Path, wmseg: Path | None, fmap: Path | None,
                 fmapmag: Path | None, fmapmagbrain: Path | None, echospacing: float | None, pedir: str | None) -> None:
-    """EPI → T1 boundary-based registration."""
+    """EPI -> T1 boundary-based registration."""
     _run(registration.epi_reg(epi, t1, t1brain, out_base, wmseg=wmseg, fmap=fmap, fmap_mag=fmapmag,
                               fmap_mag_brain=fmapmagbrain, echo_spacing=echospacing, pe_dir=pedir))
 
 
-# ── diffusion ────────────────────────────────────────────────────────────────
+# diffusion
 
 
 @main.command("topup")
@@ -473,7 +473,7 @@ def xtract_cmd(bedpostx_dir: Path, out_dir: Path, species: str, stdwarp: tuple[P
                           tracts=[t.strip() for t in tracts.split(",") if t.strip()], native=native, gpu=gpu))
 
 
-# ── functional ───────────────────────────────────────────────────────────────
+# functional
 
 
 @main.command("melodic")
@@ -535,7 +535,7 @@ def prepare_fieldmap_cmd(phase: Path, magnitude_brain: Path, output: Path, delta
     _run(functional.prepare_fieldmap(phase, magnitude_brain, output, delta_te_ms=delta_te, scanner=scanner))
 
 
-# ── ASL perfusion (BASIL) ────────────────────────────────────────────────────
+# ASL perfusion (BASIL)
 
 _LABELLING = click.Choice(list(("pcasl", "pasl")), case_sensitive=False)
 
@@ -710,7 +710,7 @@ def asl_calib_cmd(calib: Path, out_dir: Path, **kw: Any) -> None:
         click.echo(f"{'M0':22s} {asl.read_value(outputs['m0_value'])}")
 
 
-# ── utilities ────────────────────────────────────────────────────────────────
+# utilities
 
 
 @main.command("maths", context_settings={"ignore_unknown_options": True, "help_option_names": ["--help"]})

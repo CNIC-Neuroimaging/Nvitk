@@ -2,7 +2,7 @@
 
 **Inputs**
 
-- ``image_measurements`` rows already published by stage 6 — ``flow_mean`` per vessel, and
+- ``image_measurements`` rows already published by stage 6: ``flow_mean`` per vessel, and
   ``cross_section_area`` where available. Nothing is read from disk, so this stage can be
   re-run after a re-import without touching the pipeline outputs.
 
@@ -21,7 +21,7 @@ literature-grounded checks in :mod:`nvitk.measure.hemodynamics`:
 Metric                  What it catches                                         Level
 ======================  ======================================================  ==========
 ``qc_flow_plausible``   flow far outside the healthy band for that vessel        vessel
-``qc_hypoplastic``      caliber under 0.8 mm — normal anatomy, not a failure     vessel
+``qc_hypoplastic``      caliber under 0.8 mm: normal anatomy, not a failure     vessel
 ``qc_conservation``     junction inflow ≠ outflow                                vessel
 ``qc_segment_cv``       flow varies too much along a non-branching segment       vessel
 ``qc_ap_share``         anterior/posterior split away from 72/28                 subject
@@ -30,8 +30,8 @@ Metric                  What it catches                                         
 ======================  ======================================================  ==========
 
 The scores are deliberately **soft**: a low ``qc_flow_plausible`` marks a measurement worth
-looking at, not one to delete. Single-subject pathology — a high-grade stenosis, an AVM,
-moyamoya collateralisation — legitimately falls outside a healthy-cohort band without any
+looking at, not one to delete. Single-subject pathology (a high-grade stenosis, an AVM,
+moyamoya collateralisation) legitimately falls outside a healthy-cohort band without any
 data-quality problem, which is why the pipeline flags and never drops.
 
 Hypoplasia gates the rest: a vessel whose segmented caliber is already at or under the
@@ -41,9 +41,7 @@ patent-vessel band would report a normal circle of Willis as a failure.
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -107,8 +105,8 @@ QC_SCORE_FLAG_BELOW: float = 0.5
 
 #: AutoQC mass-balance checks: ``(rule_key, anchor_nodes, tolerance)``.
 #: Rules come from :data:`~nvitk.stats.vessel_network.CONSERVATION_RULES`. Communicating-artery
-#: terms are dropped (unsigned LOC flows), so ICA and BA→PCA balances reduce to the classical
-#: parent → daughters check used by the QVT validation paper. Residuals are written onto every
+#: terms are dropped (unsigned LOC flows), so ICA and BA->PCA balances reduce to the classical
+#: parent -> daughters check used by the QVT validation paper. Residuals are written onto every
 #: *anchor* vessel so arterial parents, VAs/PCAs and the venous confluence all colour in the GUI.
 AUTOQC_CONSERVATION: tuple[tuple[str, tuple[str, ...], float], ...] = (
     ("left_carotid_split", ("lica",), CONSERVATION_TOL_ARTERIAL),
@@ -121,9 +119,9 @@ AUTOQC_CONSERVATION: tuple[tuple[str, tuple[str, ...], float], ...] = (
 #: Vessels held out of the along-segment flow CV. Empty by default: the check runs on **every**
 #: vessel the station profile carries, one CV per vessel, along that vessel's own trunk centerline.
 #:
-#: Communicating arteries need no entry — they are dropped from the PITC root groups upstream and
+#: Communicating arteries need no entry: they are dropped from the PITC root groups upstream and
 #: never reach ``pitc_profile.csv``. Neither do the venous sinuses: the profile is written only for
-#: the arterial root groups, so a venous node listed here (or anywhere) would simply never match.
+#: the arterial root groups, so a venous node listed here (or anywhere) would never match.
 SEGMENT_CV_EXCLUDED_NODES: frozenset[str] = frozenset()
 
 #: Vessels whose along-segment CV is read over the **proximal** part of the trunk only.
@@ -149,7 +147,7 @@ class AutoQcConfig:
     flow_variable: str = "flow_mean"
     area_variable: str = "cross_section_area"
     #: Factor converting the stored flow to mL/min, which the literature bands are in. ``None``
-    #: infers it from the magnitude — the right default, because what a dataset stores depends on
+    #: infers it from the magnitude: the right default, because what a dataset stores depends on
     #: which importer wrote it: stage 6 emits mL/s, but several published tables are already per
     #: minute. Assuming either one silently mis-scales the other by 60x and fails the whole cohort.
     flow_to_ml_min: float | None = None
@@ -158,7 +156,7 @@ class AutoQcConfig:
     conservation_tol_distal: float = CONSERVATION_TOL_DISTAL
     conservation_tol_venous: float = CONSERVATION_TOL_VENOUS
     segment_cv_tol: float = SEGMENT_CV_TOL
-    #: Proximal window (mm) the along-segment CV of a branched vessel is read over — see
+    #: Proximal window (mm) the along-segment CV of a branched vessel is read over; see
     #: :data:`SEGMENT_CV_PROXIMAL_NODES`. ``0`` or non-finite uses the whole trunk, which is the
     #: pre-window behaviour.
     segment_cv_proximal_mm: float = PROXIMAL_SEGMENT_MM
@@ -167,9 +165,7 @@ class AutoQcConfig:
     anterior_tol_pct: float = ANTERIOR_SHARE_TOL_PCT
 
 
-# ---------------------------------------------------------------------------
 # Computation
-# ---------------------------------------------------------------------------
 def compute_vessel_qc(
     flows: pd.DataFrame,
     areas: pd.DataFrame | None = None,
@@ -183,15 +179,15 @@ def compute_vessel_qc(
     Parameters
     ----------
     flows : pandas.DataFrame
-        Long rows with ``subject_uid``, ``region_id`` and ``value`` — the shape
+        Long rows with ``subject_uid``, ``region_id`` and ``value``; the shape
         :meth:`~nvitk.db.repo.DataRepo.image` returns for ``flow_mean``.
     areas : pandas.DataFrame, optional
         The same shape for the cross-sectional area, used only to gate hypoplastic vessels.
         Without it every vessel is scored as patent, which over-flags a normal circle of
-        Willis — so its absence is reported rather than passed over.
+        Willis, so its absence is reported rather than passed over.
     segment_cv : pandas.DataFrame, optional
         Long rows with ``subject_uid``, ``region_id`` and ``value`` holding the along-segment
-        flow coefficient of variation (from ``pitc_profile.csv``). Missing → ``qc_segment_cv``
+        flow coefficient of variation (from ``pitc_profile.csv``). Missing -> ``qc_segment_cv``
         is NaN and is skipped in the combined score.
 
     Returns
@@ -219,8 +215,8 @@ def compute_vessel_qc(
     out = out.drop(columns=["value"])
     out["node"] = out["region_id"].map(canonical_node)
 
-    # Two importers can populate the same dataset with different spellings — ``LICA`` from one and
-    # ``left_ica`` from another — and both survive as separate rows. Every downstream pivot then
+    # Two importers can populate the same dataset with different spellings (``LICA`` from one and
+    # ``left_ica`` from another), and both survive as separate rows. Every downstream pivot then
     # averages two pipelines together without saying so, which is worse than either alone.
     named = out.dropna(subset=["node"])
     clashes = named.groupby(["subject_uid", "node"])["region_id"].nunique()
@@ -239,7 +235,7 @@ def compute_vessel_qc(
             "; ".join(f"{n} = {sorted(v)}" for n, v in list(examples.items())[:3]),
         )
 
-    # ---- 1. Hypoplasia gate — evaluated first, because it excuses everything else ------
+    # 1. Hypoplasia gate: evaluated first, because it excuses everything else
     if areas is not None and not areas.empty and {"subject_uid", "region_id", "value"} <= set(areas.columns):
         area_lookup = (
             areas.assign(
@@ -265,7 +261,7 @@ def compute_vessel_qc(
         out["area_mm2"] = np.nan
         out["qc_hypoplastic"] = np.nan
 
-    # ---- 2. Literature flow band, skipped for hypoplastic and exempt vessels ----------
+    # 2. Literature flow band, skipped for hypoplastic and exempt vessels
     scores: list[float] = []
     for flow, region, hypoplastic in zip(out["flow_ml_min"], out["region_id"], out["qc_hypoplastic"]):
         if hypoplastic == 1.0:
@@ -274,16 +270,16 @@ def compute_vessel_qc(
         scores.append(flow_plausibility_score(flow, region))
     out["qc_flow_plausible"] = scores
 
-    # ---- 3. Mass conservation at each junction (ICA, VA→BA→PCA, venous) ----------------
+    # 3. Mass conservation at each junction (ICA, VA->BA->PCA, venous)
     residual, tol_used = _conservation_columns(out, config)
     out["qc_conservation"] = residual
     out["_conservation_tol"] = tol_used
 
-    # ---- 4. Along-segment flow CV (from pitc_profile stations, when available) --------
+    # 4. Along-segment flow CV (from pitc_profile stations, when available)
     out["qc_segment_cv"] = _segment_cv_column(out, segment_cv)
 
-    # ---- 5. Combined score: the mean of whichever checks applied ----------------------
-    # Residuals / CVs are errors, not scores — map each onto [0, 1] by its own tolerance
+    # 5. Combined score: the mean of whichever checks applied
+    # Residuals / CVs are errors, not scores; map each onto [0, 1] by its own tolerance
     # before averaging with the literature-band plausibility.
     conservation_score = 1.0 - (
         out["qc_conservation"].abs() / out["_conservation_tol"].clip(lower=1e-9)
@@ -311,7 +307,7 @@ def _autoqc_conservation_specs(
     distal = float(config.conservation_tol_distal)
     venous = float(config.conservation_tol_venous)
     if abs(float(config.conservation_tol) - CONSERVATION_TOL) > 1e-12:
-        # Caller overrode the single gate — treat it as the arterial baseline and scale the others.
+        # Caller overrode the single gate: treat it as the arterial baseline and scale the others.
         scale = float(config.conservation_tol) / max(CONSERVATION_TOL_ARTERIAL, 1e-9)
         arterial = float(config.conservation_tol)
         distal = CONSERVATION_TOL_DISTAL * scale
@@ -332,7 +328,7 @@ def _conservation_columns(
     Relative conservation residual and the tolerance that scored it, per vessel row.
 
     Each :data:`AUTOQC_CONSERVATION` rule is evaluated as
-    ``(Σ inflow − Σ outflow) / Σ inflow`` (communicating-artery terms dropped — LOC flows are
+    ``(Σ inflow - Σ outflow) / Σ inflow`` (communicating-artery terms dropped: LOC flows are
     unsigned). The residual is written onto every anchor vessel for that rule. When a vessel
     participates in more than one rule (the basilar is both VA confluence and PCA split), the
     **worst** residual by magnitude is kept, together with that rule's class tolerance.
@@ -346,7 +342,7 @@ def _conservation_columns(
         .pivot_table(index="subject_uid", columns="node", values="flow_ml_min", aggfunc="mean")
     )
 
-    # subject → node → (residual, tol)
+    # subject -> node -> (residual, tol)
     best: dict[tuple[str, str], tuple[float, float]] = {}
     for rule_key, anchors, tol in _autoqc_conservation_specs(config):
         rule = CONSERVATION_RULES.get(rule_key)
@@ -416,7 +412,7 @@ CONSENSUS_SEGMENTS: tuple[str, ...] = ("lica", "rica", "sss")
 
 def robust_range(values: Any, *, k: float = 3.0) -> tuple[float, float]:
     """
-    Tukey fences ``[Q1 − k·IQR, Q3 + k·IQR]`` — the window holding the bulk of a distribution.
+    Tukey fences ``[Q1 - k·IQR, Q3 + k·IQR]``: the window holding the bulk of a distribution.
 
     Preferred over a fixed percentile trim because it does not need the *proportion* of outliers to
     be known in advance: clipping the outer 1% does nothing when 2% of the values are absurd, while
@@ -449,12 +445,12 @@ def consensus_junction_report(
 
     This is the *validation* view of mass conservation, distinct from the per-scan ``qc_conservation``
     residual that stage 9 publishes. The residual asks "is this scan self-consistent"; the
-    regression asks "does this pipeline conserve flow across its measuring range" — the question the
+    regression asks "does this pipeline conserve flow across its measuring range": the question the
     4D Flow consensus statement's internal-consistency check is designed to answer, and the one the
     QVT/CPS validation paper reports as slope, intercept, 95% CI and Pearson *r*.
 
     Read the **slope**, not the correlation. A pipeline that systematically loses a fixed fraction of
-    outflow still correlates near-perfectly — *r* stays above 0.99 while the slope sits at 0.88 —
+    outflow still correlates near-perfectly (*r* stays above 0.99 while the slope sits at 0.88)
     so *r* alone certifies nothing about conservation.
 
     Parameters
@@ -466,8 +462,8 @@ def consensus_junction_report(
         ``(key, inlet_nodes, outlet_nodes)`` triples. Defaults to :data:`CONSENSUS_JUNCTIONS`.
     robust : bool
         Drop pairs outside the :func:`robust_range` fences of **either** axis before fitting. A
-        single implausible flow — a segmentation that leaked and reported 10⁶ mL/min — sits at
-        enormous leverage and can set the slope on its own, so the fenced fit is the honest
+        single implausible flow (a segmentation that leaked and reported 10⁶ mL/min) sits at
+        enormous leverage and can set the slope on its own, so the fenced fit is the useful
         sensitivity check. It is a *different estimate*, not a redrawn view: report it beside the
         full one, never instead of it.
 
@@ -476,7 +472,7 @@ def consensus_junction_report(
     pandas.DataFrame
         One row per checkable junction: ``junction``, ``label``, ``inlets``, ``outlets``, ``n``,
         ``slope`` with CI, ``intercept`` with CI, ``r``, ``p_value``, ``mean_rel_residual``,
-        ``slope_includes_one`` — the actual pass/fail of the check — and ``n_trimmed``, how many
+        ``slope_includes_one`` (the actual pass/fail of the check), and ``n_trimmed``, how many
         pairs the trim removed.
     """
     from nvitk.measure.hemodynamics import junction_consistency_regression
@@ -502,7 +498,7 @@ def consensus_junction_report(
         if missing:
             log.info("consensus: junction %s not checkable (missing %s).", key, ", ".join(missing))
             continue
-        # A subject counts only when every vessel of the junction was measured — summing over a
+        # A subject counts only when every vessel of the junction was measured: summing over a
         # missing outlet would manufacture a conservation failure out of an absent column.
         block = wide.loc[:, [*inlets, *outlets]].dropna()
         x = block[list(inlets)].sum(axis=1)
@@ -544,8 +540,8 @@ def consensus_segment_report(
     Cohort-level along-segment consistency: percent-from-mean flow variation fitted to a Gaussian.
 
     Mass is conserved along a non-branching segment, so station-to-station flow should barely move.
-    Each segment is centred on its own mean and expressed in percent — which puts a sagittal sinus
-    and a vertebral on one scale — then all stations are pooled and fitted. The **SD** is the
+    Each segment is centred on its own mean and expressed in percent (which puts a sagittal sinus
+    and a vertebral on one scale), then all stations are pooled and fitted. The **SD** is the
     result; the QVT validation work reports roughly 3%. A mean far from zero would mean the pooling
     itself is lopsided, not that flow is drifting.
 
@@ -571,7 +567,7 @@ def consensus_segment_report(
         "sd_pct", "sd_ci_low", "sd_ci_high",
     ]
 
-    # ---- Normalize either input shape into {(subject, node): stations} -----------------------
+    # Normalize either input shape into {(subject, node): stations}
     stations: dict[tuple[str, str], list[float]] = {}
     if isinstance(segment_stations, pd.DataFrame):
         needed = {"subject_uid", "region_id", "value"}
@@ -677,13 +673,13 @@ def is_main_path_station(branch_name: Any, label_id: int) -> bool:
     Whether a ``pitc_profile.csv`` station sits on its vessel's **main path**.
 
     Stage 4/6 decompose a branched territory into a trunk plus bifurcation arms and name them with
-    :func:`~nvitk.pipes.qvtpy.labels.qvtpy_branch_names` — ``LMCA-M1`` for the trunk, ``LMCA-M2a``
+    :func:`~nvitk.pipes.qvtpy.labels.qvtpy_branch_names`: ``LMCA-M1`` for the trunk, ``LMCA-M2a``
     / ``LMCA-M2b`` for the arms; a non-branched vessel keeps its bare name (``LICA``) with any
     extra path suffixed ``-b2``, ``-b3``.
 
     The along-segment CV is a statement about **one continuous vessel**: mass is conserved along a
     non-branching segment, so its station flows should barely move. Pooling a trunk with its side
-    arms breaks that premise — flow legitimately steps down past each bifurcation, and the CV would
+    arms breaks that premise: flow legitimately steps down past each bifurcation, and the CV would
     measure the branching, not the segmentation quality. Only the trunk qualifies.
 
     Both the canonical trunk name and the bare vessel name are accepted, so a profile written
@@ -709,8 +705,8 @@ def compute_segment_cv_from_profiles(
     - **Per vessel, not per tree.** The profile tags every station with the root tree it feeds
       (``L_ICA`` / ``R_ICA`` / ``Basilar``), but a tree spans several vessels and a bifurcation
       between them, where flow is *supposed* to change. Grouping by tree would fold the carotid
-      terminus into the ICA's own consistency. Every vessel the profile carries gets its own CV —
-      ICA, VA, basilar, and the ACA / MCA / PCA trunks — minus anything in
+      terminus into the ICA's own consistency. Every vessel the profile carries gets its own CV (
+      ICA, VA, basilar, and the ACA / MCA / PCA trunks) minus anything in
       :data:`SEGMENT_CV_EXCLUDED_NODES`.
     - **Main path only.** For the branched territories (ACA / MCA / PCA) only the trunk centerline
       counts; the bifurcation arms are dropped (:func:`is_main_path_station`).
@@ -719,7 +715,7 @@ def compute_segment_cv_from_profiles(
       lumen flares and the sampling planes start cutting the daughter vessels obliquely. For the
       vessels in :data:`SEGMENT_CV_PROXIMAL_NODES` the CV is therefore read over the first
       ``config.segment_cv_proximal_mm`` of the trunk only (:func:`~nvitk.measure.hemodynamics.
-      proximal_station_mask`), measured from that vessel's own proximal station — ``distance_mm``
+      proximal_station_mask`), measured from that vessel's own proximal station: ``distance_mm``
       is cumulative over the whole tree, so its absolute value carries the upstream root's length.
       Unbranched vessels keep the full trunk: an ICA or the basilar is one tube over its whole
       sampled length, and narrowing it there would only discard good stations.
@@ -788,7 +784,7 @@ def compute_segment_cv_from_profiles(
 
     work["_vessel"] = [qvtpy_vessel_name(int(v)) for v in work["_label"]]
 
-    # ---- Per-vessel CV, over the proximal window for the branched territories ------------------
+    # Per-vessel CV, over the proximal window for the branched territories
     window_mm = float(config.segment_cv_proximal_mm)
     has_distance = "distance_mm" in work.columns
     if window_mm > 0.0 and not has_distance:
@@ -838,8 +834,8 @@ def compute_subject_qc(
     """
     Subject-level QC: the anterior/posterior inflow split, and a roll-up of the vessel flags.
 
-    The split is the cheapest screen available — 72/28% with an SD of 4–5%, stable across age,
-    sex and brain volume — and needs no reference scan. It is computed from the summed
+    The split is the cheapest screen available (72/28% with an SD of 4-5%, stable across age,
+    sex and brain volume), and needs no reference scan. It is computed from the summed
     bilateral carotids against the basilar (or the vertebrals when the basilar is absent),
     and skipped when either side is missing rather than computed from half the inflow.
     """
@@ -894,9 +890,7 @@ def _sum_if_all(wide: pd.DataFrame, nodes: Sequence[str]) -> pd.Series | None:
     return wide.loc[:, list(nodes)].sum(axis=1, min_count=len(nodes))
 
 
-# ---------------------------------------------------------------------------
 # On-the-fly scoring, for a frame that has not been through the stage
-# ---------------------------------------------------------------------------
 #: Flow at or above which a cohort's median is taken to be mL/min rather than mL/s.
 #: A healthy ICA is ~257 mL/min = ~4.3 mL/s, so the two scales are two orders of magnitude apart
 #: and anything in between would be a cohort no unit assignment could rescue.
@@ -909,7 +903,7 @@ def infer_flow_scale(values: Any) -> float:
 
     Stage 6 publishes flow per **second**; the literature bands are per **minute**. A frame assembled
     in the GUI carries whichever the dataset stored, and scoring mL/s against a mL/min band would
-    fail every vessel in the cohort — so the scale is inferred rather than assumed, and logged.
+    fail every vessel in the cohort, so the scale is inferred rather than assumed, and logged.
 
     Returns 1.0 when the values already look like mL/min, 60.0 when they look like mL/s.
     """
@@ -937,7 +931,7 @@ def compute_qc_columns(
     """
     Score an analysis frame in place, without going through the dataset.
 
-    The stage is the right way to do this — it writes the metrics once, for everyone. But a frame
+    The stage is the right way to do this: it writes the metrics once, for everyone. But a frame
     assembled in the GUI on a dataset where the stage has not run yet still deserves its QC filters,
     and computing them at the moment they are asked for is better than greying the option out.
 
@@ -1030,9 +1024,7 @@ def compute_qc_columns(
     return out, added
 
 
-# ---------------------------------------------------------------------------
 # Reading and writing the dataset
-# ---------------------------------------------------------------------------
 def load_flow_measurements(
     repo: Any, *, variable_id: str, pipeline: str = "latest"
 ) -> pd.DataFrame:
@@ -1040,13 +1032,13 @@ def load_flow_measurements(
     Long ``(subject_uid, region_id, value)`` rows for one image variable, or an empty frame.
 
     Wraps :meth:`~nvitk.db.repo.DataRepo.image` so a missing variable is a reported empty
-    result rather than an exception — the area measurement is optional, and a run that has it
+    result rather than an exception: the area measurement is optional, and a run that has it
     should not be blocked by a cohort that does not.
     """
     empty = pd.DataFrame(columns=["subject_uid", "region_id", "value"])
     # The long table directly rather than ``DataRepo.image``: that accessor applies catalog
     # default-pipeline and cohort restrictions and expands regions through atlas presets, none of
-    # which this stage wants — it needs every published row for one variable, whatever cohort the
+    # which this stage wants; it needs every published row for one variable, whatever cohort the
     # subject belongs to and whether or not the pipeline is a catalog default.
     try:
         frame = repo.get("image_measurements", cohort_id=False)
@@ -1098,16 +1090,16 @@ def purge_subject_qc(
     Drop every ``qc_*`` row this stage owns for *subjects*, so a re-run cannot leave stale values.
 
     The upsert that follows overwrites any row whose
-    ``(subject_uid, region_id, variable_id, frame_index)`` it re-emits — but a metric that was
-    computable last time and is **not** this time is simply not re-emitted, and its old value would
+    ``(subject_uid, region_id, variable_id, frame_index)`` it re-emits, but a metric that was
+    computable last time and is **not** this time is not re-emitted, and its old value would
     survive. That is the dangerous case: a junction that no longer has all its vessels stops
     producing a ``qc_conservation`` row, and without this purge the dataset keeps reporting the
     previous run's residual as if it were current.
 
-    Absence is the honest representation of "not evaluated", so the subjects in scope are cleared
-    first and only what this run actually computed is written back.
+    Absence is the accurate representation of "not evaluated", so the subjects in scope are cleared
+    first and only what this run computed is written back.
 
-    Only the variables in :data:`QC_VARIABLES` and only the subjects passed in are touched — every
+    Only the variables in :data:`QC_VARIABLES` and only the subjects passed in are touched: every
     other measurement, and every other subject's QC, is left alone. Rows are matched on
     ``variable_id`` regardless of ``pipeline_id``: this stage is the sole producer of ``qc_*``, so a
     row carrying a different pipeline id is a leftover from an earlier naming, not a parallel result.
@@ -1115,7 +1107,7 @@ def purge_subject_qc(
     Returns
     -------
     dict
-        ``{table: rows_removed}`` for the tables that actually changed.
+        ``{table: rows_removed}`` for the tables that changed.
     """
     wanted = {str(s) for s in subjects}
     removed: dict[str, int] = {}
@@ -1172,16 +1164,16 @@ def publish_autoqc(
 
     Everything goes through :mod:`nvitk.db.derived_measurements`, so the rows land with the
     same schema, provenance and catalog registration as any importer-produced variable and
-    become immediately queryable — which is what lets the Statmodels filter and the QC panel's
+    become immediately queryable, which is what lets the Statmodels filter and the QC panel's
     colour picker use them without knowing this stage exists.
 
     With *purge_existing* (the default) every ``qc_*`` row for the subjects being published is
-    dropped first — see :func:`purge_subject_qc` for why an upsert alone is not enough. Pass
+    dropped first; see :func:`purge_subject_qc` for why an upsert alone is not enough. Pass
     ``False`` only to add QC for new subjects without touching what is already stored.
 
     The SQLite index is rebuilt **once, after every table is written**, not per variable. Each
     rebuild re-reads the whole Parquet table, so leaving the default on would do it eight times for
-    a single pass — the dominant cost of the run on a full cohort.
+    a single pass: the dominant cost of the run on a full cohort.
 
     Returns
     -------
@@ -1267,8 +1259,8 @@ def publish_autoqc(
             touched.add("clinical_measurements")
 
     if touched and not dry_run:
-        # Once, for the tables actually written. Without this the Parquet holds the new metrics but
-        # every SQLite-backed read still returns the old ones — the GUI reads through SQLite, so the
+        # Once, for the tables written. Without this the Parquet holds the new metrics but
+        # every SQLite-backed read still returns the old ones: the GUI reads through SQLite, so the
         # filters would silently score against stale values.
         log.info("Rebuilding the SQLite index for %s …", ", ".join(sorted(touched)))
         repo.build_sqlite_index(tables=sorted(touched))
@@ -1299,9 +1291,9 @@ def run_autoqc(
     results : ResultsSource, optional
         Where to look for measurements the dataset does not carry, and for ``pitc_profile.csv``
         station flows used by the along-segment CV check. Stage 6 writes the numbers to disk
-        before anything imports them, so a dataset whose import has not run — or has run only
-        for the flows, leaving no areas to excuse hypoplastic vessels — can still be scored.
-        Without it, a missing variable is simply missing and ``qc_segment_cv`` stays NaN.
+        before anything imports them, so a dataset whose import has not run (or has run only
+        for the flows, leaving no areas to excuse hypoplastic vessels) can still be scored.
+        Without it, a missing variable is missing and ``qc_segment_cv`` stays NaN.
 
     Returns
     -------
@@ -1404,9 +1396,7 @@ def run_autoqc(
     }
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 
 def _parse_subjects(text: str | None) -> list[str] | None:
     """Comma/space-separated subject ids, or ``None`` for every subject found."""
@@ -1429,7 +1419,7 @@ def _results_source(
     xnat_password: str | None = None,
 ) -> Any:
     """
-    Build the recovery source, resolving credentials only for the mode actually asked for.
+    Build the recovery source, resolving credentials only for the mode asked for.
 
     Lazily and never stored: a local run must not prompt, and a remote one should ask once at the
     point it needs to connect.
@@ -1641,7 +1631,7 @@ def main(
     Score published 4D-flow measurements against literature bands and physiological consistency.
 
     Reads what stage 6 published, writes the QC metrics back as ordinary measurements, and leaves
-    the pipeline outputs untouched — so it is safe to re-run after any re-import.
+    the pipeline outputs untouched, so it is safe to re-run after any re-import.
     """
     try:
         repo = _open_repo(dataset)

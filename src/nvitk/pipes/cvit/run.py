@@ -1,9 +1,9 @@
 """
-``nvitk-cvit`` — master CLI of the CViT pipeline (all stages, local or SGE).
+``nvitk-cvit``: master CLI of the CViT pipeline (all stages, local or SGE).
 
 Description
 -----------
-One command drives every stage; ``--stages`` selects which (ids or aliases, any order — they are
+One command drives every stage; ``--stages`` selects which (ids or aliases, any order: they are
 re-sorted into pipeline order). Locally, stages run in-process under
 :class:`~nvitk.core.logger.PipelineRunTracker`. With ``--submit sge`` each stage becomes one job
 in a ``-hold_jid`` chain, written into a single driver script that is executed where ``qsub``
@@ -55,7 +55,7 @@ from nvitk.pipes.cvit.util.sge_stage import run_driver_script, torch_device_for_
 
 log = Logger()
 
-#: CLI flag → CViTConfig field for the architecture options (only set flags override).
+#: CLI flag -> CViTConfig field for the architecture options (only set flags override).
 _ARCH_FLAGS: dict[str, str] = {
     "tokenizer": "tokenizer", "decoder": "decoder", "skips": "skips",
     "skip_drop": "skip_drop_prob", "skip_schedule": "skip_schedule",
@@ -76,9 +76,7 @@ def _bundle_name(o: dict[str, Any]) -> str:
     return o.get("ssl_name") or f"{o['ssl']}_{o.get('arch') or 'custom'}"
 
 
-# ---------------------------------------------------------------------------
 # Per-stage options
-# ---------------------------------------------------------------------------
 
 
 def stage_options(o: dict[str, Any], paths: Any) -> dict[str, dict[str, Any]]:
@@ -141,9 +139,7 @@ def stage_options(o: dict[str, Any], paths: Any) -> dict[str, dict[str, Any]]:
     }
 
 
-# ---------------------------------------------------------------------------
 # Local execution
-# ---------------------------------------------------------------------------
 
 
 def _local_runners(paths: Any, opts: dict[str, dict[str, Any]], backend: str) -> dict[str, Callable[[], Any]]:
@@ -176,9 +172,7 @@ def run_local(paths: Any, selected: Sequence[str], opts: dict[str, dict[str, Any
             run.run_stage("(cohort)", stage, runners[stage], reraise=True)
 
 
-# ---------------------------------------------------------------------------
 # SGE execution
-# ---------------------------------------------------------------------------
 
 
 def run_sge(paths: Any, selected: Sequence[str], opts: dict[str, dict[str, Any]], *, container: Path,
@@ -217,9 +211,7 @@ def run_sge(paths: Any, selected: Sequence[str], opts: dict[str, dict[str, Any]]
     return job_ids
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 
 
 def _list_and_exit(ctx: click.Context, _param, value: str | None) -> None:
@@ -249,7 +241,7 @@ def _list_and_exit(ctx: click.Context, _param, value: str | None) -> None:
 @click.option("--stages", type=str, default=st.DEFAULT_STAGES, show_default=True,
               help="Comma list of stage ids or aliases (dataprep, pretrain, train, evaluate, probe, infer, export).")
 @root_options
-# ---- dataset (stage 0) -----------------------------------------------------------------
+# dataset (stage 0)
 @click.option("--dataset-id", type=int, default=pth.DEFAULT_DATASET_ID, show_default=True)
 @click.option("--dataset-name", type=str, default=cfg.DEFAULT_DATASET_NAME, show_default=True)
 @click.option("--images-dir", type=click.Path(path_type=Path), default=None)
@@ -261,7 +253,7 @@ def _list_and_exit(ctx: click.Context, _param, value: str | None) -> None:
 @click.option("--group-regex", type=str, default=None)
 @click.option("--allow-empty", is_flag=True, default=False)
 @click.option("--workers", type=int, default=4, show_default=True)
-# ---- corpus + self-supervised (stages 0/1) -------------------------------------------------
+# corpus + self-supervised (stages 0/1)
 @click.option("--corpus-source", "corpus_sources", multiple=True)
 @click.option("--corpus-from-train", is_flag=True, default=False)
 @click.option("--corpus-only", is_flag=True, default=False, help="Stage 0 builds only the corpus.")
@@ -278,7 +270,7 @@ def _list_and_exit(ctx: click.Context, _param, value: str | None) -> None:
 @click.option("--from-bundle", type=click.Path(path_type=Path), default=None,
               help="Fine-tune from an existing stage-1 bundle.")
 @click.option("--llrd", type=float, default=1.0, show_default=True, help="Layer-wise LR decay (pretrained).")
-# ---- architecture ------------------------------------------------------------------------
+# architecture
 @click.option("--arch", type=str, default=cfg.DEFAULT_ARCH, show_default=True, help="CViTS/B/M/L.")
 @click.option("--tokenizer", type=click.Choice(["hierarchical", "intra_patch", "linear"]), default=None)
 @click.option("--decoder", type=click.Choice(["unet", "patch"]), default=None)
@@ -292,7 +284,7 @@ def _list_and_exit(ctx: click.Context, _param, value: str | None) -> None:
 @click.option("--num-registers", type=int, default=None)
 @click.option("--drop-path", type=float, default=None)
 @click.option("--arch-json", type=str, default=None, help="Any CViTConfig fields as JSON.")
-# ---- training (stage 2) --------------------------------------------------------------------
+# training (stage 2)
 @click.option("--configuration", type=click.Choice(["3d_fullres", "2d", "3d_lowres"]),
               default=cfg.DEFAULT_CONFIGURATION, show_default=True)
 @click.option("--baseline-planner", type=str, default=cfg.DEFAULT_BASELINE_PLANNER, show_default=True)
@@ -310,7 +302,7 @@ def _list_and_exit(ctx: click.Context, _param, value: str | None) -> None:
 @click.option("--run-name", type=str, default=None, help="Stage-2 run for stages 3-5 (default: latest).")
 @click.option("--continue-training", is_flag=True, default=False)
 @click.option("--overwrite", is_flag=True, default=False)
-# ---- probe (stage 3b) ----------------------------------------------------------------------
+# probe (stage 3b)
 @click.option("--probe-every", type=int, default=cfg.DEFAULT_PROBE_EVERY, show_default=True)
 @click.option("--probe-interventions", type=str, default=",".join(cfg.DEFAULT_PROBE_INTERVENTIONS), show_default=True)
 @click.option("--local-radius-mm", type=str, default=",".join(f"{r:g}" for r in cfg.DEFAULT_LOCAL_RADII_MM),
@@ -318,14 +310,14 @@ def _list_and_exit(ctx: click.Context, _param, value: str | None) -> None:
 @click.option("--layer-sweep", is_flag=True, default=False)
 @click.option("--probe-folds", type=str, default=None)
 @click.option("--probe-max-cases", type=int, default=0, show_default=True)
-# ---- inference / export (stages 4, 5) --------------------------------------------------------
+# inference / export (stages 4, 5)
 @click.option("--infer-input", "infer_inputs", multiple=True, type=click.Path(path_type=Path))
 @click.option("--infer-output", type=click.Path(path_type=Path), default=None)
 @click.option("--disable-tta", is_flag=True, default=False)
 @click.option("--largest-component", is_flag=True, default=False)
 @click.option("--export-name", type=str, default=None)
 @click.option("--zip", is_flag=True, default=False)
-# ---- execution -----------------------------------------------------------------------------
+# execution
 @click.option("--device", type=str, default=None, help="Torch device (default derived from --backend).")
 @click.option("--num-processes", type=int, default=8, show_default=True)
 @click.option("--submit", type=click.Choice(["local", "sge"]), default="local", show_default=True)
@@ -337,7 +329,7 @@ def _list_and_exit(ctx: click.Context, _param, value: str | None) -> None:
 @click.option("--dry-run", is_flag=True, default=False)
 @click.option("--no-remote", is_flag=True, default=False)
 def main(**o: Any) -> None:
-    """CViT: Convolutional Vision Transformer segmentation — pre-train, train, evaluate, probe, infer, export."""
+    """CViT: Convolutional Vision Transformer segmentation; pre-train, train, evaluate, probe, infer, export."""
     from nvitk.pipes.cvit.stage0_dataprep import parse_labels
 
     selected = st.parse_stages(o.pop("stages"))

@@ -101,7 +101,7 @@ def _spacing_looks_implausible(ants_img, shape: tuple[int, ...]) -> bool:
 
 
 def _warn_if_spacing_implausible(ants_img, shape: tuple[int, ...]) -> None:
-    """Mouse MRI is typically ~0.05–0.2 mm; unit spacing breaks template COM align."""
+    """Mouse MRI is typically ~0.05-0.2 mm; unit spacing breaks template COM align."""
     sp = tuple(float(x) for x in ants_img.spacing)
     if len(sp) < 3:
         return
@@ -182,8 +182,8 @@ def mouse_brain_segmentation(
         Input intensity volume. **T2-weighted mouse MRI** for ``t2`` / nick / tct;
         histology stacks for ``ex5*``. Correct voxel spacing (mm) is required.
     mode
-        ``extraction`` → brain mask (probability, optionally binarized).
-        ``parcellation`` → regional labels (nick / tct / jay).
+        ``extraction`` -> brain mask (probability, optionally binarized).
+        ``parcellation`` -> regional labels (nick / tct / jay).
     modality
         Extraction only: ``t2``, ``ex5coronal``, or ``ex5sagittal``.
         There is **no T1 mouse extraction model** in ANTsPyNet.
@@ -208,7 +208,7 @@ def mouse_brain_segmentation(
         Target max FOV in mm used by *fix_spacing* (default 20).
     verbose
         Forwarded to ANTsPyNet (prints internal preprocess / predict steps).
-        N4 always runs quietly to avoid flooding the log.
+        N4 always runs silently to avoid flooding the log.
     """
     mode_l = str(mode).strip().lower()
     mod = str(modality).strip().lower()

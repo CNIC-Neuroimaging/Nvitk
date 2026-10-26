@@ -184,7 +184,7 @@ def _split_values(
     else keeps the numeric path. Blank strings become ``pd.NA`` so an empty cell reads as missing
     rather than as a category of its own.
 
-    *agg* must already carry a 0..n-1 index — the padded Series built here align on labels.
+    *agg* must already carry a 0..n-1 index: the padded Series built here align on labels.
     """
     raw = agg[value_column]
     is_text = str(value_kind or "").strip().lower() in TEXT_VALUE_KINDS or value_column == "value_text"

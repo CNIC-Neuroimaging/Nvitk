@@ -205,7 +205,7 @@ def _as_4d(arr: np.ndarray, name: str) -> np.ndarray:
 
 
 def _velocity_from_phases(ap: np.ndarray, rl: np.ndarray, fh: np.ndarray) -> np.ndarray:
-    """Combine AP/RL/FH phase volumes into a single ``(..., 3)`` XYZ velocity field (cm/s → mm/s, sign-corrected)."""
+    """Combine AP/RL/FH phase volumes into a single ``(..., 3)`` XYZ velocity field (cm/s -> mm/s, sign-corrected)."""
     ap4 = _as_4d(ap, "ap_phase")
     rl4 = _as_4d(rl, "rl_phase")
     fh4 = _as_4d(fh, "fh_phase")
@@ -1172,11 +1172,9 @@ def _flowshow_desktop(
         log.exception(e)
         pass
 
-    # ---------------------------------------------------------------------
     # Interactor strategy:
     # Restrict interactions in the right cross-section viewport to wheel-zoom only.
     # Left viewport keeps normal 3D trackball camera controls.
-    # ---------------------------------------------------------------------
     try:
         import vtk
 
@@ -1196,7 +1194,7 @@ def _flowshow_desktop(
                     self._img_style = vtk.vtkInteractorStyleImage()
 
                 def _in_right_viewport(self) -> bool:
-                    """True when the current event position falls inside the right-hand viewport (x ≥ 80%)."""
+                    """True when the current event position falls inside the right-hand viewport (x >= 80%)."""
                     try:
                         x, y = self.GetInteractor().GetEventPosition()
                         rw = self.GetInteractor().GetRenderWindow()
@@ -1983,7 +1981,7 @@ def _flowshow_desktop(
                 pass
 
             def _is_in_left_viewport(xy: tuple[int, int]) -> bool:
-                """True when screen position *xy* falls inside the left (3-D scene) viewport (x ≤ 80%)."""
+                """True when screen position *xy* falls inside the left (3-D scene) viewport (x <= 80%)."""
                 x, y = int(xy[0]), int(xy[1])
                 try:
                     rw = vtk_iren.GetRenderWindow()
@@ -2067,12 +2065,10 @@ def _flowshow_desktop(
             log.exception(e)
             pass
 
-    # ---------------------------------------------------------------------
     # Fast desktop rendering:
     # - mask surfaces are static (3D mask), so we build them once
     # - glyphs are VTK pipelines with fixed point sets; per-frame update only
     #   writes new vectors/scalars and renders (no rebuild)
-    # ---------------------------------------------------------------------
 
     # Mask surfaces: cache PolyData so we can re-color without recomputing contours.
     mask_surfaces: list[tuple[int, Any, str]] = []  # (label, surface, base_color)

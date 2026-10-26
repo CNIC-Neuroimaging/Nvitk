@@ -24,9 +24,7 @@ import sys
 _PIPELINE_MODULE = "vessel_segmentation.pipeline"
 
 
-# ---------------------------------------------------------------------------
 # CPU cap
-# ---------------------------------------------------------------------------
 
 
 def _apply_cpu_limit():
@@ -45,9 +43,7 @@ def _apply_cpu_limit():
     mp.cpu_count = _limited
 
 
-# ---------------------------------------------------------------------------
 # CW-only run (skip the CW metrics and the whole-brain flood fill)
-# ---------------------------------------------------------------------------
 
 
 def _skip_after_cw(*args, **kwargs):

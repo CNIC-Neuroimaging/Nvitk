@@ -11,9 +11,7 @@ from nvitk.core.array import to_numpy
 from nvitk.core.exceptions import UnsupportedFormatError, ValidationError
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Format aliases
-# ──────────────────────────────────────────────────────────────────────────────
 
 _TYPE_ALIASES = {
     "nii": "nifti",
@@ -42,7 +40,7 @@ _TYPE_ALIASES = {
 
 
 def normalize_type(force_type: str | None) -> str | None:
-    """Map *force_type* aliases (``nii``, ``dcm``, …) to canonical reader names, or None."""
+    """Map *force_type* aliases (``nii``, ``dcm``, ...) to canonical reader names, or None."""
     if force_type is None:
         return None
     key = force_type.strip().lower().lstrip(".")
@@ -85,7 +83,7 @@ def _path_suffix(path: Path) -> str:
 
 def guess_read_type(path: str | Path, force_type: str | None = None) -> str:
     """
-    Resolve which reader registry key to use (``nifti``, ``dicom``, …).
+    Resolve which reader registry key to use (``nifti``, ``dicom``, ...).
 
     If *force_type* is set, it wins after :func:`normalize_type`. Otherwise uses extension;
     directories default to ``dicom`` unless they hold NIfTI or Blosc2 (``.b2nd``) volumes.
@@ -151,13 +149,11 @@ def guess_write_type(path: str | Path, force_type: str | None = None) -> str:
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Spatial metadata
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def default_nifti_axes(ndim: int) -> str:
-    """Default axis label string (``XY``, ``XYZ``, ``XYZT``, …) for *ndim*."""
+    """Default axis label string (``XY``, ``XYZ``, ``XYZT``, ...) for *ndim*."""
     if ndim == 2:
         return "XY"
     if ndim == 3:
@@ -172,8 +168,8 @@ def default_nifti_axes(ndim: int) -> str:
 #: nibabel/NIfTI affines are RAS+; ITK (SimpleITK, MetaImage, NRRD) is LPS. The two differ by a
 #: sign flip on the first two world axes, and the matrix is its own inverse, so one constant
 #: serves both directions. Getting this wrong mirrors left against right without changing a
-#: single voxel -- which for a segmentation whose classes are lateralised is the worst kind of
-#: silent error, since the result still looks like an anatomically plausible mask.
+#: single voxel. For a segmentation with lateralised classes the error is silent: the result still
+#: looks like an anatomically plausible mask.
 RAS_LPS_FLIP: Any = np.diag([-1.0, -1.0, 1.0, 1.0])
 
 

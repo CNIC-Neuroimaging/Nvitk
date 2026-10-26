@@ -136,7 +136,7 @@ def fill_holes(mesh: Mesh, max_hole_size: float = 1e9) -> Mesh:
         if np.linalg.norm(ring - centre, axis=1).max() > float(max_hole_size):
             continue
         nxt = np.roll(loop, -1)
-        # The rim's own faces use a→b; the cap must use b→a to wind consistently.
+        # The rim's own faces use a->b; the cap must use b->a to wind consistently.
         reverse = (int(loop[0]), int(loop[1])) in half
         tris = np.stack([nxt, loop, np.full(len(loop), n)], axis=1) if reverse else \
             np.stack([loop, nxt, np.full(len(loop), n)], axis=1)
@@ -164,7 +164,7 @@ def ensure_outward(mesh: Mesh) -> Mesh:
 
 
 def flip_normals(mesh: Mesh) -> Mesh:
-    """Reverse every face's winding (inside ↔ outside)."""
+    """Reverse every face's winding (inside <-> outside)."""
     return _rebuild(mesh, mesh.vertices, mesh.faces[:, ::-1].copy(), np.arange(mesh.n_vertices),
                     np.arange(mesh.n_faces))
 

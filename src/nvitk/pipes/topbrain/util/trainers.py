@@ -1,8 +1,8 @@
 """Selectable self-supervised trainers for stage 1.
 
 nnssl ships ~270 trainer classes, but almost all are hyper-parameter variants of a handful of
-methods (``SparkMAETrainer_BS8_1000ep``, ``VoCoTrainer_lr_1e3``, …). This registry names the
-**method families** — the choices that actually differ — so ``--list-trainers`` is a menu rather
+methods (``SparkMAETrainer_BS8_1000ep``, ``VoCoTrainer_lr_1e3``, ...). This registry names the
+**method families** (the choices that differ), so ``--list-trainers`` is a menu rather
 than a dump. Any nnssl class name remains valid for ``--ssl-trainer``; the registry documents,
 it does not gate.
 
@@ -15,8 +15,8 @@ keys. There is deliberately no cross-family adapter.
 
 Loss compatibility
 ------------------
-nnssl's losses are called differently per family — ``SparkTrainer`` uses
-``(prediction, groundtruth, mask)`` and the MAE trainers ``(model_output, target, mask)`` — so
+nnssl's losses are called differently per family, ``SparkTrainer`` uses
+``(prediction, groundtruth, mask)`` and the MAE trainers ``(model_output, target, mask)``, so
 :attr:`SSLTrainerSpec.loss_family` records which ``--ssl-loss`` values apply. Stage 1 checks the
 actual signatures before training either way.
 
@@ -50,7 +50,7 @@ class SSLTrainerSpec:
 
     @property
     def usable(self) -> bool:
-        """Whether this trainer can actually run."""
+        """Whether this trainer can run."""
         return self.unusable_reason is None
 
     @property
@@ -127,8 +127,8 @@ def get_trainer(name: str) -> SSLTrainerSpec | None:
 def architecture_for_trainer(name: str) -> str | None:
     """Encoder family a trainer builds, or ``None`` if it cannot be determined by name.
 
-    Falls back to nnssl's own naming convention — an ``Eva`` in the class name means a Primus
-    encoder — so hyper-parameter variants outside the registry still resolve.
+    Falls back to nnssl's own naming convention (an ``Eva`` in the class name means a Primus
+    encoder), so hyper-parameter variants outside the registry still resolve.
     """
     spec = SSL_TRAINERS.get(name)
     if spec is not None:

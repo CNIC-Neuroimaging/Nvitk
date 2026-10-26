@@ -4,18 +4,18 @@ Description
 -----------
 nnssl pre-trains from a ``pretrain_data.json`` describing a
 ``Collection -> Dataset -> Subject -> Session -> Image`` hierarchy. There is no generic
-folder-scanner in the upstream repo — its converters all hard-code one cohort's layout — so
+folder-scanner in the upstream repo (its converters all hard-code one cohort's layout), so
 this module provides a declarative one: a :class:`CorpusSource` names a root, a glob and a
 regex that recovers the subject id from each path.
 
 Why volumes are rewritten rather than referenced
 ------------------------------------------------
 nnssl's experiment planner emits a single normalisation scheme for the whole collection
-(``ZScoreNormalization``) and its fingerprint records **only spacings** — it never collects
+(``ZScoreNormalization``) and its fingerprint records **only spacings**: it never collects
 intensity statistics, so it has no CT normalisation and no way to acquire one. Feeding raw
 Hounsfield units and raw TOF arbitrary units into one per-volume z-score therefore trains the
 encoder across two incompatible intensity scales. Worse, nnssl crops to the non-zero bounding
-box before normalising, which is meaningless on CT where air is −1000 rather than 0.
+box before normalising, which is meaningless on CT where air is -1000 rather than 0.
 
 Harmonising every volume onto a common ``[0, 1]`` range on the way in fixes both, and keeps the
 corpus consistent with what stage 0 feeds the segmentation model.
@@ -75,7 +75,7 @@ class CorpusSource:
     subject_template: str | None = None
     """Format string over the :attr:`subject_regex` groups, e.g. ``"{center}_{pid}"``.
 
-    Needed when the subject key is not one contiguous span of the filename — TopAneu writes
+    Needed when the subject key is not one contiguous span of the filename: TopAneu writes
     ``topaneu_<center>_<modality>_<patient>``, so the modality sits between the two halves of
     the subject and no single regex group can capture it. ``None`` uses the ``subject`` group.
     """
@@ -97,7 +97,7 @@ class CorpusVolume:
 
     @property
     def name(self) -> str:
-        """Image name inside the collection — unique within its subject/session."""
+        """Image name inside the collection: unique within its subject/session."""
         return self.path.name
 
 
@@ -118,11 +118,11 @@ BUILTIN_SOURCES: dict[str, dict[str, Any]] = {
             r"topaneu_(?P<center>center\d+)_(?P<modality>ct|mr)_(?P<pid>\d+)"
             r"(?:_(?P<repeat>\d+))?_0000\.nii\.gz$"
         ),
-        # Both modalities of one patient — and both scans of a longitudinal pair — share a
+        # Both modalities of one patient (and both scans of a longitudinal pair) share a
         # subject, so the repeat index is deliberately left out of the key.
         "subject_template": "{center}_{pid}",
     },
-    # BO-Large-IA: ~1400 CTA volumes. 
+    # BO-Large-IA: ~1400 CTA volumes.
     # The release keeps its images in numbered batch directories beside annotation directories and
     # CSV manifests, so the globs name the image batches explicitly rather than sweeping the
     # tree -- an annotation volume pulled in as an image would be pre-trained on as anatomy.
@@ -188,7 +188,7 @@ def parse_source_spec(spec: str, *, challenge_root: Path | None = None) -> Corpu
     ------
     ValueError
         On a malformed spec, a built-in name given without the root it needs, or a non-built-in
-        name without an explicit modality — guessing the modality would apply an HU window to
+        name without an explicit modality: guessing the modality would apply an HU window to
         arbitrary-unit MR data, which looks plausible and is completely wrong.
     """
     text = spec.strip()
@@ -349,11 +349,11 @@ def harmonize_volume(volume: CorpusVolume, corpus_root: Path, *, overwrite: bool
                      mr_percentiles: Sequence[float] | None = None) -> Path:
     """Write an intensity-harmonised copy of *volume* under *corpus_root*; returns its path.
 
-    Geometry is untouched — harmonisation is a voxelwise intensity map.
+    Geometry is untouched: harmonisation is a voxelwise intensity map.
 
     The windows must be the ones stage 0 applies to the labelled data. Only the *clipping* they
-    do survives nnU-Net's per-image z-score — an affine intensity map leaves a z-score unchanged
-    — but clipping does survive, so a corpus windowed differently pre-trains the encoder on a
+    do survives nnU-Net's per-image z-score (an affine intensity map leaves a z-score unchanged
+), but clipping does survive, so a corpus windowed differently pre-trains the encoder on a
     saturation pattern the segmentation data never shows it. ``None`` keeps
     :func:`~nvitk.normalization.harmonize_modality`'s own defaults.
     """
@@ -394,7 +394,7 @@ def build_collection(
 ) -> tuple[Any, list[CorpusVolume]]:
     """Build an nnssl ``Collection`` from *sources*.
 
-    Requires the vendored nnssl clone to be importable — call
+    Requires the vendored nnssl clone to be importable: call
     :func:`~nvitk.pipes.topbrain.util.nnssl_env.apply_nnssl_env` first.
 
     Returns

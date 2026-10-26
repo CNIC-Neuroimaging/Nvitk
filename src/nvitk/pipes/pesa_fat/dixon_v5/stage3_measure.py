@@ -57,9 +57,7 @@ setup(globals())
 log = Logger()
 
 
-# ---------------------------------------------------------------------------
 # Measurement plan (single source of truth in cfg.MEASURE_SPECS)
-# ---------------------------------------------------------------------------
 
 SPECS = cfg.MEASURE_SPECS
 
@@ -80,9 +78,7 @@ _REGION_LABELS: dict[str, dict[str, int]] = {
 }
 
 
-# ---------------------------------------------------------------------------
 # Loading helpers
-# ---------------------------------------------------------------------------
 
 
 def _imread_opt(parent: Path, stem: str) -> Image | None:
@@ -133,9 +129,7 @@ def _nslices_axial_xyz(mask: Image) -> int:
     """Number of axial (Z) slices in *mask* containing at least one foreground voxel."""
     return int(np.any(mask.data > 0, axis=(0, 1)).sum())
 
-# ---------------------------------------------------------------------------
 # Per-subject processing
-# ---------------------------------------------------------------------------
 
 
 def _wf_reference(
@@ -304,9 +298,7 @@ def run_subject(
     return output
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 
 
 @click.command("dixon-v5-stage3")

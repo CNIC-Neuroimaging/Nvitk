@@ -7,8 +7,8 @@
 **Outputs**
 
 - Boolean foreground mask after sliding threshold + area opening.
-- :func:`venous_search_region` — superior Y-slab mask restricting venous geometry heuristics.
-- :func:`arterial_exclusion_mask` — eICAB arterial voxels to subtract from venous CD ROI.
+- :func:`venous_search_region`: superior Y-slab mask restricting venous geometry heuristics.
+- :func:`arterial_exclusion_mask`: eICAB arterial voxels to subtract from venous CD ROI.
 """
 
 from __future__ import annotations
@@ -22,9 +22,7 @@ from nvitk.pipes.qvtpy.labels import QVTPY_ARTERIAL_LABEL_IDS
 setup(globals())
 
 
-# ---------------------------------------------------------------------------
 # Venous search region (superior Y-slab)
-# ---------------------------------------------------------------------------
 
 
 def venous_search_region(shape: tuple[int, int, int]) -> np.ndarray:
@@ -60,15 +58,13 @@ def arterial_exclusion_mask(
     return as_backend_array(art.astype(bool, copy=False))
 
 
-# ---------------------------------------------------------------------------
 # Sliding threshold on 3D complex-difference (MATLAB slidingThreshold.m)
-# ---------------------------------------------------------------------------
 
 
 from nvitk.filters.sliding_threshold import binary_mask_sliding_threshold_3d
 
 
-# ---- Public API: global vessel mask + area opening ---------------------------
+# Public API: global vessel mask + area opening
 
 
 def binary_vessel_segment_cd(

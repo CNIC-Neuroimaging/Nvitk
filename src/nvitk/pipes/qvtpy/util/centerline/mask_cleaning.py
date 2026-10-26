@@ -19,9 +19,7 @@ from nvitk.morphology.components import (
 setup(globals())
 
 
-# ---------------------------------------------------------------------------
 # eICAB multilabel island removal (+ optional bridge opening)
-# ---------------------------------------------------------------------------
 
 
 def clean_multilabel_islands(
@@ -65,9 +63,7 @@ def clean_multilabel_islands(
     return as_backend_array(out).astype(np.int32, copy=False)
 
 
-# ---------------------------------------------------------------------------
 # Binary / venous-slab area opening
-# ---------------------------------------------------------------------------
 
 
 def clean_binary_mask(

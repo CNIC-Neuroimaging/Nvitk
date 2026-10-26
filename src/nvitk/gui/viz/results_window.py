@@ -6,7 +6,7 @@ shows only the first line, and a per-label metrics table in the log is a wall of
 ``name: value`` that cannot be sorted, aligned or copied as a unit.
 
 This window takes the same payload the log line is built from and renders it as
-a table — one window per viewer, reused across runs, with a history of previous
+a table: one window per viewer, reused across runs, with a history of previous
 results so a second measurement does not destroy the one you were reading. The
 log line is still written; this is an addition, not a replacement.
 
@@ -18,7 +18,7 @@ Two payload shapes are supported, both flowing through :func:`show_results`:
     a matrix, rendered with one row per key and one column per metric.
 
 A result may come with an ``on_select`` callback: selecting a row calls it with
-that row's key (a branch, a frame…) so the viewer can show what the row is
+that row's key (a branch, a frame...) so the viewer can show what the row is
 about, and ``None`` when that should go (*Clear highlight*, another result, the
 window closing).
 
@@ -29,11 +29,11 @@ the colour of their value (the range automatic or typed, a legend beside it;
 labels without a value turn grey), as the Meshlab panel colours a surface by a
 field. *Original colours* puts the label colours back as they were. Each label
 row carries a swatch of its label's colour. An ``on_colour`` callback colours
-more than the label layer — the surfaces of those labels, say — with the same
-values: it is called with ``(column, label id → value, colormap, (lo, hi))``, and
+more than the label layer (the surfaces of those labels, say) with the same
+values: it is called with ``(column, label id -> value, colormap, (lo, hi))``, and
 with ``(None, {}, colormap, None)`` when the labels take their own colours back.
 
-A result may also tint its rows (``row_colours``: row key → colour, e.g. a lesion's confidence
+A result may also tint its rows (``row_colours``: row key -> colour, e.g. a lesion's confidence
 class) and bring its own controls (``controls``: a factory returning a widget shown above the
 table while that result is on screen, e.g. a filter of what the viewer shows).
 
@@ -47,7 +47,7 @@ The window is an nvitk panel (``nvitk:results``) with the panels' title bar: ⧉
 main window with the other panels or pops it out again, ⛶ fills the screen, ✕ closes it, and the
 panel manager moves it into any panel window (:mod:`nvitk.gui.core.workspace`), where it is
 remembered across sessions. It opens as a window of its own; once docked it stays docked while it
-is open. Closed, it comes back — a pop-up again — with the next result or the *Results* button
+is open. Closed, it comes back (a pop-up again) with the next result or the *Results* button
 (:func:`results_button`, on the Imaging panel's title bar).
 """
 
@@ -88,7 +88,7 @@ from nvitk.gui.core.design import (
 
 #: Kept on the viewer so a second measurement re-uses the window.
 _WINDOW_ATTR = "_nvitk_results_window"
-#: The Results panel's dock name — what a saved layout knows it by.
+#: The Results panel's dock name: what a saved layout knows it by.
 RESULTS_DOCK_NAME = "nvitk:results"
 RESULTS_TITLE = "Results"
 
@@ -182,7 +182,7 @@ class _Result:
     ) -> None:
         self.title = title
         self.on_colour = on_colour
-        #: Row key → tint of that row (any colour Qt understands, or RGB(A) floats).
+        #: Row key -> tint of that row (any colour Qt understands, or RGB(A) floats).
         self.row_colours = {str(k): v for k, v in dict(row_colours or {}).items()}
         #: Builds the widget shown above the table while this result is displayed.
         self.controls = controls
@@ -220,7 +220,7 @@ class _Result:
         return out
 
     def label_values(self, column: str) -> dict[int, float]:
-        """Label id → its value in *column* (the first row of a label measured twice)."""
+        """Label id -> its value in *column* (the first row of a label measured twice)."""
         out: dict[int, float] = {}
         for key, lid in self.row_labels.items():
             row = self.payload.get(key, self.payload.get(_int_key(key), {}))
@@ -545,7 +545,7 @@ class ResultsWindow(QWidget):
                 _ORIGINAL_COLOURS[layer] = label_color_state(layer)
             limits = None if auto else (self._colour_lo.value(), self._colour_hi.value())
             lo, hi = apply_label_value_colors(layer, values, colormap, limits=limits)
-        except Exception as exc:  # noqa: BLE001 — a colouring must never break the window
+        except Exception as exc:  # noqa: BLE001 (a colouring must never break the window)
             self._colour_status.setText(f"Could not colour the labels: {exc}")
             return
         result.colour["limits"] = (lo, hi)
@@ -566,12 +566,12 @@ class ResultsWindow(QWidget):
 
     def _colour_others(self, result: _Result, column: str | None, values: dict[int, float], colormap: str,
                        limits: tuple[float, float] | None) -> None:
-        """Pass the colouring on to the result's ``on_colour`` (surfaces of the same labels…)."""
+        """Pass the colouring on to the result's ``on_colour`` (surfaces of the same labels...)."""
         if result.on_colour is None:
             return
         try:
             result.on_colour(column, values, colormap, limits)
-        except Exception as exc:  # noqa: BLE001 — the label colouring already happened
+        except Exception as exc:  # noqa: BLE001 (the label colouring already happened)
             self._colour_status.setText(f"{self._colour_status.text()} (Surfaces not coloured: {exc})")
 
     def _row_swatches(self, result: _Result) -> None:
@@ -617,7 +617,7 @@ class ResultsWindow(QWidget):
         if result.controls is not None:
             try:
                 widget = result.controls()
-            except Exception as exc:  # noqa: BLE001 — a broken control must not hide the table
+            except Exception as exc:  # noqa: BLE001 (a broken control must not hide the table)
                 widget = QLabel(f"Controls unavailable: {exc}")
         if widget is not None:
             self._controls_layout.addWidget(widget)
@@ -640,7 +640,7 @@ class ResultsWindow(QWidget):
     ) -> None:
         """Show *payload* and keep the previous results in the history picker.
 
-        With *label_layer* and *row_labels* (row key → label id), the labels can be
+        With *label_layer* and *row_labels* (row key -> label id), the labels can be
         coloured by any measured column; *on_colour* passes that colouring on.
         *row_colours* tints rows; *controls* builds a widget shown above the table."""
         if on_select is not None and not note:
@@ -683,7 +683,7 @@ class ResultsWindow(QWidget):
             return
         try:
             result.on_select(key)
-        except Exception:  # noqa: BLE001 — a highlight must never break the window
+        except Exception:  # noqa: BLE001 (a highlight must never break the window)
             pass
 
     def _on_row_selected(self) -> None:
@@ -784,7 +784,7 @@ class _PanelCloseWatcher(QObject):
         self._window = window
         self._viewer = viewer
 
-    def eventFilter(self, obj: Any, event: Any) -> bool:  # noqa: N802 — Qt naming
+    def eventFilter(self, obj: Any, event: Any) -> bool:  # noqa: N802 (Qt naming)
         if event.type() == QEvent.Type.Close:
             self._window.panel_closed()
             QTimer.singleShot(0, self._hide_empty_window)
@@ -807,7 +807,7 @@ def _panel_manager(viewer: Any) -> Any:
 def _main_window(viewer: Any) -> Any:
     try:
         return viewer.window._qt_window
-    except Exception:  # noqa: BLE001 — a viewer without Qt window
+    except Exception:  # noqa: BLE001 (a viewer without Qt window)
         return None
 
 
@@ -815,7 +815,7 @@ def results_dock(viewer: Any) -> QDockWidget | None:
     """The viewer's Results panel (dock + :class:`ResultsWindow`), created closed on first use.
 
     It is added, hidden, to the main window's right edge, so the panel manager can move it like
-    any panel and a saved layout can put it back — the app creates it before restoring the layout.
+    any panel and a saved layout can put it back: the app creates it before restoring the layout.
     ``None`` when no Qt application is running.
     """
     if QApplication.instance() is None:
@@ -849,7 +849,7 @@ def results_dock(viewer: Any) -> QDockWidget | None:
         manager.watch_dock(dock)
     try:
         setattr(viewer, _WINDOW_ATTR, window)
-    except Exception:  # noqa: BLE001 — a viewer that rejects attributes just
+    except Exception:  # noqa: BLE001 (a viewer that rejects attributes just)
         # gets a fresh window each time, which still shows the result.
         pass
     return dock
@@ -858,7 +858,7 @@ def results_dock(viewer: Any) -> QDockWidget | None:
 def results_window(viewer: Any) -> ResultsWindow | None:
     """The viewer's results window (the Results panel's contents), created on first use.
 
-    ``None`` when no Qt application is running — a headless call site should get
+    ``None`` when no Qt application is running: a headless call site should get
     the log line and nothing else rather than an exception.
     """
     dock = results_dock(viewer)
@@ -867,7 +867,7 @@ def results_window(viewer: Any) -> ResultsWindow | None:
 
 def open_results(viewer: Any) -> ResultsWindow | None:
     """Bring the Results panel on screen: where it is when open (docked or in a window), raised;
-    closed, in the window it was closed in, or — docked or never shown — a window of its own."""
+    closed, in the window it was closed in, or (docked or never shown) a window of its own."""
     dock = results_dock(viewer)
     if dock is None:
         return None
@@ -901,7 +901,7 @@ def _float_alone(viewer: Any, dock: QDockWidget) -> None:
 
 
 def results_button(viewer: Any) -> QToolButton:
-    """A title-bar button that opens the Results window — after it was closed, too."""
+    """A title-bar button that opens the Results window, after it was closed, too."""
     button = bar_tool_button("nvitkResultsButton", min_width=78)
     button.setText("▤  Results")
     button.setToolTip("Show the Results window (the measurement tables): a window of its own, or "
@@ -928,14 +928,14 @@ def show_results(
     """Show *payload* in the viewer's results window; return it as text.
 
     With *on_select*, selecting a row calls it with the row's key (and ``None``
-    when the highlight should go). With *label_layer* and *row_labels* (row key →
+    when the highlight should go). With *label_layer* and *row_labels* (row key ->
     label id), the window offers to colour those labels by a measured column;
     *on_colour* (see the module docstring) colours other layers along with them.
-    *row_colours* (row key → colour) tints rows; *controls* builds a widget shown above the
+    *row_colours* (row key -> colour) tints rows; *controls* builds a widget shown above the
     table while this result is displayed.
 
     The text is returned rather than logged here so the caller keeps control of
-    the log — every measurement already writes one line, and this must not
+    the log: every measurement already writes one line, and this must not
     duplicate it.
     """
     text = _Result(title, payload, subtitle=subtitle, row_header=row_header, note=note).as_text()

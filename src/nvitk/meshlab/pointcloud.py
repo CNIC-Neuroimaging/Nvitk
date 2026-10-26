@@ -145,7 +145,7 @@ def orient_normals(points: np.ndarray, normals: np.ndarray, *, k: int = 12) -> n
     Neighbours whose normals are nearly parallel are linked most cheaply, so the
     orientation travels along the surface rather than jumping across thin parts.
     Each connected piece is seeded at its topmost point (normal up) and finally
-    flipped as a whole if most of its normals point towards its centre — outward
+    flipped as a whole if most of its normals point towards its centre: outward
     for closed shapes, whatever their form.
     """
     from scipy import sparse
@@ -191,8 +191,8 @@ def estimate_normals(
 ) -> PointCloud:
     """Per-point normals by PCA of the *k* nearest neighbours.
 
-    *orient*: ``"propagate"`` (consistent along the surface, :func:`orient_normals`
-    — right for any shape), ``"outward"`` (away from the centroid: only for
+    *orient*: ``"propagate"`` (consistent along the surface, :func:`orient_normals`;
+right for any shape), ``"outward"`` (away from the centroid: only for
     star-shaped clouds) or ``"none"``. *orient_outward* is the older boolean form.
     """
     if orient_outward is not None:
@@ -238,7 +238,7 @@ def _grid_for(points: np.ndarray, resolution: int, pad: float) -> tuple[np.ndarr
     """``(origin, step, shape)`` of an isotropic grid around the points.
 
     *resolution* is the number of steps along the longest side; ``0`` picks it
-    from the sampling density (a step of ~0.75 sample spacings, 48–256 steps).
+    from the sampling density (a step of ~0.75 sample spacings, 48-256 steps).
     """
     lo, hi = points.min(axis=0), points.max(axis=0)
     span = np.maximum(hi - lo, 1e-9)
@@ -281,12 +281,12 @@ def poisson_reconstruct(
     function whose gradient best matches it is found by solving a Poisson
     equation (with a DCT, i.e. Neumann boundaries). Its level set through the
     samples is the surface: watertight, smooth, and robust to noise and uneven
-    sampling — the usual choice for scans and segmentation boundary points.
+    sampling; the usual choice for scans and segmentation boundary points.
 
     *resolution* is the grid size along the longest side (0 = from the sampling
     density); *smoothing* (grid steps) blurs the normal field (more = smoother,
     fewer spurious bumps); *trim* removes surface farther than this many sample
-    spacings from any sample — where the solver bridged a gap in the data, e.g.
+    spacings from any sample, where the solver bridged a gap in the data, e.g.
     the open end of a vessel (0 keeps the closed result).
     """
     from scipy.fft import dctn, idctn
@@ -351,7 +351,7 @@ def imls_reconstruct(
     """Implicit moving least squares (Kolluri 2005): the zero set of a smooth signed distance.
 
     Each grid node near the samples gets the Gaussian-weighted mean of its
-    nearest samples' plane distances ``(x − pᵢ)·nᵢ``. Follows the data closely
+    nearest samples' plane distances ``(x - pᵢ)·nᵢ``. Follows the data closely
     (no global smoothing, open surfaces stay open); evaluated only within *band*
     grid steps of the samples.
     """
@@ -423,7 +423,7 @@ def reconstruct_surface(
     """A surface through the points.
 
     ``"poisson"`` (:func:`poisson_reconstruct`): watertight and smooth, robust to
-    noise — the default. ``"screened_poisson"``: MeshLab's screened Poisson
+    noise; the default. ``"screened_poisson"``: MeshLab's screened Poisson
     (PyMeshLab; octree depth from *resolution*, 8 by default). ``"ball_pivoting"``:
     MeshLab's ball pivoting, which interpolates the points and keeps holes open
     (ball radius *alpha*, 0 = automatic). ``"imls"`` (:func:`imls_reconstruct`):

@@ -4,7 +4,7 @@ Blosc2 NDArray (``.b2nd``) reader for nnU-Net / nnSSL preprocessed volumes.
 A preprocessed case is a compressed ``<name>.b2nd`` array shaped ``(C, Z, Y, X)`` next to a
 ``<name>.pkl`` sidecar that holds the SimpleITK geometry of the source scan plus the
 crop/resample bookkeeping. Neither file records the *final* voxel spacing, so this reader
-rebuilds it from the sidecar and — when it can be located by walking up the tree — the
+rebuilds it from the sidecar and (when it can be located by walking up the tree) the
 ``*Plans*.json`` whose ``data_identifier`` names one of the parent folders. The array is
 returned in ``XYZ`` order with a world affine, matching :func:`~nvitk.io.readers.read_nifti`.
 
@@ -38,9 +38,7 @@ _MAX_PLAN_BYTES = 4 * 1024 * 1024
 _LPS_TO_RAS = np.diag([-1.0, -1.0, 1.0, 1.0])
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Sidecar properties
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def b2nd_properties_path(b2nd_file: str | Path) -> Path:
@@ -80,9 +78,7 @@ def _properties_for(b2nd_file: Path, properties: str | Path | dict[str, Any] | N
         return {}
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Plans discovery (target spacing + transpose_forward)
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _plan_candidates(b2nd_file: Path) -> Iterator[tuple[str, Path]]:
@@ -134,9 +130,7 @@ def _find_configuration_plan(b2nd_file: Path) -> dict[str, Any] | None:
     return None
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Geometry reconstruction
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _transpose_forward(plan: dict[str, Any] | None) -> tuple[int, int, int]:
@@ -152,7 +146,7 @@ def _spatial_perm_to_xyz(transpose_forward: tuple[int, int, int]) -> tuple[int, 
     Permutation taking the stored spatial axes to SimpleITK index order ``(x, y, z)``.
 
     Stored axis ``a`` is pre-transpose axis ``transpose_forward[a]``, and the pre-transpose array
-    is ``(z, y, x)`` — i.e. SimpleITK axis ``2 - transpose_forward[a]``.
+    is ``(z, y, x)``, i.e. SimpleITK axis ``2 - transpose_forward[a]``.
     """
     inverse = [0, 0, 0]
     for stored_axis, pre_axis in enumerate(transpose_forward):
@@ -226,7 +220,7 @@ def _sitk_geometry(
     source_spacing_vec = np.asarray(source_spacing, dtype=float)
 
     # Crop offset: bbox is in stored spatial-axis order; undo the transpose, then reverse
-    # (z, y, x) → (x, y, z) to reach SimpleITK index order.
+    # (z, y, x) -> (x, y, z) to reach SimpleITK index order.
     offset_pre = np.zeros(3, dtype=float)
     bbox = properties.get("bbox_used_for_cropping")
     if isinstance(bbox, (list, tuple)) and len(bbox) == 3:
@@ -251,9 +245,7 @@ def _sitk_geometry(
     }
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Array loading
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _b2nd_files_in_dir(directory: Path) -> list[Path]:
@@ -289,7 +281,7 @@ def _select_channel(
 
 
 def _to_xyz(data: np.ndarray, perm: tuple[int, int, int], has_channel: bool) -> tuple[np.ndarray, str]:
-    """Reorder stored ``(C,)ZYX`` data to ``XYZ`` / ``XYZC`` (a view — no copy) and return its axis string."""
+    """Reorder stored ``(C,)ZYX`` data to ``XYZ`` / ``XYZC`` (a view: no copy) and return its axis string."""
     if has_channel:
         return np.transpose(data, (perm[0] + 1, perm[1] + 1, perm[2] + 1, 0)), "XYZC"
     return np.transpose(data, perm), "XYZ"
@@ -309,9 +301,7 @@ def _blosc2_storage_info(array: Any) -> dict[str, Any]:
     return info
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # read_b2nd
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def read_b2nd(

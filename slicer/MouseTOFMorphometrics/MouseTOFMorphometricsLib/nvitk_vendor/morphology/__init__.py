@@ -5,7 +5,7 @@
 upstream they route through ``nvitk.types.Image``, which would pull SimpleITK,
 dicom2nifti and the rest of the I/O stack into Slicer.
 
-No heavy top-level imports here — submodules are imported on demand.
+No heavy top-level imports here: submodules are imported on demand.
 """
 
 from __future__ import annotations

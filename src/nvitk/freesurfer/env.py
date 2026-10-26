@@ -74,7 +74,7 @@ def freesurfer_home() -> Path | None:
 
 
 def freesurfer_version(home: Path | None = None) -> str | None:
-    """The version in the installation's ``build-stamp.txt`` (``5.3.0``, ``7.4.1`` …)."""
+    """The version in the installation's ``build-stamp.txt`` (``5.3.0``, ``7.4.1`` ...)."""
     home = home or freesurfer_home()
     stamp = (home / "build-stamp.txt") if home is not None else None
     if stamp is None or not stamp.is_file():

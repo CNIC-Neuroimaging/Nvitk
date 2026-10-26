@@ -24,11 +24,11 @@ so every label set is spelled out here and :func:`label_map` is the only way to 
    * - 37-40
      - ICVs, R/L-BVR, SSS
      - R/L-STA, R/L-MaxA
-     - —
+     -:
    * - 41-42
-     - —
+     -:
      - R/L-MMA
-     - —
+     -:
 
 ``ta36`` also renames values 4 and 6 from ``R-ICA``/``L-ICA`` to ``R-ICA-C6-C7``/``L-ICA-C6-C7``
 (the supraclinoid segment), because the infraclinoid segment becomes 35/36.
@@ -48,9 +48,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Label-set identities
-# ──────────────────────────────────────────────────────────────────────────────
 
 #: Selectable label sets. ``ta36`` is the ToPBrain-2026 / ToPAneu track and the pipeline default.
 LabelSet = Literal["ta36", "v1_ct", "v1_mr"]
@@ -71,7 +69,7 @@ LABEL_SET_JSONS: dict[str, str] = {
 
 #: Modalities each label set covers. ``ta36`` is modality-agnostic; the v1 sets are not.
 #: Foreground of the binary vessel label set: one class, "is this voxel a vessel".
-#: Not a released label set — it is derived by collapsing any TA36/v1 mask, which is what makes
+#: Not a released label set: it is derived by collapsing any TA36/v1 mask, which is what makes
 #: silver-standard masks usable as a first fine-tuning stage (see :mod:`stage2_train`).
 BINARY_LABELS: dict[int, str] = {1: "vessel"}
 
@@ -84,9 +82,7 @@ LABEL_SET_MODALITIES: dict[str, tuple[str, ...]] = {
     "v1_mr": ("mr",),
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Label maps
-# ──────────────────────────────────────────────────────────────────────────────
 
 #: Values 1-34: identical anatomy in every label set (modulo the ICA rename in ``ta36``).
 _COMMON: dict[int, str] = {
@@ -162,7 +158,7 @@ BINARY_LABEL_SET: str = "binary"
 
 #: Binary label set per multi-class set it is meant to seed. Each gets its **own** dataset and
 #: its own stage 2 provenance, so a CT-only and an MR-only curriculum can be trained side by
-#: side without overwriting each other's binary model — one shared slot would mean the second
+#: side without overwriting each other's binary model: one shared slot would mean the second
 #: run silently replaced the first, and ``--init-from-binary`` would then resolve to whichever
 #: finished last.
 BINARY_LABEL_SET_FOR: dict[str, str] = {
@@ -183,11 +179,9 @@ _LABEL_MAPS: dict[str, dict[int, str]] = {
     "v1_mr": V1_MR_LABELS,
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Scoring constants (topbrain25_eval/constants.py)
-# ──────────────────────────────────────────────────────────────────────────────
 
-#: "Side road" vessels present in every label set — small, anatomically variable branches
+#: "Side road" vessels present in every label set: small, anatomically variable branches
 #: whose *detection* (not overlap) is scored by the F1 metric.
 SIDEROAD_COMMON: tuple[int, ...] = (8, 9, 10, 15, 16, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34)
 
@@ -203,19 +197,17 @@ SIDEROAD_LABELS: dict[str, tuple[int, ...]] = {
 #: IoU above which a side-road component counts as detected. Deliberately lenient upstream.
 IOU_THRESHOLD: float = 0.25
 
-#: HD95 substituted when a class is absent from the prediction or the reference — roughly the
+#: HD95 substituted when a class is absent from the prediction or the reference: roughly the
 #: largest distance available inside a human head, in millimetres.
 HD95_UPPER_BOUND: float = 290.0
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Anatomical adjacency
-# ──────────────────────────────────────────────────────────────────────────────
 
 #: Directory holding the published adjacency tables copied from ``TopBrain_Eval_Metrics``.
 DATA_DIR: Path = Path(__file__).resolve().parent / "data"
 
-#: Published adjacency table per label set. ``ta36`` has none — see :func:`valid_neighbours`.
+#: Published adjacency table per label set. ``ta36`` has none; see :func:`valid_neighbours`.
 _NEIGHBOUR_FILES: dict[str, str] = {
     "v1_ct": "valid_neighbors_ct_all.json",
     "v1_mr": "valid_neighbors_mr_all.json",
@@ -289,7 +281,7 @@ def binary_modality(label_set: str) -> str | None:
 
 
 def valid_neighbours(label_set: str) -> dict[int, tuple[int, ...]]:
-    """Label → labels it may anatomically touch, for the invalid-neighbour metric.
+    """Label -> labels it may anatomically touch, for the invalid-neighbour metric.
 
     ``v1_ct`` and ``v1_mr`` are the challenge's published tables, copied verbatim from
     `TopBrain_Eval_Metrics <https://github.com/CoWBenchmark/TopBrain_Eval_Metrics>`_.
@@ -297,8 +289,8 @@ def valid_neighbours(label_set: str) -> dict[int, tuple[int, ...]]:
     **``ta36`` is derived, not published.** The challenge ships tables only for the two v1 label
     sets, and TA36 renumbers everything above 34 (35/36 become the infraclinoid ICA segments
     rather than veins or extracranial arteries), so neither table can be applied to it as-is.
-    The derivation keeps the 1-34 adjacencies the three label sets share — taking the union of
-    the CT and MR tables, since a pair valid in either modality is anatomically possible — and
+    The derivation keeps the 1-34 adjacencies the three label sets share (taking the union of
+    the CT and MR tables, since a pair valid in either modality is anatomically possible), and
     adds the two links the new classes introduce by construction: the infraclinoid ICA
     (35 / 36) is continuous with the supraclinoid ICA (4 / 6) on the same side, and inherits its
     ipsilateral vertebral/basilar relationships.
@@ -309,7 +301,7 @@ def valid_neighbours(label_set: str) -> dict[int, tuple[int, ...]]:
     if is_binary(label_set):
         # One class cannot touch another, so every adjacency is trivially valid and the metric
         # is meaningless rather than perfect. Returning an empty table makes callers score 0
-        # violations, which is the honest answer.
+        # violations, which is the correct answer.
         return {}
 
     if label_set in _NEIGHBOUR_FILES:
@@ -339,13 +331,11 @@ def valid_neighbours(label_set: str) -> dict[int, tuple[int, ...]]:
     return {key: tuple(sorted(values)) for key, values in sorted(shared.items())}
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Accessors
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def label_map(label_set: str) -> dict[int, str]:
-    """Value → anatomy name for *label_set* (foreground only; background 0 is implicit).
+    """Value -> anatomy name for *label_set* (foreground only; background 0 is implicit).
 
     Raises
     ------
@@ -362,7 +352,7 @@ def label_map(label_set: str) -> dict[int, str]:
 
 
 def lateral_pairs(label_set: str) -> dict[int, str]:
-    """Right label → left label, for the classes that exist as a mirrored pair.
+    """Right label -> left label, for the classes that exist as a mirrored pair.
 
     Derived from the ``R-`` / ``L-`` name prefixes rather than hard-coded, so it follows the
     label map instead of drifting from it. Unpaired classes (BA, Acom, the 3rd-A2/A3 variants)
@@ -402,7 +392,7 @@ def sideroad_labels(label_set: str) -> tuple[int, ...]:
 def nnunet_labels(label_set: str) -> dict[str, int]:
     """``dataset.json``-shaped ``{name: value}`` map, background first.
 
-    nnU-Net wants name → value (the inverse of :func:`label_map`) with an explicit
+    nnU-Net wants name -> value (the inverse of :func:`label_map`) with an explicit
     ``background`` entry.
     """
     return {"background": 0} | {name: value for value, name in sorted(label_map(label_set).items())}

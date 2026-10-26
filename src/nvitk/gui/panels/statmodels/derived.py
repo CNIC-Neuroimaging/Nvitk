@@ -3,42 +3,40 @@ Derived-column editor.
 
 Description
 -----------
-Lets the analysis frame carry transformed measurements — ``log_pi``, a z-scored covariate, a ratio
-between two pipelines' measurements — as **real columns**. That matters because a formula-level
-transform (``log(pi) ~ …``) only exists inside patsy: it cannot be plotted, filtered on, or used as
+Lets the analysis frame carry transformed measurements (``log_pi``, a z-scored covariate, a ratio
+between two pipelines' measurements) as **real columns**. That matters because a formula-level
+transform (``log(pi) ~ ...``) only exists inside patsy: it cannot be plotted, filtered on, or used as
 a mediation variable. A derived column can do all three.
 
 Five kinds:
 
 ``transform``   a canned function (:data:`~nvitk.stats.frame_ops.TRANSFORMS`) applied to one column
 ``expression``  a free-form expression over the frame's columns, e.g. ``pi / flow_mean``
-``bins``        a continuous column cut into labelled groups — the ``tacsctot`` → ``tacsctot_group``
-                pattern, e.g. left carotid plaque volume into ``cp0`` (= 0), ``cp1`` (0–25],
-                ``cp2`` (25–100], ``cp3`` (> 100)
+``bins``        a continuous column cut into labelled groups: the ``tacsctot`` -> ``tacsctot_group``
+                pattern, e.g. left carotid plaque volume into ``cp0`` (= 0), ``cp1`` (0-25],
+                ``cp2`` (25-100], ``cp3`` (> 100)
 ``binarize``    the same column collapsed to numeric 0/1 either side of a threshold, for when the
                 question is "any plaque at all" rather than "how much"
 ``merge``       levels of a categorical column pooled into fewer groups, e.g. a six-level APOE
                 genotype folded to ``E4_carrier`` / ``E2_carrier`` / ``E3E3``
-``visits``      a longitudinal summary of a variable loaded at every visit (covariate visit picker →
-                "all visits"): change between two visits, AUC, slope, mean/max, progression… —
-                e.g. ``total_carotid_plaque_vol`` v1–v4 → its AUC over the exam dates
+``visits``      a longitudinal summary of a variable loaded at every visit (covariate visit picker ->
+                "all visits"): change between two visits, AUC, slope, mean/max, progression...,
+                e.g. ``total_carotid_plaque_vol`` v1-v4 -> its AUC over the exam dates
 
 Bin cut points are stored as explicit numbers, never as a rule: a rule would be recomputed against
 whatever rows are loaded, so the same label would silently mean a different range once a filter
 changed. The generator on the bins page writes numbers into the field, and can take its quantiles
-over the values above a threshold — without which a zero-inflated column's tertiles are mostly the
-zero, and "tertiles" quietly yields two groups.
+over the values above a threshold, without which a zero-inflated column's tertiles are mostly the
+zero, and "tertiles" silently yields two groups.
 
 Names are constrained to Python identifiers because
-:func:`~nvitk.stats.mixedlm.fit_or_load_mixedlm` sanitizes column names before fitting — a column
+:func:`~nvitk.stats.mixedlm.fit_or_load_mixedlm` sanitizes column names before fitting: a column
 called ``log(pi)`` would silently become ``log_pi_`` in the model frame and stop matching.
 """
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from typing import Sequence
 
 import pandas as pd
@@ -117,18 +115,18 @@ class DerivedColumnsDialog(QDialog):
         ----------
         bin_column : str, optional
             Open on the bins page with this column preselected, for the table header's
-            "Group into bins…" action.
+            "Group into bins..." action.
         """
         super().__init__(parent)
         self.setWindowTitle("Derived columns")
         # Not a bare resize: the editor side's forms add up to an 850x499 minimum, which silently
         # overrode the 680x520 asked for here and left the dialog unable to be made smaller. The
         # same helper the other exploration dialogs use caps the floor to something the screen
-        # can actually give, and leaves the window resizable.
+        # can give, and leaves the window resizable.
         fit_dialog(self, 680, 520)
         self._frame = frame
         self._columns: list[DerivedColumn] = list(columns)
-        # Columns that exist before any derived one — what a new name must not collide with.
+        # Columns that exist before any derived one: what a new name must not collide with.
         self._base_columns = [str(c) for c in frame.columns]
         # The frame with the current definitions applied, so a bin can be cut from a log or a ratio
         # defined earlier in the list. Rebuilt whenever the list changes.
@@ -150,7 +148,7 @@ class DerivedColumnsDialog(QDialog):
                 self._bin_source.setCurrentIndex(sidx)
             self._on_bin_source_changed()
 
-    # ---- construction ---------------------------------------------------------
+    # construction
     def _build_list_side(self) -> QWidget:
         """Left column: the ordered list of derived columns plus its reorder/remove controls."""
         panel = QWidget()
@@ -178,7 +176,7 @@ class DerivedColumnsDialog(QDialog):
         lay.addLayout(row)
 
         # One line per derived column, and a word-wrapped QLabel's *minimum* height is its whole
-        # text — so ten of them demanded more height than the dialog has, took it from the list
+        # text, so ten of them demanded more height than the dialog has, took it from the list
         # above, and still ran off the bottom. Scrolled, it asks for a fixed share and keeps the
         # rest of the column intact however many columns are defined.
         self._preview = QLabel("")
@@ -190,7 +188,7 @@ class DerivedColumnsDialog(QDialog):
         self._preview_scroll.setWidgetResizable(True)
         self._preview_scroll.setFrameShape(QScrollArea.NoFrame)
         # Wrapping is to the viewport width, so a horizontal bar would only ever appear for an
-        # unbreakable column name — and a second scrollbar is worse than an elided one.
+        # unbreakable column name, and a second scrollbar is worse than an elided one.
         self._preview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._preview_scroll.setMinimumHeight(70)
         self._preview_scroll.setMaximumHeight(190)
@@ -279,11 +277,11 @@ class DerivedColumnsDialog(QDialog):
 
     def _build_visits_page(self) -> QWidget:
         """
-        Summarise a visit family across visits — change, AUC, slope, progression….
+        Summarise a visit family across visits: change, AUC, slope, progression....
 
         A family is a variable loaded at every visit (the covariate's visit picker set to
-        "all visits"), i.e. columns ``<variable>_v1``, ``<variable>_v2``, …. The time axis is the
-        visit number, or — far better when visits are unevenly spaced — another family holding
+        "all visits"), i.e. columns ``<variable>_v1``, ``<variable>_v2``, .... The time axis is the
+        visit number, or (far better when visits are unevenly spaced) another family holding
         each visit's date (``peqdate``) or a numeric time (age), turned into years.
         """
         from nvitk.stats.visit_series import VISIT_OPERATIONS
@@ -420,7 +418,7 @@ class DerivedColumnsDialog(QDialog):
                 visit_b=str(self._vs_to.currentData() or ""),
                 threshold=float(self._vs_threshold.value()), min_visits=int(self._vs_min.value()),
             )
-        except Exception as exc:  # noqa: BLE001 — shown, not raised
+        except Exception as exc:  # noqa: BLE001 (shown, not raised)
             self._vs_preview.setText(f"⚠ {exc}")
             return
         n = int(values.notna().sum())
@@ -469,7 +467,7 @@ class DerivedColumnsDialog(QDialog):
 
         The categorical counterpart of the bins page. Each level of the source column gets a text
         box holding the group it belongs to; levels sharing a group name are merged. Typing the
-        same name in two boxes is the whole interface — there is no separate "create group" step,
+        same name in two boxes is the whole interface: there is no separate "create group" step,
         because the group *is* its name.
         """
         page = QWidget()
@@ -600,11 +598,11 @@ class DerivedColumnsDialog(QDialog):
         form.addRow("", self._bin_right)
         lay.addLayout(form)
 
-        # ---- cut-point generator ------------------------------------------------
+        # cut-point generator
         # Quantiles of a zero-inflated column are mostly the zero, so "tertiles" of a plaque volume
-        # where half the cohort has none returns one usable cut point and quietly makes two groups.
+        # where half the cohort has none returns one usable cut point and silently makes two groups.
         # The exclusion threshold takes the quantiles over the values above it and keeps the
-        # excluded rows as the reference bin, which is the split that was actually meant.
+        # excluded rows as the reference bin, which is the split that was meant.
         gen = QGroupBox("Generate cut points")
         gen_lay = QVBoxLayout(gen)
         gen_lay.setContentsMargins(SPACE_TIGHT, SPACE_TIGHT, SPACE_TIGHT, SPACE_TIGHT)
@@ -664,7 +662,7 @@ class DerivedColumnsDialog(QDialog):
         compute.clicked.connect(self._on_compute_cuts)
         button_row.addWidget(compute)
         button_row.addWidget(QLabel("Quick:"))
-        # The presets are the same generator with the group count filled in — kept because three
+        # The presets are the same generator with the group count filled in: kept because three
         # clicks of a spin box to reach quartiles is three clicks too many.
         for text, method, n_bins in (
             ("Tertiles", "quantile", 3),
@@ -738,7 +736,7 @@ class DerivedColumnsDialog(QDialog):
         return page
 
     def _numeric_columns(self) -> list[str]:
-        """Columns that can be binned — base columns plus any numeric derived ones."""
+        """Columns that can be binned: base columns plus any numeric derived ones."""
         frame = self._preview_frame
         return [str(c) for c in frame.columns if pd.api.types.is_numeric_dtype(frame[c])]
 
@@ -746,7 +744,7 @@ class DerivedColumnsDialog(QDialog):
         """
         Columns whose levels can be merged: discrete, and few enough to lay out one row each.
 
-        A float column is excluded — its "levels" are its values, and merging those is what the
+        A float column is excluded: its "levels" are its values, and merging those is what the
         bins page is for. So is anything past *max_levels*: a subject id has nothing to pool.
         """
         frame = self._preview_frame
@@ -761,7 +759,7 @@ class DerivedColumnsDialog(QDialog):
         return out
 
     def _on_bin_source_changed(self) -> None:
-        """Suggest a name from the source, mirroring ``tacsctot`` → ``tacsctot_group``."""
+        """Suggest a name from the source, mirroring ``tacsctot`` -> ``tacsctot_group``."""
         source = self._bin_source.currentText()
         if not source:
             return
@@ -772,13 +770,13 @@ class DerivedColumnsDialog(QDialog):
         self._on_bins_changed()
 
     def _on_bin_exclude_toggled(self) -> None:
-        """Enable the threshold controls only while an exclusion is actually wanted."""
+        """Enable the threshold controls only while an exclusion is wanted."""
         on = self._bin_exclude.isChecked()
         self._bin_threshold.setEnabled(on)
         self._bin_keep_excluded.setEnabled(on)
 
     def _on_preset_cuts(self, method: str, n_bins: int) -> None:
-        """Set the generator to a named split (tertiles, quartiles, …) and run it."""
+        """Set the generator to a named split (tertiles, quartiles, ...) and run it."""
         midx = self._bin_method.findData(method)
         if midx >= 0:
             self._bin_method.setCurrentIndex(midx)
@@ -818,9 +816,9 @@ class DerivedColumnsDialog(QDialog):
         if current_labels and len(current_labels) != expected:
             self._bin_labels.clear()
 
-    # ---- binarize --------------------------------------------------------------
+    # binarize
     def _on_binarize_source_changed(self) -> None:
-        """Suggest a name from the source, mirroring ``lcp`` → ``lcp_bin``."""
+        """Suggest a name from the source, mirroring ``lcp`` -> ``lcp_bin``."""
         source = self._bz_source.currentText()
         if not source:
             return
@@ -910,7 +908,7 @@ class DerivedColumnsDialog(QDialog):
         lines.append(f"{total} of {len(self._preview_frame)} rows grouped.")
         self._bin_preview.setText("\n".join(lines))
 
-    # ---- state ----------------------------------------------------------------
+    # state
     def columns(self) -> list[DerivedColumn]:
         """The configured derived columns, in application order."""
         return list(self._columns)
@@ -956,7 +954,7 @@ class DerivedColumnsDialog(QDialog):
 
         self._refresh_visit_sources()
 
-        # Binarizing needs a number line too — the same candidates as the bins page.
+        # Binarizing needs a number line too: the same candidates as the bins page.
         current_bz = self._bz_source.currentText()
         self._bz_source.blockSignals(True)
         self._bz_source.clear()
@@ -1004,7 +1002,7 @@ class DerivedColumnsDialog(QDialog):
         self._preview.setText("\n".join(lines))
         self._error.setText("\n".join(errors))
 
-    # ---- form -----------------------------------------------------------------
+    # form
     def _current_spec(self) -> DerivedColumn:
         """
         Build a :class:`DerivedColumn` from the editor form.
@@ -1105,7 +1103,7 @@ class DerivedColumnsDialog(QDialog):
     def _set_suggested_name(self, suggested: str, *, also_replace: set[str] | frozenset = frozenset()) -> None:
         """Write *suggested* unless the name field holds a name the user typed.
 
-        Any name this dialog suggested earlier — on any page — is ours to replace, so
+        Any name this dialog suggested earlier (on any page) is ours to replace, so
         switching from a transform to an across-visits column renames as expected.
         """
         suggested_before = self.__dict__.setdefault("_suggested_names", set())
@@ -1350,7 +1348,7 @@ class CovarianceTermDialog(QDialog):
 
     The MMRM engine takes its covariance structure from the formula itself, the way R does. This
     spares you memorising the nine structure names and the ``visit | subject`` notation, and shows
-    what each structure costs in parameters before you commit to it — an unstructured covariance
+    what each structure costs in parameters before you commit to it: an unstructured covariance
     over many levels needs a lot of subjects to support.
     """
 

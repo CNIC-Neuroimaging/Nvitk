@@ -3,7 +3,7 @@
 The layout a radiologist expects, and the one 3D Slicer opens with: axial,
 coronal and sagittal through one shared crosshair, each scrollable on its own,
 each showing where the other two are cutting. Scroll a view, click in it, or drag
-its slider — the crosshair moves and the other two follow.
+its slider: the crosshair moves and the other two follow.
 
 The fourth quadrant drives the *main* Napari canvas rather than adding a second
 one: with ``Show 3D planes`` on, the three slices are pushed onto the canvas as
@@ -81,7 +81,7 @@ from nvitk.gui.labels.visibility import (
     stored_visible_ids,
 )
 
-#: Axis codes → the plane you are looking at when you slice along that axis.
+#: Axis codes -> the plane you are looking at when you slice along that axis.
 _PLANE_NAMES: dict[str, str] = {
     "S": "Axial", "I": "Axial",
     "A": "Coronal", "P": "Coronal",
@@ -129,7 +129,7 @@ _VIEW_CELLS = ((0, 0), (0, 1), (1, 0))
 #: Default cine rate of the time/energy play button.
 _PLAY_FPS = 8
 
-#: Projections the views can show instead of a slice (key → description).
+#: Projections the views can show instead of a slice (key -> description).
 PROJECTIONS: dict[str, str] = {
     "max": "Maximum intensity projection",
     "min": "Minimum intensity projection",
@@ -150,7 +150,7 @@ _HANDLE_MIN_FRACTION = 0.55
 #: Largest volume for which a per-axis contiguous copy is worth its memory.
 #:
 #: Measured, rather than guessed. On a 419 MB volume a strided read of the last
-#: axis takes 0.94 ms against 0.04 ms from a reordered copy — a real speedup, but
+#: axis takes 0.94 ms against 0.04 ms from a reordered copy: a real speedup, but
 #: one that costs 458 ms to build and only repays after ~500 slices on that axis,
 #: while 0.94 ms was already far inside a frame. The old 512 MB ceiling let every
 #: layer reorder itself: five layers of a 241 MB study built 2.4 GB of copies on
@@ -247,7 +247,7 @@ _PLANE_ORDER: dict[str, int] = {"Axial": 0, "Coronal": 1, "Sagittal": 2}
 
 def _anatomical_views(layer: Any) -> list[AxisView]:
     """The three views in one fixed anatomical convention (superior / anterior up,
-    the patient's right on the viewer's right), from the axis codes alone — for a
+    the patient's right on the viewer's right), from the axis codes alone, for a
     layer whose affine says nothing usable."""
     codes = layer_orientation_codes(layer) or ""
     views: list[AxisView] = []
@@ -274,10 +274,10 @@ def _axis_views(layer: Any, viewer: Any = None) -> list[AxisView]:
     """The three orthogonal views for *layer*, laid out in the image's own orientation.
 
     The orientation codes say which way each voxel axis runs, and the views put that
-    direction to the right (across) and down (anterior-posterior on the axial plane) —
-    superior-inferior keeps its letter at the top: an RAS image reads left to right L→R
-    and top to bottom P→A, an LPS one (a DICOM series) R→L and A→P, superior up in both.
-    When the display has been reoriented (RAS → LPS by the orientation tools, which
+    direction to the right (across) and down (anterior-posterior on the axial plane):
+    superior-inferior keeps its letter at the top: an RAS image reads left to right L->R
+    and top to bottom P->A, an LPS one (a DICOM series) R->L and A->P, superior up in both.
+    When the display has been reoriented (RAS -> LPS by the orientation tools, which
     mirrors the affine and leaves the voxels where they are), the views follow the new
     codes over the voxels' real anatomy, so they mirror as the canvas does. Slicing
     *along* an axis shows the plane perpendicular to it: the superior axis gives axial
@@ -433,7 +433,7 @@ def _resample_budget() -> int:
 
     One off-grid layer costs a full copy on the active grid. The old fixed
     512 MB refused to draw any off-grid layer at all next to a 512x512x416
-    float64 CT (870 MB on its own) — on a workstation with tens of GB free.
+    float64 CT (870 MB on its own), on a workstation with tens of GB free.
     """
     from nvitk.core.parallel import physical_memory_bytes
 
@@ -466,11 +466,11 @@ class RenderSource:
     resampled: bool = False
     #: Time point ``data`` was taken at, for a 3D+t layer (``None`` for a 3D one).
     time: int | None = None
-    #: Drawn smoothed when magnified — the layer's napari 2D interpolation.
+    #: Drawn smoothed when magnified: the layer's napari 2D interpolation.
     smooth: bool = False
     #: Distinct label ids in ``data``, computed once. Finding them is a full
     #: ``np.unique`` over the volume (~24 ms on a 50 MB mask) and they cannot
-    #: change without ``data`` changing, which rebuilds the source anyway — so
+    #: change without ``data`` changing, which rebuilds the source anyway, so
     #: recomputing it on every style event was the single largest cost of
     #: clicking a layer in the list.
     label_ids: list[int] | None = None
@@ -560,8 +560,8 @@ def is_drawable_layer(layer: Any) -> bool:
 
     Deliberately cheap: this runs for every layer in the viewer every time the
     layer list changes, and the tools add and move overlay layers constantly.
-    Materialising a volume here — which is what reading the data to find out
-    costs — made every tool that adds a layer pay for every layer on screen.
+    Materialising a volume here (which is what reading the data to find out
+    costs) made every tool that adds a layer pay for every layer on screen.
     """
     if type(layer).__name__ not in DRAWN_LAYER_TYPES:
         return False
@@ -589,8 +589,8 @@ def _is_plain_2d(layer: Any) -> bool:
 def flat_axis(layer: Any) -> int | None:
     """The axis a 2D image lies across in the panel's 3D layout; ``None`` for a volume.
 
-    ``0`` for a plain 2D layer (drawn as a one-slice stack); for a positioned slice — one
-    spatial axis one voxel thick, a 2D+t series included — that axis.
+    ``0`` for a plain 2D layer (drawn as a one-slice stack); for a positioned slice (one
+    spatial axis one voxel thick, a 2D+t series included) that axis.
     """
     if _is_plain_2d(layer):
         return 0
@@ -611,7 +611,7 @@ def is_flat_layer(layer: Any) -> bool:
 def is_volume_layer(layer: Any) -> bool:
     """A layer the panel can bind to as its grid: three spatial axes, none of them
     a single voxel. A positioned 2D slice is a one-slice 3D layer, and a 2D+t
-    series a one-slice 3D+t one — drawable over a volume, but no grid of their own.
+    series a one-slice 3D+t one: drawable over a volume, but no grid of their own.
     """
     if not is_drawable_layer(layer):
         return False
@@ -673,14 +673,14 @@ def resample_layer_to(
 ) -> np.ndarray | None:
     """*data* put on *reference*'s grid, or ``None`` when it cannot be.
 
-    ``None`` rather than an exception for the case the aligner refuses — a layer
-    with no affine and a different shape — because a panel that cannot draw one
+    ``None`` rather than an exception for the case the aligner refuses (a layer
+    with no affine and a different shape), because a panel that cannot draw one
     layer should say so and draw the rest.
     """
     from nvitk.gui.core.spatial import layer_affine
 
     # Both grids known: compose the voxel-to-voxel map and resample slab-parallel
-    # on the worker pool (~7x on 8 threads) — the same composition resample_to
+    # on the worker pool (~7x on 8 threads); the same composition resample_to
     # uses, without building Image objects for a display copy.
     src_aff, ref_aff = layer_affine(layer), layer_affine(reference)
     ref_shape = _spatial_shape(reference)
@@ -688,8 +688,8 @@ def resample_layer_to(
         try:
             from nvitk.transform.threaded import affine_transform
 
-            vox = np.linalg.inv(ref_aff) @ src_aff          # source voxel → reference voxel
-            inv = np.linalg.inv(vox)                        # reference voxel → source voxel
+            vox = np.linalg.inv(ref_aff) @ src_aff          # source voxel -> reference voxel
+            inv = np.linalg.inv(vox)                        # reference voxel -> source voxel
             host = to_numpy(data)
             # A display copy: intensities in float32 (half of a float64 CT's
             # footprint, far below what a screen can show); labels keep their ids.
@@ -699,7 +699,7 @@ def resample_layer_to(
                 order=int(order), mode="constant", cval=0.0, prefilter=int(order) > 1,
                 output=out_dtype,
             )
-        except Exception:  # noqa: BLE001 — fall through to the generic aligner
+        except Exception:  # noqa: BLE001 (fall through to the generic aligner)
             pass
 
     from nvitk.core.backend import using
@@ -711,12 +711,12 @@ def resample_layer_to(
                 layer, reference, data, order=int(order)
             )
         return to_numpy(aligned.data)
-    except Exception:  # noqa: BLE001 — reported by the caller, never raised into paint
+    except Exception:  # noqa: BLE001 (reported by the caller, never raised into paint)
         return None
 
 
 def _axis_index(ndim: int, axis: int, index: int) -> tuple:
-    """Basic-indexing key selecting *index* along *axis* — a view, never a copy."""
+    """Basic-indexing key selecting *index* along *axis*: a view, never a copy."""
     key: list[Any] = [slice(None)] * int(ndim)
     key[int(axis)] = int(index)
     return tuple(key)
@@ -726,7 +726,7 @@ def _slice_of(data: np.ndarray, axis: int, index: int) -> np.ndarray:
     """The 2D slice of *data* at *index* along *axis*, clamped into range.
 
     Basic indexing, deliberately not ``np.take``: ``take`` first makes the whole
-    input C-contiguous, and a NIfTI volume comes off disk in Fortran order — so
+    input C-contiguous, and a NIfTI volume comes off disk in Fortran order, so
     every slice of a 512x512x416 CT copied the full 870 MB volume (~1.4 s per
     slice, per layer, per view). An indexed view reads only the slice.
     """
@@ -803,15 +803,15 @@ class SliceCache:
     """Serves 2D slices of a volume, keeping the slow axes contiguous.
 
     A C-ordered volume gives axis 0 for free, but a slice along the last axis is a
-    strided gather over the whole array — around 40x slower on a 400x512x512 CT,
+    strided gather over the whole array: around 40x slower on a 400x512x512 CT,
     which is exactly why scrolling axial felt heavier than the others. Reordering
     that axis into its own contiguous copy makes every axis equally cheap.
 
     The copy is built lazily, on the first scroll of that axis, and only for the
-    *innermost* axis (the smallest stride — last for C order, first for the
+    *innermost* axis (the smallest stride: last for C order, first for the
     Fortran order NIfTI arrays arrive in): that is the one whose slice is a
     gather with a stride between every element. The other axes yield
-    contiguous runs and measure no faster reordered — so reordering them was
+    contiguous runs and measure no faster reordered, so reordering them was
     pure memory.
 
     Panels share a *pool* so that the ceiling is on the session rather than on
@@ -826,7 +826,7 @@ class SliceCache:
         budget_bytes: int = _SLICE_CACHE_BUDGET,
         pool: dict[str, int] | None = None,
     ) -> None:
-        """Wrap *data*, reordering nothing until an axis is actually asked for."""
+        """Wrap *data*, reordering nothing until an axis is asked for."""
         self._data = data
         self._budget = int(budget_bytes)
         self._pool = pool
@@ -837,10 +837,10 @@ class SliceCache:
 
     def _worth_reordering(self, axis: int, arr: np.ndarray) -> bool:
         """Whether a contiguous copy of *axis* would earn its memory."""
-        # Only the innermost (smallest-stride) axis is genuinely slow to slice:
+        # Only the innermost (smallest-stride) axis is slow to slice:
         # its slice gathers one element per stride. That is the *last* axis of
         # a C-ordered array but the *first* of a Fortran-ordered one, which is
-        # how nibabel hands NIfTI volumes over — so ask the strides, not the
+        # how nibabel hands NIfTI volumes over, so ask the strides, not the
         # axis number.
         strides = [abs(int(st)) for st in arr.strides]
         if not strides or axis != int(np.argmin(strides)):
@@ -898,7 +898,7 @@ def volume_contrast(data: np.ndarray, *, sample: int = 400_000) -> tuple[float, 
     """Robust display range for a volume, from a subsample of its finite voxels.
 
     Computed once for the volume rather than per slice: per-slice percentiles are
-    both slower and *wrong* — the window would shift as you scroll, so the same
+    both slower and *wrong*; the window would shift as you scroll, so the same
     tissue changes brightness from one slice to the next.
     """
     arr = np.asarray(data)
@@ -915,7 +915,7 @@ def volume_contrast(data: np.ndarray, *, sample: int = 400_000) -> tuple[float, 
 
 
 def layer_contrast(layer: Any, data: np.ndarray) -> tuple[float, float] | None:
-    """The window to draw *layer* with — its own, when it has one.
+    """The window to draw *layer* with: its own, when it has one.
 
     Following the layer means the panels show what the Napari canvas shows: adjust
     brightness on the layer controls and these views track it, instead of staying
@@ -968,7 +968,7 @@ def _label_rgb(plane: np.ndarray, layer: Any, lut: dict[int, np.ndarray] | None 
     return table[np.clip(arr, 0, table.shape[0] - 1)]
 
 
-# ── RGBA pipeline ─────────────────────────────────────────────────────────────
+# RGBA pipeline
 #: Entries in a tabulated colormap. Matches the size of the texture Napari's own
 #: shader samples, so the two agree to within a quantisation step.
 _COLORMAP_STEPS = 256
@@ -978,7 +978,7 @@ def layer_colormap(layer: Any) -> Any | None:
     """*layer*'s colormap, or ``None`` for a label layer or one without.
 
     Label colormaps map *integers* and raise on float input, so they are
-    deliberately excluded here — labels go through :func:`label_rgba_lut`.
+    deliberately excluded here: labels go through :func:`label_rgba_lut`.
     """
     if is_label_like_layer(layer):
         return None
@@ -997,13 +997,13 @@ def colormap_table(colormap: Any, gamma: float = 1.0, size: int = _COLORMAP_STEP
     """*colormap* sampled into a ``(size, 4)`` uint8 table, with *gamma* folded in.
 
     Tabulated once rather than mapped per pixel: ``Colormap.map`` over a 250k-voxel
-    slice costs milliseconds per redraw, and the GPU does exactly this — samples a
-    256-texel texture — so the result matches what the canvas shows.
+    slice costs milliseconds per redraw, and the GPU does exactly this (samples a
+    256-texel texture), so the result matches what the canvas shows.
     """
     ramp = np.linspace(0.0, 1.0, int(size), dtype=np.float32) ** max(float(gamma), 1e-6)
     try:
         rgba = np.asarray(colormap.map(ramp), dtype=np.float32)
-    except Exception:  # noqa: BLE001 — an unusable colormap falls back to grey
+    except Exception:  # noqa: BLE001 (an unusable colormap falls back to grey)
         rgba = np.repeat(ramp[:, None], 4, axis=1)
         rgba[:, 3] = 1.0
     if rgba.ndim != 2 or rgba.shape[1] < 3:
@@ -1038,8 +1038,8 @@ def label_rgba_lut(layer: Any, label_ids: list[int]) -> dict[int, np.ndarray]:
 
     Alpha is kept, unlike :func:`label_lut`, and a label hidden in the label list
     (nvitk's visibility filter) comes out fully transparent, as on the canvas.
-    :func:`get_label_color` returns a hidden label's *own* colour — the one it
-    gets back when shown — so the filter is read separately.
+    :func:`get_label_color` returns a hidden label's *own* colour (the one it
+    gets back when shown), so the filter is read separately.
     """
     visible = stored_visible_ids(layer)
     shown = None if visible is None else {int(v) for v in visible}
@@ -1060,7 +1060,7 @@ def _label_rgba(
 ) -> np.ndarray:
     """Colour a 2D label slice to ``(H, W, 4)`` uint8; background transparent.
 
-    A Labels layer drawn as outlines (its ``contour``) is outlined here too —
+    A Labels layer drawn as outlines (its ``contour``) is outlined here too:
     Napari's own contour, so the views match the canvas, and whatever the canvas
     is doing: in a 3D canvas Napari cannot draw contours, the views still can.
     """
@@ -1237,14 +1237,14 @@ def slice_to_rgb(
     return _grayscale_rgb(plane, contrast)
 
 
-# ── interpolation ─────────────────────────────────────────────────────────────
+# interpolation
 
 
 def layer_interpolation_smooth(layer: Any) -> bool:
     """Whether *layer* is drawn smoothed when magnified (its napari 2D interpolation).
 
-    Labels never are — napari draws them nearest-neighbour, whatever the image
-    layers under them do — and an Image layer follows ``interpolation2d``
+    Labels never are (napari draws them nearest-neighbour, whatever the image
+    layers under them do), and an Image layer follows ``interpolation2d``
     (napari's own default is ``nearest``).
     """
     if type(layer).__name__ == "Labels" or is_label_like_layer(layer):
@@ -1283,7 +1283,7 @@ def composite_over_rgba(
     blendings: Sequence[str],
     opacities: Sequence[float],
 ) -> np.ndarray:
-    """Translucent/opaque *planes* over transparency → premultiplied RGBA uint8."""
+    """Translucent/opaque *planes* over transparency -> premultiplied RGBA uint8."""
     shape = np.asarray(planes[0]).shape[:2]
     rgb = np.zeros((*shape, 3), dtype=np.float32)
     acc = np.zeros((*shape, 1), dtype=np.float32)
@@ -1472,7 +1472,7 @@ class SliceView(QWidget):
         root.addWidget(self._canvas, stretch=1)
         root.addWidget(self._slider)
 
-    # ── rendering ────────────────────────────────────────────────────────────
+    # rendering
 
     def set_slice(
         self,
@@ -1485,7 +1485,7 @@ class SliceView(QWidget):
     ) -> None:
         """Show *rgb* as this view's slice, at *index* of *count*.
 
-        *rgb* is an RGB array, or a list of :class:`PaintRun` — the layer stack split
+        *rgb* is an RGB array, or a list of :class:`PaintRun`: the layer stack split
         by interpolation, each run scaled with its own filter when painted.
         """
         if isinstance(rgb, (list, tuple)):
@@ -1638,8 +1638,8 @@ class SliceView(QWidget):
             # Fitted: centred.
             return (scaled_w, scaled_h,
                     (target.width() - scaled_w) / 2.0, (target.height() - scaled_h) / 2.0)
-        # Zoomed: the panned-to point sits at the canvas centre — nothing else. It
-        # is always a point of the slice (pan is 0…1), so the slice can never leave
+        # Zoomed: the panned-to point sits at the canvas centre; nothing else. It
+        # is always a point of the slice (pan is 0...1), so the slice can never leave
         # the view; centring or pinning it to the edges instead is what made a zoom
         # drift away from the cursor until the slice outgrew the canvas.
         off_x = target.width() / 2.0 - self._pan[0] * scaled_w
@@ -1656,7 +1656,7 @@ class SliceView(QWidget):
         """Set the magnification.
 
         With *anchor* (a canvas position, the cursor's), the slice point under it
-        stays under it — the zoom every image viewer does, so the wheel closes in
+        stays under it: the zoom every image viewer does, so the wheel closes in
         on what the mouse is over. *about* (a normalised slice point) is instead
         put at the canvas centre.
         """
@@ -1668,10 +1668,10 @@ class SliceView(QWidget):
         elif geometry is not None:
             scaled_w, scaled_h, off_x, off_y = geometry
             x, y = anchor
-            # The slice point under the cursor, as a fraction of the drawn slice…
+            # The slice point under the cursor, as a fraction of the drawn slice...
             u = (x - off_x) / max(scaled_w, 1)
             v = (y - off_y) / max(scaled_h, 1)
-            # …and the pan that leaves it there at the new size (_geometry places
+            # ...and the pan that leaves it there at the new size (_geometry places
             # the panned-to point at the centre, then keeps the slice on the canvas).
             new_geometry = self._geometry()
             if new_geometry is not None:
@@ -1715,7 +1715,7 @@ class SliceView(QWidget):
             base.fill(QColor("#000000"))
             painter = QPainter(base)
             # Each interpolation run is scaled with the filter its layers use in
-            # napari — nearest stays blocky, linear/cubic smooth — then stacked.
+            # napari (nearest stays blocky, linear/cubic smooth), then stacked.
             for run in self._runs or [PaintRun(np.asarray(self._rgb), True, "base")]:
                 data = np.ascontiguousarray(run.image, dtype=np.uint8)
                 h, w = data.shape[:2]
@@ -1813,7 +1813,7 @@ class SliceView(QWidget):
         super().resizeEvent(event)
         self._repaint()
 
-    # ── interaction ──────────────────────────────────────────────────────────
+    # interaction
 
     def eventFilter(self, obj: Any, event: Any) -> bool:
         """Scroll to step slices; click to move the crosshair."""
@@ -1920,7 +1920,7 @@ class SliceView(QWidget):
             return False
         try:
             return bool(handler(kind, self._pixel_at(event), event))
-        except Exception:  # noqa: BLE001 — an editor fault must not wedge the view
+        except Exception:  # noqa: BLE001 (an editor fault must not wedge the view)
             return False
 
     @staticmethod
@@ -1975,9 +1975,7 @@ class SliceView(QWidget):
             self.pixelPicked.emit(*pixel)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # 3D planes and clipping on the Napari canvas
-# ──────────────────────────────────────────────────────────────────────────────
 def _plane_layer_name(source_name: str, axis: int) -> str:
     """Name of the canvas layer carrying *axis*'s 3D slice plane."""
     return f"{source_name}{_PLANE_LAYER_SUFFIX}_{axis}"
@@ -1986,8 +1984,8 @@ def _plane_layer_name(source_name: str, axis: int) -> str:
 def displayed_axes(viewer: Any, ndim: int = 3) -> list[int]:
     """Array axes in the order Napari is currently displaying them.
 
-    ``viewer.dims.order`` is rarely the identity here — nvitk sets it so a volume
-    opens axially — and a plane's geometry is expressed in *that* order, not in
+    ``viewer.dims.order`` is rarely the identity here (nvitk sets it so a volume
+    opens axially), and a plane's geometry is expressed in *that* order, not in
     array-axis order.
     """
     try:
@@ -2015,7 +2013,7 @@ def _plane_geometry(
 
     Two frames meet here and must not be confused. ``Plane.position`` and
     ``Plane.normal`` are data (voxel-index) coordinates *permuted into displayed
-    order* — Napari's own convention. ``PlaneFrame`` holds unit vectors in
+    order*: Napari's own convention. ``PlaneFrame`` holds unit vectors in
     spacing-scaled millimetre space; a direction converts to voxels by dividing
     by the spacing, so the plane normal is the cross product of the two converted
     in-plane directions, permuted **after** the cross product (an odd permutation
@@ -2076,8 +2074,8 @@ _LABEL_STYLE_ATTRS: tuple[str, ...] = ("colormap",)
 def copy_plane_style(source: Any, plane: Any) -> None:
     """Give a slice *plane* the display window and colours of the *source* layer.
 
-    Planes used to be added with Napari's defaults — the full data range and a
-    grey ramp — so a CT windowed for soft tissue appeared washed out in 3D, and
+    Planes used to be added with Napari's defaults (the full data range and a
+    grey ramp), so a CT windowed for soft tissue appeared washed out in 3D, and
     additive blending brightened it further wherever it crossed the volume.
     Only properties that differ are written: each assignment is an event.
     """
@@ -2102,7 +2100,7 @@ def copy_plane_style(source: Any, plane: Any) -> None:
             elif current == value:
                 continue
             setattr(plane, attr, value)
-        except Exception:  # noqa: BLE001 — a style that will not copy is not worth a failed sync
+        except Exception:  # noqa: BLE001 (a style that will not copy is not worth a failed sync)
             continue
 
 
@@ -2122,11 +2120,11 @@ def sync_ortho_planes(
 
     Napari renders a plane-depicted Image as a single slab through the volume, so
     three of them at the crosshair give the 3D view the same three cuts the 2D
-    views show. Existing plane layers are moved rather than recreated — rebuilding
+    views show. Existing plane layers are moved rather than recreated: rebuilding
     them on every scroll re-uploads the volume to the GPU each time.
 
     The planes carry *layer*'s window, colormap and gamma (labels: its colours),
-    and a 3D+t layer is shown at *time_index* — its planes are re-fed only when
+    and a 3D+t layer is shown at *time_index*; its planes are re-fed only when
     the time point changes, or with *refresh_data* (the layer was edited).
 
     *thickness* is the slab each plane renders: layers drawn over another give
@@ -2173,7 +2171,7 @@ def sync_ortho_planes(
     spatial = layer_spatial_kwargs(layer, ndim=3)
     labels = type(layer).__name__ == "Labels" or is_label_like_layer(layer)
     # Adding a layer makes it active, which would re-bind anything watching the
-    # active layer — including the panel that asked for these planes.
+    # active layer, including the panel that asked for these planes.
     try:
         previously_active = viewer.layers.selection.active
     except Exception:
@@ -2282,7 +2280,7 @@ def _same_corners(shapes_layer: Any, corners: Any) -> bool:
         old = np.asarray(current[0], dtype=float)
         new = np.asarray(corners, dtype=float)
         return old.shape == new.shape and bool(np.array_equal(old, new))
-    except Exception:  # noqa: BLE001 — an unreadable layer is simply rewritten
+    except Exception:  # noqa: BLE001 (an unreadable layer is rewritten)
         return False
 
 
@@ -2353,9 +2351,9 @@ def sync_ortho_boxes(
             )
             existing.editable = False
         else:
-            # Only write when the outline actually moved. Assigning ``data`` on a
-            # Shapes layer runs Napari's whole event cascade — re-validating the
-            # model, recomputing the world extent — for ~11 ms, and dragging one
+            # Only write when the outline moved. Assigning ``data`` on a
+            # Shapes layer runs Napari's whole event cascade (re-validating the
+            # model, recomputing the world extent) for ~11 ms, and dragging one
             # crosshair leaves the other two planes exactly where they were.
             if not _same_corners(existing, corners):
                 existing.data = [corners]
@@ -2375,7 +2373,7 @@ def _scene_point(layer: Any, displayed: list[int], data_point: list[float]) -> n
     Deliberately mirrors ``VispyBaseLayer._on_matrix_change``: the layer transform
     is sliced to the displayed dims, then the axes are reversed for vispy. Deriving
     it any other way means guessing at a convention, and the two differ exactly
-    when ``dims.order`` is a permutation — which is nvitk's normal case.
+    when ``dims.order`` is a permutation, which is nvitk's normal case.
     """
     # A 3D+t layer's spatial dims are its trailing three; *displayed* and
     # *data_point* are spatial (0-2), so shift them onto the layer's own dims.
@@ -2398,7 +2396,7 @@ def clip_geometry(
 
     Napari converts a clipping plane for vispy with a plain component reversal
     (``as_array()[..., ::-1]``), but the node's transform is built from the layer
-    sliced to the *displayed* dims and then reversed — so vispy's scene axes are
+    sliced to the *displayed* dims and then reversed, so vispy's scene axes are
     ``reversed(displayed)``, not ``reversed(range(3))``. A plane built in raw axis
     order therefore cuts the wrong axis whenever ``dims.order`` is a permutation.
 
@@ -2479,7 +2477,7 @@ def _ortho_prefs() -> dict[str, Any]:
         from nvitk.gui.core.prefs import load_prefs
 
         stored = load_prefs().get(_ORTHO_PREFS_KEY)
-    except Exception:  # noqa: BLE001 — a preference must never break the panel
+    except Exception:  # noqa: BLE001 (a preference must never break the panel)
         return {}
     return dict(stored) if isinstance(stored, dict) else {}
 
@@ -2700,9 +2698,9 @@ class OrthoViewerPanel(QWidget):
         except Exception:  # noqa: BLE001
             pass
 
-        # Adding or moving layers arrives in bursts — a tool that drops four
+        # Adding or moving layers arrives in bursts: a tool that drops four
         # overlays on the canvas fires four inserts. Rebuild once when they stop.
-        # Zero-interval: the point is not to wait but to land *after* the write
+        # Zero-interval: not a wait, just a way to land *after* the write
         # that the event announced, and to fold a drag's many events into one.
         self._data_timer = QTimer(self)
         self._data_timer.setSingleShot(True)
@@ -2715,7 +2713,7 @@ class OrthoViewerPanel(QWidget):
         self._rebuild_timer.timeout.connect(self._rebuild_sources)
 
         # A layer moved, mirrored or reoriented (its affine): re-lay the views. Not
-        # Napari's own view settings (axis order, camera) — those are the main window's.
+        # Napari's own view settings (axis order, camera): those are the main window's.
         self._geometry_dirty: list[Any] = []
         self._geometry_timer = QTimer(self)
         self._geometry_timer.setSingleShot(True)
@@ -2772,7 +2770,7 @@ class OrthoViewerPanel(QWidget):
         self._time_box.setVisible(False)
 
         # Projection row: the three views show a projection of the volume along their
-        # own axis instead of a slice — the whole volume, or a slab on the crosshair.
+        # own axis instead of a slice; the whole volume, or a slab on the crosshair.
         proj_row = QHBoxLayout()
         proj_row.setContentsMargins(0, 0, 0, 0)
         proj_row.setSpacing(SPACE_TIGHT)
@@ -2819,7 +2817,7 @@ class OrthoViewerPanel(QWidget):
         self._proj_box.setLayout(proj_row)
         try:
             viewer.dims.events.current_step.connect(self._on_viewer_dims)
-        except Exception:  # noqa: BLE001 — a viewer without dims events has no time to follow
+        except Exception:  # noqa: BLE001 (a viewer without dims events has no time to follow)
             pass
 
         self._slice_views: list[SliceView] = []
@@ -2927,7 +2925,7 @@ class OrthoViewerPanel(QWidget):
         card.add(self._resample_box)
 
         # The main canvas has its own say over resampling: Napari draws every layer
-        # in world space through its affine — turned, flipped and placed as acquired,
+        # in world space through its affine; turned, flipped and placed as acquired,
         # layers on other grids resampled into alignment. Off, each image and label
         # layer is drawn as stored, on its own voxel grid. Which layers are drawn
         # there at all is the table's "Main" column.
@@ -2966,7 +2964,7 @@ class OrthoViewerPanel(QWidget):
 
         # One row per drawn layer: whether it gets a slice image in 3D, and
         # whether the see-inside cut opens it. A mask can stay whole while the
-        # CT around it is cut away — or the other way round.
+        # CT around it is cut away, or the other way round.
         self._layers_table = QTableWidget(0, 4)
         self._layers_table.setHorizontalHeaderLabels(["Layer", "3D slice", "Cut", "Main"])
         self._layers_table.verticalHeader().setVisible(False)
@@ -3049,7 +3047,7 @@ class OrthoViewerPanel(QWidget):
         card.body().addStretch(1)
         return card
 
-    # ── binding ──────────────────────────────────────────────────────────────
+    # binding
 
     def refresh_from_layer(self, layer: Any | None) -> None:
         """Bind *layer* and redraw all three views, or show why it cannot be shown."""
@@ -3072,7 +3070,7 @@ class OrthoViewerPanel(QWidget):
         same_layer = layer is self._layer and self._data is not None
         # Binding a *different* layer that sits on the same grid changes nothing
         # anyone can see: the composite is drawn from every visible layer, not
-        # from the bound one, and the bound layer only supplies the geometry —
+        # from the bound one, and the bound layer only supplies the geometry,
         # which is, by definition, identical. Clicking between a CT and its
         # segmentation was re-slicing and re-compositing all three views for a
         # pixel-for-pixel identical result, ~60 ms of it on a whole-body study.
@@ -3100,7 +3098,7 @@ class OrthoViewerPanel(QWidget):
         self._proj_box.setEnabled(self._flat_axis is None)
         # Keep what stays valid. On the same grid the rendered slices are the
         # ones already on screen, so clearing them would force a redraw that
-        # reproduces them exactly — and resetting the crosshair below would
+        # reproduces them exactly, and resetting the crosshair below would
         # leave the panel claiming a position it is not showing.
         if not same_grid:
             self._rendered = {}
@@ -3110,7 +3108,7 @@ class OrthoViewerPanel(QWidget):
         # kept only as the geometry anchor everything else is drawn against.
         # The resample cache is deliberately *not* cleared here. Its key already
         # carries the reference grid, so an entry for another grid can never be
-        # returned by mistake — and throwing it away meant that switching to a
+        # returned by mistake, and throwing it away meant that switching to a
         # layer on a different grid and back re-ran a whole-volume affine
         # transform each way, seconds at a time on a large study. The budget
         # below evicts instead.
@@ -3144,7 +3142,7 @@ class OrthoViewerPanel(QWidget):
         self._rebuild_sources()
         self._redraw(force=True)
 
-    # ── render sources ───────────────────────────────────────────────────────
+    # render sources
 
     def _candidate_layers(self) -> list[Any]:
         """Layers eligible to be drawn, in the viewer's own order."""
@@ -3158,8 +3156,8 @@ class OrthoViewerPanel(QWidget):
         """Identity of the grid everything is resampled onto.
 
         The grid, not the layer that happens to define it. Keying on the bound
-        layer's identity threw away every cached source — host copies, slice
-        caches, resampled volumes — each time the user clicked a different layer,
+        layer's identity threw away every cached source (host copies, slice
+        caches, resampled volumes) each time the user clicked a different layer,
         even when the new one sat on exactly the same shape and affine and every
         one of those caches was still valid.
         """
@@ -3294,8 +3292,8 @@ class OrthoViewerPanel(QWidget):
         if self._suspend_rebuild or self._layer is None or self._data is None:
             return
         # Reuse the description a layer already had. Rebuilds happen whenever the
-        # layer list changes at all, and the expensive parts — the host copy, the
-        # slice cache, any resampling — depend on the layer and the reference
+        # layer list changes at all, and the expensive parts (the host copy, the
+        # slice cache, any resampling) depend on the layer and the reference
         # grid, neither of which a reorder or an unrelated insert touches.
         reference = self._reference_key()
         keep = self._source_cache if self._source_ref == reference else {}
@@ -3366,7 +3364,7 @@ class OrthoViewerPanel(QWidget):
             lines += [f"  • {name}" for name in self._offgrid_skipped]
         self._composite_label.setToolTip("\n".join(lines))
 
-    # ── event subscriptions ──────────────────────────────────────────────────
+    # event subscriptions
 
     def _connect(self, emitter: Any, callback: Any) -> None:
         """Subscribe *callback* to *emitter* and remember it for teardown."""
@@ -3381,14 +3379,14 @@ class OrthoViewerPanel(QWidget):
         for emitter, callback in self._subs:
             try:
                 emitter.disconnect(callback)
-            except Exception:  # noqa: BLE001 — a removed layer's emitter may be gone
+            except Exception:  # noqa: BLE001 (a removed layer's emitter may be gone)
                 pass
         self._subs = []
 
     def _watch_layers(self) -> None:
         """Follow the display state of every layer that could be drawn.
 
-        ``visible`` is watched on every *candidate*, not just the drawn ones — a
+        ``visible`` is watched on every *candidate*, not just the drawn ones: a
         hidden layer being un-hidden is precisely the event that has to reach the
         panel, and it cannot if only visible layers are subscribed.
         """
@@ -3413,7 +3411,7 @@ class OrthoViewerPanel(QWidget):
                     )
             # ``data`` (the array was replaced) and ``paint`` (a brush stroke),
             # but deliberately **not** ``set_data``. Despite the name, Napari
-            # emits set_data from ``Layer._refresh_sync(data_displayed=True)`` —
+            # emits set_data from ``Layer._refresh_sync(data_displayed=True)``:
             # every slice refresh, so once per scroll of its own canvas. Acting
             # on it rebuilt every render source and redrew all three views on
             # each notch of the main viewer's scrollbar, which on a whole-body
@@ -3430,7 +3428,7 @@ class OrthoViewerPanel(QWidget):
                         functools.partial(self._on_layer_data_changed, layer=layer),
                     )
         # Placement: a drawn layer that moves is resampled again; the bound one
-        # (drawn or not) sets the views' layout — an orientation change mirrors or
+        # (drawn or not) sets the views' layout; an orientation change mirrors or
         # reorders it, and the views follow as the canvas does.
         watched = [s.layer for s in self._sources]
         if self._layer is not None and all(ly is not self._layer for ly in watched):
@@ -3486,7 +3484,7 @@ class OrthoViewerPanel(QWidget):
     def _on_interpolation_changed(self, _event: Any = None, *, layer: Any = None) -> None:
         """A layer's interpolation changed: new screen filter, reslice order, planes.
 
-        A layer resampled from another grid is resampled again — its cached copy
+        A layer resampled from another grid is resampled again: its cached copy
         was made with the previous order.
         """
         source = next((s for s in self._sources if s.layer is layer), None)
@@ -3685,7 +3683,7 @@ class OrthoViewerPanel(QWidget):
         return composite_runs(planes, blendings, opacities, [source.smooth for source in drawn])
 
     def _redraw(self, *, force: bool = False) -> None:
-        """Refresh the views, re-rendering only those whose slice actually moved.
+        """Refresh the views, re-rendering only those whose slice moved.
 
         A crosshair move changes at most two of the three slices; redrawing all of
         them on every scroll step is wasted work on a large volume.
@@ -3697,7 +3695,7 @@ class OrthoViewerPanel(QWidget):
         try:
             # The Labeling box and a traced vessel follow the crosshair's planes.
             self._label_editor.overlays()
-        except Exception:  # noqa: BLE001 — an overlay must never stop the views
+        except Exception:  # noqa: BLE001 (an overlay must never stop the views)
             pass
         flat = self._flat_axis is not None
         projection = self._active_projection()
@@ -3749,11 +3747,11 @@ class OrthoViewerPanel(QWidget):
                 crosshair=None if flat else view.to_pixel(self._position, self._data.shape),
             )
 
-    # ── projection ───────────────────────────────────────────────────────────
+    # projection
 
     def _active_projection(self) -> str | None:
         """The projection the views show (``"max"`` / ``"min"`` / ``"mean"``), or ``None``
-        for slices — always ``None`` on a 2D image."""
+        for slices: always ``None`` on a 2D image."""
         if self._flat_axis is not None or not self._proj_btn.isChecked():
             return None
         return str(self._proj_kind.currentData() or "max")
@@ -3798,7 +3796,7 @@ class OrthoViewerPanel(QWidget):
         self._redraw(force=True)
         self._label_editor.refresh()
 
-    # ── interaction ──────────────────────────────────────────────────────────
+    # interaction
 
     def _on_slice_changed(self, axis: int, index: int) -> None:
         """Move the crosshair along *axis* and refresh the other two views."""
@@ -3825,8 +3823,8 @@ class OrthoViewerPanel(QWidget):
     def _crosshair_lines(self, view_index: int) -> list[tuple[float, float, str]]:
         """Where the other two planes cut across this view, with their colours.
 
-        Each line is coloured like the view it belongs to — the same red / green /
-        blue the 3D outlines use — so dragging one says which plane is about to
+        Each line is coloured like the view it belongs to (the same red / green /
+        blue the 3D outlines use), so dragging one says which plane is about to
         turn without having to watch all three.
         """
         if not self._frames or view_index >= len(self._frames):
@@ -3850,7 +3848,7 @@ class OrthoViewerPanel(QWidget):
         """Turn the other two planes about this view's normal, following the drag.
 
         Only the other two move: the view being dragged in has to stay still, or
-        the line would run away from the cursor that is steering it — which is
+        the line would run away from the cursor that is steering it, which is
         also what makes this read as reorienting the volume rather than spinning
         the picture.
         """
@@ -3868,7 +3866,7 @@ class OrthoViewerPanel(QWidget):
         if float(np.linalg.norm(trace)) <= 1e-9:
             return
         # The cursor angle is measured in *pixels*, and a pixel is not square on
-        # anisotropic spacing — so it is converted back through the two step sizes
+        # anisotropic spacing, so it is converted back through the two step sizes
         # before being turned into a direction in the plane. Solving the angle on
         # screen instead would under- or over-rotate by the aspect ratio.
         target = (
@@ -4012,15 +4010,15 @@ class OrthoViewerPanel(QWidget):
         self._planed.clear()
 
     def _cut_source_name(self) -> str:
-        """Name the 3D cut layers are keyed on — the bound layer's."""
+        """Name the 3D cut layers are keyed on: the bound layer's."""
         return str(getattr(self._layer, "name", "volume"))
 
-    # ── per-layer choices ────────────────────────────────────────────────────
+    # per-layer choices
 
     def _wants_plane(self, source: RenderSource) -> bool:
         """Whether *source*'s slice image goes on the 3D planes.
 
-        Defaults to the bound layer only — the historical behaviour. A layer
+        Defaults to the bound layer only: the historical behaviour. A layer
         resampled from another grid cannot: plane positions are voxel indices
         of the bound grid, which are not its own.
         """
@@ -4030,7 +4028,7 @@ class OrthoViewerPanel(QWidget):
         if key not in self._plane_choice:
             # Decided once, when the layer is first drawn. Following "whichever
             # layer is bound now" flipped the 3D slices to a segmentation the moment
-            # it was clicked — on the same grid nothing redraws, so the table said
+            # it was clicked, on the same grid nothing redraws, so the table said
             # one thing and the canvas another until the crosshair next moved.
             self._plane_choice[key] = source.layer is self._layer
         return self._plane_choice[key]
@@ -4204,7 +4202,7 @@ class OrthoViewerPanel(QWidget):
         Every drawn layer is cut by default, overlays included: cutting only the
         base leaves a segmentation floating in front of the opened volume,
         covering the very interior the cut was made to expose. The layers table
-        takes any of them out — keep a mask whole while the CT around it opens.
+        takes any of them out: keep a mask whole while the CT around it opens.
         """
         if self._layer is None or _is_plain_2d(self._layer):
             return  # a plain 2D image has nothing to cut in 3D
@@ -4214,7 +4212,7 @@ class OrthoViewerPanel(QWidget):
         displayed = displayed_axes(self._viewer)
         drawn = [s.layer for s in self._sources] or [self._layer]
         targets = [layer for layer in drawn if self._wants_cut(layer)]
-        # A layer that dropped out of the composite — or was unticked — keeps
+        # A layer that dropped out of the composite (or was unticked) keeps
         # whatever cut it was given otherwise, and nothing would take it off.
         for stale in self._clipped:
             if stale not in targets:
@@ -4255,7 +4253,7 @@ class OrthoViewerPanel(QWidget):
         k = int(np.argmax(np.abs(direction)))
         return k, float(here[t_dims[k]]), bool(direction[k] < 0)
 
-    # ── time (3D+t) ──────────────────────────────────────────────────────────
+    # time (3D+t)
 
     def _time_layer(self) -> Any | None:
         """The 3D+t layer whose time axis the panel follows (bound first)."""
@@ -4295,7 +4293,7 @@ class OrthoViewerPanel(QWidget):
         self._update_time_label()
 
     def _update_time_label(self) -> None:
-        """``t 3 / 15  ·  0.120 s`` — the frame and, when known, its time."""
+        """``t 3 / 15  ·  0.120 s``: the frame and, when known, its time."""
         text = f"t {self._time + 1} / {self._n_time}"
         layer = self._time_layer()
         if layer is not None:
@@ -4475,11 +4473,11 @@ def attach_ortho_dock(viewer: Any, panel: OrthoViewerPanel) -> Any:
             return
         # An empty selection is not a reason to unbind. Napari clears it
         # transiently while a layer is being added, and the panel's own 3D cuts
-        # are layers — so rebinding here threw away the crosshair and the plane
+        # are layers, so rebinding here threw away the crosshair and the plane
         # rotation every time those were drawn.
         if active is None and panel.bound_layer() is not None:
             return
-        # Nor is selecting something that is neither a volume nor a 2D image —
+        # Nor is selecting something that is neither a volume nor a 2D image:
         # shapes, points, a mesh, a colour capture: the volume already on screen is
         # what the user still wants to look at. A 2D image (a plain 2D layer, a
         # localizer, a single tracker slice) is shown in the first view.
@@ -4493,8 +4491,8 @@ def attach_ortho_dock(viewer: Any, panel: OrthoViewerPanel) -> Any:
         ):
             return
         # Napari emits `active` twice for a single click, with the same layer
-        # both times. Re-binding is not free — it re-materialises the volume,
-        # rebuilds every render source and forces a redraw — so the second one
+        # both times. Re-binding is not free (it re-materialises the volume,
+        # rebuilds every render source and forces a redraw), so the second one
         # is pure waste. Data and layer-list changes arrive on their own events.
         if active is not None and active is panel.bound_layer():
             return

@@ -1,6 +1,6 @@
 """Locate nvitk's JSON configuration files.
 
-nvitk keeps its site configuration in four JSON files — ``sge.json`` (cluster settings and
+nvitk keeps its site configuration in four JSON files: ``sge.json`` (cluster settings and
 pipeline path roots), ``settings.json`` (dataset and atlas roots), ``xnat.json`` (XNAT
 connection profile) and ``gui.json`` (window layout the GUI manages for itself). This module
 is the single place that decides *where those files live*.
@@ -14,19 +14,19 @@ can say where it looked (:func:`describe_search`).
 
 Precedence, highest first:
 
-1. :func:`set_config_dir` — the ``--config-dir`` flag
+1. :func:`set_config_dir`: the ``--config-dir`` flag
 2. a per-file environment variable (``NVITK_SGE_JSON``, ``NVITK_SETTINGS_JSON``,
-   ``NVITK_XNAT_CONFIG``) — for that one file only
+   ``NVITK_XNAT_CONFIG``), for that one file only
 3. ``$NVITK_CONFIG_DIR``
-4. ``$NVITK_HOME/.nvitk`` — retained; this already worked, undocumented
-5. ``$XDG_CONFIG_HOME/nvitk`` or ``~/.config/nvitk`` — the standard location for an installed
+4. ``$NVITK_HOME/.nvitk``: retained; this already worked, undocumented
+5. ``$XDG_CONFIG_HOME/nvitk`` or ``~/.config/nvitk``: the standard location for an installed
    package, and where ``nvitk.db.xnat_config`` already looked for its profile
 6. ``~/.nvitk``
 7. ``./.nvitk``
 8. the ``.nvitk`` of a source checkout, if this file is running from one
 
 First match wins; the candidates are not layered. Merging several files would make "which
-value am I actually using?" unanswerable, which is the failure mode this module was written to
+value am I using?" unanswerable, which is the failure mode this module was written to
 end.
 """
 
@@ -84,7 +84,7 @@ def candidate_dirs() -> list[tuple[Path, str]]:
 
     Each entry is ``(path, why)``, where *why* is a short human-readable description used by
     :func:`describe_search` to build error messages. Directories are returned whether or not
-    they exist — callers filter.
+    they exist: callers filter.
     """
     out: list[tuple[Path, str]] = []
 
@@ -132,8 +132,8 @@ def source_checkout_root() -> Path | None:
 
     Deliberately last in the config search order: it is a developer convenience, and relying on
     it is exactly what made configuration unreachable for installed users. It remains the right
-    answer for locating *repo assets* that genuinely only exist in a checkout — the
-    ``registry/`` submodules, for instance — which is why it is public.
+    answer for locating *repo assets* that only exist in a checkout (the
+    ``registry/`` submodules, for instance), which is why it is public.
     """
     here = Path(__file__).resolve()
     for anc in [here.parent, *here.parents]:
@@ -145,8 +145,8 @@ def source_checkout_root() -> Path | None:
 def set_config_dir(path: str | os.PathLike[str] | None) -> None:
     """Point nvitk at *path* for the rest of this process, or clear the override with ``None``.
 
-    Also exported into the environment as ``$NVITK_CONFIG_DIR`` so that subprocesses — SGE job
-    scripts, Singularity containers, the GUI shelling out to a CLI — resolve the same
+    Also exported into the environment as ``$NVITK_CONFIG_DIR`` so that subprocesses (SGE job
+    scripts, Singularity containers, the GUI shelling out to a CLI) resolve the same
     configuration as their parent.
     """
     global _override_dir
@@ -165,7 +165,7 @@ def register_reload_hook(hook: "Callable[[], None]") -> "Callable[[], None]":
     For modules that compute their constants eagerly at import: they register the function that
     performs the merge, and it is re-run when :func:`set_config_dir` redirects the lookup, so a
     late ``--config-dir`` reaches them too. Modules built on
-    :func:`nvitk.core.lazy_config.module_getattr` do not need this — they re-resolve on access.
+    :func:`nvitk.core.lazy_config.module_getattr` do not need this: they re-resolve on access.
     """
     _reload_hooks.append(hook)
     return hook
@@ -192,7 +192,7 @@ def generation() -> int:
     """A counter bumped every time the search path changes.
 
     Lets other modules cache values derived from configuration and notice when that
-    configuration has been redirected underneath them — see :mod:`nvitk.core.lazy_config`.
+    configuration has been redirected underneath them; see :mod:`nvitk.core.lazy_config`.
     """
     return _generation
 
@@ -200,8 +200,8 @@ def generation() -> int:
 def default_config_dir() -> Path:
     """Where a new configuration should be created.
 
-    The XDG location, derived the same way :func:`candidate_dirs` derives it — so a directory
-    created here is one the search will actually find. Computing it independently is how
+    The XDG location, derived the same way :func:`candidate_dirs` derives it, so a directory
+    created here is one the search will find. Computing it independently is how
     ``nvitk-config init`` came to write to ``~/.config/nvitk`` on a machine whose
     ``$XDG_CONFIG_HOME`` pointed somewhere else.
     """
@@ -212,7 +212,7 @@ def default_config_dir() -> Path:
 def default_data_dir() -> Path:
     """Where nvitk keeps user data it manages itself (datasets, and similar).
 
-    ``$XDG_DATA_HOME/nvitk`` or ``~/.local/share/nvitk`` — the standard location for
+    ``$XDG_DATA_HOME/nvitk`` or ``~/.local/share/nvitk``: the standard location for
     application data on Linux, and the counterpart of :func:`default_config_dir`. Notably *not*
     a repository-shaped path: someone who installed from conda has no checkout, and a
     ``~/nvitk/dataset/...`` directory appearing in their home both looks like a clone and
@@ -234,7 +234,7 @@ def config_file(name: str) -> Path | None:
     """Locate config file *name* (e.g. ``"sge.json"``), or ``None``.
 
     A per-file environment variable, if set, names the file directly and takes precedence over
-    every directory candidate — including ``--config-dir`` — because it is the more specific
+    every directory candidate (including ``--config-dir``), because it is the more specific
     instruction.
     """
     env_var = FILE_ENV_VARS.get(name)
@@ -264,7 +264,7 @@ def iter_candidate_files(name: str) -> Iterator[tuple[Path, str]]:
 def load_json(name: str) -> dict[str, Any]:
     """Parse config file *name*, or return ``{}`` if it is absent or unreadable.
 
-    Returning ``{}`` for a *missing* file is intentional — most settings are optional and have
+    Returning ``{}`` for a *missing* file is intentional: most settings are optional and have
     defaults. Callers that need a value must ask for it explicitly via :func:`require`, which
     produces an error naming the key and the search path. A file that exists but cannot be
     parsed always warns, since that is a mistake rather than a choice.
@@ -322,7 +322,7 @@ def require(
     """Return *value*, or raise :class:`ConfigError` naming *key* and where *file* was sought.
 
     Used in place of the institution-specific path constants this codebase used to fall back
-    on. Failing here — at the point the value is needed, with the key name in the message — is
+    on. Failing here (at the point the value is needed, with the key name in the message) is
     far more useful than defaulting to somebody else's filesystem layout and surfacing as a
     ``FileNotFoundError`` several stages into a pipeline run.
     """

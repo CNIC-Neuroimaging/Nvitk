@@ -1,5 +1,5 @@
 """
-CViT stage 5 — export a trained CViT as a portable, self-contained model bundle.
+CViT stage 5: export a trained CViT as a portable, self-contained model bundle.
 
 Description
 -----------
@@ -16,7 +16,7 @@ Writes ``<results_root>/stage5_export/<name>/``::
 Two ways to use it
 ------------------
 - with nvitk: ``nvitk-cvit-infer --model-dir <export> -i <inputs>`` (it is an nnU-Net model folder);
-- without nvitk: ``python predict.py -i <inputs> -o <outputs>`` — the network is rebuilt from
+- without nvitk: ``python predict.py -i <inputs> -o <outputs>``; the network is rebuilt from
   ``cvit_nn`` and handed to nnU-Net's predictor through ``manual_initialization``, so neither
   the CViT trainer classes nor the in-tree nnU-Net are needed. This works because
   :mod:`nvitk.nn` imports nothing from nvitk.
@@ -196,9 +196,7 @@ def run_export(
     return target
 
 
-# ---------------------------------------------------------------------------
 # SGE + CLI
-# ---------------------------------------------------------------------------
 
 
 def _worker_argv(**o: Any) -> list[str]:

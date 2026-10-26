@@ -1,8 +1,8 @@
 """CPU performance preferences for the GUI: worker threads and Napari async slicing.
 
-The heavy host work behind the interactive views — slicing and compositing the
+The heavy host work behind the interactive views: slicing and compositing the
 orthogonal views, resampling a layer that sits on another grid, oblique and CPR
-reformats, FFTs — runs on nvitk's shared worker pool
+reformats, FFTs: runs on nvitk's shared worker pool
 (:mod:`nvitk.core.parallel`). This module is the GUI side of it: the stored
 preference, applying it at start-up, and the small dialog that changes it.
 
@@ -32,9 +32,7 @@ PERF_KEY = "performance"
 DEFAULT_PERFORMANCE: dict[str, Any] = {"workers": "75%", "async_slicing": False}
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Stored preference
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def stored_performance() -> dict[str, Any]:
@@ -96,7 +94,7 @@ def set_async_slicing(enabled: bool) -> bool:
     Slicing then happens off the GUI thread, so dragging a slider through a
     whole-body CT no longer blocks the window while each slice is read. It is
     Napari's *experimental* setting, and Napari stores it in its own settings
-    file — only written when it actually changes.
+    file, only written when it changes.
     """
     try:
         from napari.settings import get_settings
@@ -105,7 +103,7 @@ def set_async_slicing(enabled: bool) -> bool:
         if bool(getattr(experimental, "async_", False)) != bool(enabled):
             experimental.async_ = bool(enabled)
         return True
-    except Exception:  # noqa: BLE001 — an older Napari without the setting
+    except Exception:  # noqa: BLE001 (an older Napari without the setting)
         return False
 
 
@@ -116,9 +114,7 @@ def performance_label() -> str:
     return f"CPU: {get_worker_count()} / {cpu_count()} threads"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dialog
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def open_performance_dialog(parent: Any = None) -> bool:

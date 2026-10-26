@@ -7,15 +7,15 @@ stenosis / enlargement at its midpoint. This module makes them explorable:
   the healthy reference, taper %), length, position and the confidence with each penalty
   spelled out;
 - **click** it (or its row in the results window's lesion table): the *Lesion inspector* dock
-  plots the calibre along the measured path — inscribed (detection) and cross-section radius, the
+  plots the calibre along the measured path; inscribed (detection) and cross-section radius, the
   healthy taper reference and the threshold the radius had to cross, the lesion's run, the
   reference windows (and the interpolated reference between them), the siphon mask and the path's
-  other lesions — i.e. why the lesion was called and how much to trust it. ◀ / ▶ step through the
+  other lesions, i.e. why the lesion was called and how much to trust it. ◀ / ▶ step through the
   lesions;
 - **extents**: each lesion's run is drawn along its centerline (``Morpho lesion extents``), not
   just its midpoint;
 - **filter** by confidence (:func:`confidence_filter_controls`, above the results window's lesion
-  table): lesions below the chosen confidence are hidden from the viewer — points and extents —
+  table): lesions below the chosen confidence are hidden from the viewer (points and extents)
   and skipped by hover, click and ◀ / ▶. The table rows are tinted by confidence class
   (:data:`LESION_CLASS_COLOURS`: green high, yellow moderate, red low).
 
@@ -37,9 +37,9 @@ import numpy as np
 import pandas as pd
 
 LESION_EXTENTS_LAYER = "Morpho lesion extents"
-#: Confidence class → colour (table rows, filter labels).
+#: Confidence class -> colour (table rows, filter labels).
 LESION_CLASS_COLOURS: dict[str, str] = {"high": "#5fb35f", "moderate": "#d4b83a", "low": "#d9534f"}
-#: Filter presets: label → minimum confidence (the class boundaries of the lesion table).
+#: Filter presets: label -> minimum confidence (the class boundaries of the lesion table).
 CONFIDENCE_PRESETS: dict[str, float] = {
     "all lesions": 0.0,
     "moderate and high (≥ 0.4)": 0.4,
@@ -51,7 +51,7 @@ _STATE_ATTR = "_nvitk_lesion_state"
 _EXTENT_OWNERS = "nvitk_lesion_index"
 _EXTENT_COLOURS = "nvitk_lesion_colour"
 
-#: Confidence flags → (what it means, factor). ``{near_end}`` / ``{near_bif}`` are filled in mm.
+#: Confidence flags -> (what it means, factor). ``{near_end}`` / ``{near_bif}`` are filled in mm.
 FLAG_TEXT: dict[str, tuple[str, float]] = {
     "reference_distal": ("no proximal reference window: distal one used", 0.8),
     "reference_none": ("no reference window", 0.8),
@@ -194,9 +194,7 @@ def lesion_card(row: Any, run: LesionRun | None = None, *, html: bool = True) ->
     return f"{head}<br>{body}{tail}"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # The calibre profile
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _runs(flag: np.ndarray) -> list[tuple[int, int]]:
@@ -349,9 +347,7 @@ def draw_profile(ax: Any, run: LesionRun, i: int) -> str:
     return "" if ref is not None else "This output has no taper reference for enlargements (re-run to plot it)."
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # The inspector dock
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _make_inspector(viewer: Any) -> Any:
@@ -515,9 +511,7 @@ def _centre_on(viewer: Any, i: int) -> None:
         pass
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Hover, click and extents
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _lesion_under_cursor(layer: Any, event: Any) -> int | None:
@@ -650,9 +644,7 @@ def install_lesion_tools(
     return extents_layer
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Filtering by confidence
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _confidences(run: LesionRun) -> np.ndarray:
@@ -661,7 +653,7 @@ def _confidences(run: LesionRun) -> np.ndarray:
 
 
 def located(lesions: pd.DataFrame) -> np.ndarray:
-    """The lesions with a position (``x/y/z_mm``); a hypoplasia — an absent vessel — has none."""
+    """The lesions with a position (``x/y/z_mm``); a hypoplasia (an absent vessel) has none."""
     if lesions.empty or not {"x_mm", "y_mm", "z_mm"} <= set(lesions.columns):
         return np.zeros(len(lesions), dtype=bool)
     xyz = lesions[["x_mm", "y_mm", "z_mm"]].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)
@@ -678,7 +670,7 @@ def visible_lesions(state: dict[str, Any] | None) -> set[int]:
 
 
 def apply_confidence_filter(viewer: Any, min_confidence: float) -> tuple[int, int]:
-    """Show only the lesions with confidence ≥ *min_confidence* (points and extents);
+    """Show only the lesions with confidence >= *min_confidence* (points and extents);
     returns ``(shown, total)``."""
     state = getattr(viewer, _STATE_ATTR, None)
     run = state.get("run") if state else None
@@ -740,7 +732,7 @@ def confidence_filter_controls(viewer: Any) -> Any:
 
     def _on_preset(name: str) -> None:
         if name in CONFIDENCE_PRESETS:
-            spin.setValue(CONFIDENCE_PRESETS[name])  # → valueChanged → _apply
+            spin.setValue(CONFIDENCE_PRESETS[name])  # -> valueChanged -> _apply
 
     preset.currentTextChanged.connect(_on_preset)
     spin.valueChanged.connect(_apply)

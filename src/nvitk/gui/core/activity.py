@@ -2,20 +2,20 @@
 
 Every load and every tool run registers a *task* (:func:`activity`, or
 :func:`start_task` for work that finishes later, a worker thread's): the status
-bar shows its message, a bar — filled when the task reports how far it got,
-sweeping when it does not — and the time it has been running; with several at
-once, the latest and how many more. A finished task leaves "Done …" (or
-"Failed …") for a moment when it took long enough to be worth saying.
+bar shows its message, a bar (filled when the task reports how far it got,
+sweeping when it does not), and the time it has been running; with several at
+once, the latest and how many more. A finished task leaves "Done ..." (or
+"Failed ...") for a moment when it took long enough to be worth saying.
 
 Two kinds of work, two behaviours:
 
 * **Work handed to a thread** (:func:`run_in_background`: reading image files,
-  DICOM series, writing a scene…): the GUI keeps repainting while it runs — the
-  bar moves, the time counts — though clicks and keys wait until it is done.
+  DICOM series, writing a scene...): the GUI keeps repainting while it runs (the
+  bar moves, the time counts), though clicks and keys wait until it is done.
 * **Work on the GUI thread** (a tool from the Imaging tab, most edits): the
   indicator is painted before the work starts and says what is running; the
   window cannot repaint until it ends, so the bar holds still meanwhile.
-* **Work elsewhere** — a job sent to the SGE cluster (``kind="cluster"``): the task
+* **Work elsewhere**: a job sent to the SGE cluster (``kind="cluster"``): the task
   stays while the job is queued and running (its state in the message), for as long
   as that takes, and the GUI is free meanwhile. Elapsed times read as minutes and
   hours, and the tooltip lists every task when several are running.
@@ -249,7 +249,7 @@ def install_activity_indicator(viewer: Any) -> ActivityIndicator | None:
         return existing
     try:
         bar = viewer.window._qt_window.statusBar()
-    except Exception:  # noqa: BLE001 — headless
+    except Exception:  # noqa: BLE001 (headless)
         return None
     indicator = ActivityIndicator(activity_hub())
     bar.addPermanentWidget(indicator)
@@ -309,7 +309,7 @@ def run_in_background(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     calls *fn*.
 
     *fn* must not touch Qt or Napari objects: it is for reading files, computing
-    arrays, writing archives — the layers are added afterwards, back here.
+    arrays, writing archives; the layers are added afterwards, back here.
     """
     app = QApplication.instance()
     if app is None or threading.current_thread() is not threading.main_thread():
@@ -319,7 +319,7 @@ def run_in_background(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     def work() -> None:
         try:
             box["value"] = fn(*args, **kwargs)
-        except BaseException as exc:  # noqa: BLE001 — handed back to the caller
+        except BaseException as exc:  # noqa: BLE001 (handed back to the caller)
             box["error"] = exc
 
     thread = threading.Thread(target=work, name="nvitk-background", daemon=True)

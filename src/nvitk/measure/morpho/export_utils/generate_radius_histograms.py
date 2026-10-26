@@ -2,7 +2,7 @@
 """Generate one vessel-radius histogram per centerline sheet in a metrics workbook.
 
 All sheets are processed together so the x-axis range, bin edges, and y-axis
-limit are shared — making histograms directly comparable across vessels.
+limit are shared: making histograms directly comparable across vessels.
 
 Edit the CONFIG block below for direct single-case runs; the batch runner
 patches EXCEL_PATH and OUTPUT_DIR at runtime.
@@ -20,17 +20,14 @@ import numpy as np
 import pandas as pd
 
 
-# ============================================================================
 # CONFIG FOR DIRECT RUN (paths must be supplied at runtime; no host defaults)
-# ============================================================================
 EXCEL_PATH = None
-OUTPUT_DIR = None   # None → <excel folder>/radius_histograms
+OUTPUT_DIR = None   # None -> <excel folder>/radius_histograms
 RADIUS_COLUMN = "radius_mm"
 BIN_METHOD = "fd"   # "fd", "auto", "sturges", "sqrt", or integer as text e.g. "40"
 MIN_BINS = 12
 MAX_BINS = 80
 FIG_DPI = 180
-# ============================================================================
 
 
 # Summary sheets: the numbered cow_morpho-style ones and the compact tables / sheet index.

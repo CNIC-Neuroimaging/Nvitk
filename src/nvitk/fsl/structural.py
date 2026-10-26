@@ -121,7 +121,7 @@ def first(
     if three_stage:
         argv.append("-3")
     # The boundary-correction method names the file (``_all_fast_firstseg`` for auto/fast,
-    # ``_all_none_…``, ``_all_th<t>_…``): matched by pattern.
+    # ``_all_none_...``, ``_all_th<t>_...``): matched by pattern.
     outputs = {"seg": Path(f"{out}_all_*_firstseg.nii.gz"), "origsegs": Path(f"{out}_all_*_origsegs.nii.gz")}
     return FslCommand(argv, "FIRST subcortical segmentation", outputs,
                       label_outputs=("seg",), long=True, requires=("run_first_all", "first", "first_flirt"))
@@ -142,7 +142,7 @@ def fsl_anat(
     no_subcortseg: bool = False,
     no_search: bool = False,
 ) -> FslCommand:
-    """The structural pipeline (reorient, crop, bias, MNI registration, FAST, FIRST) → ``<out>.anat``."""
+    """The structural pipeline (reorient, crop, bias, MNI registration, FAST, FIRST) -> ``<out>.anat``."""
     out = base(out_base)
     argv = ["fsl_anat", "-i", str(input), "-o", str(out), "-t", img_type, "--clobber"]
     for flag, on in (
@@ -179,7 +179,7 @@ def siena(
     std_mask: bool = False,
     ventricles: bool = False,
 ) -> FslCommand:
-    """Two-time-point atrophy (percentage brain volume change) → ``<out>/report.siena``."""
+    """Two-time-point atrophy (percentage brain volume change) -> ``<out>/report.siena``."""
     argv = ["siena", str(input1), str(input2), "-o", str(out_dir)]
     if bet_opts:
         argv += ["-B", bet_opts]
@@ -200,7 +200,7 @@ def sienax(
     regional: bool = False,
     lesion_mask: Path | None = None,
 ) -> FslCommand:
-    """Single-time-point normalised brain / GM / WM volumes → ``<out>/report.sienax``."""
+    """Single-time-point normalised brain / GM / WM volumes -> ``<out>/report.sienax``."""
     argv = ["sienax", str(input), "-o", str(out_dir)]
     if bet_opts:
         argv += ["-B", bet_opts]
@@ -235,7 +235,7 @@ def parse_sienax_report(path: Path) -> dict[str, dict[str, float]]:
 
 
 def parse_siena_report(path: Path) -> dict[str, float]:
-    """``{"PBVC": percentage brain volume change, …}`` from ``report.siena``."""
+    """``{"PBVC": percentage brain volume change, ...}`` from ``report.siena``."""
     out: dict[str, float] = {}
     for line in Path(path).read_text().splitlines():
         parts = line.split()

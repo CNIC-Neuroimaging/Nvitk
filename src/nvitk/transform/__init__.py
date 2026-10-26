@@ -3,18 +3,18 @@ Geometric transform utilities for 3D/4D clinical imaging.
 
 Submodules:
 
-- :mod:`nvitk.transform.isotropy` — make an image voxel-isotropic by zooming the
+- :mod:`nvitk.transform.isotropy`: make an image voxel-isotropic by zooming the
   anisotropic axis.
-- :mod:`nvitk.transform.resampling` — affine-based voxel resampling between two
+- :mod:`nvitk.transform.resampling`: affine-based voxel resampling between two
   :class:`~nvitk.types.Image` grids.
-- :mod:`nvitk.transform.rotate` — rotate a volume around a spatial axis.
-- :mod:`nvitk.transform.reorient` — permute / flip / match reference or mouse preset.
-- :mod:`nvitk.transform.swap_axes` — swap or permute array axes.
-- :mod:`nvitk.transform.threaded` — slab-parallel ``affine_transform`` /
+- :mod:`nvitk.transform.rotate`: rotate a volume around a spatial axis.
+- :mod:`nvitk.transform.reorient`: permute / flip / match reference or mouse preset.
+- :mod:`nvitk.transform.swap_axes`: swap or permute array axes.
+- :mod:`nvitk.transform.threaded`: slab-parallel ``affine_transform`` /
   ``map_coordinates`` on the shared CPU worker pool.
-- :mod:`nvitk.transform.fourier` — k-space (FFT) forward/inverse transforms and
+- :mod:`nvitk.transform.fourier`: k-space (FFT) forward/inverse transforms and
   k-space filtering.
-- :mod:`nvitk.transform.rotation` — detect and correct rigid Z-rotation between
+- :mod:`nvitk.transform.rotation`: detect and correct rigid Z-rotation between
   image grids.
 """
 

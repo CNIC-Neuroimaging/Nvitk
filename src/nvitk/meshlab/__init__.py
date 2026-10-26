@@ -1,24 +1,24 @@
-"""Meshes and point clouds: build, clean, smooth, remesh, measure, align — and over time.
+"""Meshes and point clouds: build, clean, smooth, remesh, measure, align, and over time.
 
 The MeshLab / ParaView basics for nvitk's surface types
 (:class:`~nvitk.types.Mesh`, :class:`~nvitk.types.PointCloud`,
 :class:`~nvitk.types.MeshSeries`):
 
-- :mod:`~nvitk.meshlab.marching_cubes` — surfaces from masks and label maps;
-- :mod:`~nvitk.meshlab.io` — STL, OBJ, OFF, PLY, VTK/VTP, GIfTI, XYZ/CSV/PCD, series + ``.pvd``;
-- :mod:`~nvitk.meshlab.cleaning` — duplicates, degenerate faces, components, holes, orientation;
-- :mod:`~nvitk.meshlab.smoothing` — Laplacian and Taubin;
-- :mod:`~nvitk.meshlab.remeshing` — decimation, subdivision, clipping, convex hull, voxel remesh;
-- :mod:`~nvitk.meshlab.measure` — area, volume, curvature, distances, cross-sections;
-- :mod:`~nvitk.meshlab.transform` — affine transforms, principal axes, ICP;
-- :mod:`~nvitk.meshlab.pointcloud` — sampling, downsampling, outliers, normals, reconstruction;
-- :mod:`~nvitk.meshlab.voxelize` — closed meshes back to masks on any image grid;
-- :mod:`~nvitk.meshlab.temporal` — 3D+t series: per-frame surfaces, tracking, motion, smoothing;
-- :mod:`~nvitk.meshlab.topology` — edges, boundaries, components, Euler characteristic, genus;
-- :mod:`~nvitk.meshlab.vessels` — centerlines, diameter profiles, stenosis, bifurcations, thickness;
-- :mod:`~nvitk.meshlab.edit` — local edits around a point: erase, keep a piece, push/pull, smooth;
-- :mod:`~nvitk.meshlab.sampling` — image values on surfaces (probe), signed distance maps;
-- :mod:`~nvitk.meshlab.pymeshlab_filters` — MeshLab's filters through PyMeshLab (optional).
+- :mod:`~nvitk.meshlab.marching_cubes`: surfaces from masks and label maps;
+- :mod:`~nvitk.meshlab.io`: STL, OBJ, OFF, PLY, VTK/VTP, GIfTI, XYZ/CSV/PCD, series + ``.pvd``;
+- :mod:`~nvitk.meshlab.cleaning`: duplicates, degenerate faces, components, holes, orientation;
+- :mod:`~nvitk.meshlab.smoothing`: Laplacian and Taubin;
+- :mod:`~nvitk.meshlab.remeshing`: decimation, subdivision, clipping, convex hull, voxel remesh;
+- :mod:`~nvitk.meshlab.measure`: area, volume, curvature, distances, cross-sections;
+- :mod:`~nvitk.meshlab.transform`: affine transforms, principal axes, ICP;
+- :mod:`~nvitk.meshlab.pointcloud`: sampling, downsampling, outliers, normals, reconstruction;
+- :mod:`~nvitk.meshlab.voxelize`: closed meshes back to masks on any image grid;
+- :mod:`~nvitk.meshlab.temporal`: 3D+t series: per-frame surfaces, tracking, motion, smoothing;
+- :mod:`~nvitk.meshlab.topology`: edges, boundaries, components, Euler characteristic, genus;
+- :mod:`~nvitk.meshlab.vessels`: centerlines, diameter profiles, stenosis, bifurcations, thickness;
+- :mod:`~nvitk.meshlab.edit`: local edits around a point: erase, keep a piece, push/pull, smooth;
+- :mod:`~nvitk.meshlab.sampling`: image values on surfaces (probe), signed distance maps;
+- :mod:`~nvitk.meshlab.pymeshlab_filters`: MeshLab's filters through PyMeshLab (optional).
 """
 
 from .cleaning import (

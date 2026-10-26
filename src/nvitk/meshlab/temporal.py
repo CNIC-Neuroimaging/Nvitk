@@ -1,6 +1,6 @@
 """Meshes over time (3D+t): build, measure, track, smooth and resample a :class:`MeshSeries`.
 
-A series either has one topology for every frame (a tracked surface — vertex
+A series either has one topology for every frame (a tracked surface: vertex
 ``i`` is the same material point throughout) or a mesh of its own per frame
 (marching cubes of each time point). Displacement, temporal smoothing and frame
 interpolation need the former; :func:`propagate_mesh` turns the latter into it
@@ -240,7 +240,7 @@ def to_napari_4d(
     Frame ``k``'s vertices get time coordinate ``k``; give the layer
     ``scale=(t_res, 1, 1, 1)`` to place frames in time. Napari selects a frame's
     faces by *exact* equality between those integers and the slider position
-    divided by the scale, which a non-integral step (``3 * 0.1 / 0.1``) can miss —
+    divided by the scale, which a non-integral step (``3 * 0.1 / 0.1``) can miss:
     the GUI therefore shows series as a 3D layer swapped per frame
     (:func:`nvitk.gui.mesh.layers.add_mesh_series_layer`); this export is for
     files and other viewers.

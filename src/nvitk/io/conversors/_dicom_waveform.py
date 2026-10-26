@@ -1,19 +1,19 @@
 """
-DICOM waveforms (ECG) — export as signals, not as images.
+DICOM waveforms (ECG): export as signals, not as images.
 
 Description
 -----------
 A gated cardiac CT ships the patient's ECG as a *General ECG Waveform* object
 (SOP 1.2.840.10008.5.1.4.1.1.9.1.2; Philips: series ``For Series: 401 - 40997``). Treated as an
-image it became an 8x8 NIfTI of the vendor's icon. What it actually holds is the trace the
-scanner gated on — one lead, 250 Hz, a few seconds either side of the acquisition — which is
+image it became an 8x8 NIfTI of the vendor's icon. What it holds is the trace the
+scanner gated on (one lead, 250 Hz, a few seconds either side of the acquisition), which is
 how a heart rate, an arrhythmia, or a premature beat during the scan is checked afterwards.
 
 :func:`export_waveforms` writes, per waveform object:
 
-- ``<name>.csv`` — ``time_s`` plus one column per channel (scaled by the channel sensitivity
+- ``<name>.csv``: ``time_s`` plus one column per channel (scaled by the channel sensitivity
   when the file records one, raw ADC units otherwise);
-- ``<name>.json`` — sampling frequency, channel labels/units, the absolute start time (so the
+- ``<name>.json``: sampling frequency, channel labels/units, the absolute start time (so the
   trace can be aligned with the CT's acquisition time), detected R-peak times, RR intervals and
   the median heart rate.
 
@@ -36,7 +36,7 @@ from nvitk.core.logger import Logger
 
 log = Logger()
 
-#: SOP Class UID prefix shared by every DICOM waveform IOD (ECG, haemodynamic, audio, …).
+#: SOP Class UID prefix shared by every DICOM waveform IOD (ECG, haemodynamic, audio, ...).
 WAVEFORM_SOP_PREFIX = "1.2.840.10008.5.1.4.1.1.9."
 
 
@@ -121,13 +121,13 @@ def export_waveforms(ds_list: Sequence[Any], output_base: str) -> list[str]:
         data, fs, labels, units = waveform_channels(ds, index)
         base = output_base if len(groups) == 1 else f"{output_base}_{n + 1}"
         times = np.arange(data.shape[0], dtype=float) / fs
-        # ---- CSV: time plus one column per channel ---------------------------
+        # CSV: time plus one column per channel
         header = "time_s," + ",".join(
             f"{lab}_{unit}" if unit != "raw" else lab for lab, unit in zip(labels, units)
         )
         table = np.column_stack([times, data])
         np.savetxt(f"{base}.csv", table, delimiter=",", header=header, comments="", fmt="%.6g")
-        # ---- JSON: acquisition context and a heart-rate summary --------------
+        # JSON: acquisition context and a heart-rate summary
         group = ds.WaveformSequence[index]
         info: dict[str, Any] = {
             "sop_class": str(ds.SOPClassUID),

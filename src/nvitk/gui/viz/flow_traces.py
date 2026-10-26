@@ -131,7 +131,7 @@ def _paths_and_colors(traces: list[FlowTrace], cache: FlowTraceCache) -> tuple[l
 
 
 def _paths_to_vector_data(paths: list[np.ndarray]) -> np.ndarray:
-    """Voxel-space polylines → Napari vectors ``(N, 2, 3)`` (tail, direction)."""
+    """Voxel-space polylines -> Napari vectors ``(N, 2, 3)`` (tail, direction)."""
     tails, dirs = [], []
     for pts in paths:
         p = np.asarray(pts, dtype=np.float64)

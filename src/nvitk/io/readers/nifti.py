@@ -17,9 +17,7 @@ from nvitk.core.exceptions import BackendUnavailableError
 from .._common import default_nifti_axes, orientation_codes_from_affine, reorder_axes
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Constants & path helpers
-# ──────────────────────────────────────────────────────────────────────────────
 
 _NIFTI_JSON_STRIP_KEYS = {
     "axes",
@@ -49,9 +47,7 @@ def _sorted_nifti_files_in_dir(directory: Path) -> list[Path]:
     return sorted(out, key=lambda x: x.name.lower())
 
 
-# -----------------------------------------------------------------------------
 # Single-file resolution
-# -----------------------------------------------------------------------------
 
 
 def _resolve_nifti_file_path(path: Path) -> Path:
@@ -90,9 +86,7 @@ def _merge_sidecar_dict(metadata: dict[str, Any], raw: Any) -> None:
     metadata.update(extra)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Colour (RGB/RGBA) channel detection
-# ──────────────────────────────────────────────────────────────────────────────
 
 #: Trailing-axis lengths that can hold colour samples (RGB / RGBA).
 _RGB_CHANNEL_SIZES = (3, 4)
@@ -140,9 +134,7 @@ def _resolve_channel_axis(data: np.ndarray, stored_axes: Any, rgb: bool | None) 
     return data.ndim - 1 if rgb else _guessed_channel_axis(data)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # read_nifti
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def read_nifti(
@@ -157,7 +149,7 @@ def read_nifti(
     Load a NIfTI file or the first ``.nii`` / ``.nii.gz`` in a directory via nibabel.
 
     FreeSurfer ``.mgz`` / ``.mgh`` files load through here too: nibabel gives them the
-    same affine (voxel → scanner RAS) and zooms.
+    same affine (voxel -> scanner RAS) and zooms.
 
     Populates ``axes``, ``shape``, ``affine``, ``orientation`` (when derivable), voxel sizes,
     and merges a sibling JSON sidecar if present (or *metadata_json* when given). NIfTI header

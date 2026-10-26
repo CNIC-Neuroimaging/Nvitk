@@ -9,11 +9,11 @@
 Topology files live under ``nvitk/measure/morpho/topology/*.json`` and use the
 schema expected by :func:`nvitk_vendor.measure.morpho.io_utils.load_mapping`.
 
-- ``eicab_topology.json`` — eICAB TOF label IDs (1–18). Used by qvtpy stage-7
+- ``eicab_topology.json``: eICAB TOF label IDs (1-18). Used by qvtpy stage-7
   morphometrics (input masks are eICAB, not ``seg_4dflow``).
-- ``qvtpy_topology.json`` — 4D-flow / qvtpy pipeline label IDs (arterial 1–14,
-  venous 31–34). Reference only; not selected by the qvtpy pipeline.
-- ``mouse_root_topology.json`` — mouse CoW root vessels.
+- ``qvtpy_topology.json``: 4D-flow / qvtpy pipeline label IDs (arterial 1-14,
+  venous 31-34). Reference only; not selected by the qvtpy pipeline.
+- ``mouse_root_topology.json``: mouse CoW root vessels.
 
 Beside the integer-keyed vessel entries a topology may carry an optional
 ``"_meta"`` object describing the *subject* the label ids belong to (species,

@@ -2,10 +2,10 @@
 
 Qt gives every dropdown, spin box and slider the wheel as soon as the pointer is
 over it, so scrolling down a panel with a long form flips whatever option happens
-to pass under the mouse — a tool's method, a colormap, a parameter — without
+to pass under the mouse (a tool's method, a colormap, a parameter) without
 anyone noticing. With the guard installed:
 
-* a dropdown (``QComboBox``) never takes the wheel — choose with a click or the keys;
+* a dropdown (``QComboBox``) never takes the wheel: choose with a click or the keys;
 * a spin box or slider takes it only once it has been clicked into (keyboard focus),
   so it can still be nudged on purpose;
 * otherwise the wheel goes on to the panel, which scrolls as if the control were not
@@ -40,7 +40,7 @@ def _is_value_control(obj: Any) -> bool:
 
 
 def _click_focus(widget: Any) -> None:
-    """No focus from the wheel: ``WheelFocus`` → ``StrongFocus`` (tab and click still focus)."""
+    """No focus from the wheel: ``WheelFocus`` -> ``StrongFocus`` (tab and click still focus)."""
     try:
         if widget.focusPolicy() == Qt.FocusPolicy.WheelFocus:
             widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -61,7 +61,7 @@ def _scroll_area_around(widget: Any) -> Any | None:
 class WheelGuard(QObject):
     """Application-wide event filter implementing the rules above."""
 
-    def eventFilter(self, obj: Any, event: Any) -> bool:  # noqa: N802 — Qt naming
+    def eventFilter(self, obj: Any, event: Any) -> bool:  # noqa: N802 (Qt naming)
         if sys.is_finalizing():
             return False
         kind = event.type()

@@ -3,7 +3,7 @@ Pairwise contrasts between the levels of a factor, for the significance brackets
 
 Description
 -----------
-"Is this territory different from that one" is the question a grouped plot is actually read for,
+"Is this territory different from that one" is the question a grouped plot is read for,
 and it is not the question a coefficient table answers: those are contrasts against whichever
 level happened to sort first, so ``LICA`` vs ``RICA`` is nowhere in them. This module computes
 every level-versus-level comparison instead.
@@ -18,7 +18,7 @@ two rows of the resulting design matrix is the contrast vector ``c``, and then
 
     estimate = c' β            se = sqrt(c' V c)            t = estimate / se
 
-which needs nothing from the model but its coefficients and their covariance — so one
+which needs nothing from the model but its coefficients and their covariance, so one
 implementation serves MixedLM, OLS and GLM alike. The R engines do not expose a patsy design
 matrix, so they go through ``emmeans::pairs`` instead, which computes the same quantity in R.
 
@@ -26,13 +26,13 @@ Multiplicity
 ------------
 Thirteen vessels are seventy-eight comparisons, and at α = 0.05 four of them are expected to be
 "significant" with no effect present at all. Holm's step-down correction is applied across every
-comparison computed — not only the ones that fit on the figure — and both backends are corrected
+comparison computed (not only the ones that fit on the figure), and both backends are corrected
 the same way in Python rather than each engine's own default, so a bracket means the same thing
 whichever engine drew it. Holm rather than Tukey because it needs no distributional assumption
 about the set, and it is valid for the unbalanced, covariate-adjusted comparisons these are.
 
-What counts as "the set" is the family the figure is read in. With a ``by`` — one series or one
-panel per level of a second factor — each level is corrected on its own, which is also
+What counts as "the set" is the family the figure is read in. With a ``by`` (one series or one
+panel per level of a second factor) each level is corrected on its own, which is also
 ``emmeans``' convention for a ``by`` specification. Pooling them instead makes seventeen
 territories a single family of 102 tests, and a real effect at raw p = 0.003 comes out at 0.30:
 every bracket reads NS and nothing is drawn, which says far more about the denominator than about
@@ -41,9 +41,7 @@ the data.
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
@@ -58,10 +56,10 @@ log = Logger()
 ADJUST_HOLM = "holm"
 ADJUST_NONE = "none"
 
-#: What a bracket between two levels is testing — the simple effect inside a series, or the
+#: What a bracket between two levels is testing: the simple effect inside a series, or the
 #: difference-in-differences against the reference series, which is what an interaction term is.
 BASIS_WITHIN = "within"
-#: One bracket per interaction row of the coefficient table — pairs against the factor's own
+#: One bracket per interaction row of the coefficient table: pairs against the factor's own
 #: reference, which is what an interaction *term* contrasts.
 BASIS_INTERACTION = "interaction"
 #: The same difference-in-differences over *every* pair of levels. A g1-versus-g2 bracket is then
@@ -141,7 +139,7 @@ def _frame(rows: list[dict[str, Any]]) -> pd.DataFrame:
     # Corrected within each ``by`` level, not across the whole set. That is what ``emmeans`` does
     # with a ``by`` specification, and it is how the figure is read: a series' brackets are a
     # family of their own, drawn over its own curve. Across the set instead, seventeen
-    # territories make one family of 102 tests — where a real effect at raw p = 0.003 adjusts to
+    # territories make one family of 102 tests, where a real effect at raw p = 0.003 adjusts to
     # 0.30, every bracket reads NS, and "significant only" draws nothing at all.
     grouped = out["by"].astype(bool).any()
     out["p_adj"] = (
@@ -157,9 +155,7 @@ def _frame(rows: list[dict[str, Any]]) -> pd.DataFrame:
     ).reset_index(drop=True)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # statsmodels: MixedLM / OLS / GLM
-# ──────────────────────────────────────────────────────────────────────────────
 def _statsmodels_contrasts(
     result: Any,
     df: pd.DataFrame,
@@ -177,7 +173,7 @@ def _statsmodels_contrasts(
     Every pair of *levels*, as differences of design-matrix rows at *covariate_refs*.
 
     With *by*, the grid is the factorial ``factor x by`` and the pairs are formed **within** each
-    ``by`` level — the simple effect there rather than an effect averaged over it. On a model with
+    ``by`` level: the simple effect there rather than an effect averaged over it. On a model with
     an interaction those are different numbers, and the one a per-series bracket is claiming is
     the simple effect.
     """
@@ -226,7 +222,7 @@ def _statsmodels_contrasts(
     groups = [str(g) for g in by_levels] if by else [""]
     width = len(levels)
     # The reference block's rows, for the difference-in-differences: an interaction contrast is
-    # this series' (a − b) minus the reference series' (a − b), which is exactly what the
+    # this series' (a - b) minus the reference series' (a - b), which is exactly what the
     # coefficient table's interaction row reports.
     baseline = (
         groups.index(reference) * width
@@ -240,7 +236,7 @@ def _statsmodels_contrasts(
                     str(levels[i]), str(levels[j])
                 }:
                     # An interaction *term* contrasts a level against the factor's reference.
-                    # Any other pair is the difference of two of them — a real contrast, but not
+                    # Any other pair is the difference of two of them: a real contrast, but not
                     # one the coefficient table prints, so not one this basis claims to show.
                     continue
                 contrast = rows_design[offset + i] - rows_design[offset + j]
@@ -269,14 +265,12 @@ def _two_sided(statistic: float, dof: float) -> float:
     return float(2.0 * stats.norm.sf(abs(statistic)))
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # R engines: lme4, lmrob, MMRM
-# ──────────────────────────────────────────────────────────────────────────────
 #: ``contrast`` rather than ``pairs``: ``pairs`` is an S3 method registered on ``emmGrid``, not an
 #: exported object, so ``emmeans::pairs`` raises "not an exported object from namespace:emmeans".
 #: ``contrast(em, "pairwise")`` is the exported spelling of the same thing.
 #:
-#: No adjustment of its own — Holm is applied in Python so a bracket means the same thing
+#: No adjustment of its own: Holm is applied in Python so a bracket means the same thing
 #: whichever engine produced it.
 _R_PAIRS_HELPER = """
 .nvitk_pairs <- function(model, factor_name, by_name) {
@@ -348,8 +342,8 @@ def _r_contrasts(
         with localconverter(default_converter + pandas2ri.converter):
             table = pd.DataFrame(globalenv[".nvitk_pairs"](model, str(factor), str(by)))
     except Exception as exc:
-        # emmeans has no ``emm_basis`` for every model this toolkit fits — ``lmrob`` is the one
-        # that matters here — and says so by raising. The contrasts are still computable from the
+        # emmeans has no ``emm_basis`` for every model this toolkit fits (``lmrob`` is the one
+        # that matters here), and says so by raising. The contrasts are still computable from the
         # fit's own coefficients and covariance, which is what this falls back to.
         # Debug, not info: for an lmrob fit this fires on every plot, the fallback reproduces
         # emmeans to 1e-9, and an R traceback in the log on each redraw reads like a failure.
@@ -363,7 +357,7 @@ def _r_contrasts(
         table = linear_pairs(model, factor, by=by, reference="", factor_reference="")
 
     # emmeans names the comparison column "contrast" and spells a pair "LICA - RICA"; levels
-    # holding a "-" are re-split on the separator emmeans actually uses, " - ".
+    # holding a "-" are re-split on the separator emmeans uses, " - ".
     wanted = {str(level) for level in levels}
     rows: list[dict[str, Any]] = []
     for _index, row in table.iterrows():
@@ -400,7 +394,7 @@ def _r_interaction_contrasts(
 
     ``emmeans`` returns every pair of *factor* crossed with every pair of *by*; only the rows
     whose ``by`` pair involves the reference level are an interaction *coefficient*. Which side
-    of that pair the reference falls on decides the sign — ``BASILAR - RICA`` is the negative of
+    of that pair the reference falls on decides the sign: ``BASILAR - RICA`` is the negative of
     the row the table prints for RICA.
     """
     from rpy2.robjects import default_converter, globalenv, pandas2ri
@@ -490,9 +484,7 @@ def reference_level(result: Any, df: pd.DataFrame, column: str) -> str:
     return missing[0] if len(missing) == 1 else ""
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# What the model can actually be asked
-# ──────────────────────────────────────────────────────────────────────────────
+# What the model can be asked
 def fixed_effect_terms(result: Any) -> list[str]:
     """Names of the model's fixed-effect parameters, whichever engine produced it.
 
@@ -512,16 +504,16 @@ def fixed_effect_terms(result: Any) -> list[str]:
 
 def has_fixed_effect(result: Any, df: pd.DataFrame, column: str) -> bool:
     """
-    Whether *column* has a fixed-effect term — the only kind a contrast can be formed from.
+    Whether *column* has a fixed-effect term: the only kind a contrast can be formed from.
 
-    A factor that appears only as a random-effects *grouping* — ``(1 + plaque | territory)`` —
+    A factor that appears only as a random-effects *grouping*, ``(1 + plaque | territory)``,
     has no fixed-effect parameters, so there is nothing to contrast between its levels. What it
     has instead are shrunk per-level predictions, which are not tested parameters: a BLUP carries
     no null hypothesis. Asking ``emmeans`` anyway gets *No variable named territory in the
     reference grid*, three frames below where the mistake was made.
 
-    Matching is by coefficient name, which each engine spells differently — patsy's
-    ``territory[T.LICA]``, R's ``territoryLICA`` — and the R form is only accepted when what
+    Matching is by coefficient name, which each engine spells differently (patsy's
+    ``territory[T.LICA]``, R's ``territoryLICA``), and the R form is only accepted when what
     follows the column's name is one of its actual levels, so ``age`` does not match ``age_c``.
     """
     terms = fixed_effect_terms(result)
@@ -543,9 +535,7 @@ def has_fixed_effect(result: Any, df: pd.DataFrame, column: str) -> bool:
     return False
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Entry point
-# ──────────────────────────────────────────────────────────────────────────────
 def pairwise_contrasts(
     result: Any,
     df: pd.DataFrame,
@@ -564,10 +554,10 @@ def pairwise_contrasts(
     Parameters
     ----------
     factor : str
-        The column whose levels are being compared — the plot's categorical axis.
+        The column whose levels are being compared; the plot's categorical axis.
     levels : sequence of str, optional
         Restrict to these levels, in this order. Defaults to every level present in *df*.
-        Passing the levels actually drawn matters: the correction is over the comparisons
+        Passing the levels drawn matters: the correction is over the comparisons
         computed, so hiding half the vessels should not leave the rest carrying their penalty.
     covariate_refs : mapping, optional
         Where to hold the other covariates. Ignored by the R path, which uses ``emmeans``' own
@@ -582,24 +572,24 @@ def pairwise_contrasts(
     adjust : {"holm", "none"}
         Whether to correct for multiplicity. ``holm`` is the default and the responsible one.
         ``none`` reports the raw p of each comparison, which is what a coefficient *table* shows
-        — a regression table corrects nothing — so it is the setting that makes a figure and a
+(a regression table corrects nothing), so it is the setting that makes a figure and a
         table agree. An uncorrected bracket is a real result about one comparison; it is only
         misleading if read as though the whole figure had been tested at that level.
     basis : {"within", "interaction", "interaction_all"}
         What a comparison between two levels is testing.
 
         ``within``
-            The simple effect inside each ``by`` level — "does g1 differ from g0 *in RICA*",
+            The simple effect inside each ``by`` level: "does g1 differ from g0 *in RICA*",
             over every pair of levels.
         ``interaction``
-            The difference-in-differences against the reference ``by`` level — "does the g0→g1
+            The difference-in-differences against the reference ``by`` level: "does the g0->g1
             effect differ *between RICA and the reference territory*", which is the quantity the
             coefficient table's ``plaque[g1]:territory[RICA]`` row reports. Restricted to pairs
             against the *factor's* own reference, so there is one comparison per interaction row
             of the table and no more.
         ``interaction_all``
             The same quantity over every pair. A g1-versus-g2 comparison is then the difference
-            of two interaction coefficients — a real contrast, but one no table row carries, so
+            of two interaction coefficients: a real contrast, but one no table row carries, so
             it cannot be checked against the table.
 
         The last two need a ``by``, and the reference level itself gets no comparisons: it is the
@@ -700,7 +690,7 @@ def pairwise_contrasts(
     # having to re-derive the reason.
     if str(adjust) == ADJUST_NONE:
         # Re-stated rather than re-derived: the backends always Holm-adjust on the way out, so
-        # this puts the raw p back in the column everything downstream reads — the brackets, the
+        # this puts the raw p back in the column everything downstream reads; the brackets, the
         # cap's ordering and the "significant only" filter all key on ``p_adj``.
         out["p_adj"] = out["p_value"]
         out["stars"] = _stars(out["p_adj"])
@@ -717,7 +707,7 @@ def _r_object(result: Any) -> Any:
     """The underlying R model, whichever wrapper this engine hands back.
 
     An ``lmrob`` or ``mmrm`` fit *is* the R object. A pymer4 ``lmer`` holds one, and where it
-    holds it moved between versions — the same two names the rest of this package reads, in the
+    holds it moved between versions: the same two names the rest of this package reads, in the
     same order. Guessing ``.model`` instead got the pymer4 object itself handed to rpy2, which
     fails with "Conversion 'py2rpy' not defined for objects of type ... lmer".
     """
@@ -728,9 +718,7 @@ def _r_object(result: Any) -> Any:
     return result
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Brackets
-# ──────────────────────────────────────────────────────────────────────────────
 #: Show every comparison, or only the ones that survived the correction.
 MODE_ALL = "all"
 MODE_SIGNIFICANT = "significant"
@@ -745,7 +733,7 @@ MAX_BRACKETS = 12
 
 
 def format_p(value: float) -> str:
-    """The p-value as it goes under a bracket — short enough not to widen it."""
+    """The p-value as it goes under a bracket: short enough not to widen it."""
     if not np.isfinite(value):
         return "p n/a"
     # One threshold, not two: ``0.0004`` is easier to read than ``4.0e-04``, and below 1e-4 the
@@ -777,8 +765,8 @@ def level_positions(labels: Sequence[Any], ticks: Sequence[float]) -> dict[str, 
     """
     Map each categorical tick's level name to its x position.
 
-    Tick text is not always the bare level — the distribution plots put the group's N on a second
-    line — so only the first line is matched. That is the level; everything after it is decoration.
+    Tick text is not always the bare level (the distribution plots put the group's N on a second
+    line), so only the first line is matched. That is the level; everything after it is decoration.
     """
     out: dict[str, float] = {}
     for label, position in zip(labels, ticks):
@@ -799,7 +787,7 @@ def bracket_layout(
     """
     Choose and stack the brackets to draw, backend-independently.
 
-    Returns ``(brackets, omitted)`` — the second is how many comparisons were left off, which the
+    Returns ``(brackets, omitted)``: the second is how many comparisons were left off, which the
     caller has to report rather than let a capped figure imply that is all there was.
 
     Brackets are stacked greedily into rows: a bracket goes in the lowest row whose spans it does
@@ -861,8 +849,8 @@ def series_colours(ax: Any) -> dict[str, Any]:
     """
     Each legend entry's level name and the colour drawn for it.
 
-    Used to paint a series' brackets in that series' colour, and — on a grouped display, where
-    each panel carries only some of the levels — to tell which comparisons belong on this panel
+    Used to paint a series' brackets in that series' colour, and (on a grouped display, where
+    each panel carries only some of the levels) to tell which comparisons belong on this panel
     at all. Legend labels are matched after the last ``=``, since the plotters spell them both
     ``RICA`` and ``territory=RICA``.
     """
@@ -938,7 +926,7 @@ def annotate_axes(
     Put significance brackets over the categorical levels of a finished axes.
 
     Works from the axes' own tick labels and legend rather than from the plotting call, so one
-    implementation serves every engine's plotter — they all end up with the levels on the
+    implementation serves every engine's plotter: they all end up with the levels on the
     categorical axis and the series in the legend, and none of them agree on much else.
 
     That is also what makes the grouped display work without being told about it: a panel holding
@@ -964,7 +952,7 @@ def annotate_axes(
 
 
 def _plotly_extent(figure: Any) -> tuple[float, float]:
-    """``(top, span)`` of whatever the traces actually reach, for placing brackets above them."""
+    """``(top, span)`` of whatever the traces reach, for placing brackets above them."""
     lo, hi = np.inf, -np.inf
     for trace in figure.data:
         values = getattr(trace, "y", None)
@@ -1050,7 +1038,7 @@ def annotate_corner(
     List the comparisons in a box on the axes, for a plot with no categorical axis to span.
 
     A continuous plot draws one fitted line per level, so "different from which" is still the
-    question — but there are no ticks to bracket between, and a bracket across a numeric axis
+    question, but there are no ticks to bracket between, and a bracket across a numeric axis
     would claim a range of x it does not mean. A list says the same thing without the lie.
 
     Returns ``(drawn, omitted)``.

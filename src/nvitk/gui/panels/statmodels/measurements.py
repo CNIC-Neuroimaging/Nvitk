@@ -1,13 +1,13 @@
 """
-Measurement selection — one or several image measurements per analysis frame.
+Measurement selection: one or several image measurements per analysis frame.
 
 Description
 -----------
 A model like ``att_mean ~ pi + age_c`` needs 4D-flow and ASL measurements side by side in one frame.
 Each measurement carries its *own* pipeline kind, pipeline, feature, atlas and grouping, and the
-frames are joined on ``(subject_uid, territory)`` — so the groupings must be chosen to produce
-commensurate keys (qvtpy ``hemisphere`` → ``MCA``/``ACA``/``PCA`` lines up with ASL ``territory``;
-qvtpy ``vessel`` → ``LMCA``/``RMCA`` does not).
+frames are joined on ``(subject_uid, territory)``, so the groupings must be chosen to produce
+commensurate keys (qvtpy ``hemisphere`` -> ``MCA``/``ACA``/``PCA`` lines up with ASL ``territory``;
+qvtpy ``vessel`` -> ``LMCA``/``RMCA`` does not).
 
 ``MeasurementForm`` is the reusable selector: the window shows one inline for the primary
 measurement, and :class:`MeasurementDialog` wraps another for adding/editing the rest.
@@ -17,9 +17,7 @@ measurement.
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from typing import Any, Mapping, Sequence
 
 import pandas as pd
@@ -75,9 +73,7 @@ from nvitk.gui.core.design import SPACE, SPACE_TIGHT, clear_layout
 log = Logger()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Single-measurement selector
-# ──────────────────────────────────────────────────────────────────────────────
 class MeasurementForm(QWidget):
     """
     Pipeline-kind / pipeline / feature / atlas / grouping selector for one measurement.
@@ -131,7 +127,7 @@ class MeasurementForm(QWidget):
         )
         self._alias_label = QLabel("Column name")
 
-        # Composite territory labels (e.g. TCBF) — populated per pipeline kind / feature.
+        # Composite territory labels (e.g. TCBF): populated per pipeline kind / feature.
         self._composites_host = QWidget()
         self._composites_layout = QVBoxLayout(self._composites_host)
         self._composites_layout.setContentsMargins(0, 0, 0, 0)
@@ -195,7 +191,7 @@ class MeasurementForm(QWidget):
 
         self._on_kind_changed()
 
-    # ---- combo population -----------------------------------------------------
+    # combo population
     def _current_kind(self) -> str:
         """The selected pipeline kind."""
         return str(self._pipeline_kind.currentData() or PIPELINE_KIND_QVTPY)
@@ -261,7 +257,7 @@ class MeasurementForm(QWidget):
         Rebuild the composite-label checkboxes for the current kind/feature, preserving ticks.
 
         Composites are aggregates over raw vessels (TCBF = RICA + LICA + BASILAR), so they only
-        exist for the pipelines and features that publish those vessels — the row hides entirely
+        exist for the pipelines and features that publish those vessels: the row hides entirely
         when nothing applies.
         """
         checked = {name for name, box in self._composite_boxes.items() if box.isChecked()}
@@ -276,7 +272,7 @@ class MeasurementForm(QWidget):
                 + str(COMPOSITE_DEFINITIONS[name].get("description") or label)
             )
             # A checkbox cannot elide its caption, so its full text width becomes
-            # the form's — and the whole panel's — minimum. Let it shrink; the
+            # the form's (and the whole panel's) minimum. Let it shrink; the
             # tooltip carries the full label.
             box.setMinimumWidth(0)
             box.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -354,7 +350,7 @@ class MeasurementForm(QWidget):
         self._sync_hint()
         self.changed.emit()
 
-    # ---- spec round-trip ------------------------------------------------------
+    # spec round-trip
     def spec(self) -> MeasurementSpec:
         """The measurement currently described by the form."""
         kind = self._current_kind()
@@ -386,7 +382,7 @@ class MeasurementForm(QWidget):
             feature=self._current_feature(),
             pipeline=str(self._pipeline.currentData() or "latest"),
         )
-        # Composites are not published rows — they are computed at load time — so they are offered
+        # Composites are not published rows (they are computed at load time), so they are offered
         # alongside whatever the table holds rather than looked up in it.
         composites = [name for name, box in self._composite_boxes.items() if box.isChecked()]
         available = [*composites, *available]
@@ -515,14 +511,12 @@ class MeasurementDialog(QDialog):
         return self._form.spec()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Measurement list
-# ──────────────────────────────────────────────────────────────────────────────
 class MeasurementsWidget(QGroupBox):
     """
     The measurements that make up the analysis frame, plus the join mode and load diagnostics.
 
-    Entry 0 is the *primary* measurement — it is the one the window's inline Data-selection form
+    Entry 0 is the *primary* measurement: it is the one the window's inline Data-selection form
     edits, the one whose column the default formulas and plots fall back to, and the one every other
     measurement's ``(subject_uid, territory)`` keys are compared against.
     """
@@ -603,7 +597,7 @@ class MeasurementsWidget(QGroupBox):
         self._diagnostics.setStyleSheet(muted_label_style())
         lay.addWidget(self._diagnostics)
 
-    # ---- state ----------------------------------------------------------------
+    # state
     def specs(self) -> list[MeasurementSpec]:
         """The configured measurements, primary first."""
         return list(self._specs)
@@ -695,7 +689,7 @@ class MeasurementsWidget(QGroupBox):
             self._diagnostics.setStyleSheet(muted_label_style())
         self._diagnostics.setText(text)
 
-    # ---- list actions ---------------------------------------------------------
+    # list actions
     def _on_add(self) -> None:
         """Append a measurement configured in a modal dialog."""
         dialog = MeasurementDialog(self, self._repo)
@@ -742,9 +736,7 @@ class MeasurementsWidget(QGroupBox):
             self.changed.emit()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Background loading
-# ──────────────────────────────────────────────────────────────────────────────
 class FrameLoadWorker(QThread):
     """
     Background thread that builds the analysis frame, so the GUI stays responsive.

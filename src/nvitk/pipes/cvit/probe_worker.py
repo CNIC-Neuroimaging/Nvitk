@@ -1,5 +1,5 @@
 """
-Attention-usage probe worker — runs **inside** the in-tree nnU-Net subprocess.
+Attention-usage probe worker: runs **inside** the in-tree nnU-Net subprocess.
 
 Description
 -----------
@@ -69,7 +69,7 @@ def parse_interventions(names: list[str], radii: list[float], depth: int, layer_
 
 
 def centre_crop(data: torch.Tensor, patch: list[int]) -> torch.Tensor:
-    """``(C, *S)`` → ``(1, C, *patch)`` centre crop, zero-padded where the volume is smaller."""
+    """``(C, *S)`` -> ``(1, C, *patch)`` centre crop, zero-padded where the volume is smaller."""
     c, *shape = data.shape
     out = torch.zeros((1, c, *patch), dtype=data.dtype)
     src, dst = [], []

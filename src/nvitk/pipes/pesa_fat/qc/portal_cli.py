@@ -15,7 +15,7 @@ from nvitk.core.click_config import config_dir_click_option
 # DEFAULT_RESULTS_ROOT is imported above from common.paths, which resolves it through
 # sge.json. It used to be reassigned here to a hardcoded path, which discarded that override
 # and made the import dead.
-#: Bind address for the review portal. Loopback by default — this serves unblinded QC images,
+#: Bind address for the review portal. Loopback by default: this serves unblinded QC images,
 #: so exposing it on a routable interface is an explicit `--host` decision, not a default.
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8008

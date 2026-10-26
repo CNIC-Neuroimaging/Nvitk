@@ -8,17 +8,15 @@ two different claims about the same file.
 
 What the colours mean
 ---------------------
-``randomise`` writes corrected p-values as **1 − p**, so a bright voxel in a ``*_corrp_*`` map is
+``randomise`` writes corrected p-values as **1 - p**, so a bright voxel in a ``*_corrp_*`` map is
 *strong evidence*, not a large effect. Nothing in these figures encodes effect size unless the
 ``tstat`` map is what was asked for. Every builder here returns its caption alongside the figure
-for exactly that reason — a p-map drawn without saying so reads as an effect map.
+for exactly that reason: a p-map drawn without saying so reads as an effect map.
 """
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -31,7 +29,7 @@ log = Logger()
 #: p-value thresholds offered by the viewers, as α. 0.05 is the default everywhere.
 ALPHA_CHOICES: tuple[float, ...] = (0.10, 0.05, 0.01, 0.001)
 
-#: How a result should be drawn. ``(label, key)`` in the order a picker should offer them — the
+#: How a result should be drawn. ``(label, key)`` in the order a picker should offer them: the
 #: single source both viewers populate from, so they cannot label the same view differently.
 VIEW_KINDS: tuple[tuple[str, str], ...] = (
     ("Cortical surface", "surface"),
@@ -39,8 +37,8 @@ VIEW_KINDS: tuple[tuple[str, str], ...] = (
     ("Orthogonal slices", "slices"),
 )
 
-#: Sequential colormaps offered for a 1−p map. Deliberately not the diverging list the vascular and
-#: brain maps use: 1−p is one-sided and has no meaningful midpoint, so a diverging map would invite
+#: Sequential colormaps offered for a 1-p map. Deliberately not the diverging list the vascular and
+#: brain maps use: 1-p is one-sided and has no meaningful midpoint, so a diverging map would invite
 #: centring a quantity that cannot be centred.
 VOXELWISE_COLORMAPS: tuple[tuple[str, str], ...] = (
     ("hot", "hot"),
@@ -52,7 +50,7 @@ VOXELWISE_COLORMAPS: tuple[tuple[str, str], ...] = (
     ("YlOrRd", "YlOrRd"),
 )
 
-#: ``display_mode`` values nilearn accepts, per builder — the registries genuinely differ, and
+#: ``display_mode`` values nilearn accepts, per builder: the registries differ, and
 #: offering a projector-only mode to the slice view fails at draw time.
 #: From ``nilearn.plotting.displays._slicers.SLICERS`` / ``._projectors.PROJECTORS`` (0.13).
 SLICE_DISPLAY_MODES: tuple[str, ...] = (
@@ -73,10 +71,10 @@ DISPLAY_MODE_N_CUTS: dict[str, int] = {
 
 
 def _accepted(fn: Any, **kwargs: Any) -> dict[str, Any]:
-    """Keep only the *kwargs* that *fn* actually declares.
+    """Keep only the *kwargs* that *fn* declares.
 
     nilearn's plotting signatures move between releases and this repo is run against several at
-    once — 0.11 in the GUI environment, 0.13/0.14 elsewhere. An unknown keyword does not raise at
+    once: 0.11 in the GUI environment, 0.13/0.14 elsewhere. An unknown keyword does not raise at
     the nilearn call: it is swallowed into ``**kwargs`` and forwarded to matplotlib, which fails
     much later with ``AxesImage.set() got an unexpected keyword argument``. Filtering here turns a
     confusing crash into a silently unavailable option.
@@ -139,8 +137,8 @@ def cut_axes_for(display_mode: str) -> tuple[str, ...]:
     """Which of ``x``/``y``/``z`` a *display_mode* takes a coordinate for, in nilearn's own order.
 
     ``ortho``/``tiled`` take all three. A two-letter mode takes its two letters. A single-axis mode
-    takes one — and there, nilearn also accepts an int meaning *number of cuts*, which is how a
-    montage is requested. Projector-only modes (``l``, ``lyrz``, …) fix their own angles, so they
+    takes one, and there, nilearn also accepts an int meaning *number of cuts*, which is how a
+    montage is requested. Projector-only modes (``l``, ``lyrz``, ...) fix their own angles, so they
     take no coordinate from us.
     """
     mode = str(display_mode or "").strip().lower()
@@ -176,12 +174,12 @@ def world_bounds(image: Any) -> dict[str, tuple[float, float]]:
 
 
 def alpha_to_map_threshold(alpha: float) -> float:
-    """α → the value a ``*_corrp_*`` map must exceed. ``0.05`` → ``0.95``."""
+    """α -> the value a ``*_corrp_*`` map must exceed. ``0.05`` -> ``0.95``."""
     return 1.0 - float(alpha)
 
 
 def is_corrp_kind(kind: str) -> bool:
-    """True when *kind* names a 1−p map rather than a statistic."""
+    """True when *kind* names a 1-p map rather than a statistic."""
     from nvitk.measure.voxelwise import CORRP_KINDS
 
     return str(kind) in CORRP_KINDS or str(kind).endswith(("p_tstat", "p_fstat"))
@@ -197,10 +195,10 @@ def load_map(path: str | Path) -> Any:
 def resolve_band(
     *, lo: float | None = None, hi: float | None = None, alpha: float | None = None
 ) -> tuple[float, float]:
-    """Normalise a 1−p window to ``(lo, hi)``.
+    """Normalise a 1-p window to ``(lo, hi)``.
 
-    ``alpha`` is the older, coarser spelling of the same thing — ``alpha=0.05`` is the band
-    ``0.95 … 1.0``. It stays supported so existing callers keep working; an explicit *lo* wins.
+    ``alpha`` is the older, coarser spelling of the same thing: ``alpha=0.05`` is the band
+    ``0.95 ... 1.0``. It stays supported so existing callers keep working; an explicit *lo* wins.
     """
     if lo is None:
         lo = alpha_to_map_threshold(alpha if alpha is not None else 0.05)
@@ -221,10 +219,10 @@ def threshold_image(
 ) -> tuple[Any, float, float]:
     """Return *image* with out-of-band voxels zeroed, plus the ``(lo, hi)`` band used.
 
-    For a 1−p map everything outside the band is *not the result being looked at*, so it is zeroed
-    rather than merely hidden — a colour scale stretched over the whole 0…1 range would give
+    For a 1-p map everything outside the band is *not the result being looked at*, so it is zeroed
+    rather than merely hidden: a colour scale stretched over the whole 0...1 range would give
     p = 0.6 a visible colour. An upper bound below 1.0 is how you isolate a marginal shell
-    (0.95–0.99) from the voxels that pass overwhelmingly.
+    (0.95-0.99) from the voxels that pass overwhelmingly.
 
     For a statistic map nothing is zeroed here; the caller passes the threshold to nilearn, which
     handles a signed statistic symmetrically.
@@ -247,7 +245,7 @@ def significant_voxels(
     lo: float | None = None,
     hi: float | None = None,
 ) -> int:
-    """How many voxels fall in the band — the number a caption has to be able to quote."""
+    """How many voxels fall in the band: the number a caption has to be able to quote."""
     data = np.asarray(image.dataobj, dtype=float)
     if is_corrp_kind(kind):
         band_lo, band_hi = resolve_band(lo=lo, hi=hi, alpha=alpha)
@@ -316,9 +314,7 @@ def map_caption(
     return " ".join(parts)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Figure builders
-# ──────────────────────────────────────────────────────────────────────────────
 def _unlink_axes(figure: Any) -> Any:
     """Mark *figure* as having no axes the pane's x/y sliders should rescale.
 
@@ -351,17 +347,17 @@ def plot_voxelwise_surface(
     ``interactive`` picks the renderer the way the Statmodels pane's Interactive checkbox does
     everywhere else: a rotatable 3-D view (:func:`nilearn.plotting.view_img_on_surf`) or a static
     Matplotlib panel grid (:func:`nilearn.plotting.plot_img_on_surf`). Same map, same threshold,
-    same colours — only the medium changes.
+    same colours, only the medium changes.
 
     ``surface`` selects the geometry: ``"pial"`` folded, ``"infl"`` inflated (nilearn's
-    ``inflate=True``), ``"flat"`` — which has no view angle to pick, so the caller should hide the
+    ``inflate=True``), ``"flat"``, which has no view angle to pick, so the caller should hide the
     views control for it.
     """
     from nilearn import plotting
 
     thresholded, band_lo, band_hi = threshold_image(image, kind=kind, alpha=alpha, lo=lo, hi=hi)
     label = title or (f"{contrast} — {kind}" if contrast else kind)
-    # A 1−p map is one-sided and lives in [0, 1]; a t-map is signed and must keep a symmetric scale.
+    # A 1-p map is one-sided and lives in [0, 1]; a t-map is signed and must keep a symmetric scale.
     corrp = is_corrp_kind(kind)
     vmin = band_lo if corrp else None
     vmax = band_hi if corrp else None
@@ -434,7 +430,7 @@ def plot_voxelwise_glass(
         threshold=band_lo if corrp else "auto",
         cmap=cmap if corrp else "RdBu_r",
         colorbar=True,
-        # A 1−p map has no sign, so taking |value| would be a lie about a one-sided quantity.
+        # A 1-p map has no sign, so taking |value| would be a lie about a one-sided quantity.
         plot_abs=not corrp,
         symmetric_cbar=not corrp,
         vmin=band_lo if corrp else None,
@@ -460,7 +456,7 @@ def plot_voxelwise_slices(
     opacity: float = 1.0,
     title: str = "",
 ) -> Any:
-    """Orthogonal slices over the MNI152 template — the view that gives a cluster coordinates."""
+    """Orthogonal slices over the MNI152 template: the view that gives a cluster coordinates."""
     import matplotlib.pyplot as plt
     from nilearn import plotting
     from nilearn.datasets import load_mni152_template
@@ -468,7 +464,7 @@ def plot_voxelwise_slices(
     thresholded, band_lo, band_hi = threshold_image(image, kind=kind, alpha=alpha, lo=lo, hi=hi)
     corrp = is_corrp_kind(kind)
     fig = plt.figure(figsize=(9.0, 3.2))
-    # 'transparency' arrived in nilearn 0.12. On 0.11 an unknown keyword is not rejected here — it
+    # 'transparency' arrived in nilearn 0.12. On 0.11 an unknown keyword is not rejected here: it
     # is forwarded to matplotlib and blows up inside AxesImage.set(), which is what this filter
     # exists to prevent.
     transparency = float(np.clip(opacity, 0.05, 1.0))

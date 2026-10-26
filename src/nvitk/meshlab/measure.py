@@ -77,7 +77,7 @@ def principal_axes(obj: Mesh | PointCloud | np.ndarray) -> tuple[np.ndarray, np.
     """``(centre, axes, extents)``: PCA of the vertices / points.
 
     ``axes`` rows are unit vectors, largest spread first; ``extents`` the length
-    along each (max − min of the projections).
+    along each (max - min of the projections).
     """
     pts = points_of(obj)
     centre = pts.mean(axis=0)
@@ -152,9 +152,7 @@ def point_cloud_metrics(cloud: PointCloud) -> dict[str, Any]:
     return out
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Curvature
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def curvature(mesh: Mesh, kind: str = "mean") -> np.ndarray:
@@ -173,9 +171,7 @@ def curvature(mesh: Mesh, kind: str = "mean") -> np.ndarray:
     return np.nan_to_num(vals)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Distances
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def distance_to_surface(points: Any, surface: Mesh, *, signed: bool = False) -> np.ndarray:
@@ -233,7 +229,7 @@ def surface_distance_stats(a: Mesh | PointCloud, b: Mesh | PointCloud) -> dict[s
 
 
 def chamfer_distance(a: Any, b: Any) -> float:
-    """Mean nearest-neighbour distance a→b plus b→a (point sets)."""
+    """Mean nearest-neighbour distance a->b plus b->a (point sets)."""
     from scipy.spatial import cKDTree
 
     pa, pb = points_of(a), points_of(b)
@@ -242,9 +238,7 @@ def chamfer_distance(a: Any, b: Any) -> float:
     return float(d_ab.mean() + d_ba.mean())
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Cross-sections
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _polygon_area_3d(points: np.ndarray, normal: np.ndarray) -> float:
@@ -258,9 +252,9 @@ def _polygon_area_3d(points: np.ndarray, normal: np.ndarray) -> float:
 def cross_section(mesh: Mesh, origin: Sequence[float], normal: Sequence[float]) -> dict[str, Any]:
     """Cut *mesh* by a plane: contour loops, enclosed area and perimeter.
 
-    Returns ``{"loops": [ (K, 3) arrays ], "area": …, "perimeter": …}``; the area
+    Returns ``{"loops": [ (K, 3) arrays ], "area": ..., "perimeter": ...}``; the area
     is that of the outer loops minus nested ones only when they are separate
-    pieces — loops are summed by absolute area, which is right for the usual
+    pieces: loops are summed by absolute area, which is right for the usual
     case of disjoint cross-sections (vessels, organs).
     """
     normal = np.asarray(normal, dtype=float)

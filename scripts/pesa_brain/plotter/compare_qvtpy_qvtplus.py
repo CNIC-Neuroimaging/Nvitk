@@ -2,7 +2,7 @@
 """Compare per-subject, per-vessel flow_mean and PI between pipeline v2 and v3.
 
 Only the intersection of subjects and vessels (region_ids) present in both
-pipelines is compared. Generates Bland–Altman and correlation scatter plots.
+pipelines is compared. Generates Bland-Altman and correlation scatter plots.
 
 Examples::
 
@@ -187,7 +187,7 @@ def _plot_bland_altman_per_vessel(
     metric: dict[str, str],
     out_dir: Path,
 ) -> None:
-    """One Bland–Altman PNG per vessel."""
+    """One Bland-Altman PNG per vessel."""
     vessels_present = [v for v in _TERRITORY_ORDER if v in set(merged["region_id"])]
     for vessel in vessels_present:
         sub = merged[merged["region_id"] == vessel].dropna(subset=["v2", "v3"])

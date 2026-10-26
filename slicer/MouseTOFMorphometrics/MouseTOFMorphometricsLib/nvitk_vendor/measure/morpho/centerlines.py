@@ -274,7 +274,7 @@ def _enlargement_flags_on(s, r, pts, is_stenotic) -> np.ndarray:
 
 
 def refresh_centerline_result_metrics(res: dict) -> None:
-    """In-place: (re)compute every derived metric for a path result — geometry, curvature/torsion
+    """In-place: (re)compute every derived metric for a path result; geometry, curvature/torsion
     summaries, taper slope, and stenosis/enlargement detection (both MIS- and cross-section-radius
     based), writing all fields the export layer expects back into *res*.
     """
@@ -382,7 +382,7 @@ def refresh_centerline_result_metrics(res: dict) -> None:
 
 
 def _as_flag_array(values, n: int) -> np.ndarray:
-    """Coerce a per-point boolean-ish array to ``int`` 0/1 of length *n* (NaN → 0)."""
+    """Coerce a per-point boolean-ish array to ``int`` 0/1 of length *n* (NaN -> 0)."""
     if values is None:
         return np.zeros(n, dtype=int)
     arr = np.asarray(values, dtype=float)
@@ -418,7 +418,7 @@ def summarize_segment_result(res: dict) -> dict:
     their reference radius is established over the whole parent vessel and often
     lies proximal to the segment, so re-running detection on an isolated distal
     piece would silently lose lesions (and flag uniformly narrow segments as
-    normal). The per-point flags transferred from the measured root→terminal
+    normal). The per-point flags transferred from the measured root->terminal
     paths are aggregated instead.
     """
     pts = centerline_points_from_result(res)
@@ -451,7 +451,7 @@ def summarize_segment_result(res: dict) -> dict:
     ref_valid = ref[np.isfinite(ref)]
     res["radius_ref_mm"] = float(np.nanmedian(ref_valid)) if ref_valid.size else np.nan
 
-    # -- stenosis, aggregated from the transferred per-point flags -----------
+    # stenosis, aggregated from the transferred per-point flags
     # stenosis_total_length bit-ANDs consecutive flags, so it needs an integer array.
     is_stenotic = _as_flag_array(res.get("is_stenotic"), n)
     sten_pct = np.asarray(res.get("stenosis_percent_point", np.full(n, np.nan)), dtype=float)
@@ -466,7 +466,7 @@ def summarize_segment_result(res: dict) -> dict:
     res["stenosis_segments_point_idx"] = json.dumps(sten_runs)
     res["stenosis_segments_detail_json"] = segment_detail_json(s, sten_pct, sten_runs)
 
-    # -- enlargement, likewise ----------------------------------------------
+    # enlargement, likewise
     is_enlarged = _as_flag_array(res.get("is_enlarged"), n)
     enl_pct = np.asarray(res.get("enlargement_percent_point", np.full(n, np.nan)), dtype=float)
     enl_runs = binary_runs(is_enlarged)
@@ -492,7 +492,7 @@ def slice_centerline_result(res: dict, start_idx: int, *, redetect: bool = True)
     With ``redetect=False`` the stenosis/enlargement point flags established on
     the full path are kept and merely re-aggregated
     (:func:`summarize_segment_result`), instead of re-running detection on the
-    truncated path — the reference radius usually lies in the removed prefix.
+    truncated path: the reference radius usually lies in the removed prefix.
     """
     n = len(res["x_mm"])
     start_idx = int(np.clip(start_idx, 0, max(0, n - 1)))
@@ -532,14 +532,14 @@ def deduplicate_path_results(
 ) -> Tuple[List[dict], List[str]]:
     """Trim path results so each piece of vessel is represented exactly once.
 
-    Root→terminal paths of the same component all traverse the shared proximal
+    Root->terminal paths of the same component all traverse the shared proximal
     trunk, so summing their lengths multiply-counts it. Paths are processed
     longest-first against a growing reference cloud; the leading run of points
     already covered by an earlier path is removed. A path left with fewer than
     *min_points* unique points is dropped entirely.
 
     Returns ``(kept_results, dropped_path_ids)``. Caliber flags are preserved
-    rather than re-detected — see :func:`slice_centerline_result`.
+    rather than re-detected; see :func:`slice_centerline_result`.
     """
     if len(path_results) <= 1:
         return list(path_results), []
@@ -1162,7 +1162,7 @@ def analyze_centerline_poly(
         "enlargement_reference_radius_point": enlarg.r_ref_per_point,
         "enlargement_threshold_radius_point": (1.0 + _cfg.ENLARGEMENT_THRESHOLD_PCT / 100.0) * enlarg.r_ref_per_point,
         # The radius the enlargement test used (cow: cross-section here, the detection radius when
-        # a pruned path is re-measured) — the lesion table measures severity on the same one.
+        # a pruned path is re-measured); the lesion table measures severity on the same one.
         "enlargement_radius_mm": enl_radius,
         "length_mm": float(L), "chord_length_mm": float(C), "tortuosity_dm": float(T),
         "curvature_mean_1_per_mm": float(k_mean), "curvature_median_1_per_mm": float(k_median),

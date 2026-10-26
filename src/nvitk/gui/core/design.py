@@ -1,18 +1,18 @@
 """Shared visual language for every nvitk Qt surface.
 
 One palette, one spacing scale, one stylesheet, and the handful of primitives
-(:class:`Card`, :func:`chip`, :func:`kv_row`, …) that the panels compose. Panels
+(:class:`Card`, :func:`chip`, :func:`kv_row`, ...) that the panels compose. Panels
 should reach for a token or a primitive here rather than spelling out a hex
 value, so a change to the look lands everywhere at once.
 
-The palette is deliberately low-contrast — near-neutral greys carrying the
+The palette is deliberately low-contrast: near-neutral greys carrying the
 structure, with saturated colour reserved for the few things that genuinely
 signal something (an accent for selection, amber for a translation column, the
 anatomical axis colours).
 
 Two themes share that structure. The constants below *are* the dark theme, the
 one Napari's own chrome is built for; :data:`LIGHT_TOKENS` overrides each of them
-for the light theme. :func:`toggle_theme` swaps between the two live — it rebinds
+for the light theme. :func:`toggle_theme` swaps between the two live: it rebinds
 the tokens, rebuilds the stylesheet, rewrites the inline stylesheets already on
 screen, and moves Napari's chrome with them. Reach for a token or a primitive
 here rather than a hex value and a panel follows the theme for free.
@@ -39,9 +39,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Palette
-# ──────────────────────────────────────────────────────────────────────────────
 #: Page background, behind cards and panes.
 COLOR_BG = "#2b2b2b"
 #: Card / raised surface, one step lighter than the page.
@@ -73,7 +71,7 @@ COLOR_BORDER_OFF = "#3a3a3a"
 #: The one saturated colour in the interface: selection, focus, active state.
 COLOR_ACCENT = "#ffa400"
 #: Filled backgrounds behind light text (pressed buttons, selected rows), dark
-#: enough that white stays legible on it. The same amber in both themes — it is
+#: enough that white stays legible on it. The same amber in both themes: it is
 #: read against its own white text, not against the page.
 COLOR_ACCENT_DEEP = "#b36f00"
 #: Text and icons drawn on top of :data:`COLOR_ACCENT_DEEP`.
@@ -86,7 +84,7 @@ COLOR_ERROR = "#e06c6c"
 #: they stay R/L-red, A/P-green, S/I-blue whatever the interface accent is.
 COLOR_AXIS_SI = "#6fa8dc"
 
-#: Anatomical direction → axis chip colour, so an orientation reads at a glance.
+#: Anatomical direction -> axis chip colour, so an orientation reads at a glance.
 AXIS_COLORS: dict[str, str] = {
     "R": COLOR_ERROR,
     "L": COLOR_ERROR,
@@ -115,15 +113,13 @@ SIGNIFICANCE_COLORS: dict[str, str] = {
     ".": "#4a4a2a",
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Themes
-# ──────────────────────────────────────────────────────────────────────────────
-#: The light theme, token by token. Every name above appears here exactly once —
+#: The light theme, token by token. Every name above appears here exactly once:
 #: :func:`_check_palettes` fails the import if one is missing, so a token added to
 #: the dark block cannot be forgotten here.
 #:
 #: Not the dark values inverted: light chrome needs its *text* darkened and its
-#: signal colours deepened, or they wash out. The accent is the clearest case —
+#: signal colours deepened, or they wash out. The accent is the clearest case:
 #: the dark theme's #ffa400 on a white page is barely a colour, so the light one
 #: carries the same amber several steps down.
 LIGHT_TOKENS: dict[str, Any] = {
@@ -142,7 +138,7 @@ LIGHT_TOKENS: dict[str, Any] = {
     "COLOR_SCROLL": "#c2c2c9",
     "COLOR_SCROLL_HOVER": "#a9a9b2",
     "COLOR_BUTTON_OFF": "#ededf0",
-    # One step off the fill, the way the dark block has it — which lands on the
+    # One step off the fill, the way the dark block has it, which lands on the
     # same value as COLOR_CONTROL in both themes. They have to agree: a single hex
     # cannot have two answers when a live restyle maps it back.
     "COLOR_BORDER_OFF": "#e7e7ea",
@@ -154,7 +150,7 @@ LIGHT_TOKENS: dict[str, Any] = {
     "COLOR_WARN": "#a96a00",
     "COLOR_ERROR": "#c02b2b",
     "COLOR_AXIS_SI": "#2f6fb0",
-    # Anatomy keeps its hues — R/L red, A/P green, S/I blue — at the light
+    # Anatomy keeps its hues (R/L red, A/P green, S/I blue) at the light
     # theme's darker values, so a chip still reads as its axis on a white page.
     "AXIS_COLORS": {
         "R": "#c02b2b",
@@ -186,7 +182,7 @@ LIGHT_TOKENS: dict[str, Any] = {
 #: above stays the single place a dark value is written.
 DARK_TOKENS: dict[str, Any] = {name: globals()[name] for name in LIGHT_TOKENS}
 
-#: Theme name → its token table.
+#: Theme name -> its token table.
 THEMES: dict[str, dict[str, Any]] = {"dark": DARK_TOKENS, "light": LIGHT_TOKENS}
 
 #: Preferences key holding the theme to open with.
@@ -196,7 +192,7 @@ _ACTIVE_THEME = "dark"
 
 
 def _hex_values(tokens: dict[str, Any]) -> dict[str, str]:
-    """Token → hex, flattened so the dict-valued tokens take part one entry each."""
+    """Token -> hex, flattened so the dict-valued tokens take part one entry each."""
     out: dict[str, str] = {}
     for name, value in tokens.items():
         if isinstance(value, dict):
@@ -243,7 +239,7 @@ _check_palettes()
 
 
 def active_theme() -> str:
-    """Name of the theme in force — ``"dark"`` or ``"light"``."""
+    """Name of the theme in force: ``"dark"`` or ``"light"``."""
     return _ACTIVE_THEME
 
 
@@ -272,7 +268,7 @@ def _rebind_tokens(outgoing: dict[str, Any], incoming: dict[str, Any]) -> None:
     """Point every token at the incoming theme's value, here and wherever it was copied.
 
     ``from ...design import COLOR_TEXT`` binds a *copy* into the importing module,
-    which updating this module's globals cannot reach — and there are a few dozen
+    which updating this module's globals cannot reach, and there are a few dozen
     such copies. Each one is rebound by name, but only while it still holds the
     outgoing theme's value: a module that computed or overrode its own colour is
     left alone.
@@ -288,13 +284,11 @@ def _rebind_tokens(outgoing: dict[str, Any], incoming: dict[str, Any]) -> None:
             try:
                 if getattr(module, token, None) == outgoing[token]:
                     setattr(module, token, value)
-            except Exception:  # noqa: BLE001 — a module that refuses is not fatal
+            except Exception:  # noqa: BLE001 (a module that refuses is not fatal)
                 continue
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Spacing
-# ──────────────────────────────────────────────────────────────────────────────
 #: Gap between tightly related controls on one row.
 SPACE_TIGHT = 6
 #: Standard gap between sibling widgets.
@@ -305,9 +299,7 @@ SPACE_LOOSE = 14
 PAD = 12
 RADIUS = 5
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Stylesheet
-# ──────────────────────────────────────────────────────────────────────────────
 def stylesheet() -> str:
     """The application stylesheet, built from the tokens as they stand now.
 
@@ -668,8 +660,8 @@ _NAPARI_ICON = {"dark": "#cfcfcf", "light": "#3c3c44"}
 def napari_theme_colors(theme: str | None = None) -> dict[str, str]:
     """The nvitk palette expressed in Napari's theme vocabulary.
 
-    Napari paints its own chrome — the layer list, the dims sliders, the menus,
-    the area around the canvas — from a registered theme rather than from a
+    Napari paints its own chrome (the layer list, the dims sliders, the menus,
+    the area around the canvas) from a registered theme rather than from a
     stylesheet, so matching it to the docks means restating the same tokens in
     its field names rather than styling those widgets ourselves.
 
@@ -722,8 +714,8 @@ def register_napari_theme(theme: str | None = None) -> str:
 
 
 #: Qt property marking a widget :func:`apply_theme` owns. A live theme switch
-#: restyles these trees and leaves everything else — Napari's own widgets above
-#: all — to whoever styled them.
+#: restyles these trees and leaves everything else (Napari's own widgets above
+#: all) to whoever styled them.
 THEMED_PROPERTY = "nvitkThemed"
 
 
@@ -758,9 +750,7 @@ def apply_theme(widget: QWidget) -> None:
     widget.setStyleSheet(stylesheet())
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Switching
-# ──────────────────────────────────────────────────────────────────────────────
 def set_theme(name: str) -> str:
     """Make *name* the theme in force, without touching anything already drawn.
 
@@ -790,7 +780,7 @@ def _themed_roots() -> list[QWidget]:
         try:
             if widget.property(THEMED_PROPERTY):
                 roots.append(widget)
-        except Exception:  # noqa: BLE001 — a widget mid-destruction is not ours
+        except Exception:  # noqa: BLE001 (a widget mid-destruction is not ours)
             continue
     return roots
 
@@ -800,8 +790,8 @@ def _remap_item_colours(widget: QWidget, mapping: dict[str, str]) -> int:
 
     A stylesheet cannot reach these: ``item.setBackground(QColor(...))`` stores the
     colour in the item, which is why the QC review table's pass/fail tint and the
-    DICOM tree's key colouring would otherwise keep the theme they were built in —
-    dark text on a light page — until whatever refreshes them ran again.
+    DICOM tree's key colouring would otherwise keep the theme they were built in (
+    dark text on a light page) until whatever refreshes them ran again.
 
     Views that paint through a model (the statmodels tables answer
     ``Qt.BackgroundRole`` from :data:`SIGNIFICANCE_COLORS`) need none of this: the
@@ -838,7 +828,7 @@ def _remap_item_colours(widget: QWidget, mapping: dict[str, str]) -> int:
                 if new:
                     set_(QBrush(QColor(new)))
                     count += 1
-            except Exception:  # noqa: BLE001 — one odd item must not stop the rest
+            except Exception:  # noqa: BLE001 (one odd item must not stop the rest)
                 continue
         return count
 
@@ -868,8 +858,8 @@ def _restyle_live_widgets(mapping: dict[str, str]) -> int:
     """Move the widgets already on screen to the new palette; returns how many changed.
 
     Three passes over the nvitk trees, because their colour arrives three ways. The
-    panels' own inline stylesheets — ``setStyleSheet(f"color: {COLOR_MUTED}")`` and
-    its several dozen siblings — have the old hex baked into them, so those are
+    panels' own inline stylesheets, ``setStyleSheet(f"color: {COLOR_MUTED}")`` and
+    its several dozen siblings, have the old hex baked into them, so those are
     rewritten value by value through *mapping*; so are the brushes painted into
     list, table and tree items. The themed roots then have the fresh application
     stylesheet and palette applied over the top.
@@ -890,7 +880,7 @@ def _restyle_live_widgets(mapping: dict[str, str]) -> int:
                         widget.setStyleSheet(swapped)
                         changed += 1
                 changed += _remap_item_colours(widget, mapping)
-            except Exception:  # noqa: BLE001 — skip anything being destroyed
+            except Exception:  # noqa: BLE001 (skip anything being destroyed)
                 continue
     for root in roots:
         try:
@@ -913,7 +903,7 @@ def _current_napari_viewer() -> Any:
         return None
     try:
         return napari.current_viewer()
-    except Exception:  # noqa: BLE001 — no viewer, or a Napari mid-teardown
+    except Exception:  # noqa: BLE001 (no viewer, or a Napari mid-teardown)
         return None
 
 
@@ -925,7 +915,7 @@ def _set_napari_theme(viewer: Any, name: str) -> None:
     theme_id = register_napari_theme(name)
     try:
         viewer.theme = theme_id
-    except Exception:  # noqa: BLE001 — a Napari whose theme API moved is not fatal
+    except Exception:  # noqa: BLE001 (a Napari whose theme API moved is not fatal)
         pass
 
 
@@ -935,7 +925,7 @@ _THEME_LISTENERS: list[Any] = []
 
 
 def add_theme_listener(callback: Callable[[], Any]) -> None:
-    """Call *callback()* after every :func:`switch_theme` — for content drawn with the colour
+    """Call *callback()* after every :func:`switch_theme`: for content drawn with the colour
     tokens but outside any stylesheet, such as a Matplotlib figure that must be redrawn. A bound
     method is held weakly (it goes with its object); a plain function is kept."""
     if hasattr(callback, "__self__") and hasattr(callback, "__func__"):
@@ -953,7 +943,7 @@ def _notify_theme_listeners() -> None:
         alive.append(ref)
         try:
             callback()
-        except Exception:  # noqa: BLE001 — a listener on a widget mid-destruction
+        except Exception:  # noqa: BLE001 (a listener on a widget mid-destruction)
             continue
     _THEME_LISTENERS[:] = alive
 
@@ -981,7 +971,7 @@ def switch_theme(name: str, *, viewer: Any = None, remember: bool = True) -> str
             from nvitk.gui.core.prefs import save_prefs
 
             save_prefs({THEME_PREF_KEY: target})
-        except Exception:  # noqa: BLE001 — an unwritable config is not fatal
+        except Exception:  # noqa: BLE001 (an unwritable config is not fatal)
             pass
     return target
 
@@ -1003,7 +993,7 @@ def stored_theme() -> str:
 
 
 def bar_tool_button(object_name: str, parent: QWidget | None = None, *, min_width: int = 78) -> QToolButton:
-    """A labelled button for someone else's bar — a tab corner, a dock header.
+    """A labelled button for someone else's bar: a tab corner, a dock header.
 
     Its geometry is set explicitly: a host stylesheet that clamps button sizes
     otherwise leaves it laid out, clickable and blank.
@@ -1051,9 +1041,7 @@ def theme_toggle_button(viewer: Any = None, parent: QWidget | None = None) -> QT
     return button
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Primitives
-# ──────────────────────────────────────────────────────────────────────────────
 def mono_font(size: int = 10) -> QFont:
     """Monospace font at *size* points, for numbers that should stay in columns."""
     font = QFont("Monospace")
@@ -1287,7 +1275,7 @@ def style_image_figure(fig: Any) -> None:
     """Theme a Matplotlib figure that carries an image, for the dark chrome.
 
     Greyscale is read against dark and these canvases sit inside Napari's own dark
-    viewer, so — unlike :func:`style_figure`, whose plots stay report-ready white —
+    viewer, so (unlike :func:`style_figure`, whose plots stay report-ready white)
     an image figure takes the surrounding background.
     """
     fig.patch.set_facecolor(COLOR_BG)

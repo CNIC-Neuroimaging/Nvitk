@@ -1,4 +1,4 @@
-"""qvtpy stage 4t: per-timepoint local CD segmentation → ``seg_4dflow_4d``.
+"""qvtpy stage 4t: per-timepoint local CD segmentation -> ``seg_4dflow_4d``.
 
 **Inputs**
 
@@ -63,9 +63,7 @@ setup(globals())
 log = Logger()
 
 
-# ---------------------------------------------------------------------------
 # Path helpers
-# ---------------------------------------------------------------------------
 
 
 def _default_nvitk_src_dir() -> Path:
@@ -110,9 +108,7 @@ def _outputs_complete(out_dir: Path, n_timepoints: int) -> bool:
     return all(_meta_path_for_timepoint(out_dir, t).is_file() for t in range(n_timepoints))
 
 
-# ---------------------------------------------------------------------------
 # Temporal QC helpers
-# ---------------------------------------------------------------------------
 
 
 def dice_binary(mask_a: np.ndarray, mask_b: np.ndarray) -> float | None:
@@ -271,9 +267,7 @@ def _segmentation_meta_for_timepoint(
     }
 
 
-# ---------------------------------------------------------------------------
 # Stage 4t: per-timepoint segmentation
-# ---------------------------------------------------------------------------
 
 
 def run_subject(
@@ -410,29 +404,13 @@ def run_subject(
             encoding="utf-8",
         )
 
-    # venous_polylines: dict[str, Any] = {}
-    # venous_label_by_name: dict[str, int] = {}
-    # if centerline_meta_path(s3).is_file():
-    #     meta3 = json.loads(centerline_meta_path(s3).read_text(encoding="utf-8"))
-    #     venous_label_by_name = {
-    #         str(k): int(v) for k, v in (meta3.get("venous_label_by_name") or {}).items()
-    #     }
-    #     venous_polylines = load_venous_centerlines(s3, min_points=3, meta=meta3)
-    # export_centerlines_from_segmentation(
-    #     seg_stack[..., 0],
-    #     out_dir,
-    #     metadata=ref_meta,
-    #     venous_polylines=venous_polylines,
-    #     venous_label_by_name=venous_label_by_name,
-    # )
+    # Centerlines are not exported from the 3D+t segmentation; stage 3 provides them.
 
     log.info(f"[{subject}] stage4t segmentation ({n_t} frames) -> {seg_path}")
     return out_dir
 
 
-# ---------------------------------------------------------------------------
 # CLI + SGE submission
-# ---------------------------------------------------------------------------
 
 
 def _stage4t_cli_options(func):

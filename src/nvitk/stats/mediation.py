@@ -1,5 +1,5 @@
 """
-Mediation analysis — three engines over one common result shape.
+Mediation analysis: three engines over one common result shape.
 
 Description
 -----------
@@ -25,16 +25,14 @@ notebook plots use), so the plotting helpers and the GUI treat them interchangea
 
 Conventions
 -----------
-Paths are labeled ``a`` (x → m), ``b`` (m → y | x), ``c'`` (x → y | m, the direct effect),
+Paths are labeled ``a`` (x -> m), ``b`` (m -> y | x), ``c'`` (x -> y | m, the direct effect),
 ``Indirect`` (a·b), ``Direct`` (= c'), and ``Total`` (indirect + direct). Bootstrap p-values are
-two-sided percentile p-values: ``2 · min(P(θ ≤ 0), P(θ ≥ 0))``.
+two-sided percentile p-values: ``2 · min(P(θ <= 0), P(θ >= 0))``.
 """
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
 
@@ -72,9 +70,7 @@ RESULT_COLUMNS = ("path", "coef", "ci_low", "ci_high", "pval", "n", "engine", "l
 _PATH_ORDER = ("a", "b", "c'", "Indirect", "Direct", "Total")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Specification
-# ──────────────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class MediationSpec:
     """
@@ -83,7 +79,7 @@ class MediationSpec:
     Parameters
     ----------
     x, m, y : str
-        Exposure, mediator, outcome column names. These must be bare frame columns — a transformed
+        Exposure, mediator, outcome column names. These must be bare frame columns: a transformed
         term belongs in a derived column, not here, because the engines look coefficients up by name.
     covariates : tuple of str
         Adjusted for in both the mediator and the outcome model.
@@ -108,7 +104,7 @@ class MediationSpec:
     ci: float = 0.95
 
     def formulas(self) -> tuple[str, str]:
-        """``(mediator_formula, outcome_formula)`` — ``m ~ x + covars`` and ``y ~ m + x + covars``."""
+        """``(mediator_formula, outcome_formula)``: ``m ~ x + covars`` and ``y ~ m + x + covars``."""
         covars = list(self.covariates)
         formula_m = " + ".join([self.x, *covars])
         formula_y = " + ".join([self.m, self.x, *covars])
@@ -169,9 +165,7 @@ class MediationSpec:
         )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Engine (a) — MixedLM subject-cluster bootstrap
-# ──────────────────────────────────────────────────────────────────────────────
+# Engine (a): MixedLM subject-cluster bootstrap
 def _bootstrap_summary(values: np.ndarray, *, q_lo: float, q_hi: float) -> dict[str, Any]:
     """Percentile CI, mean and two-sided bootstrap p-value of a draw distribution."""
     finite = values[np.isfinite(values)]
@@ -219,7 +213,7 @@ def bootstrap_mediation_mixedlm_by_subject(
        group. Refit both models and record ``a·b``, ``c'`` and their sum.
     3. Summarize each path by its percentile interval and a two-sided bootstrap p-value.
 
-    Resampling whole subjects — rather than rows — is what keeps the within-subject correlation in
+    Resampling whole subjects (rather than rows) is what keeps the within-subject correlation in
     the resampled data; row-wise resampling would understate the uncertainty.
 
     Parameters
@@ -245,7 +239,7 @@ def bootstrap_mediation_mixedlm_by_subject(
     Raises
     ------
     ValueError
-        If the observed-data fits do not expose *x* / *m* as named parameters — which happens when a
+        If the observed-data fits do not expose *x* / *m* as named parameters, which happens when a
         term is wrapped (``C(x)``) or transformed in the formula. The message lists what is available.
     """
     fit_kwargs = dict(fit_kwargs or {})
@@ -279,7 +273,7 @@ def bootstrap_mediation_mixedlm_by_subject(
         )
         return res_m, res_y
 
-    # ---- 1. Point estimates on the observed data ------------------------------
+    # 1. Point estimates on the observed data
     res_m0, res_y0 = _fit_pair(df)
     if x not in res_m0.params.index:
         raise ValueError(
@@ -298,7 +292,7 @@ def bootstrap_mediation_mixedlm_by_subject(
     cprime0 = float(res_y0.params[x])
     ind0 = a0 * b0
 
-    # ---- 2. Cluster bootstrap over subjects ------------------------------------
+    # 2. Cluster bootstrap over subjects
     # Index the frame by subject once: rebuilding each draw with a boolean scan per subject would be
     # quadratic in the number of subjects and dominate the runtime.
     by_subject: dict[Any, pd.DataFrame] = {
@@ -344,7 +338,7 @@ def bootstrap_mediation_mixedlm_by_subject(
         if progress is not None:
             progress(draw + 1, int(n_boot))
 
-    # ---- 3. Summarize ----------------------------------------------------------
+    # 3. Summarize
     alpha = 1.0 - float(ci)
     q_lo, q_hi = 100 * (alpha / 2.0), 100 * (1.0 - alpha / 2.0)
     dist = {k: np.asarray(v, dtype=float) for k, v in draws.items()}
@@ -410,9 +404,7 @@ def mediation_boot_to_stats_df(boot_res: dict[str, Any], *, include_total: bool 
     return _finalize_result_frame(frame, engine="mixedlm_bootstrap")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Engine (b) — pingouin, per grouping level
-# ──────────────────────────────────────────────────────────────────────────────
+# Engine (b): pingouin, per grouping level
 def _canonical_pingouin_path(path: str, *, x: str, m: str, y: str) -> str:
     """
     Relabel pingouin's regression-style path names.
@@ -421,7 +413,7 @@ def _canonical_pingouin_path(path: str, *, x: str, m: str, y: str) -> str:
     ``a`` path and maps cleanly. The second does **not** map to ``b``: pingouin reports the
     coefficient of M in ``Y ~ M + covariates``, without X, whereas the ``b`` that multiplies into the
     indirect effect comes from ``Y ~ M + X + covariates``. On a 4000-row simulation with a true
-    ``b = 0.5155`` adjusted, pingouin's row reads ``0.7402`` — so it is labeled ``b (unadjusted)``
+    ``b = 0.5155`` adjusted, pingouin's row reads ``0.7402``, so it is labeled ``b (unadjusted)``
     and kept out of the default forest, where sitting next to Indirect/Direct would invite reading
     ``a × b`` off the plot and getting the wrong number.
     """
@@ -570,9 +562,7 @@ def pingouin_mediation_by_level(
     return by_level, summary
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Engine (c) — statsmodels Mediation (pooled OLS)
-# ──────────────────────────────────────────────────────────────────────────────
+# Engine (c): statsmodels Mediation (pooled OLS)
 def statsmodels_mediation(
     df: pd.DataFrame,
     *,
@@ -588,7 +578,7 @@ def statsmodels_mediation(
     ``statsmodels.stats.mediation.Mediation`` with OLS mediator and outcome models.
 
     The models are fitted on the pooled frame, so repeated (subject × territory) rows count as
-    independent observations — see :data:`POOLED_OLS_NOTE`, which is attached to the returned frame
+    independent observations; see :data:`POOLED_OLS_NOTE`, which is attached to the returned frame
     as ``frame.attrs["note"]``.
 
     Parameters
@@ -643,9 +633,7 @@ def statsmodels_mediation(
     return frame
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Common result shape
-# ──────────────────────────────────────────────────────────────────────────────
 def _finalize_result_frame(frame: pd.DataFrame, *, engine: str, level: str | None = None) -> pd.DataFrame:
     """Give *frame* the canonical column set, ordering and legacy CI aliases."""
     out = frame.copy()
@@ -846,9 +834,7 @@ def render_mediation_info(bundle: Mapping[str, Any]) -> str:
     return buffer.getvalue()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Plots
-# ──────────────────────────────────────────────────────────────────────────────
 def _ci_columns(frame: pd.DataFrame) -> tuple[str, str]:
     """Pick the CI column spelling present in *frame* (canonical or notebook-legacy)."""
     if "ci_low" in frame.columns and "ci_high" in frame.columns:
@@ -1006,7 +992,7 @@ def plot_partial_paths_mediation(
     Partial-regression plots of the ``a`` and ``b`` paths.
 
     Left: ``m`` against ``x``, both residualized on the covariates. Right: ``y`` against ``m``, both
-    residualized on ``x`` + covariates — the adjusted relationship the ``b`` coefficient describes.
+    residualized on ``x`` + covariates; the adjusted relationship the ``b`` coefficient describes.
     These are OLS partial plots, offered as a visual check rather than as the mixed-model estimate.
     """
     import matplotlib.pyplot as plt
@@ -1019,7 +1005,7 @@ def plot_partial_paths_mediation(
 
     fig, axes = plt.subplots(1, 2, figsize=figsize)
 
-    # ---- a path: residual(m | covars) vs residual(x | covars) ------------------
+    # a path: residual(m | covars) vs residual(x | covars)
     if covars:
         rx = _residualize(data[x], data[covars])
         rm = _residualize(data[m], data[covars])
@@ -1030,7 +1016,7 @@ def plot_partial_paths_mediation(
     axes[0].set_xlabel(f"{x} residualized on covariates")
     axes[0].set_ylabel(f"{m} residualized on covariates")
 
-    # ---- b path: residual(y | x+covars) vs residual(m | x+covars) --------------
+    # b path: residual(y | x+covars) vs residual(m | x+covars)
     rm_x = _residualize(data[m], data[[x, *covars]])
     ry_x = _residualize(data[y], data[[x, *covars]])
     sns.regplot(x=rm_x, y=ry_x, ax=axes[1], scatter_kws={"alpha": 0.6}, line_kws={"color": "#55A868"})
@@ -1042,9 +1028,7 @@ def plot_partial_paths_mediation(
     return fig
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Backwards compatibility
-# ──────────────────────────────────────────────────────────────────────────────
 def bootstrap_mediation_by_subject(
     df,
     formula_m,

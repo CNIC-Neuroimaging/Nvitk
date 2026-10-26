@@ -1,4 +1,4 @@
-"""``nvitk-voxelwise`` CLI — mass-univariate voxelwise analysis with FSL ``randomise``."""
+"""``nvitk-voxelwise`` CLI: mass-univariate voxelwise analysis with FSL ``randomise``."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ PIPELINE_ID = "voxelwise"
 CONTAINER_IMAGES = "/nvitk/images/"
 
 #: The two optional single-file inputs travel with the images, so on the ``--from-source local``
-#: path they need no mount of their own — they arrive inside the uploaded inputs directory under
+#: path they need no mount of their own: they arrive inside the uploaded inputs directory under
 #: these fixed names.
 CONTAINER_EXCLUDE_NAME = "exclude.csv"
 CONTAINER_MASK_NAME = "mask_input.nii.gz"
@@ -30,9 +30,7 @@ CONTAINER_EXCLUDE_CSV = f"{CONTAINER_IMAGES}{CONTAINER_EXCLUDE_NAME}"
 CONTAINER_MASK = f"{CONTAINER_IMAGES}{CONTAINER_MASK_NAME}"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# SGE settings (``.nvitk/sge.json`` → ``pipelines.voxelwise``)
-# ──────────────────────────────────────────────────────────────────────────────
+# SGE settings (``.nvitk/sge.json`` -> ``pipelines.voxelwise``)
 def _sge_settings() -> dict[str, object]:
     """The merged ``defaults`` + ``pipelines.voxelwise`` block, read lazily.
 
@@ -46,7 +44,7 @@ def _sge_settings() -> dict[str, object]:
 
 #: Where the uploaded cohort lands, relative to the results root. Kept inside the output tree
 #: rather than in a shared staging area so one analysis is one self-contained directory on the
-#: cluster — it needs no extra config key, and it is removed with the results.
+#: cluster: it needs no extra config key, and it is removed with the results.
 INPUTS_SUBDIR = "inputs"
 
 
@@ -95,10 +93,10 @@ def _verify_ssh(host: str, user: str, password: str) -> None:
 
 
 def _resolve_selection(**kw) -> tuple[list, int, int]:
-    """Work out which images the analysis will actually use, locally.
+    """Work out which images the analysis will use, locally.
 
     Returns ``(images, n_found, n_cohort)``. This is the same resolution the worker performs
-    inside the container — run here only to decide *what to upload*, so a 4000-file directory
+    inside the container: run here only to decide *what to upload*, so a 4000-file directory
     sends the few hundred volumes the design keeps rather than the whole tree.
     """
     from nvitk.db.repo import get_repo
@@ -178,10 +176,10 @@ def _upload_inputs(
 ) -> None:
     """Send ``(local, remote)`` *pairs* and *refresh* to ``{out}/inputs/``.
 
-    *pairs* skip a remote file of the same size — what makes re-running a cohort cheap. *refresh*
+    *pairs* skip a remote file of the same size: what makes re-running a cohort cheap. *refresh*
     is always sent: it holds the small files uploaded under fixed names (``design.mat``,
-    ``mask_input…``, ``exclude.csv``), where a different file of the same size is not just
-    possible but likely — two designs over the same subjects differ in values, not in length.
+    ``mask_input...``, ``exclude.csv``), where a different file of the same size is not just
+    possible but likely; two designs over the same subjects differ in values, not in length.
     """
     from nvitk.cluster.remote_transfer import cluster_session, upload_files
 
@@ -245,7 +243,7 @@ def _submit_sge(
     fragments inside this one job, on the slots SGE granted (``NSLOTS``).
 
     ``qsub`` does not exist on a workstation, so this never shells out to it directly: the script
-    is written locally, published over sshfs, and executed over SSH — the same six steps the qvtpy and
+    is written locally, published over sshfs, and executed over SSH; the same six steps the qvtpy and
     pesa_fat pipelines take.
     """
     from nvitk.cluster import sge_json as sj
@@ -334,7 +332,7 @@ def _submit_sge(
         click.echo("(dry run — nothing uploaded, nothing submitted)")
         return
 
-    # ---- credentials, then transfer, then submit -----------------------------
+    # credentials, then transfer, then submit
     host = user = password = ""
     if not emit_script or not no_remote:
         host, user, password = _ssh_credentials(remote_host, remote_user)
@@ -391,9 +389,7 @@ def _fsl_status():
     return fsl_backend_status()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Shared options
-# ──────────────────────────────────────────────────────────────────────────────
 def cohort_options(f):
     """Attach the image-scan and cohort-selection options shared by ``run``, ``merge`` and ``design``."""
     f = click.option(
@@ -544,8 +540,8 @@ def submission_options(source_help: str):
 def friendly_errors(f):
     """Turn the resolvers' ``ValueError``/``FileNotFoundError`` into a clean Click error.
 
-    Those messages are written for a person — they name the offending id, the missing column, the
-    registered alternatives — and a traceback around them buries exactly that.
+    Those messages are written for a person (they name the offending id, the missing column, the
+    registered alternatives), and a traceback around them buries exactly that.
     """
     from functools import wraps
 
@@ -576,9 +572,7 @@ def main() -> None:
     """
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # cohorts
-# ──────────────────────────────────────────────────────────────────────────────
 @main.command("cohorts")
 @friendly_errors
 def cmd_cohorts() -> None:
@@ -604,9 +598,7 @@ def cmd_cohorts() -> None:
             click.echo(f"  {option.pipeline_id:<20} {option.n_subjects:>6} subject(s)")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # design
-# ──────────────────────────────────────────────────────────────────────────────
 @main.command("design")
 @cohort_options
 @design_options
@@ -625,7 +617,7 @@ def cmd_design(
     pipeline_kind: str, feature: str, grouping: str, atlas: str | None,
     out_dir: Path,
 ) -> None:
-    """Build and write the design matrix and contrasts — no FSL, no permutations.
+    """Build and write the design matrix and contrasts: no FSL, no permutations.
 
     Run this first on a new analysis: it reports the intersection and validates the GLM without
     spending an hour on a design that was never going to fit.
@@ -699,9 +691,7 @@ def cmd_design(
     click.echo(f"Wrote {mat}\nWrote {con}\nWrote {out_dir / 'subjects.txt'}")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # merge
-# ──────────────────────────────────────────────────────────────────────────────
 @main.command("merge")
 @cohort_options
 @click.option(
@@ -752,9 +742,7 @@ def cmd_merge(
     click.echo(f"Wrote {out} ({len(images)} volume(s))\nWrote {order}")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # report
-# ──────────────────────────────────────────────────────────────────────────────
 @main.command("report")
 @click.argument("results_dir", type=click.Path(path_type=Path, file_okay=False, exists=True))
 @click.option("--threshold", type=float, default=0.95, show_default=True,
@@ -799,9 +787,7 @@ def cmd_report(results_dir: Path, threshold: float) -> None:
                 click.echo(f"    {name:<24} {path.name}")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # run
-# ──────────────────────────────────────────────────────────────────────────────
 @main.command("run")
 @cohort_options
 @design_options
@@ -843,7 +829,7 @@ def cmd_run(
         container_mask = f"{CONTAINER_IMAGES}{mask_name}"
         if str(from_source).lower() == "local":
             # Which images the analysis keeps is decided here, on the workstation that can see
-            # both the directory and the database — so only those files are sent, not the tree.
+            # both the directory and the database, so only those files are sent, not the tree.
             selection, n_found, n_cohort = _resolve_selection(
                 image_dir=image_dir, include=include, exclude_csv=exclude_csv,
                 id_pattern=id_pattern, namespaces=namespaces, on_duplicate=on_duplicate,
@@ -928,7 +914,7 @@ CORRP_NOTE = (
 def _worker_argv(**kw) -> list[str]:
     """The in-container command line: the same ``run`` with the container's mount points.
 
-    Everything the local path would do, with ``--submit local`` so the worker actually runs it.
+    Everything the local path would do, with ``--submit local`` so the worker runs it.
     """
     argv = [
         "nvitk-voxelwise", "run",
@@ -981,16 +967,14 @@ def _warn_jobs_without_parallel(jobs: int | None, parallel: bool) -> None:
         log.warning("--jobs only applies with --parallel; ignoring it.")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # randomise (prepared inputs)
-# ──────────────────────────────────────────────────────────────────────────────
 #: Where ``<output>/inputs/`` appears inside the container: the output root is already mounted at
 #: ``/nvitk/output/``, so uploaded inputs need no mount of their own.
 CONTAINER_UPLOADED = f"/nvitk/output/{INPUTS_SUBDIR}/"
 
 
 def _nifti_suffix(path: Path) -> str:
-    """``.nii.gz`` or ``.nii`` — kept on upload, since nibabel reads by extension."""
+    """``.nii.gz`` or ``.nii``: kept on upload, since nibabel reads by extension."""
     return ".nii.gz" if path.name.endswith(".nii.gz") else path.suffix
 
 
@@ -1027,7 +1011,7 @@ def cmd_randomise(
     submit: str, emit_script: Path | None, dry_run: bool,
     from_source: str, no_remote: bool, remote_host: str | None, remote_user: str | None,
 ) -> None:
-    """Run randomise on a prepared 4D stack and design files — no cohort, no database.
+    """Run randomise on a prepared 4D stack and design files: no cohort, no database.
 
     For a design built anywhere: FSL's Glm GUI, another tool, or `design` and `merge` here. The
     stack and the files are checked against each other from their headers before anything runs
@@ -1050,8 +1034,8 @@ def cmd_randomise(
                 stack, design_mat, design_con, fts=design_fts, mask=mask_path
             )
             click.echo(inputs.describe())
-            # The stack keeps its own name — it is the one large file, uploaded only when the
-            # cluster copy differs in size — while the small files go under fixed names and are
+            # The stack keeps its own name (it is the one large file, uploaded only when the
+            # cluster copy differs in size), while the small files go under fixed names and are
             # always re-sent.
             names = {
                 "mat": "design.mat",
@@ -1149,11 +1133,9 @@ def _randomise_worker_argv(paths: dict[str, str], **kw) -> list[str]:
     return argv
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # fetch
-# ──────────────────────────────────────────────────────────────────────────────
 #: Pulled by default. The 4D stack and the uploaded inputs stay on the cluster: for 500 subjects
-#: at 2 mm the stack alone is several GB, and nothing local reads it — the maps and the manifest
+#: at 2 mm the stack alone is several GB, and nothing local reads it; the maps and the manifest
 #: are what a viewer needs.
 FETCH_PATTERNS: tuple[str, ...] = (
     "manifest.json", "design.mat", "design.con", "design.fts", "subjects.txt", "mask.nii.gz",
@@ -1222,9 +1204,7 @@ def cmd_fetch(
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # status
-# ──────────────────────────────────────────────────────────────────────────────
 @main.command("status")
 def cmd_status() -> None:
     """Report whether FSL is usable here, and which binary is missing if not."""

@@ -50,7 +50,7 @@ def mean_flow_ml_min(flow_pulsatile) -> float:
 
     Same quantity as :func:`flow_per_heart_cycle_ml_s` scaled by
     :data:`ML_S_TO_ML_MIN`, but ``|Q(t)|`` is taken first so a flipped plane
-    normal (tangent polarity) cannot cancel the mean — this matches how
+    normal (tangent polarity) cannot cancel the mean: this matches how
     ``loc_mean_flow_ml_s`` and the ``flow_mean`` DB variable are reported.
     """
     x = np.abs(as_backend_array(flow_pulsatile).astype(np.float64).reshape(-1))
@@ -145,9 +145,7 @@ def through_plane_velocity_series(
     return out
 
 
-# ---------------------------------------------------------------------------
 # Cross-section waveform quality (QVTplus StdvFromMean analogue)
-# ---------------------------------------------------------------------------
 
 
 def waveform_quality_score(flow_t, *, eps: float = 1e-9) -> float:
@@ -207,16 +205,14 @@ def stdv_from_mean_station(
     # Robust floors: avoid 1/eps blow-ups when mean flow/area ≈ 0.
     floor_f = max(abs(mu_f), float(np.max(np.abs(fpc))) * 0.05, eps)
     floor_a = max(abs(mu_a), float(np.max(np.abs(ar))) * 0.05 if ar.size else eps, eps)
-    # qv_meanflow = float(np.clip(1.0 - float(np.std(fpc)) / floor_f, -1.0, 1.0))
-    # qv_area = float(np.clip(1.0 - float(np.std(ar)) / floor_a, -1.0, 1.0))
-    # qv_circ = float(np.clip(float(np.mean(di)) if di.size else 0.0, 0.0, 1.0))
-    qv_meanflow = max(-1.0, min(1.0, 1.0 - float(np.std(fpc)) / floor_f))     # Clipped to [-1, 1]
-    qv_area     = max(-1.0, min(1.0, 1.0 - float(np.std(ar)) / floor_a))      # Clipped to [-1, 1]
-    qv_circ     = max(0.0, min(1.0, float(np.mean(di)) if di.size else 0.0))  # Clipped to [0, 1]
+    # Each term is clamped (flow/area/tightness to [-1, 1], circularity to [0, 1]) before summing.
+    qv_meanflow = max(-1.0, min(1.0, 1.0 - float(np.std(fpc)) / floor_f))
+    qv_area     = max(-1.0, min(1.0, 1.0 - float(np.std(ar)) / floor_a))
+    qv_circ     = max(0.0, min(1.0, float(np.mean(di)) if di.size else 0.0))
 
     minmax_phase = np.max(fp, axis=0) - np.min(fp, axis=0)
-    qv_tight = float(max(-1.0, min(1.0, 1.0 - float(np.mean(minmax_phase)) / floor_f)))          # Clipped to [-1, 1]
-    return max(0.0, min(float(QUALITY_SCALE_MAX), qv_meanflow + qv_area + qv_circ + qv_tight))   # Clipped to [0, QUALITY_SCALE_MAX]
+    qv_tight = float(max(-1.0, min(1.0, 1.0 - float(np.mean(minmax_phase)) / floor_f)))
+    return max(0.0, min(float(QUALITY_SCALE_MAX), qv_meanflow + qv_area + qv_circ + qv_tight))
 
 
 def stdv_from_mean_branch(
@@ -270,9 +266,7 @@ def station_quality_scores(
     return stdv_from_mean_branch(flow_per_cycle, area, diam, fp)
 
 
-# ---------------------------------------------------------------------------
 # Weighted linear regression + PITC
-# ---------------------------------------------------------------------------
 
 
 def weighted_linear_fit(x, y, weights=None, *, eps: float = 1e-12) -> dict[str, float]:
@@ -372,9 +366,7 @@ def damping_index(pi_proximal: float, pi_distal: float, *, eps: float = 1e-9) ->
     return float((p - float(pi_distal)) / p)
 
 
-# ---------------------------------------------------------------------------
 # Pulse wave velocity (Bjornfoot optimizer + Fielding cross-correlation)
-# ---------------------------------------------------------------------------
 
 # QVTplus ``enc_PWV_XCor`` / Rivera-style upsample of one cardiac cycle.
 _XCOR_UPSAMPLE: int = 500
@@ -393,7 +385,7 @@ def bjornfoot_prepare_waveforms(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """QVTplus ``enc_PWV_WO`` / Björnfot normalization and station weights.
 
-    Per-station (matching MATLAB): convert flow→velocity ``F/A``, zero-mean,
+    Per-station (matching MATLAB): convert flow->velocity ``F/A``, zero-mean,
     unit-std normalize; area weights ``A / scaling²`` then ``/ max``.
     ``weight_mode='area'`` (tag=0) uses those area weights; ``'quality'`` (tag=1)
     filters ``Q < thresh`` and uses Dempsey weights on the remaining rows.
@@ -464,7 +456,7 @@ def _pwvest3_share_components(
     D = D[:n]
     F = F[:n, :m]
     Qw = Qw[:n]
-    # tV = 0:tres:(tres*3*m - tres)  → 3*m samples (MATLAB 1-based region m+1:2m).
+    # tV = 0:tres:(tres*3*m - tres)  -> 3*m samples (MATLAB 1-based region m+1:2m).
     tV = np.arange(0.0, tr * 3.0 * m, tr, dtype=np.float64)
     if tV.size != 3 * m:
         tV = np.linspace(0.0, tr * (3 * m - 1), num=3 * m, dtype=np.float64)
@@ -574,7 +566,7 @@ def pwvest3_share_residuals(
         in_params, distances_m, flows_norm, temporal_resolution_s, weights
     )
     if diff is None:
-        # Large finite residuals so the LS solver can step away from invalid PWV≤0.
+        # Large finite residuals so the LS solver can step away from invalid PWV<=0.
         return np.full(n_res, 1e6, dtype=np.float64)
     return diff.reshape(-1)
 
@@ -593,7 +585,7 @@ def pwv_bjornfoot_optimize(
 
     Jointly fits the shared velocity template and PWV by weighted least squares
     (paper ML estimator; QVTplus ``fminunc`` analogue via ``scipy.optimize.least_squares``).
-    Returns ``pwv_m_s`` and residual cost; non-positive / ≥30 m/s → ``nan``.
+    Returns ``pwv_m_s`` and residual cost; non-positive / >=30 m/s -> ``nan``.
     """
     dist = as_backend_array(distances_m).astype(np.float64).reshape(-1)
     flows = as_backend_array(flow_matrix).astype(np.float64)
@@ -659,7 +651,7 @@ def pwv_bjornfoot_optimize(
     if not np.isfinite(pwv):
         pwv = float("nan")
     elif pwv <= 0.0 or pwv >= PWV_MAX_M_S:
-        # QVTplus enc_PWV_WO: Results(end)<0 → PWV=-1 (rejected downstream).
+        # QVTplus enc_PWV_WO: Results(end)<0 -> PWV=-1 (rejected downstream).
         pwv = float("nan")
     return {
         "pwv_m_s": pwv,
@@ -767,7 +759,7 @@ def cross_correlation_delay_seconds(
     ref_u, spp = upsample_periodic_cycle(reference, n_up=n_up)
     sig_u, _ = upsample_periodic_cycle(signal, n_up=n_up)
     lag_samples, corr = circular_cross_correlation_lag(ref_u, sig_u)
-    # lag_samples = roll(signal) to match ref. Delayed distal → negative roll →
+    # lag_samples = roll(signal) to match ref. Delayed distal -> negative roll ->
     # arrival delay = -lag (in original frames).
     delay_frames = -float(lag_samples) / float(spp)
     return delay_frames * tr, float(corr)
@@ -831,7 +823,6 @@ def pwv_fielding_xcor(
         }
     tr = float(temporal_resolution_s)
     n = int(flows.shape[0])
-    # ref_i = int(np.clip(reference_index, 0, n - 1))
     ref_i = max(0, min(reference_index, n - 1))
     ref = flows[ref_i]
     lags_s = np.zeros(n, dtype="float64")
@@ -877,12 +868,9 @@ def accept_pwv(pwv_m_s: float) -> bool:
     return PWV_MIN_M_S < v < PWV_MAX_M_S
 
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Automatic quality control — literature-grounded plausibility and consistency
-# ──────────────────────────────────────────────────────────────────────────────
+# Automatic quality control: literature-grounded plausibility and consistency
 # The scores above answer "is this waveform smooth?". These answer "is this number
-# physiologically possible, and is it consistent with the vessel's neighbours?" —
+# physiologically possible, and is it consistent with the vessel's neighbours?",
 # which is what catches a mis-placed LOC, an aliased velocity or a leaked segmentation.
 #
 # Bands come from Zarrinkoob et al. 2015 (J Cereb Blood Flow Metab 35:648-654), 94
@@ -918,33 +906,33 @@ ANTERIOR_SHARE_TOL_PCT: float = 10.0
 
 #: How far outside its band a flow may sit before it scores zero, as a fraction of the bound it
 #: crossed. 0.15 means 15% below the floor (or above the ceiling) is fully implausible. Small
-#: because the bands are already widened well past any healthy cohort — see
+#: because the bands are already widened well past any healthy cohort; see
 #: :func:`flow_plausibility_score`. Raise it to be more forgiving, lower it to be stricter.
 FLOW_BAND_TOLERANCE: float = 0.15
 
 #: Krabbe-Hartkamp et al. 1998 definition of CoW hypoplasia on 3D TOF MRA.
 HYPOPLASIA_DIAM_MM: float = 0.8
 
-#: Arterial proximal (ICA, VA→BA):  10%   ← top of ISMRM “good” band
-#: Distal arterial (BA→PCA):        15%   ← distal inflation (ISMRM) + unmeasured AICA/SCA
-#: Venous (SSS+STR→TS):             20%   ← Sci Rep: 4–9% is normal incomplete tree
-#: Along-segment CV:                15%   ← ~5× QVT’s ~3% SD (soft review gate)
+#: Arterial proximal (ICA, VA->BA):  10%   <- top of ISMRM “good” band
+#: Distal arterial (BA->PCA):        15%   <- distal inflation (ISMRM) + unmeasured AICA/SCA
+#: Venous (SSS+STR->TS):             20%   <- Sci Rep: 4-9% is normal incomplete tree
+#: Along-segment CV:                15%   <- ~5× QVT’s ~3% SD (soft review gate)
 #: Default relative junction residual beyond which mass conservation is considered violated.
 #: Cranial literature does **not** publish one universal threshold: ISMRM 2017 (Roberts et al.)
-#: observed ~1–10% residuals at well-conserved proximal junctions and 11–55% where flow was
-#: clearly broken, while venous confluence imbalances of ~4–9% are typical even in good data
+#: observed ~1-10% residuals at well-conserved proximal junctions and 11-55% where flow was
+#: clearly broken, while venous confluence imbalances of ~4-9% are typical even in good data
 #: (Sci Rep 2025). Class-specific tolerances below are preferred; this default is the arterial
 #: gate used when a single number is needed (filters, CLI ``--conservation-tol``).
 CONSERVATION_TOL: float = 0.15
 
-#: Proximal arterial junctions (ICA → ACA+MCA, VA → BA). Upper end of the "good" 1–10% band.
+#: Proximal arterial junctions (ICA -> ACA+MCA, VA -> BA). Upper end of the "good" 1-10% band.
 CONSERVATION_TOL_ARTERIAL: float = 0.20
 
-#: Distal / incomplete arterial junctions (BA → PCA). Smaller vessels plus unmeasured AICA/SCA
+#: Distal / incomplete arterial junctions (BA -> PCA). Smaller vessels plus unmeasured AICA/SCA
 #: outflow systematically inflate the residual, so the gate is looser than the proximal one.
 CONSERVATION_TOL_DISTAL: float = 0.30
 
-#: Venous confluence (SSS + straight sinus → transverse sinuses). Direct cortical / petrosal /
+#: Venous confluence (SSS + straight sinus -> transverse sinuses). Direct cortical / petrosal /
 #: emissary tributaries make a zero residual anatomically unreachable; ~20% catches gross
 #: failures without flagging every healthy subject.
 CONSERVATION_TOL_VENOUS: float = 0.20
@@ -1060,7 +1048,7 @@ def bifurcation_conservation_error(
     cranial QVT/CPS validation work and by cardiac 4D Flow CMR quality assurance
     (conservation of mass). Relative residual ``(Qp - sum(Qb)) / Qp``.
 
-    A failure is genuinely ambiguous between "the flow measurement is wrong" and "the
+    A failure is ambiguous between "the flow measurement is wrong" and "the
     vessel tree is incomplete" -- a missed side branch removes real outflow and shows up
     identically. 
 
@@ -1101,7 +1089,7 @@ def proximal_station_mask(
     Parameters
     ----------
     distance_mm : array-like
-        Arc length of each station, in mm, along the centerline. Order is irrelevant — the
+        Arc length of each station, in mm, along the centerline. Order is irrelevant: the
         window is taken **relative to the minimum**, because pipeline arc lengths are usually
         cumulative over a whole vessel tree and their absolute value carries the upstream root's
         length rather than anything about this vessel.
@@ -1111,13 +1099,13 @@ def proximal_station_mask(
         Never narrow below this many stations. Three is the floor
         :func:`segment_flow_consistency_cv` needs to return a number at all, and a window that
         silently produces ``NaN`` reads downstream as "not measured" rather than "window too
-        tight" — a false negative in a QC check, which is the expensive direction.
+        tight": a false negative in a QC check, which is the expensive direction.
 
     Returns
     -------
     numpy.ndarray of bool
         One flag per station. **All-True** when the window is disabled, when every station
-        already falls inside it, or when applying it would leave fewer than *min_stations* —
+        already falls inside it, or when applying it would leave fewer than *min_stations*,
         so the caller can detect the fallback by comparing the count against the window itself.
 
     Examples
@@ -1166,9 +1154,7 @@ def segment_flow_consistency_cv(flow_per_cycle_stations: Any) -> float:
         return float(values.std() / abs(mean))
 
 
-# ---------------------------------------------------------------------------
 # Cohort-level internal consistency (4D Flow consensus statement)
-# ---------------------------------------------------------------------------
 # The per-scan metrics above answer "should this scan be reviewed". The two estimators below
 # answer the *other* question the consensus statement poses -- "does this pipeline conserve flow
 # at all" -- which is a property of a cohort, not of a subject, and is therefore estimated the way
@@ -1181,7 +1167,7 @@ def junction_consistency_regression(
     inlet_flows: Any, outlet_flows: Any, *, confidence: float = 0.95
 ) -> dict[str, float]:
     """
-    Regress junction outflow on inflow across a cohort — the consensus internal-consistency check.
+    Regress junction outflow on inflow across a cohort: the consensus internal-consistency check.
 
     Conservation of mass says a junction's outlets carry its inlet's flow, so across subjects the
     two should fall on the identity line. The validation literature reports this as a linear
@@ -1205,7 +1191,7 @@ def junction_consistency_regression(
     -------
     dict
         ``n``, ``slope``, ``slope_ci_low/high``, ``intercept``, ``intercept_ci_low/high``,
-        ``r``, ``p_value``, and ``mean_rel_residual`` — the average ``(in − out) / in``, kept
+        ``r``, ``p_value``, and ``mean_rel_residual``: the average ``(in - out) / in``, kept
         because it is the quantity the per-scan gate thresholds.
         Everything is ``NaN`` when fewer than three pairs survive.
 
@@ -1287,11 +1273,11 @@ def gaussian_mvue_fit(values: Any, *, confidence: float = 0.95) -> dict[str, flo
 
     Used on pooled :func:`percent_variation_from_mean` output to describe along-segment flow
     consistency the way the validation literature reports it: a mean (expected ~0, because each
-    segment was centred on itself — a non-zero mean would mean the *pooling* is skewed) and an SD,
+    segment was centred on itself; a non-zero mean would mean the *pooling* is skewed) and an SD,
     which is the number that matters. The QVT paper reports an SD of roughly 3%.
 
     The sample SD is biased low for a Gaussian, so it is corrected by the standard
-    ``c4(n) = sqrt(2/(n−1))·Γ(n/2)/Γ((n−1)/2)`` factor — that correction is what makes the estimate
+    ``c4(n) = sqrt(2/(n-1))·Γ(n/2)/Γ((n-1)/2)`` factor: that correction is what makes the estimate
     "MVUE" rather than merely "sample". The interval is the usual chi-square one, built on the
     uncorrected sample SD.
 

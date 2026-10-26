@@ -4,9 +4,9 @@
 Description
 -----------
 Education is the standard proxy for cognitive reserve, so it belongs beside age and sex as a
-covariate in essentially every cognitive model this dataset supports.
+covariate in every cognitive model this dataset supports.
 
-``PSQEDUCA`` is an ordinal level (2–6 in the current export), not a count of years. It is written
+``PSQEDUCA`` is an ordinal level (2-6 in the current export), not a count of years. It is written
 as a float so it can be used either as a continuous covariate or binned into groups, but treat the
 spacing between levels as arbitrary unless the study codebook says otherwise.
 
@@ -21,9 +21,7 @@ Examples::
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from pathlib import Path
 from typing import Any
 
@@ -48,7 +46,7 @@ DEFAULT_SOURCE = Path(
 
 SOURCE_COLUMN = "PSQEDUCA"
 VARIABLE_ID = "psqeduca"
-#: The workbook carries the study visit and the date the psychosocial block was administered — the
+#: The workbook carries the study visit and the date the psychosocial block was administered: the
 #: block PSQEDUCA belongs to. Both are read rather than defaulted: this cohort is entirely visit 4
 #: today, but the dataset already holds visit-3 clinical rows, and a hard-coded default would file
 #: a future visit-3 export under the wrong visit without complaining.
@@ -56,15 +54,13 @@ VISIT_COLUMN = "VISITA"
 DATE_COLUMN = "PSQDATE_PSICOSOCIAL"
 
 
-# ---------------------------------------------------------------------------
-# SEQN → subject_uid
-# ---------------------------------------------------------------------------
+# SEQN -> subject_uid
 def seqn_to_subject(repo: Any) -> dict[str, str]:
     """
     Map SEQN to ``subject_uid``, from the ``subject_ids`` registry first and ``subjects`` second.
 
     Both hold the key, with very different coverage: the ``seqn`` namespace of ``subject_ids``
-    carries it for essentially every subject, while ``subjects.primary_seqn`` is only filled for the
+    carries it for every subject, while ``subjects.primary_seqn`` is only filled for the
     few hundred whose catalog row was built from a source that had it. Reading only the latter would
     silently discard two thirds of the cohort, so the registry leads and ``subjects`` fills gaps.
 
@@ -116,7 +112,7 @@ def seqn_to_subject(repo: Any) -> dict[str, str]:
 
 
 def _normalize_seqn(value: Any) -> str:
-    """``28``, ``28.0``, ``' 28 '`` → ``'28'``; anything unusable → ``''``."""
+    """``28``, ``28.0``, ``' 28 '`` -> ``'28'``; anything unusable -> ``''``."""
     if value is None or (isinstance(value, float) and pd.isna(value)) or pd.isna(value):
         return ""
     text = str(value).strip()
@@ -128,9 +124,7 @@ def _normalize_seqn(value: Any) -> str:
     return text
 
 
-# ---------------------------------------------------------------------------
 # Extraction
-# ---------------------------------------------------------------------------
 def extract_psqeduca(
     path: Path, mapping: dict[str, str], *, sheet: str | int = 0
 ) -> pd.DataFrame:
@@ -224,7 +218,7 @@ def publish_psqeduca(
         return rows
 
     # The spec carries one measured_at for the whole batch; these dates are per subject, so they
-    # are assigned after the build. Positions line up — the builder resets the index and preserves
+    # are assigned after the build. Positions line up: the builder resets the index and preserves
     # row order.
     if "measured_at" in frame.columns:
         rows["measured_at"] = frame["measured_at"].reset_index(drop=True)
@@ -251,9 +245,7 @@ def publish_psqeduca(
     return rows
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 @click.command("import-pqseduca")
 @click.option(
     "--source",

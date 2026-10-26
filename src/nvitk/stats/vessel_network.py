@@ -1,5 +1,5 @@
 """
-The cerebral vascular network — topology, conservation, adjacency and composition.
+The cerebral vascular network: topology, conservation, adjacency and composition.
 
 Description
 -----------
@@ -24,7 +24,7 @@ compositional (flow shares)   :func:`flow_fractions`, :func:`clr_transform`
 Communicating arteries
 ----------------------
 The circle of Willis is not a tree. The posterior communicating arteries join each carotid to the
-ipsilateral posterior cerebral, and the anterior communicating joins the two anterior cerebrals —
+ipsilateral posterior cerebral, and the anterior communicating joins the two anterior cerebrals:
 collaterals whose flow **direction is subject-specific**. That is why they are held separately from
 the tree edges in :data:`COLLATERAL_EDGES` and enter the conservation equations as *signed* terms:
 a positive PComm flow moves blood from the carotid to the posterior circulation, a negative one the
@@ -33,7 +33,7 @@ other way. Modelling them as tree edges would force a direction the anatomy does
 Sign convention
 ---------------
 Tree flows are magnitudes and always positive. Collateral flows are signed, positive in the
-direction named by the edge (``lica → lpca`` for the left PComm). Whether a published measurement
+direction named by the edge (``lica -> lpca`` for the left PComm). Whether a published measurement
 already follows that convention is a property of the pipeline, not of this module: pass
 ``signed_collaterals=False`` to :func:`conservation_frame` when the values are magnitudes and the
 direction is unknown, and the affected balances are reported as ranges rather than as residuals.
@@ -48,9 +48,7 @@ otherwise.
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Sequence
@@ -63,9 +61,7 @@ from nvitk.core.logger import Logger
 log = Logger()
 
 
-# ---------------------------------------------------------------------------
 # Canonical nodes
-# ---------------------------------------------------------------------------
 #: Canonical node ids and their display labels. Everything else in this module speaks these.
 VESSEL_NODES: dict[str, str] = {
     "lva": "Left vertebral",
@@ -88,7 +84,7 @@ VESSEL_NODES: dict[str, str] = {
     "rts": "Right transverse sinus",
 }
 
-#: Published spellings → canonical node. Normalized on lookup, so case and separators do not matter.
+#: Published spellings -> canonical node. Normalized on lookup, so case and separators do not matter.
 _NODE_ALIASES: dict[str, str] = {
     "lva": "lva", "left_va": "lva", "left_vertebral": "lva", "l_va": "lva",
     "rva": "rva", "right_va": "rva", "right_vertebral": "rva", "r_va": "rva",
@@ -115,7 +111,7 @@ _NODE_ALIASES: dict[str, str] = {
 
 
 def _normalize(name: Any) -> str:
-    """Lowercase, underscore-separated form of a region label (``Left-ICA`` → ``left_ica``)."""
+    """Lowercase, underscore-separated form of a region label (``Left-ICA`` -> ``left_ica``)."""
     text = re.sub(r"[\s\-.]+", "_", str(name).strip().lower())
     return re.sub(r"_+", "_", text).strip("_")
 
@@ -141,9 +137,7 @@ def canonical_node(region_id: Any) -> str | None:
     return _NODE_ALIASES.get(stripped)
 
 
-# ---------------------------------------------------------------------------
 # Topology
-# ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class VesselEdge:
     """One directed connection, ``source`` feeding ``target``."""
@@ -219,15 +213,15 @@ def neighbour_list(
     Symmetric adjacency, as ``mgcv``'s Markov-random-field smooth expects it.
 
     ``bs="mrf"`` needs an *undirected* neighbourhood: each node listing the nodes it touches, with
-    the relation symmetric. Directions are dropped here on purpose — an MRF shares information
+    the relation symmetric. Directions are dropped here on purpose: an MRF shares information
     between anatomically adjacent vessels, it does not model flow direction. Use
     :func:`sem_model_syntax` when the direction is the point.
 
     Parameters
     ----------
     nodes : sequence of str, optional
-        Restrict to these canonical nodes (typically the ones actually present in the frame).
-        Edges to absent nodes are dropped, which can leave a node isolated — reported, because an
+        Restrict to these canonical nodes (typically the ones present in the frame).
+        Edges to absent nodes are dropped, which can leave a node isolated: reported, because an
         MRF over a disconnected graph estimates those levels independently.
 
     Returns
@@ -273,22 +267,20 @@ def neighbour_list(
     return {node: sorted(neighbours) for node, neighbours in sorted(out.items())}
 
 
-# ---------------------------------------------------------------------------
 # Conservation
-# ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class ConservationRule:
     """
     One mass-balance equation, written as a signed sum that should come to zero.
 
     ``terms`` maps a canonical node to its coefficient, so
-    ``{"lva": 1, "rva": 1, "basi": -1}`` is *left vertebral + right vertebral − basilar = 0*.
+    ``{"lva": 1, "rva": 1, "basi": -1}`` is *left vertebral + right vertebral - basilar = 0*.
     """
 
     key: str
     label: str
     terms: Mapping[str, float]
-    #: Why it may not close exactly — the branches nobody measured.
+    #: Why it may not close exactly: the branches nobody measured.
     caveat: str = ""
     #: Nodes whose measurement must be signed for the equation to hold as written.
     signed_terms: tuple[str, ...] = ()
@@ -299,7 +291,7 @@ class ConservationRule:
         return tuple(sorted(self.terms))
 
     def expression(self) -> str:
-        """The equation as text, e.g. ``lva + rva − basi``."""
+        """The equation as text, e.g. ``lva + rva - basi``."""
         parts: list[str] = []
         for node, coefficient in self.terms.items():
             sign = "−" if coefficient < 0 else "+"
@@ -309,7 +301,7 @@ class ConservationRule:
         return text[2:] if text.startswith("+ ") else text
 
 
-#: Standard balances. Each is *inflow − outflow*, so a healthy residual sits near zero.
+#: Standard balances. Each is *inflow - outflow*, so a healthy residual sits near zero.
 CONSERVATION_RULES: dict[str, ConservationRule] = {
     "basilar_inflow": ConservationRule(
         "basilar_inflow", "Vertebrals → basilar",
@@ -368,7 +360,7 @@ def wide_flow_frame(
 
     Conservation, composition and path models all need a subject's vessels side by side; the
     analysis frame stores them stacked. Regions that are not vessels are dropped, and duplicate
-    (subject, node) cells are averaged with a warning — that happens when a melted grouping put two
+    (subject, node) cells are averaged with a warning: that happens when a melted grouping put two
     vessels under one key, where a balance no longer means anything.
 
     Returns
@@ -424,7 +416,7 @@ def network_frame(
     rest of the design on the same row. Those live in the long frame repeated once per territory,
     so they are folded back by taking the single value each subject carries.
 
-    A covariate that *varies within a subject* is not subject-level — it is another vessel-wise
+    A covariate that *varies within a subject* is not subject-level: it is another vessel-wise
     measurement, and averaging it would invent a number that was never observed. Those are dropped
     with a warning rather than silently collapsed; name them in the syntax as vessels if that is
     what they are.
@@ -456,7 +448,7 @@ def network_frame(
     vessels = list(wide.columns)
     dropped_regions = list(wide.attrs.get("dropped_regions", []))
 
-    # ---- Candidate covariates: everything that is not the pivot's own three columns ----------
+    # Candidate covariates: everything that is not the pivot's own three columns
     reserved = {value_column, region_column, subject_column}
     if covariates is None:
         candidates = [c for c in df.columns if c not in reserved]
@@ -466,7 +458,7 @@ def network_frame(
         if missing:
             raise ValueError(f"Covariate column(s) not in the frame: {', '.join(missing)}.")
 
-    # ---- Keep only what is genuinely subject-level -------------------------------------------
+    # Keep only what is subject-level
     # nunique(dropna=False) > 1 means the column moves between a subject's territories, so it is a
     # per-vessel measurement wearing a covariate's name.
     carried: list[str] = []
@@ -477,7 +469,7 @@ def network_frame(
             continue
         try:
             spread = grouped[column].nunique(dropna=False).max()
-        except TypeError:                       # unhashable cells (lists, arrays) — never a covariate
+        except TypeError:                       # unhashable cells (lists, arrays): never a covariate
             continue
         if spread is not None and spread > 1:
             varying.append(column)
@@ -519,9 +511,9 @@ def conservation_frame(
     """
     Evaluate the mass-balance residuals, one column per rule, one row per subject.
 
-    A residual is *inflow − outflow*: near zero means the measurements are internally consistent,
+    A residual is *inflow - outflow*: near zero means the measurements are internally consistent,
     and a systematic departure is either an unmeasured branch (see each rule's ``caveat``) or a
-    measurement bias. Either way it is a quantity worth modelling in its own right — a subject whose
+    measurement bias. Either way it is a quantity worth modelling in its own right: a subject whose
     carotid balance is 40 mL/min out has something wrong with a segmentation or with an artery.
 
     Parameters
@@ -577,7 +569,7 @@ def conservation_frame(
         out[f"{rule.key}_residual"] = residual
         if relative:
             inflow = sum(wide[node] for node, c in terms.items() if c > 0)
-            # A subject with no measured inflow would give ±inf; NaN is the honest answer.
+            # A subject with no measured inflow would give ±inf; NaN is the correct answer.
             out[f"{rule.key}_rel"] = residual / inflow.where(inflow > 0)
         evaluated.append({
             "rule": rule.key, "label": rule.label, "expression": rule.expression(),
@@ -600,7 +592,7 @@ def conservation_summary(residuals: pd.DataFrame) -> pd.DataFrame:
     """
     Tidy per-rule summary of a :func:`conservation_frame` result: how far each balance is from zero.
 
-    ``bias`` is the median residual — a systematic offset, usually an unmeasured branch.
+    ``bias`` is the median residual: a systematic offset, usually an unmeasured branch.
     ``scatter`` is the median absolute deviation, which is the part that varies subject to subject
     and therefore the part that reflects measurement noise rather than anatomy.
     """
@@ -625,9 +617,7 @@ def conservation_summary(residuals: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-# ---------------------------------------------------------------------------
 # Composition
-# ---------------------------------------------------------------------------
 #: Sets of vessels whose flows partition a supply, and therefore form a composition.
 COMPOSITION_SETS: dict[str, tuple[str, ...]] = {
     "terminal": ("laca", "raca", "lmca", "rmca", "lpca", "rpca"),
@@ -649,7 +639,7 @@ def flow_fractions(
     prefix: str = "frac",
 ) -> pd.DataFrame:
     """
-    Each vessel's share of a set's total flow — one row per subject, one column per vessel.
+    Each vessel's share of a set's total flow: one row per subject, one column per vessel.
 
     Absolute flows carry the subject's whole cardiac output, so a model of ``lmca ~ age`` is partly
     a model of how much blood the person has. Fractions remove that: they ask *how the available
@@ -660,7 +650,7 @@ def flow_fractions(
     ----------
     nodes : sequence of str or key of :data:`COMPOSITION_SETS`
         Which vessels form the composition. They must partition one supply for the fractions to
-        mean anything — mixing arterial inflow with venous outflow does not.
+        mean anything: mixing arterial inflow with venous outflow does not.
 
     Returns
     -------
@@ -698,14 +688,14 @@ def clr_transform(
     """
     Centred log-ratio of a set of shares, so they can go into an ordinary linear model.
 
-    Shares live on a simplex: they are bounded, they sum to one, and so they are *not* independent —
+    Shares live on a simplex: they are bounded, they sum to one, and so they are *not* independent,
     if the MCA's share rises, something else's must fall. Regressing them directly gives correlated
     residuals and predictions outside [0, 1]. The CLR maps them to a real space where a linear model
     is meaningful; a positive CLR coefficient means that vessel's share grew *relative to the
     geometric mean of all of them*, which is the only kind of statement a composition supports.
 
     Zeros have no logarithm, so any subject with a zero share is returned as NaN rather than being
-    silently offset — an imputed zero would change every other component's value in the row.
+    silently offset: an imputed zero would change every other component's value in the row.
     """
     columns = list(columns) if columns is not None else [
         c for c in fractions.columns if not c.endswith("_total")
@@ -726,9 +716,7 @@ def clr_transform(
     return centred
 
 
-# ---------------------------------------------------------------------------
 # Path model syntax
-# ---------------------------------------------------------------------------
 def sem_model_syntax(
     *,
     nodes: Sequence[str] | None = None,
@@ -748,7 +736,7 @@ def sem_model_syntax(
         lpca ~ basi + lpcomm
         lmca ~ lica
 
-    *covariates* are added to every structural equation — the usual ``age_c + sex`` — which turns the
+    *covariates* are added to every structural equation (the usual ``age_c + sex``), which turns the
     fit into "how does age move flow along each edge, holding the upstream vessel fixed". That is
     the question a stacked territory model cannot answer, because it has no notion of upstream.
 
@@ -857,19 +845,19 @@ def collateral_features(
     signed: bool = True,
 ) -> pd.DataFrame:
     """
-    Turn the communicating arteries into the variables a model can actually use.
+    Turn the communicating arteries into the variables a model can use.
 
     A PComm is not a vessel like the others. In perhaps half of subjects it carries no meaningful
-    flow at all, so its measurement is a mixture of "absent" and "present but small" — and a plain
+    flow at all, so its measurement is a mixture of "absent" and "present but small", and a plain
     linear term treats those as the same thing. This builds the three features that separate them:
 
     ``<node>``            the flow itself (signed when the pipeline provides a direction);
-    ``<node>_patent``     whether it carries flow above the threshold — the pathway's *existence*;
+    ``<node>_patent``     whether it carries flow above the threshold: the pathway's *existence*;
     ``<node>_abs``        the magnitude, for questions about how hard a collateral is working
                           regardless of which way it runs.
 
-    Plus, across the pair, ``pcomm_config`` — a four-level factor (none / left / right / both) which
-    is the circle-of-Willis variant most papers actually stratify on, and ``pcomm_asymmetry``.
+    Plus, across the pair, ``pcomm_config``: a four-level factor (none / left / right / both) which
+    is the circle-of-Willis variant most papers stratify on, and ``pcomm_asymmetry``.
 
     Returns
     -------

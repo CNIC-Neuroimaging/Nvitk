@@ -53,9 +53,7 @@ ROOT_KEYS: tuple[str, ...] = (
     "model_root",
 )
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Stage output subdirectories (under ``results_root``)
-# ──────────────────────────────────────────────────────────────────────────────
 
 STAGE0_DATAPREP_DIR = "stage0_dataprep"
 STAGE1_PRETRAIN_DIR = "stage1_pretrain"
@@ -65,7 +63,7 @@ STAGE3B_PROBE_DIR = "stage3b_probe"
 STAGE4_INFER_DIR = "stage4_infer"
 STAGE5_EXPORT_DIR = "stage5_export"
 
-#: Default nnU-Net / nnssl dataset ids — in the 6xx range, clear of public datasets and of
+#: Default nnU-Net / nnssl dataset ids, in the 6xx range, clear of public datasets and of
 #: topbrain's 5xx ids that may share the same ``nnUNet_raw``.
 DEFAULT_DATASET_ID = 601
 DEFAULT_CORPUS_ID = 611
@@ -81,9 +79,7 @@ def dataset_folder_name(dataset_id: int, name: str) -> str:
     return f"Dataset{int(dataset_id):03d}_{clean}"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Config access (lazy)
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _pipe_paths() -> dict:
@@ -110,9 +106,7 @@ _RESOLVERS: dict[str, lazy_config.Resolver] = {
 __getattr__, __dir__ = lazy_config.module_getattr(_RESOLVERS, module_name=__name__)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Resolved layout
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -130,7 +124,7 @@ class CViTPaths:
     results_root: Path
     model_root: Path
 
-    # ---- nnU-Net dataset accessors -------------------------------------------------------
+    # nnU-Net dataset accessors
     def nnunet_raw_dir(self, dataset: str) -> Path:
         return self.nnunet_raw / dataset
 
@@ -140,14 +134,14 @@ class CViTPaths:
     def nnunet_results_dir(self, dataset: str) -> Path:
         return self.nnunet_results / dataset
 
-    # ---- nnssl accessors -----------------------------------------------------------------
+    # nnssl accessors
     def nnssl_raw_dir(self, corpus: str) -> Path:
         return self.nnssl_raw / corpus
 
     def nnssl_preprocessed_dir(self, corpus: str) -> Path:
         return self.nnssl_preprocessed / corpus
 
-    # ---- stage outputs -------------------------------------------------------------------
+    # stage outputs
     def stage_dir(self, name: str) -> Path:
         """A stage output directory under ``results_root``."""
         return self.results_root / name
@@ -197,7 +191,7 @@ def layout_cluster(**overrides: Path | None) -> CViTPaths:
     return _layout("cluster", **overrides)
 
 
-#: Stand-in for a root a container job did not bind — fails on an obviously fake path.
+#: Stand-in for a root a container job did not bind: fails on an obviously fake path.
 UNAVAILABLE_ROOT = Path("/nonexistent/cvit-root-not-bound-in-container")
 
 

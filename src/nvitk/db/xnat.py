@@ -263,7 +263,7 @@ def classify_scan(series_description: str | None, quality: str | None = None) ->
             "sequence": sequence,
         }
 
-    # --- Additional structural / functional sequences (order: specific before broad) ---
+    # Additional structural / functional sequences (order: specific before broad)
 
     if re.search(
         r"resting\s*state|resting-state|\brsfmri\b|\brsf?mri\b|"
@@ -487,7 +487,7 @@ def _coalesce_attr(obj: Any, *names: str) -> Any:
 
 
 def _netrc_host_candidates(server: str) -> list[str]:
-    """Bare hostnames to try (host, then parent domain ``a.b.c`` → ``b.c``)."""
+    """Bare hostnames to try (host, then parent domain ``a.b.c`` -> ``b.c``)."""
     netloc = urlparse(server if "://" in server else f"https://{server}").netloc
     if "@" in netloc:
         netloc = netloc.rsplit("@", 1)[-1]
@@ -687,7 +687,7 @@ def _download_scan_bundle(scan: Any, zip_path: Path, *, resource_label: str = "D
 
     Prefers the per-resource ``scan.resources[resource_label].download(...)`` so
     that only the requested asset type is transferred (XNAT's whole-scan
-    ``scan.download()`` bundles every resource — DICOM, NIFTI, SNAPSHOTS, ...).
+    ``scan.download()`` bundles every resource: DICOM, NIFTI, SNAPSHOTS, ...).
     Falls back to the whole-scan download only when the resource isn't exposed;
     callers are responsible for filtering non-target members in that case.
     """

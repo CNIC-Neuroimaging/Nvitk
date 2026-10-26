@@ -91,17 +91,13 @@ setup(globals())
 log = Logger()
 
 
-# ---------------------------------------------------------------------------
 # Constants
-# ---------------------------------------------------------------------------
 
 _BN_ERODE = 3  # legacy dixon used 3 (ct-pet used 5)
 _KIDNEY_ERODE = 1
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _imread_opt(parent: Path, stem: str, axes: str = "XYZ") -> Image | None:
@@ -252,9 +248,7 @@ def _subtract_skeleton(out_labels: Image, skeleton: Image | None, label_names: t
     return out_labels.with_data(arr)
 
 
-# ---------------------------------------------------------------------------
 # Per-region mask builders
-# ---------------------------------------------------------------------------
 
 
 def build_head_mask(head_total_mr: Image) -> Image:
@@ -383,9 +377,7 @@ def build_legs_mask(legs_muscles_mr: Image, skeleton: Image | None = None) -> Im
     return _subtract_skeleton(labels, skeleton, cfg.SKELETON_SUBTRACT_FROM_LEGS, LEGS_LABELS)
 
 
-# ---------------------------------------------------------------------------
 # Per-subject worker
-# ---------------------------------------------------------------------------
 
 
 def _process(segmentation_dir: Path, nifti_dir: Path, output_dir: Path) -> None:
@@ -468,9 +460,7 @@ def run_subject(subject: str, lay: BatchLayout, *, backend: str = "cupy") -> Pat
     return out_dir
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 
 
 @click.command("dixon-v5-stage2")

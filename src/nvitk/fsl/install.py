@@ -5,7 +5,7 @@ environment file (``fsl-<version>_linux-64.yml``). This creates a separate prefi
 the packages of the chosen *components* at exactly that release's versions:
 
 ==============  ===========================================================================
-base            fslmaths/fslstats/… (avwutils), cluster, randomise, fsl_sub, MNI templates
+base            fslmaths/fslstats/... (avwutils), cluster, randomise, fsl_sub, MNI templates
 structural      BET, FAST, FIRST (+ models), SIENA/SIENAX, lesion filling, defacing
 registration    FLIRT, FNIRT (+ applywarp/invwarp/convertwarp), FUGUE, MCFLIRT
 diffusion       TOPUP, EDDY, FDT (dtifit/bedpostx), probtrackx2, TBSS, XTRACT (+ atlases)
@@ -19,8 +19,8 @@ and, with ``cuda``, the GPU builds of eddy, bedpostx and probtrackx2.
 
 A *separate* prefix, not the nvitk environment: ``fsl-base`` brings its own Python
 (3.14 for 6.0.7.23) and fslpy, which must not meet nvitk's pins. Creating it needs a
-conda executable — the one that manages this environment, else ``mamba``/``conda`` on
-PATH, else a micromamba downloaded next to it — which is why a conda post-link script
+conda executable (the one that manages this environment, else ``mamba``/``conda`` on
+PATH, else a micromamba downloaded next to it), which is why a conda post-link script
 cannot do it and ``nvitk-fsl install`` (or the GUI) does.
 
 FSL is free for non-commercial use; see https://fsl.fmrib.ox.ac.uk/fsl/docs/license.html.
@@ -64,7 +64,7 @@ COMPONENTS: dict[str, tuple[str, ...]] = {
     "functional": ("fsl-melodic", "fsl-susan", "fsl-slicetimer"),
     "asl": ("fsl-oxford_asl", "fsl-basil", "fsl-fabber_core", "fsl-fabber_models_asl", "fsl-data_atlases"),
 }
-#: Components another one runs commands of (oxford_asl calls BET, FAST, FLIRT, MCFLIRT …).
+#: Components another one runs commands of (oxford_asl calls BET, FAST, FLIRT, MCFLIRT ...).
 COMPONENT_REQUIRES: dict[str, tuple[str, ...]] = {"asl": ("structural", "registration")}
 #: GPU builds added with ``cuda`` (only meaningful with the diffusion component).
 CUDA_PACKAGES: tuple[str, ...] = ("fsl-eddy-cuda", "fsl-fdt-cuda", "fsl-ptx2-cuda")
@@ -125,7 +125,7 @@ def package_specs(
     return specs, missing
 
 
-# ── a conda to create the prefix with ────────────────────────────────────────
+# a conda to create the prefix with
 
 
 def _env_root() -> Path | None:
@@ -192,7 +192,7 @@ def _create_env(prefix: Path, micromamba: bool) -> dict[str, str]:
 #: Stand-in for FSL's ``createFSLWrapper``. FSL's installer (not a package) puts that script in
 #: ``$FSLDIR/share/fsl/sbin`` before creating the environment; every FSL package's post-link
 #: script calls it to write one wrapper per command into ``$FSLDIR/share/fsl/bin``, the
-#: directory that goes on PATH without the environment's python, curl, tar … A prefix created
+#: directory that goes on PATH without the environment's python, curl, tar ... A prefix created
 #: by plain conda/mamba has neither, so the wrappers are made here, the same way: ``target`` or
 #: ``target=name`` per argument, ``<Command>_gui`` meaning the Linux TCL GUI ``<Command>``,
 #: Python scripts run isolated (``python -I``).

@@ -1,7 +1,7 @@
 """Imaging (tools) dock: magicgui panel + pipeline CLI form + TotalSeg ROIs.
 
-Label-layer tools run on the labels currently *shown* — the live filter set in
-the Labels tab or from a label layer's ▾ in the layer list — so the dock no
+Label-layer tools run on the labels currently *shown* (the live filter set in
+the Labels tab or from a label layer's ▾ in the layer list), so the dock no
 longer carries a picker of its own.
 """
 
@@ -95,14 +95,14 @@ def _cap_form_labels(native: QWidget) -> None:
     """Wrap magicgui's parameter names and stop them setting the panel's width.
 
     magicgui aligns the label column by giving every label the *widest* label's
-    width as a hard ``minimumWidth``. That silently defeats a maximum width — Qt
-    resolves max < min in favour of min — so the floor has to be cleared first.
+    width as a hard ``minimumWidth``. That silently defeats a maximum width (Qt
+    resolves max < min in favour of min), so the floor has to be cleared first.
     Re-applied whenever the form changes, because magicgui re-runs that alignment.
     """
-    # A word-wrapped label only reports the height of the lines it actually needs
+    # A word-wrapped label only reports the height of the lines it needs
     # if its size policy says its height depends on its width. Without this the
     # label reports one line, the row is laid out one line tall, and the second
-    # line is drawn outside it — which is also why the heightForWidth branch in
+    # line is drawn outside it, which is also why the heightForWidth branch in
     # _fit_tool_scroll never fired.
     policy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
     policy.setHeightForWidth(True)
@@ -124,7 +124,7 @@ def _style_operation_help(panel: Any) -> None:
     """Show the tool description as a caption instead of a form field.
 
     magicgui renders it as a labelled, bordered ``TextEdit`` that grows with the
-    text — for a wordy tool that pushes the actual parameters off the panel. Drop
+    text, for a wordy tool that pushes the actual parameters off the panel. Drop
     the label and the well, cap the height, and let it read as help text.
     """
     widget = getattr(panel, "operation_help", None)
@@ -226,8 +226,8 @@ def build_tools_dock(
     def _get_label_ids() -> list[int]:
         """Label ids a tool runs on: the ids typed in the field, else the labels shown.
 
-        "Shown" is the layer's live filter — set in the Labels tab or from the
-        layer's ▾ in the layer list — so what a tool touches is what is on screen;
+        "Shown" is the layer's live filter (set in the Labels tab or from the
+        layer's ▾ in the layer list), so what a tool touches is what is on screen;
         with no filter, every label present.
         """
         from nvitk.gui.tools.runner import parse_label_ids
@@ -456,7 +456,7 @@ def build_tools_dock(
         """
         _cap_form_labels(tool_panel.native)
         # A wrapped label's height depends on the width it ends up with, which is
-        # not settled until the form has been laid out at the viewport width — so
+        # not settled until the form has been laid out at the viewport width, so
         # ask for the height at that width when the layout can answer, and fall
         # back to the plain hint when it cannot.
         width = tool_scroll.viewport().width() or tool_scroll.width()
@@ -465,7 +465,7 @@ def build_tools_dock(
         if width > 0 and form_layout is not None and form_layout.hasHeightForWidth():
             needed = max(needed, form_layout.heightForWidth(width))
         # The form is top-aligned, so where the Run button ends is where its
-        # content ends — the layout's own hint overshoots that by the spacing of
+        # content ends: the layout's own hint overshoots that by the spacing of
         # every hidden parameter row, which showed as a band of empty form.
         button = getattr(getattr(tool_panel, "_call_button", None), "native", None)
         if button is not None and button.isVisible() and button.height() > 0:
@@ -610,7 +610,7 @@ def build_tools_dock(
         else:
             expand_row = _row_tools
 
-        # Only the panel that actually gets the stretch is allowed to grow; two
+        # Only the panel that gets the stretch is allowed to grow; two
         # panels both expanding would fight over the same spare height.
         pipeline_form.set_expanded(is_pipeline)
         totalseg_roi.set_expanded(expand_row == _row_totalseg)

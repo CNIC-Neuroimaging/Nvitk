@@ -13,7 +13,7 @@ from nvitk.types import Image
 
 log = Logger()
 
-# Integer factors only — ANTsPyNet builds model ids as ``1x1x2``, not ``1.0x1.0x2.0``.
+# Integer factors only: ANTsPyNet builds model ids as ``1x1x2``, not ``1.0x1.0x2.0``.
 MRI_SR_EXPANSION_FACTORS: tuple[tuple[int, int, int], ...] = (
     (1, 1, 2),
     (1, 1, 3),
@@ -89,7 +89,7 @@ def mri_super_resolution(
         )
     ants_img = to_ants_image(image)
     shape = tuple(to_numpy(getattr(image, "data", image)).shape)
-    # Pass ints so antspynet builds ``…_1x1x2_…`` model ids (not ``1.0x1.0x2.0``).
+    # Pass ints so antspynet builds ``..._1x1x2_...`` model ids (not ``1.0x1.0x2.0``).
     exp_list = [int(x) for x in exp]
     log.info(
         f"mri_super_resolution: shape={shape}, expansion_factor={exp_list}, feature={feat!r}"

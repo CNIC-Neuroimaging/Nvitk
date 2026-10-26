@@ -20,7 +20,7 @@ vessel (all its components and segments combined), with
 - topology: branching angles and the Murray area ratio of its bifurcations;
 - lesions: stenosis / enlargement counts, maxima, total length, and the high-confidence counts.
 
-The main path is the longest measured root→terminal path of the vessel's largest component (its
+The main path is the longest measured root->terminal path of the vessel's largest component (its
 proximal-to-distal course); lengths that describe the whole vessel tree use the non-overlapping
 segments. See :mod:`nvitk_vendor.measure.morpho.vessel_features` for the descriptor definitions.
 """
@@ -204,10 +204,10 @@ def hypoplasia_rows(
 ) -> list[dict[str, Any]]:
     """One ``kind = "hypoplasia"`` lesion row per main vessel (``HYPOPLASIA_MAIN_VESSELS``) without
     a measured mask / mesh: ``absent`` from the mask, or ``too_small`` when it has voxels (*voxels*,
-    label → input volumetry) but too few for a centerline.
+    label -> input volumetry) but too few for a centerline.
 
-    Confidence 1.0 (high) when a topological neighbour is present — the territory is still
-    reached, so the absence is local — and 0.3 (low, ``neighbours_absent``) when none is, which
+    Confidence 1.0 (high) when a topological neighbour is present (the territory is still
+    reached, so the absence is local), and 0.3 (low, ``neighbours_absent``) when none is, which
     suggests a field-of-view or segmentation dropout. Flags name the common variants:
     ``fetal_pca`` (a P1 absent, its PComm and P2 present) and ``a1_aplasia`` (an ACA absent, the
     AComm and the other ACA present). The rows carry no location or path.
@@ -269,7 +269,7 @@ def add_hypoplasia_columns(vessels: pd.DataFrame, rows: Iterable[Mapping[str, An
     return out
 
 
-#: Circle-of-Willis variant segments of the eICAB topology (vessel_name → variant name).
+#: Circle-of-Willis variant segments of the eICAB topology (vessel_name -> variant name).
 _COW_VARIANT_VESSELS = {
     "LACA": "left_A1", "RACA": "right_A1", "ACOMM": "AComm",
     "LPCOMM": "left_PComm", "RPCOMM": "right_PComm",
@@ -279,7 +279,7 @@ _COW_VARIANT_VESSELS = {
 
 def subject_summary(vessels: pd.DataFrame) -> pd.DataFrame:
     """One row per subject: CoW variants (absent / hypoplastic / present), completeness, left/right
-    asymmetry indices (2|L−R|/(L+R)) of paired vessels, totals and lesion counts."""
+    asymmetry indices (2|L-R|/(L+R)) of paired vessels, totals and lesion counts."""
     if vessels.empty:
         return pd.DataFrame()
     row: dict[str, Any] = {"case_id": vessels["case_id"].dropna().iloc[0] if "case_id" in vessels else ""}

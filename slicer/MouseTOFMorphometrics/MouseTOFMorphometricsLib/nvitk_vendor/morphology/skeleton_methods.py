@@ -11,9 +11,9 @@ Every skeleton / centerline tool in nvitk_vendor picks one of :data:`SKELETON_ME
 ``vmtk``
     VMTK centerlines on the mask's surface (Voronoi-based, sub-voxel, with the maximum inscribed
     sphere radius), seeded at the voxel-skeleton end points (:mod:`nvitk_vendor.vmtk.centerlines`). The GUI
-    default. Two coverages (:data:`VMTK_COVERAGES`): ``full`` — every branch, loop and fragment
+    default. Two coverages (:data:`VMTK_COVERAGES`): ``full``: every branch, loop and fragment
     (:func:`~nvitk_vendor.vmtk.centerlines.full_centerline_network`; the default, and always used for
-    :func:`method_skeleton`) — or ``tree``, one VMTK run from the widest end point to all others,
+    :func:`method_skeleton`), or ``tree``, one VMTK run from the widest end point to all others,
     which skips one segment of every loop and anything outside that end's connected piece.
 ``native``
     scikit-image's 3D thinning (the historical behaviour); branch polylines are re-centred on the

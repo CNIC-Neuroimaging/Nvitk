@@ -2,14 +2,14 @@ r"""Paper-style stage-6 measurement figures and PITC branch masks.
 
 Renders the four figures used to report vessel-level 4D-flow hemodynamics:
 
-- **PITC** — per-root pulsatility quality ``Q`` and pulsatility index ``p_pi`` vs
+- **PITC**: per-root pulsatility quality ``Q`` and pulsatility index ``p_pi`` vs
   distance-from-root with the transmission-coefficient fit line.
-- **PWV** — per-root cross-correlation ``XCor`` time and time-to-upstroke vs
+- **PWV**: per-root cross-correlation ``XCor`` time and time-to-upstroke vs
   distance with Bjornfoot area-weighted (\(W_1\)) and Dempsey quality-weighted
   (\(W_2\)) fits (QVTplus ``enc_PWV_XCor`` tag 0/1), plus the weights.
-- **Bjornfoot QC** — per-station weighted template residual, XCor-minus-model
+- **Bjornfoot QC**: per-station weighted template residual, XCor-minus-model
   delay residual, and observed-versus-fitted waveform correlation.
-- **Flow waveforms** — per-vessel mean +/- std flow over the cardiac cycle.
+- **Flow waveforms**: per-vessel mean +/- std flow over the cardiac cycle.
 
 Also writes, per root region, a NIfTI mask of the vessels (root + downstream
 branches) contributing to that region's PITC fit.
@@ -112,9 +112,7 @@ def _fit_pwv_line(distance_mm: np.ndarray, time_s: np.ndarray, weights: np.ndarr
     return slope, fit["intercept"], float(pwv)
 
 
-# ---------------------------------------------------------------------------
 # Figure 1: PITC (Q + p_pi vs distance)
-# ---------------------------------------------------------------------------
 
 
 def make_pitc_figure(
@@ -209,9 +207,7 @@ def plot_pitc_figure(region_plot_data: dict[str, dict[str, Any]], out_path: Path
     return out_path
 
 
-# ---------------------------------------------------------------------------
 # Figure 2: PWV (XCor time, time-to-upstroke, weights vs distance)
-# ---------------------------------------------------------------------------
 
 
 def make_pwv_figure(
@@ -491,9 +487,7 @@ def _draw_pwv_fits(ax, dist: np.ndarray, time_s: np.ndarray, w1: np.ndarray, w2:
         ax.plot(xline, yline, style, color="black", lw=1.4, label=label)
 
 
-# ---------------------------------------------------------------------------
 # Figure 3: per-vessel flow waveforms
-# ---------------------------------------------------------------------------
 
 
 def plot_flow_waveforms(
@@ -552,9 +546,7 @@ def plot_flow_waveforms(
     return out_path
 
 
-# ---------------------------------------------------------------------------
 # PITC branch masks (one NIfTI per root region)
-# ---------------------------------------------------------------------------
 
 
 def save_pitc_region_masks(

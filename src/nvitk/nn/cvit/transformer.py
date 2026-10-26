@@ -1,5 +1,5 @@
 """
-CViT transformer encoder — global attention over the conv token grid.
+CViT transformer encoder: global attention over the conv token grid.
 
 Description
 -----------
@@ -34,9 +34,7 @@ import torch.nn.functional as F
 from ..blocks import DropPath, LayerScale, SwiGLU
 from .config import CViTConfig
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Positional encodings
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def grid_coords(grid_shape: Sequence[int], device=None) -> torch.Tensor:
@@ -72,7 +70,7 @@ class RoPE(nn.Module):
 
 
 def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
-    """Rotate the leading ``2·cos.shape[-1]`` channels of ``x`` (…, N, head_dim)."""
+    """Rotate the leading ``2·cos.shape[-1]`` channels of ``x`` (..., N, head_dim)."""
     half = cos.shape[-1]
     rot, rest = x[..., : 2 * half], x[..., 2 * half:]
     x1, x2 = rot[..., :half], rot[..., half:]
@@ -90,16 +88,14 @@ def resize_pos_embed(pe: torch.Tensor, grid_shape: Sequence[int]) -> torch.Tenso
     return F.interpolate(pe, size=grid_shape, mode=mode, align_corners=False)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Attention + block
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class Attention(nn.Module):
     """Multi-head self-attention through ``F.scaled_dot_product_attention``.
 
     Probe attribute ``mode``: ``"normal"`` or ``"uniform"`` (every query receives the mean of
-    all values — global pooling with no learned pattern).
+    all values; global pooling with no learned pattern).
     """
 
     def __init__(self, dim: int, num_heads: int, *, attn_drop: float = 0.0, proj_drop: float = 0.0) -> None:
@@ -168,9 +164,7 @@ class Block(nn.Module):
         return x + self.drop_path(self.ls2(self.mlp(self.norm2(x))))
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Encoder
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def local_attention_mask(
@@ -183,7 +177,7 @@ def local_attention_mask(
 ) -> torch.Tensor:
     """Boolean ``(N+P, N+P)`` mask: grid tokens attend only to tokens within ``radius_mm``.
 
-    Register (prefix) tokens keep full attention in both directions — they carry no position.
+    Register (prefix) tokens keep full attention in both directions: they carry no position.
     ``index`` restricts the grid tokens to a subset (MAE kept tokens; must be shared by the batch).
     """
     coords = grid_coords(grid_shape, device) * torch.as_tensor(
@@ -219,7 +213,7 @@ class TransformerEncoder(nn.Module):
         for p in (self.pos_embed, self.registers, self.mask_token):
             if p is not None:
                 nn.init.trunc_normal_(p, std=0.02)
-        # ---- probe state (defaults = trained behaviour) ----
+        # probe state (defaults = trained behaviour)
         self.bypass = False
         self.local_mask_spec: tuple[float, tuple[float, ...]] | None = None   # (radius_mm, token_spacing_mm)
 
@@ -255,14 +249,14 @@ class TransformerEncoder(nn.Module):
         n = prod(g)
         tokens = grid.flatten(2).transpose(1, 2)                                   # (B, N, E)
 
-        # ---- 1. Masking + absolute position ----------------------------------------------
+        # 1. Masking + absolute position
         if token_mask is not None:
             m = token_mask.reshape(b, n, 1)
             tokens = torch.where(m, self.mask_token.to(tokens.dtype).expand(b, n, e), tokens)
         if self.pos_embed is not None:
             tokens = tokens + resize_pos_embed(self.pos_embed, g).flatten(2).transpose(1, 2)
 
-        # ---- 2. Rotary tables (gathered at kept positions for MAE) ----------------------
+        # 2. Rotary tables (gathered at kept positions for MAE)
         rope = None
         if self.rope is not None:
             cos, sin = self.rope(g, grid.device)                                    # (N, r)
@@ -272,7 +266,7 @@ class TransformerEncoder(nn.Module):
         if keep_idx is not None:
             tokens = torch.gather(tokens, 1, keep_idx[..., None].expand(-1, -1, e))
 
-        # ---- 3. Registers, optional locality mask, blocks --------------------------------
+        # 3. Registers, optional locality mask, blocks
         if self.registers is not None:
             tokens = torch.cat((self.registers.to(tokens.dtype).expand(b, -1, -1), tokens), dim=1)
         attn_mask = None

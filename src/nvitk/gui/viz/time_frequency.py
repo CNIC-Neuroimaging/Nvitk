@@ -3,7 +3,7 @@
 The Napari side of :mod:`nvitk.transform.temporal` and
 :mod:`nvitk.transform.fourier`: each handler reads the active layer, runs the
 base tool on the current compute backend, and adds its result to the viewer on
-the right grid — a 3D result of a 3D+t layer on its spatial grid, a 3D+t result
+the right grid; a 3D result of a 3D+t layer on its spatial grid, a 3D+t result
 time-first (see :func:`nvitk.gui.core.orientation.prepare_time_leading_for_napari`).
 
 K-space layers
@@ -11,8 +11,8 @@ K-space layers
 Napari cannot draw complex numbers, so the k-space tool adds a real *view* of it
 (log-magnitude by default, optionally the phase) and keeps the complex array
 beside that layer, in :data:`_KSPACE_STORE`. The inverse FFT reads it back from
-there: run "Inverse FFT" with the k-space layer active — optionally with a mask
-painted on that layer's grid, to keep or remove parts of k-space — and the image
+there: run "Inverse FFT" with the k-space layer active (optionally with a mask
+painted on that layer's grid, to keep or remove parts of k-space), and the image
 comes back on the original grid. The store holds layers weakly, so deleting the
 k-space layer frees its complex array.
 """
@@ -39,9 +39,7 @@ _KSPACE_STORE: "weakref.WeakKeyDictionary[Any, Image]" = weakref.WeakKeyDictiona
 _CURVE_WINDOW_ATTR = "_nvitk_time_curve_window"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Layer helpers
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _notify(message: str, *, error: bool = False) -> None:
@@ -133,20 +131,18 @@ def _cursor_voxel(viewer: Any, layer: Any) -> tuple[int, int, int]:
     t_ax = _time_axis_index(layer) if len(shape) == 4 else None
     try:
         pos = list(layer.world_to_data(viewer.cursor.position))[-len(shape):]
-    except Exception:  # noqa: BLE001 — no cursor yet: the middle of the volume
+    except Exception:  # noqa: BLE001 (no cursor yet: the middle of the volume)
         pos = [s / 2.0 for s in shape]
     spatial = [p for i, p in enumerate(pos) if i != t_ax]
     sp_shape = [s for i, s in enumerate(shape) if i != t_ax]
     return tuple(int(np.clip(round(float(p)), 0, n - 1)) for p, n in zip(spatial, sp_shape))  # type: ignore[return-value]
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # K-space
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def run_kspace(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
-    """FFT of the active layer → k-space display layer(s), complex kept for the inverse."""
+    """FFT of the active layer -> k-space display layer(s), complex kept for the inverse."""
     from nvitk.gui.core.spatial import layer_to_image
     from nvitk.transform.fourier import kspace, kspace_component
 
@@ -236,9 +232,7 @@ def run_kspace_filter(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
     _notify(f"{kind} k-space filter (cutoff {cutoff:g} × Nyquist) applied to “{layer.name}”.")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Time
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _require_4d(layer: Any) -> Any:
@@ -263,7 +257,7 @@ def run_extract_frame(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
 
 
 def run_temporal_projection(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
-    """Collapse the time axis of the active 3D+t layer (MIP, mean, std, TTP, AUC…)."""
+    """Collapse the time axis of the active 3D+t layer (MIP, mean, std, TTP, AUC...)."""
     from nvitk.gui.core.spatial import layer_to_image
     from nvitk.transform.temporal import temporal_projection
 
@@ -278,7 +272,7 @@ def run_temporal_projection(viewer: Any, layer: Any, params: dict[str, Any]) -> 
 
 
 def run_time_curve(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
-    """Plot the time–intensity curve at the cursor, or over a mask label."""
+    """Plot the time-intensity curve at the cursor, or over a mask label."""
     from nvitk.gui.core.spatial import layer_to_image
     from nvitk.gui.tools.runner import _layer_param, _resolve_layer
     from nvitk.transform.temporal import time_intensity_curve
@@ -367,9 +361,7 @@ def run_stack_layers(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
     _notify(f"Stacked {len(layers)} layers into 3D+t: {', '.join(l.name for l in layers)}.")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Time–intensity curve window
-# ──────────────────────────────────────────────────────────────────────────────
+# Time-intensity curve window
 
 
 def show_time_curve_window(viewer: Any, times: list[float], values: list[float], *,

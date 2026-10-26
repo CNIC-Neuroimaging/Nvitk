@@ -1,12 +1,12 @@
 """Folders and subfolders in Napari's layer list.
 
-Napari's layer list is flat. This adds folders to it without replacing it — so
+Napari's layer list is flat. This adds folders to it without replacing it, so
 the eye toggles, renaming, drag-reordering, thumbnails and nvitk's label ▾ chips
-all keep working — by treating a folder as a *run of consecutive layers that
+all keep working, by treating a folder as a *run of consecutive layers that
 share a folder path*:
 
 * a layer's folder is a ``/``-separated path stored in its metadata
-  (``"CT/Segmentations"``); subfolders are simply longer paths;
+  (``"CT/Segmentations"``); subfolders are longer paths;
 * each folder's header is painted above the first row of its run, and its
   members are indented beneath it (the delegate in
   :mod:`nvitk.gui.labels.layer_list` draws both);
@@ -16,7 +16,7 @@ share a folder path*:
 Interaction
 -----------
 On a header: the arrow folds and unfolds, the box shows or hides every layer in
-the folder, a click selects them all (so Napari's delete, duplicate… act on the
+the folder, a click selects them all (so Napari's delete, duplicate... act on the
 folder), a double click renames it and the right button opens the folder menu.
 Dragging a layer *between two members* of a folder puts it in that folder, and
 dragging it out takes it out; dragging a collapsed folder's row moves the whole
@@ -43,13 +43,11 @@ _ARROW_W = 14
 _BOX = 13
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Paths
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def normalize_path(path: Any) -> str:
-    """``" a //b/ "`` → ``"a/b"``: no empty parts, no surrounding blanks."""
+    """``" a //b/ "`` -> ``"a/b"``: no empty parts, no surrounding blanks."""
     parts = [p.strip() for p in str(path or "").replace("\\", "/").split("/")]
     return "/".join(p for p in parts if p)
 
@@ -75,7 +73,7 @@ def _set_folder(layer: Any, path: str) -> None:
 
 
 def ancestors(path: str) -> list[str]:
-    """``"a/b/c"`` → ``["a", "a/b", "a/b/c"]``."""
+    """``"a/b/c"`` -> ``["a", "a/b", "a/b/c"]``."""
     parts = normalize_path(path).split("/") if path else []
     return ["/".join(parts[: i + 1]) for i in range(len(parts))]
 
@@ -130,7 +128,7 @@ class RowEntry:
 
 
 def compute_layout(layers: Iterable[Any], collapsed: set[str], *, enabled: bool = True) -> dict[int, RowEntry]:
-    """Row entries by ``id(layer)`` for *layers* in list order (bottom → top).
+    """Row entries by ``id(layer)`` for *layers* in list order (bottom -> top).
 
     Rows are laid out top-down as Napari shows them; a folder's header starts on
     the first row of each run of its members.
@@ -166,9 +164,7 @@ def header_depth(path: str) -> int:
     return max(0, len(path.split("/")) - 1)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Header geometry and painting (shared by the delegate and the mouse filter)
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def header_rects(row_rect: QRect, entry: RowEntry) -> list[tuple[str, QRect]]:
@@ -311,9 +307,7 @@ def paint_guides(painter: QPainter, option: Any, row_rect: QRect, entry: RowEntr
     painter.restore()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # The model
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class LayerFolders(QObject):
@@ -347,7 +341,7 @@ class LayerFolders(QObject):
         for layer in viewer.layers:
             self._watch(layer)
 
-    # -- queries ----------------------------------------------------------------
+    # queries
 
     def layers(self) -> list[Any]:
         """The viewer's layers, bottom to top."""
@@ -392,7 +386,7 @@ class LayerFolders(QObject):
         selection = self._viewer.layers.selection
         return bool(members) and all(layer in selection for layer in members)
 
-    # -- operations ---------------------------------------------------------------
+    # operations
 
     def unique_name(self, parent: str, name: str = "Folder") -> str:
         """*name* under *parent*, numbered if a folder there already has it."""
@@ -425,7 +419,7 @@ class LayerFolders(QObject):
         for layer in layers:
             _set_folder(layer, folder)
         # Where the run goes: on top of the deepest existing folder on the path,
-        # or — leaving every folder — just above the top-level run it was in.
+        # or (leaving every folder), just above the top-level run it was in.
         anchor = None
         targets = list(reversed(ancestors(folder))) if folder else []
         for path in targets:
@@ -523,7 +517,7 @@ class LayerFolders(QObject):
         # Not ``active``: setting it in Napari selects that one layer only.
         try:
             selection.current = members[-1]
-        except Exception:  # noqa: BLE001 — older Napari without ``current``
+        except Exception:  # noqa: BLE001 (older Napari without ``current``)
             pass
 
     def set_enabled(self, enabled: bool) -> None:
@@ -531,7 +525,7 @@ class LayerFolders(QObject):
         self.enabled = bool(enabled)
         self.invalidate()
 
-    # -- view ---------------------------------------------------------------------
+    # view
 
     def attach_view(self, view: Any, delegate: Any) -> None:
         """Keep *view*'s hidden rows and row heights in step with the folders."""
@@ -565,7 +559,7 @@ class LayerFolders(QObject):
         except RuntimeError:  # the view is being torn down
             pass
 
-    # -- list events ----------------------------------------------------------------
+    # list events
 
     def _index(self, layer: Any) -> int:
         return self.layers().index(layer)
@@ -644,9 +638,7 @@ class LayerFolders(QObject):
         self.invalidate()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Mouse on the headers
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class _HeaderMouse(QObject):
@@ -662,7 +654,7 @@ class _HeaderMouse(QObject):
         self._folders = folders
 
     def _hit(self, pos: QPoint) -> tuple[str, str] | None:
-        """``(folder, part)`` under *pos* — part is arrow / box / name — or ``None``."""
+        """``(folder, part)`` under *pos* (part is arrow / box / name), or ``None``."""
         from napari._qt.containers._base_item_model import ItemRole
 
         index = self._view.indexAt(pos)
@@ -713,9 +705,7 @@ class _HeaderMouse(QObject):
         return True
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Menus and the toolbar button
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def prompt_rename(folders: LayerFolders, folder: str, parent: Any = None) -> None:
@@ -830,7 +820,7 @@ def _toolbar_button(viewer: Any, folders: LayerFolders) -> Any | None:
 
         bg = buttons.palette().color(buttons.palette().ColorRole.Window).red()
         button.setIcon(QColoredSVGIcon.from_resources("folder").colored(theme="dark" if bg < 128 else "light"))
-    except Exception:  # noqa: BLE001 — a text button works too
+    except Exception:  # noqa: BLE001 (a text button works too)
         button.setText("📁")
     button.setFixedSize(28, 28)
     button.setStyleSheet("QPushButton { padding: 0px; margin: 0px; min-width: 28px; min-height: 28px; }")
@@ -848,7 +838,7 @@ def install_layer_folders(viewer: Any, delegate: Any = None) -> LayerFolders | N
         return existing
     try:
         view = viewer.window._qt_viewer.layers
-    except Exception:  # noqa: BLE001 — headless
+    except Exception:  # noqa: BLE001 (headless)
         return None
     folders = LayerFolders(viewer)
     if delegate is None:

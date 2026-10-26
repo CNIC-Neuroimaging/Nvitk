@@ -26,7 +26,7 @@ def _write_done_marker(
     manifest: dict | None = None,
 ) -> None:
     """Write a ``.done`` JSON marker in *output_dir* recording job id, exit code, produced output
-    files, finish timestamp, and any error — signals the GUI that the job finished.
+    files, finish timestamp, and any error: signals the GUI that the job finished.
 
     *manifest* (FastSurfer / FSL jobs) says how the GUI should open the outputs: which are
     label maps and their names, the tables to show (see :mod:`nvitk.gui.tools.external_io`)."""

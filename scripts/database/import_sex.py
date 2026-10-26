@@ -11,7 +11,7 @@ triple below) are added or replaced.
 
 One row is written per subject, at a single ``--visit`` (default ``"4"``, the visit that carries
 age_at_mri / hematocrit / apoe / bmi and every other subject-level clinical variable in this
-dataset). Sex is time-invariant, so the visit is only a placement choice — but it must match the
+dataset). Sex is time-invariant, so the visit is only a placement choice, but it must match the
 other covariates: ``repo.clinical(wide=True)`` pivots on ``(subject_uid, visit_id)``, and the
 analysis-frame merge keeps one row per subject, so sex written at a *different* visit than the rest
 would produce a second, otherwise-empty row and silently blank out the other covariates.
@@ -47,7 +47,7 @@ VARIABLE_ID = "sex"
 SEX_ID_NAMESPACE = "sex"
 
 # Part of the ``clinical_measurements`` key tuple (subject_uid, visit_id, variable_id, source_file,
-# source_sheet, source_column) — keep stable so re-runs replace these rows instead of duplicating.
+# source_sheet, source_column): keep stable so re-runs replace these rows instead of duplicating.
 SOURCE_FILE = "derived"
 SOURCE_SHEET = "sex"
 SOURCE_COLUMN = "sex"
@@ -79,7 +79,7 @@ def _open_repo(dataset_root: Path | None) -> DataRepo:
 
 
 def _encode_sex(value: Any) -> float | None:
-    """Encode a raw sex label (``\"Male\"``, ``\"F\"``, ``1``, …) as 1.0 = male / 0.0 = female, or
+    """Encode a raw sex label (``\"Male\"``, ``\"F\"``, ``1``, ...) as 1.0 = male / 0.0 = female, or
     ``None`` when the value is missing or unrecognized."""
     if value is None or (isinstance(value, float) and pd.isna(value)) or value is pd.NA:
         return None
@@ -148,7 +148,7 @@ def _align_dtypes(rows: pd.DataFrame, existing: pd.DataFrame) -> pd.DataFrame:
     rows' storage types.
 
     Without this, a freshly built ``measured_at`` (``datetime64[ns]``) concatenated with a table
-    stored as ``datetime64[ms]`` promotes the whole column — the values survive, but every
+    stored as ``datetime64[ms]`` promotes the whole column: the values survive, but every
     pre-existing row is rewritten with a different dtype.
     """
     if existing.empty:

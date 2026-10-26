@@ -365,7 +365,7 @@ def splice_skeleton_end_connectors(pts: np.ndarray, arm_pts_mm: np.ndarray, blen
 
 
 def trim_polyline_ends_by_length(pts: np.ndarray, trim_start_mm: float, trim_end_mm: Optional[float] = None) -> np.ndarray:
-    """Trim a fixed arc-length amount off each end of a polyline (no-op if that would remove ≥80% of it)."""
+    """Trim a fixed arc-length amount off each end of a polyline (no-op if that would remove >=80% of it)."""
     pts = np.asarray(pts, dtype=float)
     if len(pts) < 3:
         return pts

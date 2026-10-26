@@ -1,18 +1,18 @@
-"""Napari layers ↔ nvitk surface types, per-vertex fields, display, and mesh time series.
+"""Napari layers <-> nvitk surface types, per-vertex fields, display, and mesh time series.
 
 Coordinates
 -----------
 Meshes and point clouds the Mesh panel adds live in *world* coordinates (mm,
 the space image layers are placed in by their affine), with an identity
-transform — so they overlay every image, and measurements are in mm. Layers
+transform, so they overlay every image, and measurements are in mm. Layers
 from elsewhere (a Surface in voxel indices with an image's affine, Points
-clicked in a 4D viewer) are read through their own data→world transform.
+clicked in a 4D viewer) are read through their own data->world transform.
 
 Fields and display
 ------------------
-Each surface / points layer carries named per-vertex (per-point) *fields* —
+Each surface / points layer carries named per-vertex (per-point) *fields*:
 curvature, a distance map, the local diameter, the label a vertex came from,
-image values probed onto it — registered with :func:`add_field`. The layer's
+image values probed onto it: registered with :func:`add_field`. The layer's
 *display* (:func:`set_display`) colours it by one field through a colormap, by
 label colours, or with one solid colour. A series keeps one array per frame.
 
@@ -68,12 +68,12 @@ def layer_kind(layer: Any) -> str:
 
 
 def _to_world(layer: Any, coords: np.ndarray) -> np.ndarray:
-    """*layer*'s data coordinates → its world coordinates, last three dims kept."""
+    """*layer*'s data coordinates -> its world coordinates, last three dims kept."""
     coords = np.asarray(coords, dtype=float)
     nd = coords.shape[1]
     try:
         mat = np.asarray(layer._data_to_world.affine_matrix, dtype=float)
-    except Exception:  # noqa: BLE001 — not a Napari layer
+    except Exception:  # noqa: BLE001 (not a Napari layer)
         mat = np.eye(nd + 1)
     if mat.shape == (nd + 1, nd + 1) and not np.allclose(mat, np.eye(nd + 1)):
         coords = coords @ mat[:nd, :nd].T + mat[:nd, nd]
@@ -81,7 +81,7 @@ def _to_world(layer: Any, coords: np.ndarray) -> np.ndarray:
 
 
 def layer_spatial_affine(layer: Any) -> np.ndarray:
-    """4x4 voxel→world affine of an image layer's spatial (last three) dims."""
+    """4x4 voxel->world affine of an image layer's spatial (last three) dims."""
     mat = np.asarray(layer._data_to_world.affine_matrix, dtype=float)
     aff = np.eye(4)
     aff[:3, :3] = mat[-4:-1, -4:-1]
@@ -170,9 +170,7 @@ def layer_to_point_cloud(layer: Any) -> PointCloud:
     return PointCloud(points=world, metadata=meta, point_data=data)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Fields and display
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -195,9 +193,9 @@ class Display:
 
 @dataclass
 class _LayerData:
-    #: name → array (static) or list of per-frame arrays (series).
+    #: name -> array (static) or list of per-frame arrays (series).
     fields: dict[str, Any] = field(default_factory=dict)
-    #: name → {value: rgba} for categorical fields (labels).
+    #: name -> {value: rgba} for categorical fields (labels).
     categories: dict[str, dict[int, tuple[float, ...]]] = field(default_factory=dict)
     display: Display = field(default_factory=Display)
 
@@ -341,7 +339,7 @@ def _solid_colormap(rgba: tuple[float, ...]) -> Any:
 
 
 def _categorical(values: np.ndarray, lut: dict[int, tuple[float, ...]]) -> tuple[np.ndarray, Any, tuple[float, float]]:
-    """Values → (rank + 0.5, zero-interpolated colormap, limits) for exact label colours."""
+    """Values -> (rank + 0.5, zero-interpolated colormap, limits) for exact label colours."""
     from napari.utils.colormaps import Colormap
 
     ids = sorted(lut)
@@ -423,9 +421,7 @@ def apply_display(layer: Any) -> None:
         _apply_points_display(layer)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Faces, wireframe and vertices, each on its own
-# ──────────────────────────────────────────────────────────────────────────────
 
 #: Wireframe colour over visible faces (Napari's default).
 _WIRE_ON_FACES = (0.0, 0.0, 0.0, 1.0)
@@ -441,7 +437,7 @@ def _vispy_layer(layer: Any) -> Any | None:
 
         viewer = napari.current_viewer()
         return viewer.window._qt_viewer.canvas.layer_to_visual.get(layer)
-    except Exception:  # noqa: BLE001 — no window, no canvas
+    except Exception:  # noqa: BLE001 (no window, no canvas)
         return None
 
 
@@ -459,7 +455,7 @@ def apply_parts(layer: Any) -> None:
     """Draw a surface's faces, wireframe and vertices as its display says.
 
     Faces and edges come from one mesh visual: its wireframe filter draws the
-    edges over the faces, or — faces off — only the edges (``wireframe_only``,
+    edges over the faces, or (faces off) only the edges (``wireframe_only``,
     which discards the rest and keeps the depth right), in the surface's colour
     so they show on the dark background. Vertices are a markers visual parented to
     the surface's own node, so it follows every move and frame without a layer of
@@ -476,7 +472,7 @@ def apply_parts(layer: Any) -> None:
             layer.wireframe.visible = True
         else:
             layer.wireframe.visible = False
-    except Exception:  # noqa: BLE001 — a Napari without a wireframe model
+    except Exception:  # noqa: BLE001 (a Napari without a wireframe model)
         pass
     vispy_layer = _vispy_layer(layer)
     if vispy_layer is None:
@@ -586,9 +582,7 @@ def _apply_points_display(layer: Any) -> None:
     layer.face_color = np.tile(np.asarray(disp.color, dtype=float), (n, 1))
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Adding layers
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _surface_kwargs(name: str, extra_meta: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -735,7 +729,7 @@ def add_normals_layer(viewer: Any, cloud: PointCloud, *, name: str, length: floa
 
 def add_polylines_layer(viewer: Any, polylines: list[np.ndarray], *, name: str, color: str = "#ffd34d",
                         width: float = 0.5) -> Any | None:
-    """Polylines (world mm) as a Vectors layer of segments — lines that show in 3D.
+    """Polylines (world mm) as a Vectors layer of segments: lines that show in 3D.
 
     The polylines themselves are kept in ``metadata["nvitk_polylines"]``: segments alone cannot
     tell two branches meeting end to end from one.
@@ -753,9 +747,7 @@ def add_polylines_layer(viewer: Any, polylines: list[np.ndarray], *, name: str, 
                               metadata={POLYLINES_META: kept})
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Time series
-# ──────────────────────────────────────────────────────────────────────────────
 
 _CONTROLLERS: "weakref.WeakKeyDictionary[Any, MeshSeriesController]" = weakref.WeakKeyDictionary()
 

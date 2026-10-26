@@ -9,7 +9,7 @@
 Inspired by the segment features of FLOWCAT ``arterial`` (feature_extraction: proximal / distal
 and end-window diameters, min/max diameter ratio, tortuosity of the first / last N mm, bending
 length, cumulative curvature, curvature energy, direction angles, bifurcation blanking) and
-re-implemented here from their definitions — no code is shared (``arterial`` is PolyForm
+re-implemented here from their definitions; no code is shared (``arterial`` is PolyForm
 Noncommercial). Two deliberate differences: curvature integrals are arc-length integrals
 (``∫κ ds``, ``∫κ² ds``) rather than sums over nodes, so they do not depend on the sampling step;
 and curvature is measured on the centerline smoothed at ``FEATURE_CURVATURE_SMOOTH_MM`` (true
@@ -133,7 +133,7 @@ def path_features(
     r = np.where(np.isfinite(mis), mis, cs)
     end = float(_cfg.FEATURE_END_WINDOW_MM)
     # The tips are excluded from calibre statistics: VMTK appends the seed point on the wall
-    # (inscribed radius → 0) and the cross-section there cuts the cap, not the lumen.
+    # (inscribed radius -> 0) and the cross-section there cuts the cap, not the lumen.
     tip = np.maximum(float(_cfg.FEATURE_TIP_EXCLUDE_MM), np.where(np.isfinite(r), r, 0.0))
     core = (s >= tip) & (s <= length - tip)
     if core.sum() < 2:
@@ -205,9 +205,7 @@ def path_features(
     return out
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Lesions
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _segment_name_at(point: np.ndarray, segments: Sequence[Mapping[str, Any]]) -> str:
@@ -257,7 +255,7 @@ def _lesion_reference(
     junction_idx: np.ndarray,
 ) -> dict[str, Any]:
     """The healthy reference radius of the lesion run ``a..b`` (extreme point *x*), per
-    ``LESION_REFERENCE_METHOD`` — see :func:`lesion_rows`."""
+    ``LESION_REFERENCE_METHOD``; see :func:`lesion_rows`."""
     lo_w, hi_w = (float(v) for v in _cfg.LESION_PROXIMAL_REFERENCE_WINDOW_MM)
     up = (s >= s[a] - hi_w) & (s <= s[a] - lo_w) & ref_ok
     down = (s >= s[b] + lo_w) & (s <= s[b] + hi_w) & ref_ok
@@ -333,7 +331,7 @@ def lesion_rows(
     ``interpolated`` (default)
         the median radius of a proximal window (``LESION_PROXIMAL_REFERENCE_WINDOW_MM`` upstream of
         the lesion) and of a distal one (the same distances downstream), interpolated linearly in arc
-        length to the lesion's narrowest (widest) point — QCA's interpolated reference — so the
+        length to the lesion's narrowest (widest) point (QCA's interpolated reference), so the
         vessel's natural taper between them is not counted as stenosis. The windows keep to healthy
         points of the lesion's own junction-to-junction stretch: other lesions and the bifurcation
         blanking zones are left out, and no window crosses a junction (a branch leaving steps the
@@ -342,7 +340,7 @@ def lesion_rows(
         ``distal``). With neither, the ``proximal`` method's plain windows (``reference_fallback``).
     ``proximal``
         the median radius over ``LESION_PROXIMAL_REFERENCE_WINDOW_MM`` upstream on the same path
-        (downstream when there is no upstream room) — the method before 2026-10-21.
+        (downstream when there is no upstream room): the method before 2026-10-21.
 
     Neither window comes within ``LESION_REFERENCE_EXCLUDE_END_MM`` of a path end. Both windows'
     medians and spans are reported (``reference_proximal_*`` / ``reference_distal_*``). Each kind is measured on the radius its test
@@ -358,7 +356,7 @@ def lesion_rows(
     ===================== ======= ====================================================================
     reference_distal/none 0.8     no proximal reference window (distal one used, or none)
     reference_inconsistent 0.8    ``interpolated``: the proximal and distal medians differ by more
-                                  than ``LESION_REFERENCE_DISAGREEMENT_FRACTION`` — more than taper
+                                  than ``LESION_REFERENCE_DISAGREEMENT_FRACTION``; more than taper
                                   explains (distal collapse, dilatation, an unseen branch)
     reference_fallback    0.8     ``interpolated``: no healthy window in the lesion's stretch, so the
                                   plain windows of the ``proximal`` method were used
@@ -374,7 +372,7 @@ def lesion_rows(
     cross_section_gaps    0.8     more than 20 % of the lesion has no valid cross-section
     ===================== ======= ====================================================================
 
-    Classes: high ≥ 0.7 (at most one mild penalty), moderate ≥ 0.4, low below.
+    Classes: high >= 0.7 (at most one mild penalty), moderate >= 0.4, low below.
     """
     end_ex = float(_cfg.LESION_REFERENCE_EXCLUDE_END_MM or 0.0)
     rows: list[dict[str, Any]] = []
@@ -397,7 +395,7 @@ def lesion_rows(
         mis = np.asarray(path.get("maximum_inscribed_sphere_radius_mm", np.full(n, np.nan)), dtype=float)
         cs = np.asarray(path.get("radius_mm", np.full(n, np.nan)), dtype=float)
         siphon = np.asarray(path.get("siphon_mask_point", np.zeros(n)), dtype=float) >= 0.5
-        # The area-equivalent cross-section radius normally exceeds the inscribed radius by 10–25 %
+        # The area-equivalent cross-section radius normally exceeds the inscribed radius by 10-25 %
         # (non-circular lumen); a lesion is suspicious when its ratio departs from the path's own.
         with np.errstate(divide="ignore", invalid="ignore"):
             ratio = np.where(mis > 0, cs / mis, np.nan)

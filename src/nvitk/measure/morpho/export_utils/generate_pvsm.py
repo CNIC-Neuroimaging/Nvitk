@@ -19,14 +19,11 @@ import re
 import sys
 
 
-# ============================================================================
 # CONFIG FOR DIRECT RUN (paths must be supplied at runtime; no host defaults)
-# ============================================================================
 CASE_DIR = None
-OUTPUT_PVSM = None  # None → <CASE_DIR>/<folder_name>.pvsm
+OUTPUT_PVSM = None  # None -> <CASE_DIR>/<folder_name>.pvsm
 QUIET = True
 PRINT_FINAL_STATUS = True
-# ============================================================================
 
 # Allow overriding via environment variables (used by the batch runner).
 CASE_DIR = os.environ.get("GENERATE_PVSM_CASE_DIR", CASE_DIR)

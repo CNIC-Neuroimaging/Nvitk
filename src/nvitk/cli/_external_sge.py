@@ -2,15 +2,15 @@
 
 The image-tool CLIs take one ``-i`` and one ``-o`` (:func:`nvitk.cli._common.run_sge`).
 FSL and FastSurfer commands take several inputs, output basenames, folders; so
-:func:`enable_sge` gives every subcommand of a group the same submission options —
+:func:`enable_sge` gives every subcommand of a group the same submission options:
 ``--submit local|sge``, ``--emit-script``, ``--direct-submit``, ``--no-remote``,
-``--dry-run``, plus ``--sge-gpu/--sge-cpu`` — and with ``--submit sge``:
+``--dry-run``, plus ``--sge-gpu/--sge-cpu``, and with ``--submit sge``:
 
 1. rebuilds the subcommand's command line from the values click parsed;
 2. binds every folder a path argument lives in (or the folder itself) into the nvitk
-   container at ``/nvitk/ext/<n>``, and rewrites the paths to match — an output's folder
+   container at ``/nvitk/ext/<n>``, and rewrites the paths to match: an output's folder
    is created first, so it can be bound;
-3. writes the SGE script running ``python -m <module> <subcommand> …`` in the container,
+3. writes the SGE script running ``python -m <module> <subcommand> ...`` in the container,
    and runs it over SSH (``NVITK_SGE_SSH_HOST`` / ``_USER`` / ``_PASSWORD``) unless
    ``--no-remote``, or ``qsub``\\ s it directly with ``--direct-submit`` (on the cluster).
 
@@ -40,7 +40,7 @@ EXT_ROOT = "/nvitk/ext"
 
 
 class PathBinder:
-    """Host folder → container mount, for the paths of one command line."""
+    """Host folder -> container mount, for the paths of one command line."""
 
     def __init__(self) -> None:
         self.mounts: dict[Path, str] = {}
@@ -75,7 +75,7 @@ def _render(param: click.Parameter, value: Any, binder: PathBinder) -> str:
     if _is_path_type(param):
         return binder.map(value)
     if param.type is click.UNPROCESSED or getattr(param.type, "name", "") == "text":
-        # Free tokens (``nvitk-fsl run …``, fslmaths operations): bind what is a path here.
+        # Free tokens (``nvitk-fsl run ...``, fslmaths operations): bind what is a path here.
         token = str(value)
         if not token.startswith("-") and os.sep in token and Path(token).expanduser().exists():
             return binder.map(token)
@@ -86,8 +86,8 @@ def _render(param: click.Parameter, value: Any, binder: PathBinder) -> str:
 def rebuild_argv(command: click.Command, values: dict[str, Any], binder: PathBinder) -> list[str]:
     """*command*'s arguments from parsed *values*, paths mapped through *binder*.
 
-    Options first, then the positional arguments (a command with free trailing tokens —
-    ``run``, ``maths`` — takes them last).
+    Options first, then the positional arguments (a command with free trailing tokens (
+    ``run``, ``maths``) takes them last).
     """
     options: list[str] = []
     arguments: list[str] = []
@@ -133,7 +133,7 @@ def submit_external(
     no_remote: bool,
     dry_run: bool,
 ) -> None:
-    """Write (and run) the SGE script for one containerised ``python -m <module> …`` call."""
+    """Write (and run) the SGE script for one containerised ``python -m <module> ...`` call."""
     from nvitk.cli._sge import default_emit_path, emit_submit_script, submit_tool_job
 
     python_cmd = " ".join(shlex.quote(a) for a in ["python", "-m", module, subcommand, *argv])
@@ -198,7 +198,7 @@ def enable_sge(
 ) -> None:
     """Give every subcommand of *group* (but *local_only*) the SGE submission options.
 
-    *prepare(subcommand, values)* may adjust the parsed values before a cluster run — fill in
+    *prepare(subcommand, values)* may adjust the parsed values before a cluster run: fill in
     what only this machine knows (a license path from the local configuration), drop what
     the container brings itself.
     """

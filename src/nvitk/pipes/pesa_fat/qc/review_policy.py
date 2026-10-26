@@ -163,9 +163,9 @@ def portal_display_status(
 ) -> tuple[str, str]:
     """Return ``(label, tone)`` for dashboard cells.
 
-    - ``PENDING`` / ``pending`` — any expected (structure, aspect) still pending.
-    - ``REVISED`` / ``ok`` — all reviewed, not all FAIL (green).
-    - ``REVISED`` / ``fail`` — all reviewed and all FAIL (red).
+    - ``PENDING`` / ``pending``: any expected (structure, aspect) still pending.
+    - ``REVISED`` / ``ok``: all reviewed, not all FAIL (green).
+    - ``REVISED`` / ``fail``: all reviewed and all FAIL (red).
     """
     if pipeline is not None:
         entries = expected_review_entries(pipeline)

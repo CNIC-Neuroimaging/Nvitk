@@ -6,11 +6,11 @@ for the same ``(subject_uid, pipeline_id, variable_id, region_id, frame_index)``
 
 Sources (written by :mod:`nvitk.pipes.qvtpy.stage6_measure`):
 
-- ``loc_measurements.csv`` — per-LOC ``pi``, ``ri``, ``flow_mean`` (mL/min),
+- ``loc_measurements.csv``: per-LOC ``pi``, ``ri``, ``flow_mean`` (mL/min),
   ``cross_section_area`` (mm2), ``velocity_mean`` (mm/s), and the per-frame
   ``flow_tseries`` (mL/min). Includes surviving PCOMMs (``LPCOMM`` / ``RPCOMM``) when
   stage-5 placed mid-LOCs; ACOMM is never measured.
-- ``vessel_hemodynamics.csv`` — per-root ``pitc_slope`` / ``pitc_intercept`` / ``pwv``
+- ``vessel_hemodynamics.csv``: per-root ``pitc_slope`` / ``pitc_intercept`` / ``pwv``
   (Bjornfoot) / ``pwv_fielding_xcor`` and per-branch ``damping_index``.
 """
 

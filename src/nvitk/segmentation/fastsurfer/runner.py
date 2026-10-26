@@ -4,7 +4,7 @@ Every builder returns an argv list plus the environment to run it in, so the sam
 call serves the CLI (run in the foreground), the GUI (an
 :class:`~nvitk.gui.core.external_jobs.ExternalJob`) and tests (inspect the argv).
 FastSurfer always runs with *this* environment's Python (``--py``), from its own tree
-on ``PYTHONPATH`` — see :mod:`nvitk.segmentation.fastsurfer.config`.
+on ``PYTHONPATH``; see :mod:`nvitk.segmentation.fastsurfer.config`.
 
 The modules map onto ``run_fastsurfer.sh`` flags:
 
@@ -238,7 +238,7 @@ def long_argv(
 
 
 def module_argv(script: str, args: Sequence[str]) -> tuple[list[str], dict[str, str]]:
-    """``(argv, env)`` for one FastSurfer Python script (``FastSurferCNN/segstats.py`` …)."""
+    """``(argv, env)`` for one FastSurfer Python script (``FastSurferCNN/segstats.py`` ...)."""
     home = _home()
     return [sys.executable, "-s", str(home / script), *[str(a) for a in args]], base_env(home)
 
@@ -268,7 +268,7 @@ def segstats_argv(
 def reduce_to_aseg_argv(
     aparc_aseg: Path, out_aseg: Path, *, out_mask: Path | None = None, fixwm: bool = True
 ) -> tuple[list[str], dict[str, str]]:
-    """aparc+aseg → aseg (and a brain mask) (``FastSurferCNN/reduce_to_aseg.py``)."""
+    """aparc+aseg -> aseg (and a brain mask) (``FastSurferCNN/reduce_to_aseg.py``)."""
     args = ["-i", str(aparc_aseg), "-o", str(out_aseg)]
     if out_mask is not None:
         args += ["--outmask", str(out_mask)]

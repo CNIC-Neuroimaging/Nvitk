@@ -8,7 +8,7 @@ Pairs with the **Mouse TOF CoW** module: its ``{volume}_tof_cow_trees`` output
 uses labels 1/2/3, exactly what ``mouse_root_topology.json`` describes.
 
 **Does not import nvitk.** The pipeline is vendored under
-``MouseTOFMorphometricsLib/nvitk_vendor/`` — copied verbatim from the nvitk
+``MouseTOFMorphometricsLib/nvitk_vendor/``: copied verbatim from the nvitk
 source with only the root package renamed, so the measurements are exactly those
 of the upstream pipeline. See
 ``MouseTOFMorphometricsLib/nvitk_vendor/VENDORED.md``.
@@ -88,7 +88,7 @@ class MouseTOFMorphometrics(ScriptedLoadableModule):
 class MouseTOFMorphometricsLogic(ScriptedLoadableModuleLogic):
     """MRML marshalling plus the call into the vendored morphometrics pipeline."""
 
-    # -- run ----------------------------------------------------------------
+    # run
     def export_labelmap(self, labelNode, out_dir: str, *, bridge_gaps: bool = True):
         """Write the labelmap to a NIfTI for the pipeline; returns ``(path, n_bridged)``.
 
@@ -158,7 +158,7 @@ class MouseTOFMorphometricsLogic(ScriptedLoadableModuleLogic):
             mapping_json=topology or morpho.none_topology(),
             case_out_dir_override=case_dir,
             # run_case parallelises with spawned subprocesses, which are not
-            # reliable inside Slicer's embedded Python — always serial here.
+            # reliable inside Slicer's embedded Python: always serial here.
             n_workers=1,
             input_already_smoothed=bool(input_already_smoothed),
             skip_if_excel_exists=bool(skip_if_excel_exists),
@@ -193,7 +193,7 @@ class MouseTOFMorphometricsWidget(ScriptedLoadableModuleWidget, VTKObservationMi
         self._resultNodes: list = []
         self._lastResult: dict | None = None
 
-    # -- setup --------------------------------------------------------------
+    # setup
     def setup(self):
         ScriptedLoadableModuleWidget.setup(self)
         self.logic = MouseTOFMorphometricsLogic()
@@ -380,7 +380,7 @@ class MouseTOFMorphometricsWidget(ScriptedLoadableModuleWidget, VTKObservationMi
         self._resultNodes = []
         self._lastResult = None
 
-    # -- helpers ------------------------------------------------------------
+    # helpers
     def _setStatus(self, text: str) -> None:
         self.statusLabel.setText(text)
 
@@ -449,7 +449,7 @@ class MouseTOFMorphometricsWidget(ScriptedLoadableModuleWidget, VTKObservationMi
         self._fillTable(self.volumetryTable, *results.volumetry_table(case_dir))
         self._fillTable(self.pathTable, *results.path_summary_table(case_dir))
 
-    # -- handlers -----------------------------------------------------------
+    # handlers
     def onInstallDeps(self):
         installed: list[str] = []
         with slicer.util.tryWithErrorDisplay("Dependency install failed.", waitCursor=True):

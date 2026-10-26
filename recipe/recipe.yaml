@@ -1,6 +1,6 @@
 # rattler-build recipe for nvitk.
 #
-# Dependency split: requirements/run below holds the conda-native core — python/numpy, the R
+# Dependency split: requirements/run below holds the conda-native core; python/numpy, the R
 # stack + rpy2, freeimage/libstdcxx-ng, and the Qt/GUI stack (pyqt6/napari/qtpy; PyQt6-WebEngine
 # alone stays pip-only in post-link.sh until conda-forge ships it). Everything else in
 # pyproject.toml is pip-only and installed by post-link.sh.
@@ -27,7 +27,7 @@ build:
   script:
     - pip install . --no-deps -vv
     # Unlike classic conda-build, rattler-build does NOT wire up post-link.sh /
-    # pre-unlink.sh by filename convention alone — the build script must copy them
+    # pre-unlink.sh by filename convention alone: the build script must copy them
     # into $PREFIX/bin/ under the exact hidden-file naming conda's linker looks for
     # (verified against a failed local install where these never ran otherwise).
     - mkdir -p "$PREFIX/bin"
@@ -39,8 +39,8 @@ build:
     - mkdir -p "$PREFIX/share/nvitk/vmtk"
     - cp "$RECIPE_DIR/vmtk/build_wheel.sh" "$PREFIX/share/nvitk/vmtk/build_wheel.sh"
     - chmod +x "$PREFIX/share/nvitk/vmtk/build_wheel.sh"
-    # FastSurfer (v2.5.4, the newest on Python 3.11) is installed by post-link from these scripts —
-    # and again on demand by `nvitk-fastsurfer install` — into $PREFIX/share/nvitk/fastsurfer.
+    # FastSurfer (v2.5.4, the newest on Python 3.11) is installed by post-link from these scripts:
+    # and again on demand by `nvitk-fastsurfer install`, into $PREFIX/share/nvitk/fastsurfer.
     - mkdir -p "$PREFIX/share/nvitk/fastsurfer-install"
     - cp "$RECIPE_DIR/fastsurfer/install_fastsurfer.sh" "$RECIPE_DIR/fastsurfer/download_checkpoints.py" "$PREFIX/share/nvitk/fastsurfer-install/"
     - chmod +x "$PREFIX/share/nvitk/fastsurfer-install/install_fastsurfer.sh"
@@ -61,10 +61,10 @@ requirements:
     - wheel
     - setuptools_scm >=6.0
   run:
-    # pip itself must be present at runtime for post-link.sh / pre-unlink.sh to use.  
+    # pip itself must be present at runtime for post-link.sh / pre-unlink.sh to use.
     # - conda-forge::pip
     - pip
-    # ── Conda-native core ──────────────────────────────────────────────────────
+    # Conda-native core
     - python ==3.11.15
     - numpy ==2.3.3
     - dvc ==3.67.1
@@ -83,13 +83,13 @@ requirements:
     - r-broom.mixed ==0.2.9.7
     - r-insight ==1.5.2
     - r-robustbase ==0.99_7
-    # ── Conda-only extras ──────────────────────────────────────────────────────
+    # Conda-only extras
     # - mrtrix3::mrtrix3 ==3.0.8
     - freeimage ==3.18.0
     - libstdcxx-ng ==15.2.0
     # ── GUI ([project.optional-dependencies].gui; Qt from conda-forge for a
-    #    consistent harfbuzz/freetype stack — PyQt6-WebEngine stays pip-only in
-    #    post-link.sh until conda-forge ships pyqt6-webengine) ───────────────
+    #    consistent harfbuzz/freetype stack: PyQt6-WebEngine stays pip-only in
+    # post-link.sh until conda-forge ships pyqt6-webengine)
     - pyqt6 ==6.11.0
     - qt6-main ==6.11.0
     - qtpy ==2.4.3
@@ -101,7 +101,7 @@ tests:
   # A real `import nvitk` needs the pip-only packages post-link.sh installs, which
   # rattler-build's test harness doesn't run (it only installs requirements/run).
   # find_spec locates the module without executing its __init__.py, so this checks
-  # the package actually landed on-disk without requiring the full pip-only stack.
+  # the package landed on-disk without requiring the full pip-only stack.
   # The real end-to-end import check happens in CI / local verification via an
   # actual `conda install`, which does trigger post-link.sh.
   - script:

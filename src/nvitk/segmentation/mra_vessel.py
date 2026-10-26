@@ -41,7 +41,7 @@ def _as_binary_brain_mask(mask: Image | np.ndarray, *, threshold: float = 0.5):
 
 
 def _stride_tuple(stride: int | tuple[int, ...] | list[int]) -> tuple[int, int, int]:
-    """Normalize a patch stride (scalar or length-3) to a 3-tuple of ints ≥ 1."""
+    """Normalize a patch stride (scalar or length-3) to a 3-tuple of ints >= 1."""
     if isinstance(stride, (tuple, list)):
         if len(stride) != 3:
             raise ValueError("patch_stride_length must be an int or length-3 tuple.")
@@ -249,9 +249,9 @@ def mra_vessel_segmentation(
     """ANTsPyNet MRA-TOF vessel segmentation (probability image).
 
     Uses a **streaming** patch predictor (same model/weights as ANTsPyNet) so
-    large TOFs do not allocate all ``160³`` patches at once — the stock
+    large TOFs do not allocate all ``160³`` patches at once: the stock
     ``antspynet.brain_mra_vessel_segmentation`` path can need tens of GiB at
-    small strides (e.g. stride 16 ≈ 25–50 GiB) and get OOM-killed.
+    small strides (e.g. stride 16 ≈ 25-50 GiB) and get OOM-killed.
 
     Parameters
     ----------
@@ -263,7 +263,7 @@ def mra_vessel_segmentation(
     prediction_batch_size
         Patches per ``model.predict`` call (keep small on CPU / limited RAM).
     patch_stride_length
-        Stride (voxels) for overlapping patch prediction. Smaller → denser
+        Stride (voxels) for overlapping patch prediction. Smaller -> denser
         overlap and more compute; does **not** inflate RAM in the streaming path.
     """
     require_antspynet()

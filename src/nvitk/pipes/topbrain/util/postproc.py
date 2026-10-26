@@ -58,7 +58,7 @@ class PostProcessSpec:
     bridge_radius: int = 1
     close_radius: int = 0
     max_fragment_fraction: float = 0.25
-    # ---- flood: a pass-through to blood_flood's own parameters, nothing more ----
+    # flood: a pass-through to blood_flood's own parameters, nothing more
     flood_hyst_low_factor: float = 3.0
     flood_hyst_high_factor: float = 0.5
     flood_thin_percentile: float | None = 55.0

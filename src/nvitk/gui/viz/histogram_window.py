@@ -33,7 +33,7 @@ class HistogramWindow(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Histogram")
         self.setMinimumSize(520, 320)
-        # Modeless: the point is to read it *while* adjusting something else.
+        # Modeless, so it can be read *while* adjusting something else.
         self.setModal(False)
 
         self._caption = QLabel("")
@@ -106,7 +106,7 @@ def show_histogram_window(
         parent = None
         try:
             parent = viewer.window._qt_window
-        except Exception:  # noqa: BLE001 — a parentless dialog still works
+        except Exception:  # noqa: BLE001 (a parentless dialog still works)
             parent = None
         window = HistogramWindow(parent)
         apply_theme(window)

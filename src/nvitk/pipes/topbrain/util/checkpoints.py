@@ -9,7 +9,7 @@ The encoder can come from three places, selected by ``--pretrain-source``:
     Resolved from an explicit path, from a name under the configured model root, or by
     download from an explicit URL.
 ``ssl``
-    The output of this pipeline's own stage 2 — the newest ``checkpoint_final.pth`` under
+    The output of this pipeline's own stage 2: the newest ``checkpoint_final.pth`` under
     ``nnssl_results``.
 ``none``
     No pre-training: nnU-Net trains from random initialisation. Worth keeping as a first-class
@@ -100,7 +100,7 @@ def _openmind(name: str, method: str, description: str) -> PublishedCheckpoint:
 #: Published OpenMind checkpoints, pre-trained on ~114 k brain MR volumes.
 #:
 #: The ``primusm-*`` entries are listed so that asking for one gives a useful error rather than a
-#: mysterious adapter failure — they are transformers and cannot seed a convolutional decoder.
+#: mysterious adapter failure: they are transformers and cannot seed a convolutional decoder.
 OPENMIND_MODELS: dict[str, PublishedCheckpoint] = {
     entry.name: entry
     for entry in (
@@ -152,7 +152,7 @@ def resolve_openmind(name: str, model_root: Path, *, overwrite: bool = False) ->
     Raises
     ------
     ValueError
-        For an unknown name, or a Primus checkpoint this pipeline cannot use — refused here
+        For an unknown name, or a Primus checkpoint this pipeline cannot use: refused here
         rather than several steps later inside the weight adapter.
     """
     entry = OPENMIND_MODELS.get(name.strip().lower())
@@ -186,7 +186,7 @@ def find_ssl_checkpoint(nnssl_results: Path, *, run_name: str | None = None) -> 
         Restrict to one training directory (``<Trainer>__<plans>__<configuration>``). Without
         it the most recently modified checkpoint across all runs wins, which is right for the
         common "adapt what I just pre-trained" case and wrong the moment two runs are in
-        flight — hence the log line naming the file that was chosen.
+        flight, hence the log line naming the file that was chosen.
 
     Raises
     ------
@@ -258,8 +258,8 @@ def download_checkpoint(url: str, destination: Path, *, overwrite: bool = False)
     Raises
     ------
     RuntimeError
-        On any network failure, with the manual-placement instruction attached — this host may
-        simply have no route to the host serving the weights.
+        On any network failure, with the manual-placement instruction attached: this host may
+        have no route to the host serving the weights.
     """
     destination = Path(destination)
     if destination.is_file() and not overwrite:
@@ -298,7 +298,7 @@ def resolve_checkpoint(
     Returns
     -------
     Path or None
-        ``None`` for ``source="none"`` — train from scratch.
+        ``None`` for ``source="none"``: train from scratch.
 
     Raises
     ------

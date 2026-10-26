@@ -71,7 +71,7 @@ def resolve_qvtpy_tree(resource_root: Path) -> Path:
     """Return the directory that contains ``qvtpy/`` stage folders.
 
     Accepts a subject root, a ``qvtpy/`` folder, or an XNAT unpack that still has
-    ``…/resources/qvtpy/files/stage*`` nesting.
+    ``.../resources/qvtpy/files/stage*`` nesting.
     """
     root = Path(resource_root)
     if (root / cfg.QVT_SUBDIR).is_dir() and (
@@ -256,7 +256,7 @@ def load_qvtpy_qc_layers(
         "stage6_dir": stage6_dir,
     }
 
-    # --- Phase images (default visibility off) ---
+    # Phase images (default visibility off)
     phases = find_phase_paths(search_roots)
     for axis, label in (("ap", "AP phase"), ("rl", "RL phase"), ("fh", "FH phase")):
         path = phases.get(axis)
@@ -273,14 +273,14 @@ def load_qvtpy_qc_layers(
             [str(r) for r in search_roots],
         )
 
-    # --- Complex Difference (on) ---
+    # Complex Difference (on)
     cd_path = find_cd_path(search_roots)
     if cd_path is not None:
         loaded["cd"] = _open_nifti(
             viewer, cd_path, name="Complex Difference 3D", visible=True
         )
 
-    # --- Segmentation + centerlines (on) ---
+    # Segmentation + centerlines (on)
     stage4 = qvt / cfg.STAGE4_SEG_DIR
     seg_path = _find_first(stage4, ("seg_4dflow.nii.gz", "seg_4dflow.nii"))
     if seg_path is None:
@@ -300,7 +300,7 @@ def load_qvtpy_qc_layers(
             viewer, cl_path, name="centerlines_mask_4dflow", visible=True
         )
 
-    # --- LOCs (on) ---
+    # LOCs (on)
     loc_rows: list[dict[str, Any]] = []
     locs_csv = _find_first(
         qvt / cfg.STAGE5_LOC_DIR,
@@ -323,7 +323,7 @@ def load_qvtpy_qc_layers(
             log.warning("QC LOCs load failed: %s", exc)
             loc_rows = []
 
-    # --- Flow velocity vectors (off) ---
+    # Flow velocity vectors (off)
     ap_lyr = loaded.get("phase_ap")
     rl_lyr = loaded.get("phase_rl")
     fh_lyr = loaded.get("phase_fh")
@@ -352,7 +352,7 @@ def load_qvtpy_qc_layers(
         except Exception as exc:
             log.warning("QC flow vectors failed: %s", exc)
 
-    # --- Vessel cross-sections (on), pick-off by default ---
+    # Vessel cross-sections (on), pick-off by default
     cd_lyr = loaded.get("cd")
     cl_lyr = loaded.get("centerlines")
     if cd_lyr is not None and cl_lyr is not None:
@@ -457,7 +457,7 @@ def load_qvtpy_qc_layers(
                 xs_state = app_state.get("vessel_xs") or {}
                 xs_state["branch_names"] = sorted(tip_sources.keys())
                 app_state["vessel_xs"] = xs_state
-                # Polylines are voxel indices — copy the reference layer
+                # Polylines are voxel indices: copy the reference layer
                 # affine/scale so tips land in the same world space as
                 # seg / CD / LOCs / vessel-XS overlays.
                 tips = []
@@ -510,7 +510,7 @@ def load_qvtpy_qc_layers(
         except Exception as exc:
             log.warning("QC vessel cross-sections failed: %s", exc)
 
-    # --- PITC / PWV overlays + diagnostics ---
+    # PITC / PWV overlays + diagnostics
     # Station coloring / PWV tabs need full stage-6-style plot + geometry arrays.
     # Reported slopes / PWV numbers always come from vessel_hemodynamics.csv.
     stage6 = loaded["stage6_dir"]
@@ -645,7 +645,7 @@ def load_qvtpy_qc_layers(
         except Exception as exc:
             log.warning("QC PITC/PWV overlays failed: %s", exc)
 
-    # --- Stage-7 morphometrics centerlines (optional) ---
+    # Stage-7 morphometrics centerlines (optional)
     stage7 = qvt / cfg.STAGE7_MORPHOMETRICS_DIR
     if (stage7 / "centerlines").is_dir():
         try:
@@ -759,7 +759,7 @@ def download_phase_niftis_for_qc(
                 or getattr(scan, "label", None)
                 or ""
             )
-            # Empty quality must stay None — classify_scan rejects non-"usable"
+            # Empty quality must stay None: classify_scan rejects non-"usable"
             # strings, and "" would incorrectly skip every unlabeled scan.
             raw_quality = getattr(scan, "quality", None)
             quality = (

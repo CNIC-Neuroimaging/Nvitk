@@ -10,15 +10,13 @@ from nvitk.core.logger import Logger
 
 log = Logger()
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Types
-# ──────────────────────────────────────────────────────────────────────────────
 
 EicabMaskKind = Literal["cw", "wb"]
 
 CENTERLINES_MASK_PP_NIFTI = "centerlines_mask_pp.nii.gz"
 
-# ---- Filename patterns -------------------------------------------------------
+# Filename patterns
 
 _CW_PATTERNS = ("*_eICAB_CW.nii.gz", "*_eICAB_CW.nii")
 _WB_PATTERNS = ("*_eICAB_WB.nii.gz", "*_eICAB_WB.nii")
@@ -39,9 +37,7 @@ class EicabMaskResolution:
     original_path: Path | None = None
 
 
-# ---------------------------------------------------------------------------
 # Resolve CW / WB multilabel path
-# ---------------------------------------------------------------------------
 
 
 def _stem_without_suffix(p: Path) -> str:
@@ -54,7 +50,7 @@ def _stem_without_suffix(p: Path) -> str:
 
 
 def eicab_pp_path(original: Path) -> Path:
-    """Post-processed mask path: ``foo_eICAB_CW.nii.gz`` → ``foo_eICAB_CW_pp.nii.gz``."""
+    """Post-processed mask path: ``foo_eICAB_CW.nii.gz`` -> ``foo_eICAB_CW_pp.nii.gz``."""
     p = Path(original)
     stem = _stem_without_suffix(p)
     if stem.endswith("_pp"):

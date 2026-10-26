@@ -21,9 +21,7 @@ from nvitk.transform.oblique import (
 
 setup(globals())
 
-# ---------------------------------------------------------------------------
 # Defaults (MATLAB segment_cross_section_thresh)
-# ---------------------------------------------------------------------------
 
 _FUSE_WEIGHTS = (0.2, 0.8, 0.2)
 _DEFAULT_RADIUS_VOX = 10.0

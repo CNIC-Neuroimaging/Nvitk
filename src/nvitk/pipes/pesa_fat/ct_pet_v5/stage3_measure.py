@@ -47,9 +47,7 @@ setup(globals())
 log = Logger()
 
 
-# ---------------------------------------------------------------------------
 # Measurement plan
-# ---------------------------------------------------------------------------
 
 SUV_SPECS = cfg.SUV_SPECS
 VOL_SPECS = cfg.VOL_SPECS
@@ -68,9 +66,7 @@ def column_order() -> list[str]:
         cols.append(spec.column.replace("_VOL", "_NSlices"))
     return cols
 
-# ---------------------------------------------------------------------------
 # Helper functions
-# ---------------------------------------------------------------------------
 
 def _nslices_axial_xyz(mask: Image) -> int:
     """Number of axial (Z) slices in *mask* containing at least one foreground voxel."""
@@ -113,9 +109,7 @@ def _load_pet(subject_nifti_dir: Path) -> Image:
     """Read the subject's PET NIfTI from *subject_nifti_dir*."""
     return imread(str(resolve_nii(subject_nifti_dir, cfg.PET_STEM)), axes="XYZ")
 
-# ---------------------------------------------------------------------------
 # Per-subject processing
-# ---------------------------------------------------------------------------
 
 def process_subject(
     pet: Image,
@@ -219,9 +213,7 @@ def run_subject(
     return output
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 
 
 @click.command("ctpet-v5-stage3")

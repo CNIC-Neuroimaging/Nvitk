@@ -14,20 +14,20 @@ Inside a subject folder the series folders are named inconsistently::
     ├── BPETXPET               ├── CT
     ├── BPETXPET2              ├── NIFTIS_3
     ├── CT                          ├── NIFTIS_4
-    ├── NIFTIS_3                    ├── studyid_…
-    └── NIFTIS_4                    └── studyid_…
+    ├── NIFTIS_3                    ├── studyid_...
+    └── NIFTIS_4                    └── studyid_...
 
-Roles come from the folder names alone — no file is opened to decide them:
+Roles come from the folder names alone: no file is opened to decide them:
 
 * ``NIFTI*`` folders, and folders with no files, are ignored.
-* **CT** — the folder whose name ends in ``CT``.
-* **PET / PET2** — every other folder, at most two. A ``…PET`` / ``…PET2`` name pair sets the order;
+* **CT**: the folder whose name ends in ``CT``.
+* **PET / PET2**: every other folder, at most two. A ``...PET`` / ``...PET2`` name pair sets the order;
   otherwise the names are sorted with their numbers compared as numbers and the first is ``PET``.
   For ``studyid_<UID>`` folders that is acquisition order: Philips study UIDs embed the study time
-  (``…63779574296…`` is 2022-02-04 12:24, ``…63779580193…`` the same day at 14:03).
+  (``...63779574296...`` is 2022-02-04 12:24, ``...63779580193...`` the same day at 14:03).
 
-A subject that cannot be assigned without guessing — two CT folders, three PET candidates, an
-unknown or ambiguous ``mr_id``, two input folders for one subject — is skipped and reported.
+A subject that cannot be assigned without guessing (two CT folders, three PET candidates, an
+unknown or ambiguous ``mr_id``, two input folders for one subject) is skipped and reported.
 
 Copy semantics
 --------------
@@ -42,7 +42,7 @@ Subject by subject
 ------------------
 Folder names are resolved up front (names only). Then each subject is listed, assigned and copied
 before the next is touched, one directory at a time, so memory holds one directory's file names and
-a one-line summary per series — never the whole input. On a network share every file operation is
+a one-line summary per series, never the whole input. On a network share every file operation is
 a round trip, so none is spent outside the copy itself: directories are listed without stat-ing
 their files, and a destination directory is listed once rather than probed file by file.
 
@@ -82,7 +82,7 @@ DEFAULT_OUTPUT = ""
 
 SOURCE_BATCH_ID = "copy_dicoms_ctpet"
 PET_ID_NAMESPACE = "pet_id"
-#: ``subject_ids`` namespaces that hold the MR id (``BMRI…``).
+#: ``subject_ids`` namespaces that hold the MR id (``BMRI...``).
 MR_ID_NAMESPACES = ("mri_id", "mr_id", "mrid", "session")
 ROLES = ("CT", "PET", "PET2")
 
@@ -94,14 +94,12 @@ PARTIAL_SUFFIX = ".partial"
 COPY_BUFFER = 1 << 20
 
 
-# ---------------------------------------------------------------------------
 # Subject resolution (folder names only)
-# ---------------------------------------------------------------------------
 def parse_folder_name(name: str) -> tuple[str, str] | None:
     """
     ``(pet_id, mr_id)`` from a subject folder name, or ``None`` when it is not two ids.
 
-    The order is ``pet_id-mr_id``; if the ids are recognisably swapped (``BMRI…-BPET…``) they are
+    The order is ``pet_id-mr_id``; if the ids are recognisably swapped (``BMRI...-BPET...``) they are
     put back.
 
     >>> parse_folder_name("BPET000001-BMRI000002")
@@ -122,7 +120,7 @@ def mr_to_subject(
     registry: pd.DataFrame, sessions: pd.DataFrame | None
 ) -> tuple[dict[str, str], dict[str, set[str]]]:
     """
-    ``({mr_id: subject_uid}, {mr_id: {subject_uid, …}})`` — the second holds the MR ids that
+    ``({mr_id: subject_uid}, {mr_id: {subject_uid, ...}})``: the second holds the MR ids that
     resolve to more than one subject, which are left out of the first.
     """
     pairs: dict[str, set[str]] = {}
@@ -201,11 +199,9 @@ def resolve_subjects(
     return subjects
 
 
-# ---------------------------------------------------------------------------
 # Roles (folder names only)
-# ---------------------------------------------------------------------------
 def _pet_number(name: str) -> int | None:
-    """``…PET`` -> 1, ``…PET2`` -> 2; ``None`` when the name does not end that way."""
+    """``...PET`` -> 1, ``...PET2`` -> 2; ``None`` when the name does not end that way."""
     match = _PET_SUFFIX.search(name)
     if match is None:
         return None
@@ -213,7 +209,7 @@ def _pet_number(name: str) -> int | None:
 
 
 def _natural_key(name: str) -> list[Any]:
-    """Sort key comparing digit runs as numbers: ``…33.1.9…`` before ``…33.1.10…``."""
+    """Sort key comparing digit runs as numbers: ``...33.1.9...`` before ``...33.1.10...``."""
     return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", name)]
 
 
@@ -273,16 +269,14 @@ def assign_roles(subject_folder: Path) -> tuple[dict[str, Path], list[str], list
     return roles, ignored, problems, warnings
 
 
-# ---------------------------------------------------------------------------
 # Copy, one directory at a time
-# ---------------------------------------------------------------------------
 def _copy_file(job: tuple[str, Path]) -> None:
     """Copy one file under a temporary name and rename it into place."""
     source, target = job
     partial = target.with_name(target.name + PARTIAL_SUFFIX)
     try:
         # Plain streams rather than shutil.copyfile, whose same-file and special-file checks cost
-        # four stats per file — four network round trips on a share.
+        # four stats per file: four network round trips on a share.
         with open(source, "rb") as src, open(partial, "wb") as dst:
             shutil.copyfileobj(src, dst, COPY_BUFFER)
         os.replace(partial, target)
@@ -344,9 +338,7 @@ def copy_folder(
     return counts
 
 
-# ---------------------------------------------------------------------------
 # pet_id registration
-# ---------------------------------------------------------------------------
 def pet_id_rows(subjects: list[Subject], registry: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     """``(subject_ids rows, warnings)`` for the resolved subjects' pet_ids, minus contradictions."""
     existing = (
@@ -391,9 +383,7 @@ def pet_id_rows(subjects: list[Subject], registry: pd.DataFrame) -> tuple[pd.Dat
     return pd.DataFrame(rows), warnings
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 REPORT_COLUMNS = (
     "input_folder", "pet_id", "mr_id", "subject_uid", "role", "source",
     "files", "copied", "already_present", "conflicts", "status", "notes",

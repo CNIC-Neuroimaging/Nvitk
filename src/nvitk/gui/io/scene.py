@@ -1,7 +1,7 @@
 """Scenes: the whole viewer saved to one file, and opened again where it was left.
 
-A scene (``*.nvscene``) holds every layer — images, labels, surfaces, points,
-shapes, vectors, tracks — with its data *and* its state: placement (scale,
+A scene (``*.nvscene``) holds every layer (images, labels, surfaces, points,
+shapes, vectors, tracks) with its data *and* its state: placement (scale,
 translate, affine), display (colormap, contrast, opacity, blending, visibility,
 label colours and names, the label list's shown labels), metadata (the source
 file's affine and axes, so a saved image still exports as it would have), the
@@ -13,15 +13,15 @@ the canvas: those are run again on the restored layers.
 
 The file is a zip archive:
 
-* ``scene.json`` — the manifest: format version, the layers in order (bottom to
+* ``scene.json``: the manifest: format version, the layers in order (bottom to
   top) with their kind and entries, the viewer's state;
-* ``layers/NNN.data.npy`` — a layer's array, a standard ``.npy`` any tool reads
+* ``layers/NNN.data.npy``: a layer's array, a standard ``.npy`` any tool reads
   (``layers/NNN.data.pkl`` for data that is not one array: a surface's
   vertices and faces, shapes, a multiscale pyramid);
-* ``layers/NNN.meta.pkl`` — the layer's Napari state (``as_layer_data_tuple``);
+* ``layers/NNN.meta.pkl``: the layer's Napari state (``as_layer_data_tuple``);
   Napari model objects (label colormaps) are stored as their class and fields
   and rebuilt on load, so the file does not depend on how they pickle;
-* ``layers/NNN.nvitk.pkl`` — nvitk's own state for the layer, when it has any.
+* ``layers/NNN.nvitk.pkl``: nvitk's own state for the layer, when it has any.
 
 The state is pickled: open scenes you (or someone you trust) saved. Arrays are
 stored uncompressed by default (fast); *compress* trades time for size.
@@ -52,9 +52,7 @@ FORMAT_VERSION = 1
 _MANIFEST = "scene.json"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Napari state ↔ picklable
-# ──────────────────────────────────────────────────────────────────────────────
+# Napari state <-> picklable
 
 
 def _picklable(value: Any) -> bool:
@@ -114,9 +112,7 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Collecting (GUI thread)
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _nvitk_state(viewer: Any, layer: Any) -> dict[str, Any]:
@@ -134,7 +130,7 @@ def _nvitk_state(viewer: Any, layer: Any) -> dict[str, Any]:
         ctrl = mesh_layers.series_controller(layer)
         if ctrl is not None:
             out["mesh_series"] = ctrl.series
-    except Exception:  # noqa: BLE001 — a mesh state that will not come along is left out
+    except Exception:  # noqa: BLE001 (a mesh state that will not come along is left out)
         pass
     return out
 
@@ -209,16 +205,14 @@ def _collect_scene(viewer: Any) -> dict[str, Any]:
         for key, value in meta.items():
             try:
                 encoded[key] = _encode(value)
-            except Exception:  # noqa: BLE001 — a property that cannot be stored is reported, not fatal
+            except Exception:  # noqa: BLE001 (a property that cannot be stored is reported, not fatal)
                 dropped.append(key)
         layers.append({"name": str(layer.name), "kind": str(kind), "data": data, "meta": encoded,
                        "nvitk": _nvitk_state(viewer, layer), "dropped": dropped})
     return {"layers": layers, "viewer": _viewer_state(viewer)}
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Writing and reading (any thread)
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _write_pickle(zf: zipfile.ZipFile, name: str, obj: Any) -> None:
@@ -324,9 +318,7 @@ def read_scene(path: str | Path, *, progress: Callable[[int, int], None] | None 
     return {"layers": layers, "viewer": manifest.get("viewer") or {}, "manifest": manifest}
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Applying (GUI thread)
-# ──────────────────────────────────────────────────────────────────────────────
 
 #: What a layer is rebuilt from when its full state will not load (another Napari).
 _CORE_KEYS = ("name", "metadata", "scale", "translate", "rotate", "shear", "affine", "opacity",
@@ -341,7 +333,7 @@ def _create_layer(data: Any, meta: dict[str, Any], kind: str) -> tuple[Any, list
     meta = {k: _decode(v) for k, v in meta.items()}
     try:
         return Layer.create(data, meta, kind), []
-    except Exception:  # noqa: BLE001 — try with less below
+    except Exception:  # noqa: BLE001 (try with less below)
         pass
     kept = {k: v for k, v in meta.items() if k in _CORE_KEYS}
     try:
@@ -394,7 +386,7 @@ def _apply_viewer_state(viewer: Any, state: dict[str, Any], layers: list[Any]) -
             dims.current_step = tuple(int(v) for v in step)
         if "ndisplay" in state:
             dims.ndisplay = int(state["ndisplay"])
-    except Exception:  # noqa: BLE001 — a viewer shaped otherwise keeps its own dims
+    except Exception:  # noqa: BLE001 (a viewer shaped otherwise keeps its own dims)
         pass
     camera = state.get("camera") or {}
     for key in ("center", "zoom", "angles", "perspective"):
@@ -486,7 +478,7 @@ def _close_tool_windows(viewer: Any) -> None:
 def _clear_layers(viewer: Any) -> None:
     try:
         viewer.layers.clear()
-    except Exception:  # noqa: BLE001 — what is left goes one by one below
+    except Exception:  # noqa: BLE001 (what is left goes one by one below)
         pass
     for layer in reversed(list(viewer.layers)):
         _discard(viewer, layer)
@@ -516,7 +508,7 @@ def _add_scene_layers(viewer: Any, scene: dict[str, Any], problems: list[str]) -
                 layer, lost = _create_layer(item["data"], item["meta"], item["kind"])
                 viewer.add_layer(layer)
             _apply_nvitk_state(viewer, layer, item.get("nvitk") or {})
-        except Exception as exc:  # noqa: BLE001 — one layer must not stop the rest
+        except Exception as exc:  # noqa: BLE001 (one layer must not stop the rest)
             # A layer the viewer took but could not draw would sit in the list
             # with no visual, and every layer added after it would fail as well.
             if layer is not None:
@@ -530,9 +522,7 @@ def _add_scene_layers(viewer: Any, scene: dict[str, Any], problems: list[str]) -
     return added
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Save / open, with the activity indicator
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def save_scene(viewer: Any, path: str | Path, *, compress: bool = False) -> Path:

@@ -6,9 +6,9 @@ Napari layer into an :class:`~nvitk.types.Image`, runs it, and adds the result.
 Placement
 ---------
 A resampled array is on a new grid, so it cannot borrow the source layer's
-placement the way same-grid tool outputs do. Its data→world transform is the
-source layer's own — every part of it, read from Napari (``affine``, ``scale``,
-``translate``) — composed with :func:`~nvitk.transform.interpolation.resample_index_map`,
+placement the way same-grid tool outputs do. Its data->world transform is the
+source layer's own, every part of it, read from Napari (``affine``, ``scale``,
+``translate``), composed with :func:`~nvitk.transform.interpolation.resample_index_map`,
 so the result overlays its source exactly whatever kind of layer that was: a
 plain volume, a world-ordered sagittal one, a time-first 3D+t series.
 """
@@ -58,10 +58,10 @@ def _is_labels(layer: Any) -> bool:
 
 
 def layer_data_to_world(layer: Any) -> np.ndarray:
-    """The layer's full homogeneous data→world matrix (affine, scale, translate…)."""
+    """The layer's full homogeneous data->world matrix (affine, scale, translate...)."""
     try:
         return np.asarray(layer._data_to_world.affine_matrix, dtype=float)
-    except Exception:  # noqa: BLE001 — a non-Napari stand-in: rebuild from its parts
+    except Exception:  # noqa: BLE001 (a non-Napari stand-in: rebuild from its parts)
         nd = int(np.ndim(layer.data))
         mat = np.eye(nd + 1)
         scale = getattr(layer, "scale", None)
@@ -148,7 +148,7 @@ def add_regridded_layer(
     name: str,
     labels: bool,
 ) -> Any:
-    """Add *data* — *layer* resampled onto a new grid of the same extent — as a layer."""
+    """Add *data* (*layer* resampled onto a new grid of the same extent) as a layer."""
     data = to_numpy(data)
     old_shape = tuple(int(v) for v in np.shape(layer.data))
     world = layer_data_to_world(layer) @ resample_index_map(old_shape, data.shape)
@@ -193,7 +193,7 @@ def add_same_grid_layer(
 
 
 def _values(text: Any) -> list[float]:
-    """``"2"`` / ``"0.5, 0.5, 1"`` → floats."""
+    """``"2"`` / ``"0.5, 0.5, 1"`` -> floats."""
     parts = [p for p in str(text or "").replace(";", ",").split(",") if p.strip()]
     if not parts:
         raise ValueError("Enter a factor, spacing or size (one value, or one per axis).")

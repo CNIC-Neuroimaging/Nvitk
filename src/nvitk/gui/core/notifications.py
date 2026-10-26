@@ -19,7 +19,7 @@ def install_notification_timeout(timeout_ms: int = NOTIFICATION_TIMEOUT_MS) -> N
     try:
         from napari._qt.dialogs.qt_notification import NapariQtNotification
         from qtpy.QtCore import QTimer
-    except Exception:  # noqa: BLE001 — headless or a Napari without Qt toasts
+    except Exception:  # noqa: BLE001 (headless or a Napari without Qt toasts)
         return
     if getattr(NapariQtNotification, "_nvitk_timeout_ms", None) is not None:
         NapariQtNotification._nvitk_timeout_ms = int(timeout_ms)
@@ -35,7 +35,7 @@ def install_notification_timeout(timeout_ms: int = NOTIFICATION_TIMEOUT_MS) -> N
             timer.setSingleShot(True)
             timer.timeout.connect(self.close_with_fade)
             timer.start(int(NapariQtNotification._nvitk_timeout_ms))
-        except Exception:  # noqa: BLE001 — a toast must never break the caller
+        except Exception:  # noqa: BLE001 (a toast must never break the caller)
             pass
 
     NapariQtNotification.DISMISS_AFTER = int(timeout_ms)

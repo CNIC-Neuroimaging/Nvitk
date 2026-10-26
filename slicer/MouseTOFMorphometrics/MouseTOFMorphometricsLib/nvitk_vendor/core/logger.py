@@ -24,7 +24,7 @@ class Logger:
             cls._instance._log = logging.getLogger(_LOGGER_NAME)
         return cls._instance
 
-    # -- levels -------------------------------------------------------------
+    # levels
     def debug(self, msg: Any, *args: Any, **kwargs: Any) -> None:
         self._log.debug(str(msg), *args)
 
@@ -45,7 +45,7 @@ class Logger:
     def critical(self, msg: Any, *args: Any, **kwargs: Any) -> None:
         self._log.critical(str(msg), *args)
 
-    # -- no-op knobs kept for signature compatibility -----------------------
+    # no-op knobs kept for signature compatibility
     def set_level(self, *args: Any, **kwargs: Any) -> None:
         return None
 

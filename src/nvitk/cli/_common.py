@@ -145,7 +145,7 @@ def run_sge(
     """Emit (and optionally submit) an SGE job script that runs *tool*'s *subcommand* worker on the
     cluster: builds the containerized worker command, writes the qsub script via
     :func:`~nvitk.cli._sge.emit_submit_script` (unless ``direct_submit`` skips straight to
-    :func:`~nvitk.cli._sge.submit_tool_job`), and — unless ``no_remote``/``direct_submit`` — runs it
+    :func:`~nvitk.cli._sge.submit_tool_job`), and (unless ``no_remote``/``direct_submit``) runs it
     over SSH on the configured cluster host if ``NVITK_SGE_SSH_*`` env vars are set."""
     from nvitk.cli._sge import build_worker_command, default_emit_path, emit_submit_script, submit_tool_job
     from nvitk.cluster.remote_submit import run_sge_script_ssh

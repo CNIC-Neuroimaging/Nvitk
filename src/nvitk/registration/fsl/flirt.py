@@ -83,8 +83,8 @@ def flirt_register_rigid(
     """Run FLIRT alignment of *moving* towards *fixed* (rigid at ``dof=6``, affine at 12).
 
     Writes ``matrix_name`` under *out_dir* and optionally a warped moving image.
-    *searchr* sets the angular search range (±degrees) on all three axes —
-    *searchr_x* on X only, kept for older callers — and *no_search* skips the
+    *searchr* sets the angular search range (±degrees) on all three axes (
+    *searchr_x* on X only, kept for older callers), and *no_search* skips the
     search entirely (images already roughly aligned). *interp* is the output's
     interpolation, *bins* the cost-function histogram size.
     Requires FSL on ``PATH`` and ``FSLDIR`` set (NiPype delegates to ``flirt``).

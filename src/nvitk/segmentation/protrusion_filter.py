@@ -20,7 +20,7 @@ from nvitk.morphology import open as morph_open
 
 log = Logger()
 
-# Defaults tuned for ~0.5–1 mm 4D-flow voxels: small surface warts, not M2/P2 trunks.
+# Defaults tuned for ~0.5-1 mm 4D-flow voxels: small surface warts, not M2/P2 trunks.
 PP_DISTAL_SMOOTH_SIGMA_DEFAULT: float = 1.0
 PP_DISTAL_CURVATURE_PERCENTILE_DEFAULT: float = 80.0
 PP_DISTAL_MAX_CC_VOXELS_DEFAULT: int = 48
@@ -114,7 +114,7 @@ def filter_mask_protrusions(
     else:
         core = m.copy()
     if not np.any(core):
-        # Opening wiped the mask — do not remove anything.
+        # Opening wiped the mask: do not remove anything.
         info["n_after"] = int(m.sum())
         info["skipped"] = "empty_core"
         return as_backend_array(m), info
@@ -128,7 +128,7 @@ def filter_mask_protrusions(
     # Mean-curvature proxy of the zero level-set (Laplace of SDF).
     curv = ndi.laplace(phi_s)
 
-    # Inner erosion (26-connected) → surface shell = mask minus its core.
+    # Inner erosion (26-connected) -> surface shell = mask minus its core.
     with using("numpy"):
         eroded = as_backend_array(erode(m, connectivity=3)).astype(bool)
     surface = m & ~eroded

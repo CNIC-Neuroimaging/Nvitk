@@ -9,7 +9,7 @@ side of it can be read straight off it.
 
 The frame is the part that decides whether the result is usable. The textbook
 Frenet-Serret frame is defined by the curvature vector, so its normal flips through
-an inflection and spins where curvature approaches zero — the reformation twists and
+an inflection and spins where curvature approaches zero: the reformation twists and
 tears. :func:`rotation_minimizing_frames` instead carries one frame along the curve
 by double reflection (Wang et al., *ACM TOG* 2008), which is stable, linear-time and
 needs no second derivative.
@@ -35,9 +35,7 @@ setup(globals())
 _EPS = 1e-9
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Frames
-# ──────────────────────────────────────────────────────────────────────────────
 def _unit(vectors: Any) -> Any:
     """Row-wise unit vectors on the active backend; a zero row stays zero, not NaN."""
     arr = as_backend_array(vectors).astype(float, copy=False)
@@ -49,7 +47,7 @@ def _unit(vectors: Any) -> Any:
 def _seed_normal(tangent: Any) -> Any:
     """Any unit vector perpendicular to *tangent*, for the first station only.
 
-    Only the *starting* orientation is arbitrary — every later frame is carried
+    Only the *starting* orientation is arbitrary: every later frame is carried
     from this one, so the choice sets the reformation's rotation offset and
     nothing else. The theta control exists precisely to rotate it.
     """
@@ -67,7 +65,7 @@ def rotation_minimizing_frames(
     """Carry an orthonormal frame along a curve with minimal twist.
 
     The double-reflection method of Wang et al. (*ACM TOG* 2008). The first
-    reflection is in the plane bisecting the two *sample points* — not the two
+    reflection is in the plane bisecting the two *sample points*, not the two
     tangents; reflecting across the tangent difference instead lets the frame
     invert wherever the curve passes through an inflection, which is the failure
     the whole method exists to avoid.
@@ -139,7 +137,7 @@ def rotation_minimizing_frames(
 
 
 def frame_twist(tangents: Any, u: Any) -> float:
-    """Total rotation of *u* about the tangent, in radians — 0 for a perfect RMF.
+    """Total rotation of *u* about the tangent, in radians: 0 for a perfect RMF.
 
     The measure the rotation-minimizing frame exists to keep small; used to compare
     it against a naive frame in tests.
@@ -162,9 +160,7 @@ def frame_twist(tangents: Any, u: Any) -> float:
     return total
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Centerline sampling
-# ──────────────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class CenterlineSamples:
     """A centerline resampled at uniform arc length, with its travelling frame."""
@@ -267,9 +263,9 @@ def resample_centerline(
     """Smooth a centerline, resample it at uniform arc length, and frame it.
 
     Everything happens in millimetres. Tangents taken on voxel coordinates of an
-    anisotropic volume point the wrong way — on 3 x 1 x 1 mm voxels a diagonal
+    anisotropic volume point the wrong way, on 3 x 1 x 1 mm voxels a diagonal
     vessel's tangent is off by the spacing ratio, and the reformation is cut at a
-    tilt — so the polyline is converted to millimetres first and only mapped back
+    tilt, so the polyline is converted to millimetres first and only mapped back
     to voxels for sampling.
     """
     sp = _spacing_tuple(spacing)
@@ -318,7 +314,7 @@ def _tangents(points_mm: Any, *, k_half: int = 2) -> Any:
     out = _unit(pts[hi] - pts[lo])
     # A degenerate run leaves a zero tangent, which would collapse the frame.
     # Carrying the previous one forward is inherently sequential, so it happens
-    # on the host — and only when there is actually a gap to fill.
+    # on the host, and only when there is a gap to fill.
     norms = np.linalg.norm(out, axis=1)
     if bool(to_numpy(np.any(norms <= _EPS))):
         with using("cpu"):
@@ -330,9 +326,7 @@ def _tangents(points_mm: Any, *, k_half: int = 2) -> Any:
     return out
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Reformation
-# ──────────────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class CprResult:
     """One straightened reformation of a volume along a centerline."""
@@ -449,7 +443,7 @@ def cpr_sample(
 ) -> CprResult:
     """Reformat *volume* along *samples* into a straightened image.
 
-    Use ``order=1`` for intensities and ``order=0`` for masks — interpolating label
+    Use ``order=1`` for intensities and ``order=0`` for masks: interpolating label
     ids produces values that were never in the segmentation.
     """
     coords = cpr_coords(samples, angle_deg=angle_deg, ray_mm=ray_mm, n_ray=n_ray)
@@ -513,7 +507,7 @@ def cross_section_at(
     center = as_backend_array(samples.points_vox).astype(float, copy=False)[idx]
     # One grid step moves ``u_vox * spacing`` = one *millimetre*, because u is a
     # unit millimetre vector divided by the spacing. So the half-size is ray_mm
-    # directly. Dividing it by the spacing again — as this did — asks for a field
+    # directly. Dividing it by the spacing again (as this did) asks for a field
     # of view 1/spacing times too wide, which on 0.4 mm voxels showed 44 mm of
     # background around a vessel the caller had asked to see 20 mm of.
     return oblique_slice(

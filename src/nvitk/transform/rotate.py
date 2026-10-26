@@ -44,12 +44,12 @@ def _affine_after_center_rotation(
     axis: int,
     degrees: float,
 ) -> _host_np.ndarray:
-    """Update voxel→world affine after a reshape=False rotation about the array center."""
+    """Update voxel->world affine after a reshape=False rotation about the array center."""
     A = _host_np.asarray(affine, dtype=float).copy()
     if A.shape != (4, 4) or len(shape) < 3:
         return A
     center = (_host_np.asarray(shape[:3], dtype=float) - 1.0) * 0.5
-    # Output voxel x_new samples input at R(-θ)(x_new − c) + c.
+    # Output voxel x_new samples input at R(-θ)(x_new - c) + c.
     Rm = _rotation_matrix_3d(axis, -float(degrees))
     T = _host_np.eye(4, dtype=float)
     T[:3, :3] = Rm

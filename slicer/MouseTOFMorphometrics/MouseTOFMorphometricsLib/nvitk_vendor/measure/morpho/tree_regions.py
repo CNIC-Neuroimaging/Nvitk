@@ -96,7 +96,7 @@ def tree_label_from_path_parts(parts: List[int]) -> str:
 
 
 def tree_path_label_for_terminal(tree: SkeletonTree, root_idx: int, terminal_idx: int, spacing) -> Tuple[str, str]:
-    """Branch label and numeric branch-path for the root→terminal path, ranking siblings by subtree extent.
+    """Branch label and numeric branch-path for the root->terminal path, ranking siblings by subtree extent.
 
     At each bifurcation along the path, downstream children are ranked by how far
     their farthest descendant endpoint reaches (longer subtree = lower branch index),
@@ -147,7 +147,7 @@ def branch_path_from_segment_name(segment_name: str) -> str:
 
 
 def branch_label_from_path(branch_path: str) -> str:
-    """Inverse of :func:`branch_path_from_segment_name`: dotted path → ``arm00_subarm00``-style label."""
+    """Inverse of :func:`branch_path_from_segment_name`: dotted path -> ``arm00_subarm00``-style label."""
     parts = [int(p) for p in str(branch_path).split(".") if str(p).isdigit()]
     return tree_label_from_path_parts(parts)
 
@@ -166,7 +166,7 @@ def split_bifurcating_tree_centerlines(
 
     Finds where the two root-to-terminal centerlines overlap (a common proximal
     trunk) using nearest-neighbor point matching, then exports the trunk and each
-    arm as separate labeled regions. Only applies to exactly 2 paths — non-bifurcating
+    arm as separate labeled regions. Only applies to exactly 2 paths: non-bifurcating
     trees (>2 terminals) are left to the recursive tree-segment splitter instead.
     """
     if not _cfg.SPLIT_BIFURCATING_TREE_REGIONS or len(path_results) != 2:

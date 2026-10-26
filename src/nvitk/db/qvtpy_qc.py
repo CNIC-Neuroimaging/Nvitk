@@ -95,7 +95,7 @@ def publish_qvtpy_qc_reviews(
         return {"updated": 0, "decisions": 0}
 
     # Read Parquet, not the SQLite index: this function rewrites the *whole* table from what it
-    # reads here, so an index that lags Parquet (any upsert since the last rebuild — the anatomy
+    # reads here, so an index that lags Parquet (any upsert since the last rebuild; the anatomy
     # configs the same review panel writes, a stage publish with build_sqlite_index=False) would
     # come back without those rows and the write would delete them.
     all_df = repo.get("image_measurements", cohort_id=False, use_sqlite=False)
@@ -173,9 +173,9 @@ def subject_qc_status_summary(
     """Per-subject revision status from ``image_measurements.qc_status``.
 
     Returns a dict mapping ``subject_uid`` to one of:
-    - ``"revised"``  — every QC-relevant row for the subject has OK or FAIL.
-    - ``"partial"``  — some rows are reviewed, others still PENDING / blank.
-    - ``"pending"``  — no rows have been reviewed yet (all PENDING or no rows).
+    - ``"revised"``: every QC-relevant row for the subject has OK or FAIL.
+    - ``"partial"``: some rows are reviewed, others still PENDING / blank.
+    - ``"pending"``: no rows have been reviewed yet (all PENDING or no rows).
     """
     repo = resolve_repo(repo)
     if not repo.catalog.table_exists("image_measurements"):

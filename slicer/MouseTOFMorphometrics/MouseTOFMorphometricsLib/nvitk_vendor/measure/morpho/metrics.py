@@ -20,7 +20,7 @@ from .models import SkeletonTree, VesselInfo
 from .skeleton import dijkstra_dist_from_root
 
 def tortuosity_dm(pts: np.ndarray) -> float:
-    """Distance-metric tortuosity: arc length / chord length (≥1; 1 = straight)."""
+    """Distance-metric tortuosity: arc length / chord length (>=1; 1 = straight)."""
     L = arc_length(pts); C = chord_length(pts)
     return float(L / C) if np.isfinite(L) and np.isfinite(C) and C > 1e-8 else np.nan
 
@@ -55,7 +55,7 @@ def smooth_polyline(pts: np.ndarray, sigma_mm: float) -> np.ndarray:
     """Gaussian-smooth a polyline along arc length at scale *sigma_mm* (same points, same count).
 
     The path is resampled uniformly at its median step, filtered, and mapped back. Ends are padded
-    by point reflection (``2·p₀ − p_k``), which keeps the end tangent: plain edge repetition would
+    by point reflection (``2·p₀ - p_k``), which keeps the end tangent: plain edge repetition would
     pull the ends inward, mirroring would fold the path back on itself.
     """
     pts = np.asarray(pts, dtype=float)
@@ -85,7 +85,7 @@ def smoothed_curvature(pts: np.ndarray, sigma_mm: float) -> np.ndarray:
     """True curvature (1/mm, :func:`menger_curvature`) of the centerline smoothed at *sigma_mm*.
 
     Curvature measured on the raw 0.1 mm resampling is dominated by sampling noise (a voxel
-    staircase or VMTK's piecewise-linear Voronoi path gives ≫0.1 mm⁻¹ everywhere); at a 1–2 mm
+    staircase or VMTK's piecewise-linear Voronoi path gives ≫0.1 mm⁻¹ everywhere); at a 1-2 mm
     scale it reflects the vessel's actual bends. End points take their neighbour's value.
     """
     k = menger_curvature(smooth_polyline(pts, sigma_mm))
@@ -154,7 +154,7 @@ def smooth_1d(x: np.ndarray, win: int = 7) -> np.ndarray:
 
 
 def inflection_count(kappa, turn_proxy, kappa_min, smooth_win) -> int:
-    """Count sign changes of :func:`signed_turn_proxy` at points with curvature ≥ *kappa_min*."""
+    """Count sign changes of :func:`signed_turn_proxy` at points with curvature >= *kappa_min*."""
     k = smooth_1d(np.where(np.isfinite(kappa), kappa, 0.0), win=smooth_win)
     tp = np.where(np.isfinite(turn_proxy), turn_proxy, 0.0)
     valid = (k >= kappa_min) & (tp != 0)

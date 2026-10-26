@@ -1,7 +1,7 @@
 """CT display-window picker for the selected image layer(s).
 
 Applies a named Hounsfield-unit window (see :mod:`nvitk.viz.ct_windows`) to a napari Image
-layer's contrast limits. Display only — voxels are never modified.
+layer's contrast limits. Display only: voxels are never modified.
 
 Why fixed windows rather than auto-contrast
 -------------------------------------------
@@ -76,7 +76,7 @@ class CTWindowPanel(QGroupBox):
         root = QVBoxLayout()
         root.setSpacing(4)
 
-        # ---- preset ----------------------------------------------------------
+        # preset
         self._combo = QComboBox()
         for key in window_keys():
             window = get_window(key)
@@ -88,7 +88,7 @@ class CTWindowPanel(QGroupBox):
         self._combo.currentIndexChanged.connect(self._on_preset_changed)
         root.addWidget(self._combo)
 
-        # ---- level / width ---------------------------------------------------
+        # level / width
         self._level = self._spin(" HU")
         self._width = self._spin(" HU")
         self._width.setMinimum(1.0)
@@ -101,12 +101,12 @@ class CTWindowPanel(QGroupBox):
             row.addWidget(spin, stretch=1)
             root.addLayout(row)
 
-        # ---- range readout ---------------------------------------------------
+        # range readout
         self._range = QLabel("—")
         self._range.setStyleSheet("color: palette(mid);")
         root.addWidget(self._range)
 
-        # ---- options ---------------------------------------------------------
+        # options
         self._all_layers = QCheckBox("Apply to all image layers")
         self._all_layers.setToolTip(
             "Apply to every Image layer in the viewer, not only the selected one.\n"
@@ -133,7 +133,7 @@ class CTWindowPanel(QGroupBox):
         self._select_key(DEFAULT_WINDOW_KEY)
         self._set_enabled(False)
 
-    # ---- construction helpers ------------------------------------------------
+    # construction helpers
 
     @staticmethod
     def _spin(suffix: str) -> QDoubleSpinBox:
@@ -145,7 +145,7 @@ class CTWindowPanel(QGroupBox):
         spin.setSuffix(suffix)
         return spin
 
-    # ---- viewer binding ------------------------------------------------------
+    # viewer binding
 
     def set_viewer(self, viewer: Any | None) -> None:
         """Bind to a napari viewer and follow its layer selection."""
@@ -205,7 +205,7 @@ class CTWindowPanel(QGroupBox):
             self._select_key(_CUSTOM)
         self._status.setText(f"'{name}' — suggested: {get_window(suggestion).title}")
 
-    # ---- state ---------------------------------------------------------------
+    # state
 
     def _set_enabled(self, enabled: bool) -> None:
         """Enable or disable every control at once."""
@@ -249,7 +249,7 @@ class CTWindowPanel(QGroupBox):
         half = self._width.value() / 2.0
         return (self._level.value() - half, self._level.value() + half)
 
-    # ---- signals -------------------------------------------------------------
+    # signals
 
     def _on_preset_changed(self, _index: int) -> None:
         """Preset chosen: load its level/width and apply."""
@@ -276,7 +276,7 @@ class CTWindowPanel(QGroupBox):
             self._updating = False
         self.apply_to_layers()
 
-    # ---- application ---------------------------------------------------------
+    # application
 
     @staticmethod
     def _current_limits(layer: Any) -> tuple[float, float] | None:
@@ -291,7 +291,7 @@ class CTWindowPanel(QGroupBox):
     def _layer_intensity_info(layer: Any) -> tuple[str | None, float | None, float | None]:
         """``(modality, min, max)`` for *layer*, from metadata and the data range.
 
-        The range is read from ``contrast_limits_range``, which napari computes once on load —
+        The range is read from ``contrast_limits_range``, which napari computes once on load:
         far cheaper than scanning a 70 M-voxel volume on every selection change.
         """
         from nvitk.gui.core.spatial import nvitk_metadata_from_layer

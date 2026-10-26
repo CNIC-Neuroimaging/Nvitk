@@ -1,18 +1,18 @@
 """Vessel label IDs: eICAB input masks vs qvtpy pipeline outputs.
 
-**eICAB (input)** — integers in ``*_eICAB_CW.nii(.gz)`` / ``*_eICAB_WB.nii(.gz)`` (0–18).
+**eICAB (input)**: integers in ``*_eICAB_CW.nii(.gz)`` / ``*_eICAB_WB.nii(.gz)`` (0-18).
 Morphometrics topology for these ids: ``measure/morpho/topology/eicab_topology.json``.
 
-**qvtpy (pipeline)** — integers in ``centerlines_mask``, ``seg_4dflow``, LOCs, and
+**qvtpy (pipeline)**: integers in ``centerlines_mask``, ``seg_4dflow``, LOCs, and
 measurement tables. Arterial ids come from :func:`relabel_eicab_mask_to_qvtpy`
-(merge PCA P1/P2; drop SCA/AChA). Venous sinuses use fixed ids 31–34.
+(merge PCA P1/P2; drop SCA/AChA). Venous sinuses use fixed ids 31-34.
 Reference morphometrics topology (unused by stage-7):
 ``measure/morpho/topology/qvtpy_topology.json``.
 
 **Outputs**
 
-- :data:`QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID` — combined arterial + venous id→name map.
-- Group frozensets (``QVTPY_ACA_IDS``, ``QVTPY_RG_SKIP_LABEL_IDS``, …) for stage-4 heuristics.
+- :data:`QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID`: combined arterial + venous id->name map.
+- Group frozensets (``QVTPY_ACA_IDS``, ``QVTPY_RG_SKIP_LABEL_IDS``, ...) for stage-4 heuristics.
 """
 
 from __future__ import annotations
@@ -22,9 +22,7 @@ from nvitk.core.backend import setup
 
 setup(globals())
 
-# ──────────────────────────────────────────────────────────────────────────────
-# eICAB — input multilabel mask (0–18)
-# ──────────────────────────────────────────────────────────────────────────────
+# eICAB: input multilabel mask (0-18)
 
 EICAB_BACKGROUND: int = 0
 
@@ -121,9 +119,7 @@ _EICAB_NAME_TO_ID_RAW: dict[str, int] = {
 
 EICAB_NAME_TO_ID: dict[str, int] = {k.upper(): v for k, v in _EICAB_NAME_TO_ID_RAW.items()}
 
-# ──────────────────────────────────────────────────────────────────────────────
-# qvtpy — arterial labels (centerline backbone + seg_4dflow)
-# ──────────────────────────────────────────────────────────────────────────────
+# qvtpy: arterial labels (centerline backbone + seg_4dflow)
 
 QVTPY_BACKGROUND: int = 0
 
@@ -180,12 +176,10 @@ QVTPY_NON_COMM_ARTERIAL_IDS: frozenset[int] = (
     QVTPY_ARTERIAL_LABEL_IDS - QVTPY_COMM_IDS - QVTPY_VERTEBRAL_IDS
 )
 
-# Stage 4: gentler crop filtering (PCA/PComm/AComm) — see QVTPY_SMALL_ARTERIAL_IDS below.
+# Stage 4: gentler crop filtering (PCA/PComm/AComm); see QVTPY_SMALL_ARTERIAL_IDS below.
 QVTPY_SMALL_ARTERIAL_IDS: frozenset[int] = QVTPY_PCA_IDS | QVTPY_COMM_IDS
 
-# ──────────────────────────────────────────────────────────────────────────────
-# qvtpy — venous labels (fixed 31–34)
-# ──────────────────────────────────────────────────────────────────────────────
+# qvtpy: venous labels (fixed 31-34)
 
 NAME_SSSV: str = "SSSV"
 NAME_STRV: str = "STRV"
@@ -231,16 +225,14 @@ QVTPY_RG_PCOMM_EICAB_BARRIER_IDS: frozenset[int] = frozenset({QVTPY_LPCOMM, QVTP
 EICAB_RG_BARRIER_LABEL_IDS: frozenset[int] = frozenset({EICAB_LSCA, EICAB_RSCA})
 QVTPY_RG_SKIP_LABEL_IDS: frozenset[int] = QVTPY_VENOUS_LABEL_IDS
 
-# Per-sinus RG intensity fractions (lower → more growth). STRV omitted (RG disabled).
+# Per-sinus RG intensity fractions (lower -> more growth). STRV omitted (RG disabled).
 QVTPY_RG_INTENSITY_FRAC_VENOUS: dict[int, float] = {
     QVTPY_SSSV: 0.40,
     QVTPY_LTSV: 0.38,
     QVTPY_RTSV: 0.38,
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
-# qvtpy — reserved / unused on backbone+seg
-# ──────────────────────────────────────────────────────────────────────────────
+# qvtpy: reserved / unused on backbone+seg
 
 QVTPY_VENOUS_UNKNOWN_LABEL: int = 30
 QVTPY_VENOUS_REGION_BASE: int = 31
@@ -255,9 +247,7 @@ QVTPY_RESERVED_LABEL_BY_ID: dict[int, str] = {
     QVTPY_UNKNOWN_LABEL: "QVTPY_UNKNOWN",
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
-# eICAB → qvtpy mapping (stage 3 relabel)
-# ──────────────────────────────────────────────────────────────────────────────
+# eICAB -> qvtpy mapping (stage 3 relabel)
 
 EICAB_LABEL_IDS_OMITTED: frozenset[int] = frozenset(
     {EICAB_LSCA, EICAB_RSCA, EICAB_LACHA, EICAB_RACHA}
@@ -283,7 +273,7 @@ EICAB_TO_QVTPY_LABEL: dict[int, int] = {
     EICAB_RSCA: QVTPY_BACKGROUND,
     EICAB_LACHA: QVTPY_BACKGROUND,
     EICAB_RACHA: QVTPY_BACKGROUND,
-    # The post-process's vertebrals stay out of stages 2–4, which grow and split their own.
+    # The post-process's vertebrals stay out of stages 2-4, which grow and split their own.
     EICAB_LVA: QVTPY_BACKGROUND,
     EICAB_RVA: QVTPY_BACKGROUND,
 }
@@ -303,9 +293,7 @@ QVTPY_TO_EICAB_LABELS: dict[int, tuple[int, ...]] = {
     QVTPY_ACOMM: (EICAB_ACOMM,),
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Combined tables (centerline backbone + seg_4dflow)
-# ──────────────────────────────────────────────────────────────────────────────
 
 QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID: dict[int, str] = {
     **QVTPY_ARTERIAL_ID_TO_NAME,
@@ -328,9 +316,7 @@ QVTPY_CENTERLINE_AND_SEG_LABEL_IDS: frozenset[int] = frozenset(
     QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID.keys()
 )
 
-# ---------------------------------------------------------------------------
 # Relabel + lookup helpers
-# ---------------------------------------------------------------------------
 
 
 def relabel_eicab_mask_to_qvtpy(volume: np.ndarray) -> np.ndarray:
@@ -397,9 +383,9 @@ def qvtpy_branch_names(label_id: int, n_branches: int) -> list[str]:
 
     Branched vessels (MCA/ACA/PCA) name the trunk ``{vessel}-{L}1`` (e.g.
     ``LACA-A1``) and each side branch a generation-2 segment ``{vessel}-{L}2a``,
-    ``{vessel}-{L}2b``, … (e.g. ``LMCA-M2a``). Non-branched vessels
+    ``{vessel}-{L}2b``, ... (e.g. ``LMCA-M2a``). Non-branched vessels
     (ICA/basilar/comm/vertebral) use the bare vessel name for the trunk and a
-    ``{vessel}-b2`` … suffix for any extra branches.
+    ``{vessel}-b2`` ... suffix for any extra branches.
     """
     base = qvtpy_vessel_name(int(label_id))
     n = max(1, int(n_branches))

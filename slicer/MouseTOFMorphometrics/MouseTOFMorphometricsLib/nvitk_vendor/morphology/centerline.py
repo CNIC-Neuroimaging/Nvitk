@@ -206,7 +206,7 @@ def _reconstruct_path(
     end: tuple[int, int, int],
     parent: dict[tuple[int, int, int], tuple[int, int, int] | None],
 ) -> list[tuple[int, int, int]]:
-    """Walk *parent* pointers back from *end* to the BFS source, returned source→end."""
+    """Walk *parent* pointers back from *end* to the BFS source, returned source->end."""
     path: list[tuple[int, int, int]] = []
     cur: tuple[int, int, int] | None = end
     while cur is not None:
@@ -249,7 +249,7 @@ def _classical_diameter_path(
     adj: dict[tuple[int, int, int], list[tuple[int, int, int]]],
     endpoints: list[tuple[int, int, int]],
 ) -> list[tuple[int, int, int]]:
-    """Graph diameter via double-BFS: farthest node ``a``, then its farthest node ``b``, path a→b."""
+    """Graph diameter via double-BFS: farthest node ``a``, then its farthest node ``b``, path a->b."""
     start = endpoints[0] if endpoints else nodes[0]
     d1, _ = _bfs_from(start, adj)
     a = max(d1, key=d1.get)
@@ -267,8 +267,8 @@ def _prefer_coverage_cost(
         return float("inf")
     # ``to_numpy`` gives host arrays, so the reductions below go through the ``_np`` alias rather
     # than the module-level ``np`` (a CuPy proxy under the GPU backend). CuPy's handling of a NumPy
-    # argument is not uniform — ``sum``/``min`` fall back to NumPy, ``any``/``argwhere`` raise, and
-    # ``unique``/``zeros_like`` silently return a *device* array — so which functions happen to be
+    # argument is not uniform (``sum``/``min`` fall back to NumPy, ``any``/``argwhere`` raise, and
+    # ``unique``/``zeros_like`` silently return a *device* array), so which functions happen to be
     # safe is not something to encode by omission. Host data, host namespace.
     path_arr = to_numpy(path).astype(_np.float64)
     prefs = to_numpy(prefer_points).astype(_np.float64).reshape(-1, 3)
@@ -288,7 +288,7 @@ def _centerline_longest_path(
 
     Uses the largest 26-connected skeleton component, then the graph diameter.
     When *prefer_points* are given (e.g. a prior stage-3 polyline), prefers a
-    root→farthest path that stays close to those points so proximal trunks on
+    root->farthest path that stays close to those points so proximal trunks on
     branched vessels (MCA M1) are not dropped by a distal-only diameter.
     """
     if coords_xyz.shape[0] <= 2:
@@ -381,8 +381,8 @@ def unique_skeleton_edge_polylines(
 ) -> list[np.ndarray]:
     """Unique centerline edges between endpoints and junctions (no interior overlap).
 
-    Each returned polyline is a chain between skeleton specials (deg≤1 endpoints
-    and deg≥3 junction clusters). Chains share only their junction endpoints so
+    Each returned polyline is a chain between skeleton specials (deg<=1 endpoints
+    and deg>=3 junction clusters). Chains share only their junction endpoints so
     the union is a connected tree/graph without duplicated trunks.
     """
     # Lazy import: polyline_graph imports helpers from this module.
@@ -453,7 +453,7 @@ def _branch_paths_from_skeleton(
     traced back toward the already-accepted paths; the segment up to the first
     node that is already covered becomes a side branch. Branches shorter than
     *min_branch_points* are dropped. Returns ordered ``(N, 3)`` polylines with the
-    trunk first (proximal→distal orientation preserved from the trunk).
+    trunk first (proximal->distal orientation preserved from the trunk).
 
     When *keep_all_components* is True (default), every skeleton CC contributes
     its own trunk + side branches (largest CC first). This preserves disconnected
@@ -534,14 +534,14 @@ def compute_connected_centerline_tree(
 
     This is the **default branched centerline representation** for nvitk:
     skeletonize each label, optionally MST-bridge nearby mask CCs, then extract
-    every unique junction↔endpoint / junction↔junction chain. Edges share only
+    every unique junction<->endpoint / junction<->junction chain. Edges share only
     junction voxels (no overlapping trunks). All meaningful skeleton CCs are
     kept by default so proximal roots are not dropped.
 
     Returns
     -------
     dict[int, list[np.ndarray]]
-        Label → list of ordered ``(N, 3)`` polylines in voxel coordinates.
+        Label -> list of ordered ``(N, 3)`` polylines in voxel coordinates.
     """
     arr = as_backend_array(vessel_mask)
     if arr.ndim != 3:
@@ -553,7 +553,7 @@ def compute_connected_centerline_tree(
     bridge_gap = max(0, int(bridge_max_gap))
 
     def _edges_for_coords(coords: _np.ndarray) -> list[_np.ndarray]:
-        """Per-label worker: skeleton coords → list of polyline edge point-arrays."""
+        """Per-label worker: skeleton coords -> list of polyline edge point-arrays."""
         if coords.shape[0] < int(min_points):
             return []
         comps = (

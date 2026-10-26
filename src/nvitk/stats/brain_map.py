@@ -5,17 +5,17 @@ Description
 -----------
 The parenchymal counterpart of :mod:`nvitk.stats.vascular_map`. That module answers "which vessel"
 on a schematic of the circulation; this one answers "where in the cortex" on an actual
-parcellation — ASL perfusion (CBF / ATT) and T1 volumetry are measured per Desikan parcel, and a
+parcellation: ASL perfusion (CBF / ATT) and T1 volumetry are measured per Desikan parcel, and a
 forest plot of sixty-eight coefficients is a list that hides every spatial pattern in it.
 
-It is a *view of a fit*, not a new analysis: the numbers are whatever the caller passes in —
+It is a *view of a fit*, not a new analysis: the numbers are whatever the caller passes in;
 estimated marginal means, model coefficients, per-subject measurements, QC scores.
 
 Atlases
 -------
 ``desikan``
-    The Desikan–Killiany cortical parcellation the ASL and T1 pipelines report against. Located
-    rather than fetched — see :mod:`nvitk.viz.atlas_sources`.
+    The Desikan-Killiany cortical parcellation the ASL and T1 pipelines report against. Located
+    rather than fetched; see :mod:`nvitk.viz.atlas_sources`.
 ``vascular``
     The arterial-territory / watershed atlas the ASL pipeline uses by default. Same figure, coarser
     parcels, and the one that makes an ASL result comparable to a 4D-flow one.
@@ -24,7 +24,7 @@ Aggregate levels
 ----------------
 A frame grouped by hemisphere reports ``precuneus``, a lobe-grouped one ``ctx-Left-Frontal-Lobe``:
 one number averaged over several parcels. It is painted on **every parcel it was averaged from**,
-because that is what it describes. Painting it on none — which an exact-match lookup does — leaves a
+because that is what it describes. Painting it on none (which an exact-match lookup does) leaves a
 lobe-grouped fit with an empty brain. Same rule, and the same reason, as
 :func:`nvitk.stats.vascular_map.nodes_for_label` mirroring a hemisphere-melted ``ICA`` onto both
 carotids.
@@ -46,9 +46,7 @@ invites the reader to count the second as evidence of the first.
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from functools import lru_cache
 from typing import Any, Hashable, Mapping, Sequence
 
@@ -102,16 +100,14 @@ BRAIN_VIEWS: tuple[tuple[str, str], ...] = (
 _UNDER_MARGIN: float = 1.0
 
 
-# ---------------------------------------------------------------------------
 # Atlas resolution
-# ---------------------------------------------------------------------------
 @lru_cache(maxsize=8)
 def _resolved_atlas(atlas: str, atlas_kwargs: tuple[tuple[str, Any], ...]) -> Any:
     """
     Cached :class:`~nvitk.viz.brainshow.ResolvedAtlas` for *atlas*.
 
     Cached because resolution reads files off disk (two ``.annot``\\ s, or a NIfTI), and the GUI
-    re-resolves on every view change — flipping from lateral to medial should not re-read the atlas.
+    re-resolves on every view change: flipping from lateral to medial should not re-read the atlas.
     """
     from nvitk.viz.brainshow import resolve_atlas
 
@@ -124,7 +120,7 @@ def parcel_resolver(
     """
     ``(resolver, resolved_atlas)`` for *atlas*.
 
-    The resolver maps a published region label onto the atlas indices it refers to — see
+    The resolver maps a published region label onto the atlas indices it refers to; see
     :func:`nvitk.viz.brainshow.atlas_indices_for_region`. It is the only thing
     :mod:`nvitk.stats._model_values` needs to know about anatomy.
     """
@@ -151,19 +147,17 @@ def regions_without_geometry(
     labels: Sequence[Any], *, atlas: str = "desikan", atlas_kwargs: Mapping[str, Any] | None = None
 ) -> list[str]:
     """
-    Which of *labels* this atlas cannot draw — for telling the user *why* the map would be empty.
+    Which of *labels* this atlas cannot draw, for telling the user *why* the map would be empty.
 
     A FLAIR frame is the motivating case: its regions are white-matter zones (``frperiv``,
-    ``juxta``, ``bgit``), not cortical parcels, so none of them resolve and the honest answer is
+    ``juxta``, ``bgit``), not cortical parcels, so none of them resolve and the correct answer is
     "this measurement is not parcellated by this atlas", not a blank brain.
     """
     resolve, _ = parcel_resolver(atlas, atlas_kwargs)
     return [str(label) for label in labels if not resolve(label)]
 
 
-# ---------------------------------------------------------------------------
 # Value extraction
-# ---------------------------------------------------------------------------
 def parcel_values_from_frame(
     frame: pd.DataFrame,
     *,
@@ -177,8 +171,8 @@ def parcel_values_from_frame(
     Map a per-region table onto atlas indices.
 
     Accepts whatever spelling the frame uses (``ctx-lh-precuneus``, ``ctx_lh_precuneus``,
-    ``left_precuneus``). Rows that are not parcels of this atlas — a vessel, a whole-head scalar
-    such as ``etiv``, an intercept term — are dropped silently: a mixed result table is the normal
+    ``left_precuneus``). Rows that are not parcels of this atlas (a vessel, a whole-head scalar
+    such as ``etiv``, an intercept term) are dropped silently: a mixed result table is the normal
     case, and only the rows this figure can draw belong on it.
     """
     resolve, _ = parcel_resolver(atlas, atlas_kwargs)
@@ -206,7 +200,7 @@ def parcel_values_from_result(
     """
     Pull per-parcel numbers off a fitted model.
 
-    Sources and their meanings are shared with the vascular map — see
+    Sources and their meanings are shared with the vascular map; see
     :func:`nvitk.stats._model_values.values_from_result` for what ``coefficient``, ``emmeans``,
     ``mean`` and ``group:<term>`` each report and why they are read differently.
 
@@ -239,7 +233,7 @@ def _label_indices_in_note(note: str, index_to_label: Mapping[int, str]) -> str:
     Replace bare atlas indices in a note with the parcel names they stand for.
 
     The shared extractor names the reference level by whatever it keys values on, which here is an
-    integer — ``(reference: 1025)`` says nothing to a reader looking at a cortex. This is cosmetic
+    integer: ``(reference: 1025)`` says nothing to a reader looking at a cortex. This is cosmetic
     and deliberately narrow: only the two phrases the extractor emits are rewritten.
     """
     import re
@@ -276,9 +270,7 @@ def brain_group_coefficient_terms(result: Any, *, group_column: str = "territory
     return _model_values.group_coefficient_terms(result, group_column=group_column)
 
 
-# ---------------------------------------------------------------------------
 # Figure
-# ---------------------------------------------------------------------------
 def _vertex_textures(
     resolved: Any, index_to_scalar: Mapping[int, float]
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -287,7 +279,7 @@ def _vertex_textures(
 
     Volumetric atlases are painted into a stat image and projected with nearest-neighbour
     interpolation, so a parcel's exact value survives the projection rather than being blended with
-    its neighbours' — a mean of two coefficients is not a coefficient.
+    its neighbours': a mean of two coefficients is not a coefficient.
     """
     from nilearn import surface
 
@@ -315,7 +307,7 @@ def fsaverage_meshes(mesh: str = "fsaverage5"):
     Cached ``fetch_surf_fsaverage`` result.
 
     The fetch re-checks the download cache on every call, and the brain map asks for it once per
-    draw *and* once per texture build — several times a second while a user drags a control.
+    draw *and* once per texture build: several times a second while a user drags a control.
     """
     from nilearn import datasets
 
@@ -326,7 +318,7 @@ def _paint_vertices(map_arr: np.ndarray, index_to_scalar: Mapping[int, float]) -
     """
     Per-vertex texture from a parcel map, via a lookup table rather than a scan per region.
 
-    The obvious loop — ``tex[map_arr == index] = value`` — walks all 10k vertices once *per region*,
+    The obvious loop (``tex[map_arr == index] = value``) walks all 10k vertices once *per region*,
     so a 68-parcel atlas reads the map 68 times to write it once. Indexing a table built over the
     label range does it in a single pass.
     """
@@ -369,7 +361,7 @@ def _scale_notes(
     The caption fragments describing what the colours do and do not mean.
 
     Shared by the static and interactive renderers so the two never disagree about how many parcels
-    were greyed, hidden or left unpainted — a figure and its rotatable twin telling different
+    were greyed, hidden or left unpainted: a figure and its rotatable twin telling different
     stories about the same fit would be worse than either alone.
     """
     notes: list[str] = []
@@ -413,7 +405,7 @@ def _interactive_surface(
     stylistic choice: that engine **clips** the texture into ``[vmin, vmax]`` before applying the
     colormap, so the below-range sentinel that marks a non-significant parcel comes out as the
     colormap's most extreme colour. A parcel the model found *no evidence for* would render as the
-    strongest negative result on the map — the exact misreading this module's three-state encoding
+    strongest negative result on the map: the exact misreading this module's three-state encoding
     exists to prevent.
 
     Mapping ``colormap(norm(texture))`` directly keeps ``set_under`` (non-significant grey) and
@@ -445,7 +437,7 @@ def _interactive_surface(
             # magnitude makes the shading fight the data colours for attention.
             tone = np.where(curvature > 0, 0.72, 0.94)
             painted = np.isfinite(texture)
-            # Unpainted vertices always take the shading — that *is* the background. Painted ones
+            # Unpainted vertices always take the shading: that *is* the background. Painted ones
             # only when blending was asked for.
             shade = tone if blend else np.where(painted, 1.0, tone)
             rgba[:, :3] *= shade[:, None]
@@ -492,7 +484,7 @@ def _interactive_surface(
 
 
 def _plotly_colorscale(colormap: Any, samples: int = 64) -> list:
-    """Sample a Matplotlib colormap into the ``[[position, "rgb(...)"], …]`` Plotly wants."""
+    """Sample a Matplotlib colormap into the ``[[position, "rgb(...)"], ...]`` Plotly wants."""
     from matplotlib.colors import to_hex
 
     return [
@@ -538,10 +530,10 @@ def plot_brain_map(
         ``{atlas index: p}``. Required for *mode* ``"pvalue"`` and for significance masking.
     mode : {"estimate", "pvalue"}
         What colour encodes. ``"estimate"`` maps the value through a diverging or sequential
-        colormap; ``"pvalue"`` maps −log₁₀(p), which spreads the small p-values that matter instead
+        colormap; ``"pvalue"`` maps -log₁₀(p), which spreads the small p-values that matter instead
         of compressing them all against zero.
     mask_nonsignificant : bool
-        Draw parcels with ``p >= alpha`` in flat grey. Has no effect without *pvalues* — and is
+        Draw parcels with ``p >= alpha`` in flat grey. Has no effect without *pvalues*, and is
         skipped with a warning rather than silently colouring everything, since an unmasked map
         looks identical to one where everything is significant.
     center : float, optional
@@ -552,41 +544,41 @@ def plot_brain_map(
         compared frame to frame.
     hemisphere : {"both", "left", "right"}
     views : sequence of str or comma-separated str
-        nilearn surface views — ``lateral``, ``medial``, ``dorsal``, ``ventral``, …
+        nilearn surface views; ``lateral``, ``medial``, ``dorsal``, ``ventral``, ...
     interactive : bool
         Return a rotatable 3-D Plotly figure instead of a static Matplotlib one, with both
         hemispheres in a single scene. Same values, same colour scale and the same three-state
-        encoding — nilearn's Plotly engine computes per-vertex colours through the colormap, so
+        encoding: nilearn's Plotly engine computes per-vertex colours through the colormap, so
         ``set_under`` and ``set_bad`` survive and non-significant still reads differently from
         no-estimate. There are no separate view panels because the view is whatever you rotate it
         to, and no *flat* surface because a flat map has no 3-D structure to explore.
     surface : {"infl", "pial", "flat"}
         Which fsaverage surface to paint on. Inflated exposes the parcels buried in sulci, which on
-        a folded pial surface are simply not visible — roughly two thirds of the cortex.
+        a folded pial surface are not visible: roughly two thirds of the cortex.
     shading : bool
         Shade the unpainted surface with its own curvature. Off gives a flat silhouette, which is
         cleaner for a figure and makes the parcel boundaries the only structure on the page.
     blend : bool
         Shade the *painted* parcels with the curvature too, rather than only the bare surface. The
         sulcal pattern then shows through the colours, which keeps the anatomy legible where a
-        parcel covers a whole gyrus — at the cost of darkening the colours unevenly, so a value
+        parcel covers a whole gyrus, at the cost of darkening the colours unevenly, so a value
         read off the colourbar is no longer exact.
     opacity : float
-        Opacity of the painted parcels, ``0``–``1``. Below 1 the surface shows through, which is
+        Opacity of the painted parcels, ``0``-``1``. Below 1 the surface shows through, which is
         the other way to keep the folding visible under a dense parcellation. Like *blend*, it
         shifts the rendered colour away from the colourbar, so it is a reading aid rather than a
         setting to publish at.
 
         Named *opacity* rather than *alpha* on purpose: in this module ``alpha`` already means the
         significance level, and one symbol for "how transparent" and "what counts as significant"
-        would be a genuinely dangerous overload.
+        would be a dangerous overload.
     threshold : float, optional
-        Leave parcels whose \|value\| is below this unpainted, the way a stat map is thresholded.
+        Leave parcels whose \\|value\\| is below this unpainted, the way a stat map is thresholded.
         Distinct from the significance mask: this one is about effect *size*, and a parcel hidden
         by it is reported in the caption so it is never confused with one that has no estimate.
     hide : sequence of int
-        Atlas indices to leave off entirely — not painted and **not counted in the colour scale**.
-        That last part is the point: hiding the one parcel that dominates the range is how you see
+        Atlas indices to leave off entirely, not painted and **not counted in the colour scale**.
+        Hiding the one parcel that dominates the range is how you see
         the structure among the rest. Distinct from a parcel with no estimate, which is unpainted
         because "not measured" is information.
 
@@ -632,7 +624,7 @@ def plot_brain_map(
         )
         values = {k: v for k, v in values.items() if k in known}
 
-    # ---- Colour scale ---------------------------------------------------------
+    # Colour scale
     if mode == "pvalue":
         scalars = {k: -np.log10(max(p, 1e-300)) for k, p in pvalues.items() if k in known}
         colormap = plt.get_cmap(cmap or "viridis").copy()
@@ -662,11 +654,11 @@ def plot_brain_map(
 
     # Three states in one texture: a value inside the range, a sentinel below it for the
     # non-significant parcels, and NaN for the ones with no estimate. One texture and one render
-    # pass — overlaying a second surface on the same faces z-fights.
+    # pass: overlaying a second surface on the same faces z-fights.
     #
     # ``set_under`` is what produces the flat non-significant grey. ``set_bad`` is defensive only:
     # nilearn short-circuits NaN to the background map before the colormap ever sees it, and that
-    # background renders around #e3e3e3 — already clearly lighter than COLOR_NONSIGNIFICANT's
+    # background renders around #e3e3e3; already clearly lighter than COLOR_NONSIGNIFICANT's
     # #9e9e9e, which is the separation this figure needs. Setting it anyway means the two states
     # stay distinct if a future nilearn routes NaN through the colormap instead.
     colormap.set_under(COLOR_NONSIGNIFICANT)
@@ -679,7 +671,7 @@ def plot_brain_map(
     n_below = 0
     limit = None if threshold in (None, "") else abs(float(threshold))
     for index, scalar in scalars.items():
-        # Thresholding drops the parcel entirely (NaN → unpainted), rather than greying it: a
+        # Thresholding drops the parcel entirely (NaN -> unpainted), rather than greying it: a
         # small effect is not the same claim as a non-significant one, and the caption counts each.
         if limit is not None and abs(float(scalar)) < limit:
             n_below += 1
@@ -690,7 +682,7 @@ def plot_brain_map(
 
     left, right = _vertex_textures(resolved, texture_values)
 
-    # ---- Canvas ---------------------------------------------------------------
+    # Canvas
     view_keys = _view_keys(views)
     sides = ["left", "right"] if hemisphere == "both" else [hemisphere]
     meshes = fsaverage_meshes(resolved.surf_mesh)
@@ -705,7 +697,7 @@ def plot_brain_map(
         view_keys = ["dorsal"]
 
     # Rows are *views*, columns are *hemispheres*. The two hemispheres of one view then sit side by
-    # side, which is the comparison a reader actually makes — left lateral against right lateral —
+    # side, which is the comparison a reader makes (left lateral against right lateral)
     # rather than one hemisphere's two views being adjacent and the homologous pair split apart.
     if interactive:
         return _interactive_surface(

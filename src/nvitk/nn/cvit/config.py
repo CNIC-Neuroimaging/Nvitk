@@ -1,5 +1,5 @@
 """
-CViT configuration — the serialisable architecture plan.
+CViT configuration: the serialisable architecture plan.
 
 Description
 -----------
@@ -14,7 +14,7 @@ Array / axis conventions
 spatial dimensionality (2 or 3). ``stem_strides`` is one per-axis stride tuple per tokenizer
 level; level 0 is normally stride 1 (full-resolution features for the finest skip). The **token
 stride** per axis is the product of all stage strides, and ``input_shape`` must be divisible by
-it — anisotropic data simply uses per-axis strides such as ``(1, 2, 2)``.
+it: anisotropic data uses per-axis strides such as ``(1, 2, 2)``.
 
 Presets
 -------
@@ -38,9 +38,7 @@ from dataclasses import asdict, dataclass, field, fields
 from math import prod
 from typing import Any, Sequence
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Constants
-# ──────────────────────────────────────────────────────────────────────────────
 
 TOKENIZERS: tuple[str, ...] = ("hierarchical", "intra_patch", "linear")
 DECODERS: tuple[str, ...] = ("unet", "patch")
@@ -83,9 +81,7 @@ def parse_skips(spec: str | Sequence[bool] | Sequence[int], n_levels: int) -> tu
     return out
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Config
-# ──────────────────────────────────────────────────────────────────────────────
 
 @dataclass
 class CViTConfig:
@@ -99,14 +95,14 @@ class CViTConfig:
     input_shape
         Training patch size; sets the positional-embedding grid (resampled for other sizes).
     tokenizer
-        ``"hierarchical"`` — strided residual conv stages over the whole volume (receptive
-        fields cross patch borders). ``"intra_patch"`` — the same CNN run independently inside
+        ``"hierarchical"``: strided residual conv stages over the whole volume (receptive
+        fields cross patch borders). ``"intra_patch"``: the same CNN run independently inside
         each non-overlapping patch (no information crosses patches before attention).
-        ``"linear"`` — classic ViT ``Conv(k=s=patch)`` projection; the conv stem then only
+        ``"linear"``: classic ViT ``Conv(k=s=patch)`` projection; the conv stem then only
         feeds the decoder skips.
     stem_channels, stem_blocks, stem_strides
         Per tokenizer level: width, residual blocks, per-axis stride. ``stem_strides=None``
-        means ``(1, 2, 2, …)`` isotropic.
+        means ``(1, 2, 2, ...)`` isotropic.
     embed_dim, depth, num_heads, mlp_ratio
         Transformer size (SwiGLU hidden width = ``embed_dim * mlp_ratio``).
     use_rope, use_abs_pos_embed, num_registers
@@ -122,7 +118,7 @@ class CViTConfig:
     skip_drop_prob
         Training-time probability of zeroing a whole skip level per sample (inverted dropout).
     skip_schedule, skip_warmup_epochs
-        ``"warmup"`` ramps the skip scale 0 → 1 over the first epochs (applied by the trainer
+        ``"warmup"`` ramps the skip scale 0 -> 1 over the first epochs (applied by the trainer
         through ``set_skip_scale``).
     skip_gate, skip_gate_init, skip_gate_l1
         ``"learned"`` adds a per-level gate ``sigmoid(g)`` (initial value ``skip_gate_init``);
@@ -132,12 +128,12 @@ class CViTConfig:
     input_channels: int = 1
     num_classes: int = 2
     input_shape: tuple[int, ...] = (128, 128, 128)
-    # ---- tokenizer -----------------------------------------------------------------------
+    # tokenizer
     tokenizer: str = "hierarchical"
     stem_channels: tuple[int, ...] = (32, 64, 128, 256)
     stem_blocks: tuple[int, ...] = (1, 1, 2, 2)
     stem_strides: tuple[tuple[int, ...], ...] | None = None
-    # ---- transformer ---------------------------------------------------------------------
+    # transformer
     embed_dim: int = 792
     depth: int = 12
     num_heads: int = 12
@@ -149,11 +145,11 @@ class CViTConfig:
     attn_drop: float = 0.0
     proj_drop: float = 0.0
     layer_scale_init: float | None = 0.1
-    # ---- decoder -------------------------------------------------------------------------
+    # decoder
     decoder: str = "unet"
     decoder_convs: int = 2
     deep_supervision: bool = True
-    # ---- skip control --------------------------------------------------------------------
+    # skip control
     skips: Any = "all"
     skip_drop_prob: float = 0.0
     skip_schedule: str = "constant"
@@ -161,10 +157,10 @@ class CViTConfig:
     skip_gate: str = "none"
     skip_gate_init: float = 0.5
     skip_gate_l1: float = 0.0
-    # ---- provenance ----------------------------------------------------------------------
+    # provenance
     preset: str | None = field(default=None)
 
-    # ---- construction --------------------------------------------------------------------
+    # construction
     def __post_init__(self) -> None:
         self.input_shape = tuple(int(v) for v in self.input_shape)
         self.stem_channels = tuple(int(v) for v in self.stem_channels)
@@ -218,7 +214,7 @@ class CViTConfig:
         """A copy with *changes* applied (re-validated)."""
         return CViTConfig.from_dict({**self.to_dict(), **changes})
 
-    # ---- derived geometry ----------------------------------------------------------------
+    # derived geometry
     @property
     def ndim(self) -> int:
         return len(self.input_shape)
@@ -255,11 +251,11 @@ class CViTConfig:
         """Stage strides in nnU-Net's plans format.
 
         nnU-Net derives deep-supervision scales as ``1 / cumprod(pool_op_kernel_sizes)[:-1]``,
-        i.e. one target per level except the deepest — exactly the U-Net decoder's outputs.
+        i.e. one target per level except the deepest: exactly the U-Net decoder's outputs.
         """
         return [list(s) for s in self.stem_strides]
 
-    # ---- validation ----------------------------------------------------------------------
+    # validation
     def validate(self) -> None:
         """Raise ``ValueError`` on any inconsistent combination."""
         if self.ndim not in (2, 3):

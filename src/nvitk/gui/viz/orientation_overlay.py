@@ -6,7 +6,7 @@ the anatomical direction of each end, and a small standing figure posed in the
 same frame, so the subject's pose can be read off at a glance.
 
 Here it lives in its own little viewport in a corner of Napari's canvas, with a
-camera that copies the 3D camera's rotation (and axis flips) every frame — so it
+camera that copies the 3D camera's rotation (and axis flips) every frame, so it
 turns with the scene but never zooms, pans or gets hidden behind a volume.
 
 Frames
@@ -14,7 +14,7 @@ Frames
 Napari hands vispy the displayed world dims reversed (vispy ``x`` is the last
 displayed dim). nvitk layers place voxels in NIfTI world space, RAS+, so each
 world dim has an anatomical direction; :func:`world_axis_codes` reads it off the
-reference layer — correcting for a display-only mirror made with the
+reference layer: correcting for a display-only mirror made with the
 orientation tool, which moves voxels in world space without changing anatomy.
 The marker is then built for the vispy frame directly
 (:func:`~nvitk.viz.orientation_marker.build_orientation_marker_mesh` with the
@@ -78,7 +78,7 @@ def _display_to_true_rotation(layer: Any) -> np.ndarray:
         if not np.allclose(np.abs(rot).sum(axis=0), 1.0, atol=1e-3):
             return eye
         return np.round(rot)
-    except Exception:  # noqa: BLE001 — a marker is decoration
+    except Exception:  # noqa: BLE001 (a marker is decoration)
         return eye
 
 
@@ -121,7 +121,7 @@ def _clear_depth_node(parent: Any) -> Any:
     """A scene node that clears the depth buffer when drawn.
 
     Drawn first in the corner viewport, so the marker is depth-tested against
-    itself only — never against a volume or surface the main scene left in the
+    itself only, never against a volume or surface the main scene left in the
     depth buffer at that corner of the screen.
     """
     from vispy import gloo
@@ -132,7 +132,7 @@ def _clear_depth_node(parent: Any) -> Any:
         def __init__(self) -> None:
             super().__init__(vcode="void main(){gl_Position=vec4(0.0);}", fcode="void main(){}")
 
-        def draw(self) -> None:  # noqa: D401 — vispy hook
+        def draw(self) -> None:  # noqa: D401 (vispy hook)
             gloo.clear(color=False, depth=True)
 
         def _prepare_transforms(self, view: Any) -> None:
@@ -207,7 +207,7 @@ class OrientationMarker:
         canvas.events.draw.connect(self._sync, position="first")
         self._place()
 
-    # -- state ----------------------------------------------------------------
+    # state
 
     @property
     def visible(self) -> bool:
@@ -246,7 +246,7 @@ class OrientationMarker:
             pass
         self._view.parent = None
 
-    # -- geometry -------------------------------------------------------------
+    # geometry
 
     def _place(self, _event: Any = None) -> None:
         """Keep the viewport square in the bottom-left corner."""
@@ -286,9 +286,7 @@ class OrientationMarker:
                 self._mesh.shading_filter.light_dir = tuple(float(v) for v in light)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Napari wiring
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _napari_parts(viewer: Any) -> tuple[Any, Any] | None:
@@ -296,7 +294,7 @@ def _napari_parts(viewer: Any) -> tuple[Any, Any] | None:
     try:
         vispy_canvas = viewer.window._qt_viewer.canvas
         return vispy_canvas._scene_canvas, vispy_canvas.camera
-    except Exception:  # noqa: BLE001 — headless or internals moved
+    except Exception:  # noqa: BLE001 (headless or internals moved)
         return None
 
 
@@ -373,7 +371,7 @@ def orientation_marker_for(viewer: Any, reference_layer: Callable[[], Any] | Non
         return existing
     try:
         marker = NapariOrientationMarker(viewer, reference_layer)
-    except Exception:  # noqa: BLE001 — headless, or vispy/pyvista missing
+    except Exception:  # noqa: BLE001 (headless, or vispy/pyvista missing)
         return None
     viewer._nvitk_orientation_marker = marker
     return marker

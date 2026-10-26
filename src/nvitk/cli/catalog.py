@@ -19,7 +19,7 @@ class ToolEntry:
     supports_gpu: bool = False
     requires_mask: bool = False
     library_only: bool = False
-    #: Whether ``command`` is a console script actually registered by the installed
+    #: Whether ``command`` is a console script registered by the installed
     #: distribution. Set by :func:`build_catalog_tree` from :func:`discover_scripts`;
     #: only meaningful when :attr:`is_command` is true.
     installed: bool = True
@@ -33,7 +33,7 @@ class ToolEntry:
     def is_command(self) -> bool:
         """True if this entry names a CLI command.
 
-        Declaring a ``command`` is what makes an entry a command — it wins over
+        Declaring a ``command`` is what makes an entry a command: it wins over
         ``library_only``, so a catalog entry can be promoted from a library reference to a
         command by naming one, without also having to clear the ``library_only`` flag.
         """
@@ -133,7 +133,7 @@ _LIBRARY_TOOLS: dict[str, list[ToolEntry]] = {
     ],
 }
 
-# Map pyproject command names → catalog submodule id under image_processing.
+# Map pyproject command names -> catalog submodule id under image_processing.
 _CMD_TO_SUBMODULE: dict[str, str] = {
     "dcm2nii": "conversion",
     "stl2nifti": "conversion",
@@ -240,7 +240,7 @@ def _general_tools(scripts: Iterable[tuple[str, str]]) -> list[ToolEntry]:
 
 def discover_installed_scripts(distribution_name: str = "nvitk") -> list[tuple[str, str]]:
     """Read *distribution_name*'s registered ``console_scripts`` entry points from installed
-    package metadata — works for any install method (conda, pip, an editable/dev checkout)
+    package metadata: works for any install method (conda, pip, an editable/dev checkout)
     since ``entry_points.txt`` is always written at install time, unlike
     :func:`parse_pyproject_scripts`, which needs a source ``pyproject.toml`` on disk and
     finds none in a real (non-source-checkout) installed environment."""
@@ -284,7 +284,7 @@ def build_catalog_tree(scripts: list[tuple[str, str]] | None = None) -> list[Cat
         if sub_id and sub_id in submodules:
             submodules[sub_id].tools.append(_tool_from_script(cmd, module))
 
-    # Commands the installed distribution actually registers, so a catalog entry that names
+    # Commands the installed distribution registers, so a catalog entry that names
     # a command it doesn't have can be flagged rather than silently looking like it works.
     installed_cmds = {cmd for cmd, _ in scripts}
 

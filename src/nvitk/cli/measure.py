@@ -1,4 +1,4 @@
-"""``nvitk-measure`` CLI — measurement tools."""
+"""``nvitk-measure`` CLI: measurement tools."""
 
 from __future__ import annotations
 

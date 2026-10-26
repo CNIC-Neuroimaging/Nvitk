@@ -10,7 +10,7 @@ lacunes, microbleeds, strategic infarcts and enlarged perivascular spaces.
 
 Harmonization
 -------------
-The sheet stores answers as the dropdown label — ``"1: Si"``, ``"2: moderada gyrus"`` — except
+The sheet stores answers as the dropdown label (``"1: Si"``, ``"2: moderada gyrus"``), except
 where a rater typed the bare code (``0``). Each cell is reduced to its code (the part before the
 colon) and mapped through the variable's table in :data:`ITEMS`. A code with no entry aborts the
 run and lists the values, so a new dropdown option cannot slip in as missing. Codes follow the
@@ -81,16 +81,14 @@ TABLE = "clinical_measurements"
 REPLACE_KEY = ["subject_uid", "visit_id", "variable_id"]
 
 
-# ---------------------------------------------------------------------------
-# Code tables — keys are the code before the colon; ``None`` = a known answer stored as missing
-# ---------------------------------------------------------------------------
+# Code tables: keys are the code before the colon; ``None`` = a known answer stored as missing
 NO_YES = {"0": 0.0, "1": 1.0}
 NO_YES_INDETERMINATE = {**NO_YES, "3": None}
-#: Global cortical atrophy, frontal, Koedam parietal and Fazekas: 0–3, 4 = not evaluable.
+#: Global cortical atrophy, frontal, Koedam parietal and Fazekas: 0-3, 4 = not evaluable.
 GRADE_0_3 = {"0": 0.0, "1": 1.0, "2": 2.0, "3": 3.0, "4": None}
-#: Medial temporal atrophy: 0–4, 5 = not evaluable.
+#: Medial temporal atrophy: 0-4, 5 = not evaluable.
 GRADE_0_4 = {"0": 0.0, "1": 1.0, "2": 2.0, "3": 3.0, "4": 4.0, "5": None}
-#: Perivascular-space degree: 0 = none, 1 = 1–10, 2 = 11–20, 3 = 21–40, 4 = >40.
+#: Perivascular-space degree: 0 = none, 1 = 1-10, 2 = 11-20, 3 = 21-40, 4 = >40.
 EPVS_DEGREE = {"0": 0.0, "1": 1.0, "2": 2.0, "3": 3.0, "4": 4.0}
 #: Side with the greater atrophy.
 SIDE = {"0": "symmetric", "1": "right", "2": "left"}
@@ -212,9 +210,7 @@ ITEMS: tuple[Item, ...] = (
 )
 
 
-# ---------------------------------------------------------------------------
 # Free-text harmonization
-# ---------------------------------------------------------------------------
 #: ``(pattern, replacement)`` applied in order to the upper-cased text: Spanish phrases first,
 #: then misspellings, then word order fixes that the later steps rely on.
 TEXT_RULES: tuple[tuple[str, str], ...] = (
@@ -300,9 +296,7 @@ def harmonize_text(value: Any) -> str | None:
     return re.sub(r"[A-Z][A-Z0-9]*", lambda m: TEXT_CASE.get(m.group(), m.group().lower()), text)
 
 
-# ---------------------------------------------------------------------------
 # Cell parsing
-# ---------------------------------------------------------------------------
 _BOUNDED_COUNT = re.compile(r"^\s*([<>]=?)?\s*(\d+(?:[.,]\d+)?)\s*$")
 
 
@@ -334,7 +328,7 @@ def cell_code(value: Any) -> str | None:
 
 def count_value(value: Any) -> tuple[float, str | None] | None:
     """
-    ``(number, censoring)`` for a count cell — ``">20"`` -> ``(20.0, ">20")`` — or ``None`` when
+    ``(number, censoring)`` for a count cell, ``">20"`` -> ``(20.0, ">20")``, or ``None`` when
     the cell is not a number.
     """
     match = _BOUNDED_COUNT.match(str(value))
@@ -344,9 +338,7 @@ def count_value(value: Any) -> tuple[float, str | None] | None:
     return number, (f"{match.group(1)}{number:g}" if match.group(1) else None)
 
 
-# ---------------------------------------------------------------------------
 # Extraction
-# ---------------------------------------------------------------------------
 def _parse_sheet(value: str) -> str | int:
     return int(value) if value.strip().isdigit() else value
 
@@ -402,8 +394,8 @@ def load_cases(path: Path, known: set[str], *, sheet: str | int = DEFAULT_SHEET)
 
 def harmonize(cases: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, dict[str, str]]]:
     """
-    Long frame of every valued item — ``subject_uid``, ``variable_id``, ``source_column``,
-    ``value_num``, ``value_text``, ``value_kind`` — plus ``{variable_id: {raw: harmonized}}`` for
+    Long frame of every valued item (``subject_uid``, ``variable_id``, ``source_column``,
+    ``value_num``, ``value_text``, ``value_kind``), plus ``{variable_id: {raw: harmonized}}`` for
     the free-text items.
 
     Raises
@@ -474,9 +466,7 @@ def harmonize(cases: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, dict[str, st
     return long, text_maps
 
 
-# ---------------------------------------------------------------------------
 # Publishing
-# ---------------------------------------------------------------------------
 def build_rows(
     frame: pd.DataFrame,
     *,
@@ -506,7 +496,7 @@ def build_rows(
             ),
         )
         # Numeric kinds get an empty value_text from the builder; a censored count (">20") keeps
-        # its mark there. Positions line up — the builder resets the index and keeps row order.
+        # its mark there. Positions line up: the builder resets the index and keeps row order.
         if kind == "float":
             rows["value_text"] = sub["value_text"].astype("string")
         parts.append(rows)
@@ -520,7 +510,7 @@ def build_rows(
                 source_file=path.name,
                 source_sheet=str(sheet),
                 # ``Aneurysm`` feeds two variables, and the catalog turns a source column into an
-                # alias — so a shared column would make ``Aneurysm`` resolve to whichever was
+                # alias, so a shared column would make ``Aneurysm`` resolve to whichever was
                 # registered last. Register each under its own id; the column stays on the rows.
                 source_column=source_column if source_column != "Aneurysm" else str(variable_id),
             )
@@ -547,7 +537,7 @@ def publish_replacing(
     provenance: dict[str, Any],
 ) -> pd.Series:
     """
-    Replace whatever the table holds at the keys *rows* writes, then add *rows* — in one write.
+    Replace whatever the table holds at the keys *rows* writes, then add *rows*, in one write.
 
     Returns the number of replaced rows per variable. Reads Parquet rather than SQLite, which may
     lag a previous write that skipped the index rebuild.
@@ -566,7 +556,7 @@ def publish_replacing(
         build_sqlite_index=False,
     )
     repo.register_variables([entry.to_catalog_entry() for entry in registrations])
-    # Once, after the catalog entries exist — the index is derived from Parquet and the catalog.
+    # Once, after the catalog entries exist: the index is derived from Parquet and the catalog.
     repo.build_sqlite_index(tables=[TABLE])
     return replaced
 
@@ -596,9 +586,7 @@ def summarize(frame: pd.DataFrame, replaced: pd.Series) -> pd.DataFrame:
     return pd.DataFrame(records).set_index("variable_id")
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 @click.command("import-brain-codebook")
 @click.option(
     "--source",

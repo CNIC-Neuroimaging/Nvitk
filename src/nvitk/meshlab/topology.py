@@ -105,7 +105,7 @@ def euler_characteristic(mesh: Mesh) -> int:
 
 
 def genus(mesh: Mesh) -> float:
-    """Genus of a closed surface per component: ``(2·C − χ − B) / 2`` (holes = B).
+    """Genus of a closed surface per component: ``(2·C - χ - B) / 2`` (holes = B).
 
     ``B`` counts boundary loops, so an open surface (a disc) has genus 0 too. A
     sphere is 0, a torus 1. Non-integral values flag a non-manifold mesh.

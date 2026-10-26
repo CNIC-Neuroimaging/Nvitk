@@ -1,7 +1,7 @@
 """Running FSL commands: :class:`FslCommand` and the helpers every wrapper shares.
 
-A wrapper returns an :class:`FslCommand` — the argv, the outputs it will write and
-whether it is long-running — without running anything. The CLI calls :meth:`run`; the
+A wrapper returns an :class:`FslCommand` (the argv, the outputs it will write and
+whether it is long-running) without running anything. The CLI calls :meth:`run`; the
 GUI runs short commands the same way and long ones as background jobs, then opens
 :attr:`outputs`. Commands run in :func:`~nvitk.fsl.env.fsl_env` (``FSLDIR``, FSL's
 command directory first on ``PATH``, ``FSLOUTPUTTYPE=NIFTI_GZ``).
@@ -68,7 +68,7 @@ class FslCommand:
 
     argv: list[str]
     title: str
-    #: Outputs by role (``brain``, ``mask``, ``seg``, …); a directory for directory outputs.
+    #: Outputs by role (``brain``, ``mask``, ``seg``, ...); a directory for directory outputs.
     outputs: dict[str, Path] = field(default_factory=dict)
     #: Output roles that are label maps (opened as Labels layers).
     label_outputs: tuple[str, ...] = ()

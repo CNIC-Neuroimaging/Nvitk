@@ -7,15 +7,15 @@ median. The fix measures curvature on the centerline smoothed at ``SIPHON_CURVAT
 this script picks that smoothing, the curvature threshold and the dilation on real eICAB CW masks:
 
 1. run stage-7 morphometrics (VMTK, cow's legacy siphon mask) on N subjects (reused if present);
-2. sweep σ × κ × dilation on the measured root→terminal paths (``points/*.csv``) and measure the
+2. sweep σ × κ × dilation on the measured root->terminal paths (``points/*.csv``) and measure the
    mask's coverage of the ICAs (whose CW crop is mostly cavernous / supraclinoid siphon) and of
    every other vessel;
-3. keep the settings whose non-ICA coverage is ≤ ``--max-other`` (each taper fit keeps most of its
-   points — the purpose of the fix) and ICA coverage ≥ ``--min-ica``, and choose the one that best
-   separates the two (ICA − other coverage; ties: closest to cow's constants). Curvature alone
-   cannot confine the mask to the ICA — the PCAs and SCAs bend as tightly — so the separation is
+3. keep the settings whose non-ICA coverage is <= ``--max-other`` (each taper fit keeps most of its
+   points: the purpose of the fix) and ICA coverage >= ``--min-ica``, and choose the one that best
+   separates the two (ICA - other coverage; ties: closest to cow's constants). Curvature alone
+   cannot confine the mask to the ICA (the PCAs and SCAs bend as tightly), so the separation is
    maximised under a coverage cap rather than required to be clean. For parity the choice keeps
-   cow's thresholds (κ ≥ 0.20 mm⁻¹ — its 0.10 on the half-valued curvature — and 5 mm dilation)
+   cow's thresholds (κ >= 0.20 mm⁻¹ (its 0.10 on the half-valued curvature), and 5 mm dilation)
    and tunes only the smoothing σ cow lacked; ``--free-thresholds`` lets κ and the dilation move
    too (the free optimum is reported either way);
 4. re-run with the chosen values and report how stenosis / enlargement calls change per vessel
@@ -79,7 +79,7 @@ def path_index(case_dir: Path) -> pd.DataFrame:
 
 
 def load_paths(case_dir: Path) -> list[tuple[str, np.ndarray]]:
-    """``(vessel_name, points)`` of every measured root→terminal path of a case."""
+    """``(vessel_name, points)`` of every measured root->terminal path of a case."""
     out = []
     for name, csv in zip(path_index(case_dir)["vessel_name"], path_index(case_dir)["points_csv"]):
         df = pd.read_csv(case_dir / csv)
@@ -109,7 +109,7 @@ def coverage(paths, sigma: float, kappa: float, dilation: float) -> tuple[float,
 
 def vessel_lesions(case_dir: Path) -> pd.DataFrame:
     """Stenosis / enlargement calls per vessel, recounted from the per-path detections
-    (root→terminal path runs + ``points/*.csv``), each lesion once where overlapping paths share it."""
+    (root->terminal path runs + ``points/*.csv``), each lesion once where overlapping paths share it."""
     book = case_dir / "case_metrics_donut_tree.xlsx"
     index = path_index(case_dir)
     csv_of = dict(zip(index["path_id"].astype(str), index["points_csv"]))
@@ -197,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
     if ok.empty:
         print(sweep.sort_values("other_coverage").head(10).to_string(index=False))
         raise SystemExit("No setting satisfies the coverage criteria; relax --min-ica / --max-other.")
-    # Closest to cow's constants (σ unknown → 2 mm, κ 0.10 half-valued = 0.20 true, dilation 5 mm).
+    # Closest to cow's constants (σ unknown -> 2 mm, κ 0.10 half-valued = 0.20 true, dilation 5 mm).
     ok = ok.assign(
         separation=(ok["ica_coverage"] - ok["other_coverage"]).round(3),
         distance=np.abs(ok["sigma_mm"] - 2.0) / 2.0 + np.abs(ok["kappa_1_per_mm"] - 0.20) / 0.20

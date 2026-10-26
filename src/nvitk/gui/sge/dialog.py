@@ -47,7 +47,7 @@ def _default_remote_job_root() -> str:
 def _configured_resources() -> tuple[str, str, str]:
     """``(project, account, h_vmem)`` the job would use with nothing overridden.
 
-    Read from :mod:`nvitk.cli.config`, which is what actually builds a GUI job's request, so
+    Read from :mod:`nvitk.cli.config`, which is what builds a GUI job's request, so
     the prefilled fields always match what submitting unchanged would do.
     """
     from nvitk.cli import config as cfg
@@ -123,7 +123,7 @@ class SgeSubmitDialog(QDialog):
             user=self.user.text().strip(),
             password=self.password.text(),
             remote_job_root=self.remote_job_root.text().strip(),
-            # Only send what the operator actually changed, so an untouched dialog submits
+            # Only send what the operator changed, so an untouched dialog submits
             # exactly the configured request rather than a copy of it.
             overrides=SgeResourceOverrides(
                 project=chosen_project if chosen_project != project else None,

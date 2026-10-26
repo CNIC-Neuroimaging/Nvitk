@@ -5,7 +5,7 @@ FreeSurfer's topology programs on any mask or surface (:mod:`nvitk.freesurfer.to
 - *Pretess* and *Marching cubes* on a label / mask layer;
 - *Main component*, *Euler number*, *Smooth*, *Inflate* and *Quick sphere* on a Surface layer;
 - *Fix topology* (``mris_fix_topology``) and *Topology fixer* (``mris_topo_fixer``) on a mask plus
-  its image: the whole tessellation → sphere → fix chain, with the defects as a volume.
+  its image: the whole tessellation -> sphere -> fix chain, with the defects as a volume.
 
 The category is listed only when a FreeSurfer installation is found (:func:`available_tool_ids`),
 and each tool only when its programs are there. FastSurfer's own parts (category *FastSurfer*):
@@ -29,7 +29,7 @@ import numpy as np
 
 from nvitk.gui.tools.external_io import ViewerInputs, manifest_layer
 
-#: Tool id → the FreeSurfer programs it needs.
+#: Tool id -> the FreeSurfer programs it needs.
 TOOL_PROGRAMS: dict[str, tuple[str, ...]] = {
     "freesurfer_pretess": ("mri_pretess",),
     "freesurfer_mc": ("mri_mc",),
@@ -96,7 +96,7 @@ def default_license() -> str:
         return ""
 
 
-# ── inputs ───────────────────────────────────────────────────────────────────
+# inputs
 
 
 def _surface_of(layer: Any) -> tuple[np.ndarray, np.ndarray]:
@@ -107,7 +107,7 @@ def _surface_of(layer: Any) -> tuple[np.ndarray, np.ndarray]:
     faces = np.asarray(layer.data[1], dtype=np.int64)
     try:
         vertices = np.asarray(layer._data_to_world(vertices), dtype=np.float64)
-    except Exception:  # noqa: BLE001 — no transform: data coordinates are world
+    except Exception:  # noqa: BLE001 (no transform: data coordinates are world)
         pass
     return vertices, faces
 
@@ -137,7 +137,7 @@ def _reference(inputs: ViewerInputs) -> np.ndarray | None:
     return data[..., 0] if data.ndim > 3 else data
 
 
-# ── running ──────────────────────────────────────────────────────────────────
+# running
 
 
 def _license(params: dict[str, Any]) -> Path | None:

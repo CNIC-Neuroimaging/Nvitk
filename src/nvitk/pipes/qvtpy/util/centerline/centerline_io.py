@@ -7,7 +7,7 @@
 
 **Outputs**
 
-- Polylines keyed by qvtpy arterial label id or venous name (SSSV, …).
+- Polylines keyed by qvtpy arterial label id or venous name (SSSV, ...).
 - Rasterized multilabel masks via :func:`rasterize_centerlines_mask`.
 """
 
@@ -45,7 +45,7 @@ from nvitk.pipes.qvtpy.util.centerline.venous_heuristics import venous_name_to_l
 
 setup(globals())
 
-# Child → parent label for proximal seed when regenerating CLs from seg_4dflow.
+# Child -> parent label for proximal seed when regenerating CLs from seg_4dflow.
 _ARTERIAL_PARENT_LABEL: dict[int, int] = {
     QVTPY_LMCA: QVTPY_LICA,
     QVTPY_RMCA: QVTPY_RICA,
@@ -64,9 +64,7 @@ _DEFAULT_ARTERIAL_BRANCH_MIN_POINTS = 5
 _DEFAULT_SMOOTH_WINDOW = 5
 _DEFAULT_SMOOTH_SPLINE = True
 
-# ---------------------------------------------------------------------------
 # Artifact names
-# ---------------------------------------------------------------------------
 
 CENTERLINES_MASK_NIFTI = "centerlines_mask.nii.gz"
 CENTERLINE_META_JSON = "centerline_meta.json"
@@ -157,9 +155,7 @@ def export_branch_vtps(
     return written
 
 
-# ---------------------------------------------------------------------------
 # Path helpers + meta JSON
-# ---------------------------------------------------------------------------
 
 
 def centerlines_mask_path(stage_dir: Path, *, from_segmentation: bool = False) -> Path:
@@ -182,9 +178,7 @@ def load_centerline_meta(stage_dir: Path, *, from_segmentation: bool = False) ->
     return json.loads(p.read_text(encoding="utf-8"))
 
 
-# ---------------------------------------------------------------------------
-# Rasterize polylines → multilabel mask
-# ---------------------------------------------------------------------------
+# Rasterize polylines -> multilabel mask
 
 
 def rasterize_centerlines_mask(
@@ -499,9 +493,7 @@ def export_centerlines_from_segmentation(
     return mask_path, meta_path
 
 
-# ---------------------------------------------------------------------------
 # Polyline extraction from multilabel centerline mask
-# ---------------------------------------------------------------------------
 
 
 def _polyline_for_label(
@@ -597,7 +589,7 @@ def load_venous_centerlines(
     meta: dict[str, Any] | None = None,
     from_segmentation: bool = False,
 ) -> dict[str, Any]:
-    """Venous centerlines keyed by vessel name (SSSV, STRV, …)."""
+    """Venous centerlines keyed by vessel name (SSSV, STRV, ...)."""
     stage_dir = Path(stage_dir)
     meta = meta or load_centerline_meta(stage_dir, from_segmentation=from_segmentation)
     mask_path = centerlines_mask_path(stage_dir, from_segmentation=from_segmentation)

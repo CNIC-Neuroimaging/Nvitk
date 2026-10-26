@@ -1,5 +1,5 @@
 """
-CLI-style converters (DICOM→NIfTI, vendor-specific pipelines, STL, etc.).
+CLI-style converters (DICOM->NIfTI, vendor-specific pipelines, STL, etc.).
 
 Each submodule exposes a callable with its own parameters; see their docstrings.
 """

@@ -5,26 +5,24 @@ Description
 -----------
 One window, many independent workbenches. :class:`StatmodelsShell` is a tab bar over N
 :class:`~nvitk.gui.panels.statmodels.window.StatmodelsWindow` pages, each holding its own
-dataset query, frame recipe, model and plot — so a second hypothesis is a new tab rather than a
+dataset query, frame recipe, model and plot, so a second hypothesis is a new tab rather than a
 reload that costs the first one.
 
 Switching is instant because nothing is rebuilt: every session is a live widget parked in a
 ``QStackedWidget``, so a tab change is a raise, not a reload. That is also why a page is built
-eagerly rather than lazily — a tab that has to construct itself on first click is not a session
+eagerly rather than lazily: a tab that has to construct itself on first click is not a session
 you can flick between while comparing two fits.
 
 The tab bar's context menu is where sessions meet. Right-clicking a session *other* than the
 current one offers to pull its dataframe across, in either of the two readings that are actually
-useful — with its transformations still live, or as finished rows to build something new on. Both
+useful, with its transformations still live, or as finished rows to build something new on. Both
 run through :meth:`StatmodelsWindow.import_session`, which owns the semantics; this module only
 asks the question and reports the answer.
 """
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from typing import Any
 
 from qtpy.QtCore import Qt, QTimer
@@ -53,14 +51,14 @@ from .window import StatmodelsWindow
 
 log = Logger()
 
-#: ``gui.json`` keys for the remembered Statmodels arrangement — the counterpart of
+#: ``gui.json`` keys for the remembered Statmodels arrangement: the counterpart of
 #: the main window's ``dock_state``. The dock layout is one session's
 #: ``QMainWindow.saveState()``; every new session opens on it. The geometry is the
 #: shell's own (size, position, maximised), from ``saveGeometry()``.
 LAYOUT_PREF_KEY = "statmodels_dock_state"
 GEOMETRY_PREF_KEY = "statmodels_geometry"
 #: Explicit dock extents (``{dock: [area, px]}``), re-applied once a session is on screen at its
-#: final size — the ``saveState`` blob alone brings the side panels back narrow.
+#: final size: the ``saveState`` blob alone brings the side panels back narrow.
 SIZES_PREF_KEY = "statmodels_dock_sizes"
 
 #: When the stored extents are re-applied after a session first appears: once the layout has run,
@@ -74,13 +72,13 @@ def _stored(key: str) -> Any:
         from nvitk.gui.core.prefs import load_prefs
 
         value = load_prefs().get(key)
-    except Exception:  # noqa: BLE001 — preferences fail soft
+    except Exception:  # noqa: BLE001 (preferences fail soft)
         return ""
     return value if value is not None else ""
 
 
 #: Edge of a tab-bar button, in pixels. A ``QPushButton`` honours an explicit stylesheet
-#: geometry exactly — a ``QToolButton`` adds three pixels of frame to its size hint that no
+#: geometry exactly: a ``QToolButton`` adds three pixels of frame to its size hint that no
 #: ``setFixedSize`` takes back, leaving a button whose hint is bigger than the box it is drawn in.
 _BUTTON_PX = 16
 
@@ -89,7 +87,7 @@ def _bar_button(glyph: str, tooltip: str) -> QPushButton:
     """One flat tab-bar button, styled to read on the dark chrome.
 
     Every geometry property is set explicitly rather than just the colours: a host stylesheet
-    styles *all* its buttons — the explorer pads its own by 5×12 — and that is enough to leave a
+    styles *all* its buttons (the explorer pads its own by 5×12), and that is enough to leave a
     16 px button laid out and clickable but drawing blank, which is indistinguishable from
     missing. See ``nvitk.gui.viz.left_dock.install_expand_button``, which learned the same lesson.
     """
@@ -125,7 +123,7 @@ class StatmodelsShell(QMainWindow):
         self.setWindowFlags(self.windowFlags() | Qt.Window)
         fit_to_screen(self, 1700, 1000)
         apply_dark_theme(self)
-        #: Whether a remembered window geometry was applied — decides whether
+        #: Whether a remembered window geometry was applied: decides whether
         #: opening the shell maximises it (first run) or restores where it was.
         self._geometry_restored = self._restore_geometry()
 
@@ -134,7 +132,7 @@ class StatmodelsShell(QMainWindow):
         self._pipeline_kind = str(initial_pipeline_kind or PIPELINE_KIND_QVTPY)
         #: Monotonic, not a count: renaming or closing tabs must not produce two "Session 3".
         self._counter = 0
-        #: The session that currently owns the screen, by widget rather than by index — tabs are
+        #: The session that currently owns the screen, by widget rather than by index: tabs are
         #: movable and closable, so an index does not keep pointing at the same session. Set
         #: before the tab widget exists because adding the first tab already fires
         #: ``currentChanged``.
@@ -163,15 +161,13 @@ class StatmodelsShell(QMainWindow):
         self._install_shortcuts()
         self.new_session()
         # The shell is a top-level window of its own: when the Napari window quits
-        # the application, Qt does not send it a close event — so the layout is
+        # the application, Qt does not send it a close event, so the layout is
         # also saved on the way out, not only when this window is closed.
         app = QApplication.instance()
         if app is not None:
             app.aboutToQuit.connect(self.save_layout)
 
-    # ──────────────────────────────────────────────────────────────────────────
     # Sessions
-    # ──────────────────────────────────────────────────────────────────────────
     def sessions(self) -> list[StatmodelsWindow]:
         """Every open session, in tab order."""
         pages = (self._tabs.widget(i) for i in range(self._tabs.count()))
@@ -203,8 +199,8 @@ class StatmodelsShell(QMainWindow):
         finally:
             QApplication.restoreOverrideCursor()
 
-        # Open on the remembered arrangement — the layout the last session was
-        # left in — rather than the factory one. A loaded config that carries its
+        # Open on the remembered arrangement (the layout the last session was
+        # left in), rather than the factory one. A loaded config that carries its
         # own layout_state still replaces this when it is applied.
         self._restore_session_layout(session)
 
@@ -244,7 +240,7 @@ class StatmodelsShell(QMainWindow):
             session.set_pipeline_kind(self._pipeline_kind)
 
     def show_maximized_floating(self) -> None:
-        """Show, raise and focus the shell — where it was left, or maximised the first time."""
+        """Show, raise and focus the shell, where it was left, or maximised the first time."""
         self.show()
         if not self._geometry_restored:
             self.showMaximized()
@@ -255,7 +251,7 @@ class StatmodelsShell(QMainWindow):
         """Remember the layout, then let every session stop its workers before the pages go.
 
         Qt destroys child widgets without delivering ``closeEvent`` to them, and a page's close
-        handler is what joins its loader and mediation threads — threads that would otherwise
+        handler is what joins its loader and mediation threads: threads that would otherwise
         outlive the widgets their signals are wired to.
         """
         self.save_layout()
@@ -263,18 +259,16 @@ class StatmodelsShell(QMainWindow):
             session.close()
         super().closeEvent(event)
 
-    # ──────────────────────────────────────────────────────────────────────────
     # Remembered layout
-    # ──────────────────────────────────────────────────────────────────────────
     def save_layout(self) -> bool:
         """Store the current session's dock arrangement and the shell's geometry.
 
-        The *current* session's, because that is the one on screen — the arrangement
+        The *current* session's, because that is the one on screen: the arrangement
         the user just left. ``True`` when ``gui.json`` was written.
 
         Skipped while the shell is hidden or minimised: :meth:`hideEvent` has already written
-        the layout and then taken the detached windows down, so a save now — the application's
-        ``aboutToQuit`` after the window was closed — would record a floated dataframe panel as
+        the layout and then taken the detached windows down, so a save now (the application's
+        ``aboutToQuit`` after the window was closed) would record a floated dataframe panel as
         closed, and it would not come back on the next launch.
         """
         if not self.isVisible() or self.isMinimized():
@@ -314,7 +308,7 @@ class StatmodelsShell(QMainWindow):
             from nvitk.gui.core.prefs import save_prefs
 
             return bool(save_prefs(values))
-        except Exception:  # noqa: BLE001 — never block a close on a preference
+        except Exception:  # noqa: BLE001 (never block a close on a preference)
             return False
 
     def _restore_geometry(self) -> bool:
@@ -326,14 +320,14 @@ class StatmodelsShell(QMainWindow):
             from qtpy.QtCore import QByteArray
 
             return bool(self.restoreGeometry(QByteArray.fromBase64(encoded.encode("ascii"))))
-        except Exception:  # noqa: BLE001 — a geometry from another screen setup is not fatal
+        except Exception:  # noqa: BLE001 (a geometry from another screen setup is not fatal)
             return False
 
     def _restore_session_layout(self, session: StatmodelsWindow) -> None:
         """Apply the remembered dock arrangement to a freshly built *session*.
 
         The arrangement (which panel where, tabbed, hidden) restores now; the panel *sizes* are
-        re-applied once the session is on screen at its final size — see :data:`SIZES_PREF_KEY`.
+        re-applied once the session is on screen at its final size; see :data:`SIZES_PREF_KEY`.
         """
         encoded = _stored(LAYOUT_PREF_KEY)
         if isinstance(encoded, str) and encoded:
@@ -360,9 +354,7 @@ class StatmodelsShell(QMainWindow):
             QTimer.singleShot(delay, _apply)
         QTimer.singleShot(max(_SIZE_REAPPLY_MS) + 50, lambda: setattr(session, "_pending_dock_sizes", None))
 
-    # ──────────────────────────────────────────────────────────────────────────
     # Tab bar
-    # ──────────────────────────────────────────────────────────────────────────
     def _install_shortcuts(self) -> None:
         """Browser-style session keys, so a second model does not need the mouse."""
         bindings: list[tuple[str, Any]] = [
@@ -401,7 +393,7 @@ class StatmodelsShell(QMainWindow):
         # Resolved at click time, not bound now: tabs are movable, so the index this button was
         # installed at is not the index it will be clicked at.
         button.clicked.connect(lambda *_: self._on_close_tab(self._tabs.indexOf(session)))
-        # Left on macOS, right everywhere else — the style knows, and putting it on the wrong
+        # Left on macOS, right everywhere else: the style knows, and putting it on the wrong
         # side leaves Qt's own button in place beside ours.
         side = QTabBar.ButtonPosition(
             QApplication.style().styleHint(QStyle.SH_TabBar_CloseButtonPosition)
@@ -418,7 +410,7 @@ class StatmodelsShell(QMainWindow):
     def _refresh_tooltips(self) -> None:
         """Re-read every session's summary onto its tab.
 
-        Pulled on demand — on a tab change and before the context menu opens — rather than pushed
+        Pulled on demand (on a tab change and before the context menu opens), rather than pushed
         from the sessions. A tab's tooltip is only ever read at those two moments, and a signal
         from each session for every frame recompute would be a great deal of wiring for it.
         """
@@ -459,7 +451,7 @@ class StatmodelsShell(QMainWindow):
         Closing or hiding the shell otherwise leaves a floated dataframe panel behind on the
         desktop, with nothing left on screen to put it back.
 
-        The layout is written first, while the floated panels are still up — the last moment
+        The layout is written first, while the floated panels are still up: the last moment
         it is the arrangement the user left (see :meth:`save_layout`).
         """
         self._write_layout()
@@ -474,7 +466,7 @@ class StatmodelsShell(QMainWindow):
         if session is not None:
             session.restore_detached_windows()
         # The first time the shell appears, sessions built before it was visible get their
-        # remembered panel sizes — now that there is a real window size to fit them into.
+        # remembered panel sizes, now that there is a real window size to fit them into.
         for each in self.sessions():
             self._schedule_dock_sizes(each)
 
@@ -545,7 +537,7 @@ class StatmodelsShell(QMainWindow):
             return None
         name = self._tabs.tabText(index)
         # A disabled action rather than addSection: the section label is drawn by the style, and
-        # this application's QMenu stylesheet paints the separator without it — leaving a menu
+        # this application's QMenu stylesheet paints the separator without it; leaving a menu
         # whose entries say "import" without ever naming what from.
         header = menu.addAction(name)
         header.setEnabled(False)
@@ -590,9 +582,7 @@ class StatmodelsShell(QMainWindow):
         menu.addAction("New session", lambda: self.new_session())
         return menu
 
-    # ──────────────────────────────────────────────────────────────────────────
     # Transfers
-    # ──────────────────────────────────────────────────────────────────────────
     def _import(self, index: int, mode: str) -> None:
         """Pull the session at *index* into the current one, confirming an overwrite first."""
         source = self._tabs.widget(index)

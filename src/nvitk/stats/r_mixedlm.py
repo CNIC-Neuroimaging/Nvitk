@@ -13,14 +13,14 @@ An optional alternative to :mod:`nvitk.stats.mixedlm`. Same models, different wa
                   re_formula="1 + age_c", vc_formula={"subject": "0 + C(subject_uid)"}
     lme4        : pi ~ age_c + (1 + age_c | territory) + (1 | subject_uid)
 
-One expression, harder to get wrong — which is the reason to want it. It also brings Satterthwaite
+One expression, harder to get wrong, which is the reason to want it. It also brings Satterthwaite
 degrees of freedom and p-values (through ``lmerTest``), which statsmodels' MixedLM does not provide.
 
 Availability
 ------------
-Nothing here imports R at module load. :func:`r_backend_status` probes the whole chain — the Python
-package, the R interpreter, and the R packages — and reports precisely what is missing, so the GUI
-can offer the engine only when it will actually work and explain itself when it will not.
+Nothing here imports R at module load. :func:`r_backend_status` probes the whole chain (the Python
+package, the R interpreter, and the R packages), and reports precisely what is missing, so the GUI
+can offer the engine only when it will work and explain itself when it will not.
 
 :func:`mixedlm_to_lme4_formula` and :func:`lme4_fixed_formula` are pure string manipulation and work
 with or without R installed.
@@ -38,11 +38,11 @@ coefficient table    ``.coefs``                  ``.result_fit`` (easystats)
 fit statistics       ``.AIC`` / ``.logLike``     ``.result_fit_stats`` (broom glance)
 convergence          ``.warnings``               ``.convergence_status``
 R model handle       ``.model_obj``              ``.r_model``
-REML                 ``fit(REML=…)``             not exposed — always on for ``lmer``
+REML                 ``fit(REML=...)``             not exposed: always on for ``lmer``
 ===================  ==========================  ==================================
 
 0.9 also grew a large R dependency surface (the easystats suite on top of lme4), which
-:data:`REQUIRED_R_PACKAGES` tracks so the availability probe reports what is genuinely needed.
+:data:`REQUIRED_R_PACKAGES` tracks so the availability probe reports what is needed.
 
 Column readers accept either generation's spelling where that is cheap; the fitting path targets
 0.9 and raises a clear error on an incompatible install.
@@ -50,9 +50,7 @@ Column readers accept either generation's spelling where that is cheap; the fitt
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import re
 import shutil
 import subprocess
@@ -70,7 +68,7 @@ log = Logger()
 
 ANALYSIS_LME4 = "lme4"
 
-# R packages pymer4 0.9 resolves eagerly at import time — every one of them must be present or
+# R packages pymer4 0.9 resolves eagerly at import time: every one of them must be present or
 # ``import pymer4`` itself fails. lmerTest is what turns lme4's t-statistics into p-values; the
 # insight/parameters/performance/report quartet is the easystats suite its reporting layer is
 # built on. ``base``/``stats``/``utils`` are built into R and ``boot`` ships as a recommended
@@ -99,9 +97,7 @@ INSTALL_HINT = (
 _RANDOM_TERM_RE = re.compile(r"\(\s*[^()|]*\|\|?\s*[^()]*\)")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Availability
-# ──────────────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class RBackendStatus:
     """What is present, what is missing, and what to do about it."""
@@ -155,7 +151,7 @@ def _r_package_versions(names: Sequence[str]) -> dict[str, str]:
 
 def r_backend_status(*, check_r_packages: bool = True) -> RBackendStatus:
     """
-    Probe the whole Python → rpy2 → R → lme4 chain.
+    Probe the whole Python -> rpy2 -> R -> lme4 chain.
 
     Never raises and never imports R as a side effect of importing this module: the GUI calls it to
     decide whether to offer the engine at all, and a broken R installation must not take the window
@@ -231,9 +227,7 @@ def r_backend_status(*, check_r_packages: bool = True) -> RBackendStatus:
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Formula translation
-# ──────────────────────────────────────────────────────────────────────────────
 def mixedlm_to_lme4_formula(
     formula: str,
     *,
@@ -246,9 +240,9 @@ def mixedlm_to_lme4_formula(
 
     The three statsmodels arguments become bracketed random terms appended to the fixed part:
 
-    * ``groups`` + ``re_formula`` → ``(<re_formula> | <groups>)``. ``re_formula="0"`` means no
+    * ``groups`` + ``re_formula`` -> ``(<re_formula> | <groups>)``. ``re_formula="0"`` means no
       group-level random effect at all, so no term is emitted.
-    * each ``vc_formula`` entry → ``(1 | <column>)``. A variance component written the statsmodels
+    * each ``vc_formula`` entry -> ``(1 | <column>)``. A variance component written the statsmodels
       way, ``"0 + C(subject_uid)"``, is exactly lme4's ``(1 | subject_uid)``: one independent
       intercept per level.
 
@@ -343,9 +337,7 @@ def lme4_grouping_factors(formula: str) -> list[str]:
     return out
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Fitting
-# ──────────────────────────────────────────────────────────────────────────────
 def fit_lme4(
     *,
     data: pd.DataFrame,
@@ -527,18 +519,16 @@ def _formula_columns(columns: Sequence[str], formula: str) -> list[str]:
     return sorted(tokens & available)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Reporting
-# ──────────────────────────────────────────────────────────────────────────────
 def _normalize(name: Any) -> str:
-    """Reduce a column name to letters and digits, lowercased: ``"Std. Error"`` → ``"stderror"``."""
+    """Reduce a column name to letters and digits, lowercased: ``"Std. Error"`` -> ``"stderror"``."""
     return re.sub(r"[^a-z0-9]", "", str(name).lower())
 
 
 # Column aliases, held as *normalized* names so a spelling this code has never seen still matches.
-# Every generation of pymer4, broom and easystats punctuates these differently — ``SE`` / ``Std.
-# Error`` / ``std.error``, ``CI_low`` / ``2.5_ci`` / ``conf.low``, ``p`` / ``P-val`` / ``Pr(>|t|)``
-# — and matching literal strings meant a near miss produced a silently empty column.
+# Every generation of pymer4, broom and easystats punctuates these differently: ``SE`` / ``Std.
+# Error`` / ``std.error``, ``CI_low`` / ``2.5_ci`` / ``conf.low``, ``p`` / ``P-val`` / ``Pr(>|t|)``,
+# and matching literal strings meant a near miss produced a silently empty column.
 _COEF_ALIASES: dict[str, tuple[str, ...]] = {
     "parameter": ("parameter", "term", "name", "effect"),
     "coef": ("coefficient", "estimate", "coef", "beta", "value"),
@@ -614,9 +604,9 @@ def _complete_coef_frame(out: pd.DataFrame) -> None:
 
     These quantities determine one another, so a table holding any two of coefficient, standard
     error, test statistic and interval implies the rest. Reconstructing them beats showing a column
-    of dashes — and every relation used here is exact, not an approximation:
+    of dashes, and every relation used here is exact, not an approximation:
 
-    ``se = coef / z``  ·  ``se = (ci_high − ci_low) / 2·crit``  ·  ``z = coef / se``  ·
+    ``se = coef / z``  ·  ``se = (ci_high - ci_low) / 2·crit``  ·  ``z = coef / se``  ·
     ``p = 2·P(T > |z|)`` on the reported degrees of freedom, falling back to the normal.
     """
     from scipy.stats import norm, t as student_t
@@ -641,7 +631,7 @@ def _complete_coef_frame(out: pd.DataFrame) -> None:
     z = out["z"]
 
     # Two-sided p-value on the reported degrees of freedom; lmerTest's Satterthwaite df make this a
-    # t-test, and without them the normal approximation is the honest fallback.
+    # t-test, and without them the normal approximation is the safe fallback.
     need = out["p_value"].isna() & z.notna()
     if need.any():
         df = out.loc[need, "df"]
@@ -665,7 +655,7 @@ def lme4_random_effects_frame(model: Any) -> pd.DataFrame:
     ``pymer4``'s variance components normalized to component/kind/var/sd.
 
     0.9 fills ``.ranef_var`` from ``broom.mixed::tidy(effects="ran_pars")``, which reports **standard
-    deviations**, not variances — the terms are named ``sd__(Intercept)``, ``cor__…``,
+    deviations**, not variances: the terms are named ``sd__(Intercept)``, ``cor__...``,
     ``sd__Observation``. Squaring the SD to recover the variance (rather than reading ``estimate`` as
     one) is the difference between reporting 0.09 and 0.0084. Correlation rows are kept but marked,
     since squaring those would be meaningless.
@@ -735,11 +725,11 @@ def _fit_statistic(model: Any, names: Sequence[str]) -> float | None:
 
 def lme4_group_coefficients(model: Any) -> pd.DataFrame:
     """
-    Per-group coefficients of an ``lme4`` fit — each level's own intercept and slopes.
+    Per-group coefficients of an ``lme4`` fit: each level's own intercept and slopes.
 
     ``lme4`` already computes both: ``coef()`` gives the total per level (what pymer4 stores as
     ``.fixef``) and ``ranef()`` the deviation from the population average (``.ranef``). With several
-    grouping factors each is a mapping keyed by factor, so the ``factor`` column keeps them apart —
+    grouping factors each is a mapping keyed by factor, so the ``factor`` column keeps them apart:
     a model with ``(1 + age_c | territory) + (1 | subject_uid)`` lists both here.
 
     Returns
@@ -863,9 +853,7 @@ def lme4_info_dict(
     }
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Prediction
-# ──────────────────────────────────────────────────────────────────────────────
 def lme4_fixef_vcov(model: Any) -> pd.DataFrame | None:
     """
     Fixed-effects covariance matrix, pulled out of the underlying R model.
@@ -936,7 +924,7 @@ def lme4_emmeans(
         An emmeans specification formula: ``"~ territory"``, or ``"~ age_c | territory"`` to get one
         curve per level.
     at_name, at_values
-        Evaluate a *continuous* predictor over a grid — ``at_name="age_c"`` with the x values the
+        Evaluate a *continuous* predictor over a grid: ``at_name="age_c"`` with the x values the
         line is drawn at. Leave unset for a purely categorical specification.
     ci_level : float
         Confidence level for the returned interval.
@@ -987,7 +975,7 @@ def _emmeans_band(
 
     The grouping factor is only asked for level by level when it appears in the *fixed* part of the
     formula. A factor that enters solely as a random effect has no marginal mean per level for
-    emmeans to report — asking anyway just errors, so the population curve is used instead.
+    emmeans to report: asking anyway just errors, so the population curve is used instead.
 
     ``emmeans_fn`` selects which engine's emmeans call to make; it defaults to lme4's. Everything
     else here is engine-independent, which is why the robust engine reuses this function rather than
@@ -997,13 +985,13 @@ def _emmeans_band(
     around the line rather than parallel to it. ``emmeans`` averages over every factor outside its
     specification with equal weights; the plotted curve instead holds each one at its modal level.
     On a model with a categorical covariate those are different numbers, and the band came out
-    displaced from the line by a constant — the modal level's effect minus the mean of them. Naming
+    displaced from the line by a constant: the modal level's effect minus the mean of them. Naming
     those factors in the specification and then selecting the held combination asks ``emmeans`` for
-    the interval of the curve actually drawn.
+    the interval of the curve drawn.
     """
     grouped = bool(group) and group != x and bool(re.search(rf"\b{re.escape(group)}\b", fixed_formula))
 
-    # Only what the model actually uses: pinning a column the formula never mentions would ask
+    # Only what the model uses: pinning a column the formula never mentions would ask
     # emmeans for a variable its reference grid does not have.
     pinned = {
         str(name): value
@@ -1097,7 +1085,7 @@ def lme4_predict(
     #
     # ``np.array`` rather than ``np.asarray``: what comes back wraps R's own memory (``owndata`` is
     # False, the base is a buffer), and R is free to reuse that block on any later call. A caller
-    # that keeps the array — a matplotlib line holds the array it was given, it does not copy —
+    # that keeps the array (a matplotlib line holds the array it was given, it does not copy)
     # would then draw whatever R put there since. The copy is what makes the values ours.
     for frame in (_to_polars(grid), grid):
         for kwargs in attempts:
@@ -1130,8 +1118,8 @@ def _grid_level_columns(
     *group*, plus every column of *df* that carries the same labels.
 
     A prediction grid has to write the level into all of them. The analysis frame carries the region
-    twice — ``territory`` and ``group_key`` hold identical labels (see
-    :func:`~nvitk.stats._statmodels_frames.finalize_analysis_frame`) — and the plot groups by
+    twice, ``territory`` and ``group_key`` hold identical labels (see
+    :func:`~nvitk.stats._statmodels_frames.finalize_analysis_frame`), and the plot groups by
     whichever of the two the user picked. Setting only that one leaves the column the *model* names
     at its reference value, so every level predicts the modal region's curve and the per-level lines
     coincide, one drawn over another.
@@ -1165,8 +1153,8 @@ def _grid_marginal_columns(model: Any, df: pd.DataFrame, *, keep: Sequence[str] 
     Random grouping factors of *model* that a curve should average over rather than fix.
 
     A ``(1 + age_c | territory) + (1 | subject_uid)`` fit predicts per (territory, subject). Holding
-    ``subject_uid`` at its modal level — what a reference row does with any other categorical column
-    — offsets every territory curve by that one subject's deviation, an arbitrary shift of whichever
+    ``subject_uid`` at its modal level (what a reference row does with any other categorical column
+) offsets every territory curve by that one subject's deviation, an arbitrary shift of whichever
     subject contributed most rows. Predicting at :data:`_MARGINAL_LEVEL` instead drops the term.
 
     Empty for a fit with no random structure (``lmrob``), whose curves have nothing to marginalize.
@@ -1179,9 +1167,7 @@ def _grid_marginal_columns(model: Any, df: pd.DataFrame, *, keep: Sequence[str] 
     return [f for f in factors if f in df.columns and f not in held]
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Plotting
-# ──────────────────────────────────────────────────────────────────────────────
 # Why this does not reuse ``plot_mixedlm_params``: that function builds a patsy design matrix and
 # indexes it by the model's parameter names. R names factor contrasts ``territoryPCA`` where patsy
 # names them ``C(territory)[T.PCA]``, so the two would silently fail to line up and every contrast
@@ -1213,11 +1199,11 @@ def plot_lme4_params(
     """
     Population and per-group curves for an ``lme4`` fit, predicted through ``pymer4``.
 
-    Mirrors :func:`~nvitk.stats.mixedlm.plot_mixedlm_params` visually — dashed black population
-    curve, one coloured curve per group, observed data in a lighter tone — but gets its numbers from
+    Mirrors :func:`~nvitk.stats.mixedlm.plot_mixedlm_params` visually (dashed black population
+    curve, one coloured curve per group, observed data in a lighter tone), but gets its numbers from
     R rather than from a locally rebuilt design matrix.
 
-    Each coloured curve is that level's own fit — the fixed effects plus its estimated deviation —
+    Each coloured curve is that level's own fit (the fixed effects plus its estimated deviation)
     with the covariates at their reference values and the fit's *other* grouping factors averaged
     over rather than held at a level (see :data:`_MARGINAL_LEVEL`). The level is written into every
     column carrying it, not only into *group*, so grouping the plot by ``group_key`` separates the
@@ -1227,7 +1213,7 @@ def plot_lme4_params(
     ----------
     errorbar : bool
         Draw confidence intervals. ``lme4``'s ``predict`` returns no standard error, so these come
-        from :func:`lme4_emmeans` — marginal means computed by ``emmeans`` in R. A band appears per
+        from :func:`lme4_emmeans`: marginal means computed by ``emmeans`` in R. A band appears per
         group when the grouping factor is in the fixed part of the formula, and one population band
         otherwise. When emmeans cannot supply them the curves are still drawn and the figure carries
         ``ci_error``.
@@ -1237,14 +1223,14 @@ def plot_lme4_params(
     display : {"overview", "grouped"}
         ``"overview"`` puts every level on one pair of axes; ``"grouped"`` splits them into a grid of
         anatomical panels (see :mod:`nvitk.stats.region_groups`), each autoscaled to its own range.
-        Both draw the same fit — the population curve and the emmeans intervals are computed once and
+        Both draw the same fit: the population curve and the emmeans intervals are computed once and
         repeat across panels.
     excluded_points : pandas.DataFrame, optional
         Observations a filter removed, drawn in grey beneath the kept ones. They are not in
-        *df_fit* — the fit ran on the filtered frame — so they have to be supplied separately.
+        *df_fit* (the fit ran on the filtered frame), so they have to be supplied separately.
     predict_fn, band_fn, population_label
         Engine hooks. They default to ``lme4``'s, and exist so another R engine whose parameters are
-        named by R rather than by patsy — :func:`~nvitk.stats.r_robust.plot_lmrob_params` — reuses
+        named by R rather than by patsy (:func:`~nvitk.stats.r_robust.plot_lmrob_params`) reuses
         this drawing code instead of copying it. Not needed for ordinary ``lme4`` use.
     """
     import matplotlib.pyplot as plt
@@ -1279,7 +1265,7 @@ def plot_lme4_params(
 
     # A prediction grid varying x, with everything else held at a reference value: the mean for
     # numeric columns, the most frequent level for categorical ones. Built once from the whole
-    # frame — a per-panel reference would pin covariates differently in each panel and the
+    # frame: a per-panel reference would pin covariates differently in each panel and the
     # population curve would stop being the same line everywhere.
     def reference_row() -> dict[str, Any]:
         row: dict[str, Any] = {}

@@ -1,5 +1,5 @@
 """
-``nvitk-statsmodels`` — launch the Statmodels explorer as a standalone window.
+``nvitk-statsmodels``: launch the Statmodels explorer as a standalone window.
 
 Description
 -----------
@@ -19,9 +19,7 @@ Examples
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import argparse
 import json
 import sys
@@ -95,7 +93,7 @@ def _resolve_config(path_or_name: str, repo_root: Path) -> Path:
     """Locate a saved ``config.json`` from a bare model name or an explicit path.
 
     Bare names resolve against the configured model directory, so ``--load`` looks wherever
-    ``_on_save`` actually wrote — not at a second, independently-built guess.
+    ``_on_save`` wrote, not at a second, independently-built guess.
     """
     candidate = Path(path_or_name)
     if candidate.is_file():

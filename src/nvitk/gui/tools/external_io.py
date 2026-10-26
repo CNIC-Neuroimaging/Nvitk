@@ -4,15 +4,15 @@ Those tools are command-line programs: the active layer is written to a run
 directory, the program writes its outputs there, and the outputs are opened again
 as layers. The helpers here keep that round trip in one place:
 
-* :func:`run_directory` — the tool's *output folder* parameter, or a fresh temporary one;
-* :func:`export_layer_file` — a layer as NIfTI in the file's own axis order (a
+* :func:`run_directory`: the tool's *output folder* parameter, or a fresh temporary one;
+* :func:`export_layer_file`: a layer as NIfTI in the file's own axis order (a
   time-first 3D+t layer such as a DWI series is written ``XYZT``, as FSL expects);
-* :func:`sidecar_file` — a file stored next to the layer's source (``.bval`` / ``.bvec``);
-* :func:`add_volume` — an output volume as an Image or Labels layer, placed by its
+* :func:`sidecar_file`: a file stored next to the layer's source (``.bval`` / ``.bvec``);
+* :func:`add_volume`: an output volume as an Image or Labels layer, placed by its
   own affine, with names and colours from a lookup table for label maps;
-* :func:`add_surface` — a mesh already in scanner RAS (world) millimetres.
+* :func:`add_surface`: a mesh already in scanner RAS (world) millimetres.
 
-What a run produced is described by an **import manifest** — the same for a local run
+What a run produced is described by an **import manifest**: the same for a local run
 and a cluster job (the SGE worker writes it into its ``.done`` marker), so results open
 identically either way::
 
@@ -202,7 +202,7 @@ def add_volume(
 
         try:
             _apply_label_color_dict(layer, colors)
-        except Exception:  # noqa: BLE001 — colours are cosmetic
+        except Exception:  # noqa: BLE001 (colours are cosmetic)
             pass
     if schema:
         from nvitk.gui.labels.catalog import remember_layer_schema
@@ -232,7 +232,7 @@ def add_surface(
     )
 
 
-# ── where a tool's inputs come from ──────────────────────────────────────────
+# where a tool's inputs come from
 
 
 class ToolInputs:
@@ -402,7 +402,7 @@ class StagedInputs(ToolInputs):
         return self._labels
 
 
-# ── import manifests ─────────────────────────────────────────────────────────
+# import manifests
 
 
 def _relative(path: Path, base: Path | None) -> str:
@@ -434,7 +434,7 @@ def manifest_layer(
             import nibabel as nib
 
             present = {int(v) for v in np.unique(np.asarray(nib.load(str(path)).dataobj))} - {0}
-        except Exception:  # noqa: BLE001 — unreadable here: keep the whole table
+        except Exception:  # noqa: BLE001 (unreadable here: keep the whole table)
             present = {int(k) for k in lut}
         table: dict[str, Any] = {}
         for key, value in lut.items():

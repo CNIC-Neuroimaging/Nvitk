@@ -1,7 +1,7 @@
 """Resolve module-level configuration constants on first use rather than at import.
 
 The pipeline and tool ``config.py`` modules expose their settings as module constants
-(``cfg.SGE_QUEUE``, ``cfg.CONTAINER_PATH``, …). Those used to be computed at *import* time by
+(``cfg.SGE_QUEUE``, ``cfg.CONTAINER_PATH``, ...). Those used to be computed at *import* time by
 reading ``sge.json`` and rebinding the names, which had three costs:
 
 * a ``--config-dir`` flag could never affect them, because the import happens before the
@@ -23,8 +23,8 @@ Usage::
     }
     __getattr__, __dir__ = lazy_config.module_getattr(_RESOLVERS, module_name=__name__)
 
-``from cfg import CONSTANT`` still works — :pep:`562` fires for that too — but it snapshots the
-value at the importing module's import time. Prefer ``import … as cfg`` plus ``cfg.CONSTANT``
+``from cfg import CONSTANT`` still works (:pep:`562` fires for that too), but it snapshots the
+value at the importing module's import time. Prefer ``import ... as cfg`` plus ``cfg.CONSTANT``
 anywhere a late ``--config-dir`` needs to be honoured.
 """
 
@@ -81,7 +81,7 @@ def module_getattr(
 def first_set(*values: Any) -> Any:
     """The first argument that is neither ``None`` nor blank, else ``None``.
 
-    For settings that accept more than one spelling in ``sge.json`` — several pipelines read
+    For settings that accept more than one spelling in ``sge.json``: several pipelines read
     both ``default_sge_model_root`` and ``models_dir``, for instance.
     """
     for value in values:

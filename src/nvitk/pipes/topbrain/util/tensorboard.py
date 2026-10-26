@@ -3,8 +3,8 @@ TensorBoard monitoring for the ToPBrain training stages.
 
 Description
 -----------
-Thin glue between :mod:`nvitk.core.tensorboard` — which does the actual log parsing, event
-writing and serving — and this pipeline's layout, label sets and SGE submission.
+Thin glue between :mod:`nvitk.core.tensorboard` (which does the actual log parsing, event
+writing and serving), and this pipeline's layout, label sets and SGE submission.
 
 Where the events live
 ---------------------
@@ -27,8 +27,8 @@ Three arrangements, all supported:
     Additionally submits a small CPU-only job running the server on a compute node with
     ``--bind_all``. It writes ``tensorboard_server.json`` naming the node it landed on, from
     which the ``ssh -L`` tunnel is assembled. Costs a slot for as long as it runs.
-``nvitk-tensorboard --mirror … --logdir …``
-    Nothing on the cluster is involved at all — the workstation parses the training logs
+``nvitk-tensorboard --mirror ... --logdir ...``
+    Nothing on the cluster is involved at all: the workstation parses the training logs
     across the mount itself. Works for runs that were launched without ``--tensorboard``, and
     for finished ones.
 
@@ -68,19 +68,17 @@ STAGE_SOURCE_ROOTS: dict[str, str] = {
     "stage2": "nnunet_results",
 }
 
-#: ``--tensorboard-serve`` choices. ``auto`` resolves against ``--submit`` — see
+#: ``--tensorboard-serve`` choices. ``auto`` resolves against ``--submit``; see
 #: :func:`resolve_serve_mode`.
 SERVE_MODES: tuple[str, ...] = ("auto", "local", "cluster", "ssh", "none")
 
 #: Where ``--tensorboard-serve ssh`` stages the training logs it pulls off the cluster. Under
-#: the *local* results root, never the cluster one -- the whole point of the mode is that the
-#: cluster root is not writable, or even visible, from here.
+#: the *local* results root, never the cluster one: this mode exists because the cluster
+#: root is not writable, or even visible, from here.
 REMOTE_STAGING_DIR: str = "tensorboard_remote"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Layout
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def tensorboard_root(results_root: Path) -> Path:
@@ -94,7 +92,7 @@ def server_sidecar_path(results_root: Path) -> Path:
 
 
 def stage_sources(paths: TopBrainPaths, stages: Sequence[str]) -> dict[str, Path]:
-    """Label → framework results root, for the training stages in *stages*.
+    """Label -> framework results root, for the training stages in *stages*.
 
     Stages that do not train (0, 3-5) contribute nothing; passing them is harmless so callers
     can forward their whole stage selection.
@@ -110,7 +108,7 @@ def dice_class_names(label_set: str | None) -> tuple[str, ...]:
     """Foreground class names in label order, for the per-class pseudo-dice series.
 
     nnU-Net's ``Pseudo dice`` list follows ``label_manager.foreground_labels``, i.e. label
-    values ascending — the same order :func:`~nvitk.pipes.topbrain.labels.label_map` sorts to.
+    values ascending: the same order :func:`~nvitk.pipes.topbrain.labels.label_map` sorts to.
     Naming matters here: on a 36-class vessel model, ``class_21`` says nothing while
     ``22_L-Pcom`` tells you immediately which side road the model is failing to find.
     """
@@ -118,14 +116,12 @@ def dice_class_names(label_set: str | None) -> tuple[str, ...]:
         return ()
     try:
         return tuple(name for _, name in sorted(lbl.label_map(label_set).items()))
-    except ValueError:  # unknown label set — numbered series are still useful
+    except ValueError:  # unknown label set: numbered series are still useful
         log.debug("No label map for %r; per-class dice series will be numbered.", label_set)
         return ()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Mirroring (used by the training stages)
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @contextmanager
@@ -140,7 +136,7 @@ def monitoring(
 ) -> Iterator[TensorBoardWatcher | None]:
     """Mirror the given stages' training logs for the duration of the block.
 
-    A no-op when *enabled* is false or TensorBoard is not installed — monitoring must never be
+    A no-op when *enabled* is false or TensorBoard is not installed: monitoring must never be
     the reason a training run does not start, so a missing package downgrades to a warning.
 
     Parameters
@@ -180,15 +176,13 @@ def monitoring(
         watcher.stop()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Serving
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def remote_staging_layout(
     local: TopBrainPaths, cluster: TopBrainPaths
 ) -> tuple[TopBrainPaths, dict[str, Path]]:
-    """A local layout standing in for *cluster*, plus the remote→local roots to keep in sync.
+    """A local layout standing in for *cluster*, plus the remote->local roots to keep in sync.
 
     Only the roots the mirror reads are redirected into the staging tree. Everything else stays
     on the local layout, so the events the mirror writes land on local disk instead of being
@@ -370,7 +364,7 @@ def workstation_view(cluster: TopBrainPaths, local: TopBrainPaths) -> tuple[TopB
     """Which layout this workstation should read for a run submitted to the cluster.
 
     On this lab's setup the cluster storage is NFS-mounted at the *same absolute paths* on the
-    workstation, so the ``cluster_*`` roots — the ones the jobs actually write to — are directly
+    workstation, so the ``cluster_*`` roots (the ones the jobs write to) are directly
     readable here. The ``local_*`` roots are a separate working copy and contain nothing a
     cluster job produced, so pointing TensorBoard at them would show an empty page.
 
@@ -442,7 +436,7 @@ def watch_and_serve(
 
     The workstation-side counterpart to a cluster run: *paths* is the **local** layout, i.e.
     the cluster roots as they are mounted here, so this reads the same training logs the
-    compute nodes are writing. Mirroring locally as well as in the job is harmless — whichever
+    compute nodes are writing. Mirroring locally as well as in the job is harmless, whichever
     process holds the lock does the work and the other stands by.
 
     Raises
@@ -479,9 +473,7 @@ def watch_and_serve(
             watcher.stop()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Cluster-side server job
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _server_worker_argv(*, port: int, interval: float, label_set: str | None) -> list[str]:
@@ -524,7 +516,7 @@ def submit_server_sge(
     """Submit the cluster-side TensorBoard server; returns its job id.
 
     Deliberately submitted **without** ``-hold_jid``: it must come up while the training jobs
-    are still queued, not after them. It is also CPU-only — a server holding a GPU for the
+    are still queued, not after them. It is also CPU-only: a server holding a GPU for the
     length of a training run would be an expensive way to draw graphs.
 
     The job runs until it is killed (``qdel``) or the queue's wall-clock limit ends it. Its
@@ -534,7 +526,7 @@ def submit_server_sge(
     Parameters
     ----------
     paths
-        The **cluster** layout — what the job itself sees.
+        The **cluster** layout: what the job itself sees.
     local_results_root
         The same results root as it is mounted on this workstation, used only to tell the user
         where to read the sidecar from here. The two rarely coincide, and quoting the cluster

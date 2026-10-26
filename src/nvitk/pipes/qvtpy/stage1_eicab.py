@@ -11,14 +11,14 @@
 
 **Execution**
 
-- ``--submit local`` — :func:`nvitk.segmentation.eicab.runner.run_eicab` via Singularity.
-- ``--submit sge`` — host ``singularity run`` eICAB (+ optional nvitk post-steps) per subject.
-- ``--post-process-eicab`` (default on) — :mod:`~nvitk.pipes.qvtpy.util.eicab.eicab_postprocess`: local
+- ``--submit local``: :func:`nvitk.segmentation.eicab.runner.run_eicab` via Singularity.
+- ``--submit sge``: host ``singularity run`` eICAB (+ optional nvitk post-steps) per subject.
+- ``--post-process-eicab`` (default on): :mod:`~nvitk.pipes.qvtpy.util.eicab.eicab_postprocess`: local
   re-segmentation of every label, extension of the ICAs / basilar below eICAB's box, and (with
   ``--eicab-pp-siphon``, default on) the ICA siphon loop cuts; writes the ``*_pp`` mask,
   ``centerlines_mask_pp.nii.gz`` and ``eicab_postprocess.json`` (originals unchanged).
-- ``--only-pp`` — skip eICAB inference; run ICA post-process on existing outputs only.
-- ``--reuse-eicab`` — reuse an existing eICAB CW mask (+ ``TOF_resampled``) and run the
+- ``--only-pp``: skip eICAB inference; run ICA post-process on existing outputs only.
+- ``--reuse-eicab``: reuse an existing eICAB CW mask (+ ``TOF_resampled``) and run the
   post-process only; without one, fall back to eICAB in CW-only mode (the whole-brain flood
   fill is skipped, see ``--eicab-wb``). The branch taken is logged; on SGE the check runs at
   submit time (post-process-only job) and again inside the eICAB job.
@@ -69,16 +69,12 @@ from .util.io.sge_backend import (
 
 log = Logger()
 
-# ---------------------------------------------------------------------------
 # Constants
-# ---------------------------------------------------------------------------
 
 _SAFE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
-# ---------------------------------------------------------------------------
 # Path helpers + TOF discovery
-# ---------------------------------------------------------------------------
 
 
 def _default_nvitk_src_dir() -> Path:
@@ -194,9 +190,7 @@ def run_postprocess_only(
     return out_dir
 
 
-# ---------------------------------------------------------------------------
 # Local execution
-# ---------------------------------------------------------------------------
 
 
 def run_subject(
@@ -323,9 +317,7 @@ def run_subject(
     return out_dir
 
 
-# ---------------------------------------------------------------------------
 # SGE submission
-# ---------------------------------------------------------------------------
 
 
 def _resolve_stage1_tof(nifti_root: Path, subject: str) -> Path:
@@ -727,9 +719,7 @@ def _submit_postprocess_only_sge(
     return submit_stage(spec, paths, hold_jid=hold_jid, dry_run=dry_run, emit=emit)
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 
 
 @click.command("qvtpy-stage1-eicab")

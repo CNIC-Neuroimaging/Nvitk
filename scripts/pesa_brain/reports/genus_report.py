@@ -1,6 +1,6 @@
 """Log per-subject ICA genus (β₁) from eICAB masks under a PESA* results tree.
 
-No Otsu / repair / centerline correction — only the raw eICAB label mask for
+No Otsu / repair / centerline correction, only the raw eICAB label mask for
 LICA and RICA (labels 1 and 2). Rows with β₁ > 0 are printed in red.
 
 Example::

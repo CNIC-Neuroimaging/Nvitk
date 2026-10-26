@@ -22,17 +22,14 @@ import numpy as np
 from scipy import ndimage as ndi
 
 
-# ============================================================================
 # CONFIG FOR DIRECT RUN (paths must be supplied at runtime; no host defaults)
-# ============================================================================
 INPUT_PATH = None
-OUTPUT_DIR = None   # None → same folder as INPUT_PATH
-OUTPUT_NAME = None  # None → <input_stem>_taubin.nii.gz
+OUTPUT_DIR = None   # None -> same folder as INPUT_PATH
+OUTPUT_NAME = None  # None -> <input_stem>_taubin.nii.gz
 KEEP_LARGEST_COMPONENT = False
 TAUBIN_ITERS = 20
 TAUBIN_LAMBDA = 0.65
 TAUBIN_MU = -0.65
-# ============================================================================
 
 
 def ensure_dir(path: str) -> None:
@@ -137,7 +134,7 @@ def build_taubin_scores(
 
 
 def fuse_from_scores(score_maps: Dict[int, np.ndarray], shape: Tuple[int, int, int]) -> np.ndarray:
-    """Re-fuse per-label score maps into one label volume: argmax label wins, 0 where all scores ≤ 0."""
+    """Re-fuse per-label score maps into one label volume: argmax label wins, 0 where all scores <= 0."""
     if not score_maps:
         return np.zeros(shape, dtype=np.int32)
     labels = sorted(score_maps)

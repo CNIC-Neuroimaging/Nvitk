@@ -4,7 +4,7 @@ Recover 4D-flow measurements the dataset is missing, from the pipeline's results
 Description
 -----------
 :mod:`~nvitk.pipes.qvtpy.stage9_autoqc` scores what stage 6 **published**. When the import has not
-run, or has run only partially, the numbers exist on disk but not in the dataset — and the QC then
+run, or has run only partially, the numbers exist on disk but not in the dataset, and the QC then
 either refuses to run or scores every vessel as patent because the areas are missing.
 
 This module closes that gap. It reads ``loc_measurements.csv`` straight out of each subject's stage-6
@@ -15,25 +15,23 @@ Where the results live
 ----------------------
 ``--submit local``  the results root on this machine.
 ``--submit sge``    the cluster's results root, fetched over sshfs into a temporary directory that is
-                    removed afterwards. Only the stage-6 CSVs are pulled, not whole subject trees —
+                    removed afterwards. Only the stage-6 CSVs are pulled, not whole subject trees:
                     a QC pass has no business moving gigabytes of NIfTI.
 ``--submit xnat``   each session's ``qvtpy`` resource, downloaded into a temporary directory. XNAT
                     serves a resource as one archive, so unlike the cluster path this cannot fetch a
-                    single file — the whole resource comes down and is discarded afterwards.
+                    single file: the whole resource comes down and is discarded afterwards.
 
 Units
 -----
 Stage 6 writes ``loc_mean_flow_ml_s`` per **second**. The literature bands are per minute. The
 conversion is left to :func:`~nvitk.pipes.qvtpy.stage9_autoqc.infer_flow_scale`, which decides from
-the magnitude rather than from the column name — so a results tree written by an older stage that
+the magnitude rather than from the column name, so a results tree written by an older stage that
 used different units still scores correctly.
 """
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import shutil
 import tempfile
 from dataclasses import dataclass, field
@@ -56,7 +54,7 @@ PITC_PROFILE = "pitc_profile.csv"
 #: Stage-6 CSVs the remote fetch mirrors locally.
 STAGE6_FETCH_FILES: tuple[str, ...] = (LOC_MEASUREMENTS, PITC_PROFILE)
 
-#: Dataset variable → the stage-6 column it is written from.
+#: Dataset variable -> the stage-6 column it is written from.
 VARIABLE_TO_LOC_COLUMN: dict[str, str] = {
     "flow_mean": "loc_mean_flow_ml_s",
     "cross_section_area": "loc_cross_section_area_mm2",
@@ -122,7 +120,7 @@ def stage6_dir(results_root: Path, subject: str) -> Path:
 
 
 def discover_subjects(results_root: Path) -> list[str]:
-    """Subjects under *results_root* that actually have a stage-6 measurements CSV."""
+    """Subjects under *results_root* that have a stage-6 measurements CSV."""
     root = Path(results_root)
     if not root.is_dir():
         return []
@@ -141,7 +139,7 @@ def read_loc_measurements(
     Returns
     -------
     pandas.DataFrame
-        The stage-6 columns plus ``subject_uid``. Empty when nothing was found — reported by the
+        The stage-6 columns plus ``subject_uid``. Empty when nothing was found: reported by the
         caller rather than raised here, since a partially-populated tree is normal mid-run.
     """
     root = Path(results_root)
@@ -174,7 +172,7 @@ def load_pitc_profiles(
     """
     Concatenate every subject's ``pitc_profile.csv`` into one frame with ``subject_uid``.
 
-    Returns an empty frame when nothing is found — along-segment CV is optional and must not
+    Returns an empty frame when nothing is found: along-segment CV is optional and must not
     take the rest of autoQC down with it.
     """
     root = Path(results_root)
@@ -208,7 +206,7 @@ def long_measurements(
     """
     One variable as long ``(subject_uid, region_id, value)`` rows, matching the dataset's shape.
 
-    Several LOC rows can share a vessel — stage 6 writes one per localized cross-section — so they
+    Several LOC rows can share a vessel (stage 6 writes one per localized cross-section), so they
     are averaged per vessel, which is the same time-averaged quantity the dataset publishes.
     """
     empty = pd.DataFrame(columns=["subject_uid", "region_id", "value"])
@@ -229,9 +227,7 @@ def long_measurements(
     return out.groupby(["subject_uid", "region_id"], as_index=False)["value"].mean()
 
 
-# ---------------------------------------------------------------------------
 # Remote retrieval
-# ---------------------------------------------------------------------------
 def fetch_stage6_csvs(
     source: ResultsSource, subjects: Sequence[str] | None = None
 ) -> Path:
@@ -243,7 +239,7 @@ def fetch_stage6_csvs(
     reason to move the NIfTIs, and on a full cohort that is the difference between seconds and
     hours.
 
-    The caller must call :meth:`ResultsSource.cleanup` — or use :func:`open_results` — to remove it.
+    The caller must call :meth:`ResultsSource.cleanup` (or use :func:`open_results`) to remove it.
     """
     from nvitk.cluster.remote_transfer import (
         cluster_session,
@@ -296,7 +292,7 @@ def fetch_stage6_xnat(
     """
     Download each session's ``qvtpy`` resource from XNAT and keep only the stage-6 measurements.
 
-    XNAT serves a resource as a single archive, so — unlike the cluster path — there is no way to ask
+    XNAT serves a resource as a single archive, so (unlike the cluster path) there is no way to ask
     for one file. The whole ``qvtpy`` resource comes down per session into a scratch directory, the
     stage-6 CSV is copied into the mirrored layout, and the rest is deleted immediately. That keeps
     peak disk to one subject rather than a cohort.
@@ -412,14 +408,14 @@ def recover_missing(
     Parameters
     ----------
     needed : iterable of str
-        Dataset variable ids that are missing — typically ``flow_mean`` and/or
+        Dataset variable ids that are missing, typically ``flow_mean`` and/or
         ``cross_section_area``.
 
     Returns
     -------
     (frames, report)
         ``frames`` maps each recovered variable to its long frame; a variable the tree cannot
-        supply is simply absent. ``report`` carries ``root``, ``n_subjects``, ``recovered`` and
+        supply is absent. ``report`` carries ``root``, ``n_subjects``, ``recovered`` and
         ``unavailable`` for the log.
     """
     wanted = [str(v) for v in needed]

@@ -132,7 +132,7 @@ def stdsd(
     *,
     spacing: tuple[float, ...] | None = None,
 ) -> float:
-    """Standard deviation of surface distances (mm) — boundary agreement spread."""
+    """Standard deviation of surface distances (mm): boundary agreement spread."""
     ensure_same_shape(label_true, label_pred)
     sp = resolve_spacing(label_true, spacing)
     d = _distances(label_true, label_pred, sp)

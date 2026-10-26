@@ -12,9 +12,7 @@ from nvitk.core.array import as_backend_array, is_cupy_array, to_cupy, to_numpy
 from nvitk.core.exceptions import ValidationError
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Metadata helpers
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _is_array_like(value: Any) -> bool:
@@ -72,9 +70,7 @@ def _is_dicom_tag_key(key: str) -> bool:
     return bool(key) and key[0].isupper()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Image
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -294,7 +290,7 @@ class Image:
         return out
 
     def __repr__(self) -> str:
-        """Compact one-line summary (shape, dtype, backend, axes, modality, …)."""
+        """Compact one-line summary (shape, dtype, backend, axes, modality, ...)."""
         return (
             f"Image(shape={self.shape}, dtype={self.dtype}, backend={self.backend}, "
             f"axes={self.axes!r}, orientation={self.orientation!r}, name={self.name!r}, "
@@ -311,7 +307,7 @@ class Image:
             yield self[i]
 
     def __array__(self, dtype: Any | None = None) -> np.ndarray:
-        """NumPy view for ``np.asarray(image)`` — always copies GPU data to host."""
+        """NumPy view for ``np.asarray(image)``: always copies GPU data to host."""
         arr = to_numpy(self.data)
         if dtype is not None:
             arr = np.asarray(arr, dtype=dtype)
@@ -569,9 +565,7 @@ class Image:
         """Subset of ``metadata`` containing only keys that exist."""
         return {k: self.metadata[k] for k in keys if k in self.metadata}
 
-    # ──────────────────────────────────────────────────────────────────────────────
     # Arithmetic
-    # ──────────────────────────────────────────────────────────────────────────────
 
     # Every operator below routes through ``_binary`` / ``_clone`` so the result
     # keeps this image's metadata and axis labels (another Image is unwrapped to
@@ -641,9 +635,7 @@ class Image:
             return tuple(self._clone(x) if _is_array_like(x) else x for x in result)
         return result
 
-    # ──────────────────────────────────────────────────────────────────────────────
     # I/O
-    # ──────────────────────────────────────────────────────────────────────────────
 
     def save(self, path: str, **kwargs: Any) -> None:
         """Write via :func:`nvitk.io.imageio.imsave` (format from extension or ``force_type``)."""

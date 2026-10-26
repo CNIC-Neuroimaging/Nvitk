@@ -74,7 +74,7 @@ COHORT_STAGES: frozenset[str] = frozenset(STAGES_ORDERED)
 def parse_stages(spec: str) -> list[str]:
     """Parse a ``--stages`` comma list into canonical stage ids in pipeline order.
 
-    Order in *spec* is ignored — the result is always sorted into :data:`STAGES_ORDERED`, so
+    Order in *spec* is ignored: the result is always sorted into :data:`STAGES_ORDERED`, so
     ``--stages stage2,stage0`` still prepares data before it trains.
     """
     tokens = [t.strip().lower() for t in spec.split(",") if t.strip()]

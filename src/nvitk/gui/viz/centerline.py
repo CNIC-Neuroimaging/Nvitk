@@ -267,7 +267,7 @@ def mask_is_thin(mask: np.ndarray) -> bool:
     In a thin skeleton those are the real bifurcations and are rare; in a mask
     two or more voxels wide almost every voxel qualifies, the whole thing
     collapses into one junction cluster, and every chain between two members of
-    the same cluster is dropped as a within-blob edge — which is why a thick mask
+    the same cluster is dropped as a within-blob edge, which is why a thick mask
     comes back fragmented, or empty.
     """
     from nvitk.morphology.polyline_graph import skeleton_graph
@@ -300,7 +300,7 @@ def centerline_mask_to_polylines(
 
     Uses :func:`~nvitk.morphology.centerline.compute_connected_centerline_tree`
     so each label keeps its main path plus every unique junction-split branch
-    (shared only at bifurcation voxels — no dropped corridors).
+    (shared only at bifurcation voxels: no dropped corridors).
 
     Parameters
     ----------
@@ -333,7 +333,7 @@ def centerline_mask_to_polylines(
     if bridge > 0:
         # compute_connected_centerline_tree only bridges on the path where it
         # skeletonizes for itself; a mask handed straight through as the
-        # centerline skips that, so bridge it here and keep both routes honest.
+        # centerline skips that, so bridge it here and keep both routes consistent.
         from nvitk.morphology.mst_bridge import bridge_binary_components_mst
 
         joined = arr.copy()

@@ -9,7 +9,7 @@ alongside the morphometrics.
    ``volume_mm3`` here deliberately duplicates :func:`nvitk.measure.volume.volume_mm3`
    instead of importing it. That function pulls in ``nvitk.core.backend`` and
    ``nvitk.types``, which would break the rule that :mod:`nvitk.measure.morpho`
-   imports nothing heavier than numpy/scipy/vtk/pandas/nibabel — the Slicer
+   imports nothing heavier than numpy/scipy/vtk/pandas/nibabel: the Slicer
    ``MouseTOFMorphometrics`` module loads this package with stubbed ``nvitk``
    and ``nvitk.measure`` packages and would otherwise fail. It is one
    multiplication.
@@ -83,7 +83,7 @@ def anatomy_provenance_fields(
     ctx: Optional[MorphoContext],
     vessel_info: Optional[VesselInfo] = None,
 ) -> dict:
-    """Columns recording which species/orientation actually drove root selection.
+    """Columns recording which species/orientation drove root selection.
 
     A wrong species or a mislabelled NIfTI header otherwise shows up only as
     silently reversed centerlines; surfacing it in the workbook makes it visible.

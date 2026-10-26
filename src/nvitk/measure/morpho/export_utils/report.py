@@ -1,6 +1,6 @@
 """The stage-7 morphometrics report: one row per vessel with the chosen features and the
-high-confidence lesions — ``morphometrics_report.csv`` and the first sheet (``Report``) of
-``case_metrics_donut_tree.xlsx`` — and the per-vessel merge it is built from.
+high-confidence lesions, ``morphometrics_report.csv`` and the first sheet (``Report``) of
+``case_metrics_donut_tree.xlsx``, and the per-vessel merge it is built from.
 
 :func:`vessel_table` joins ``vessel_summary.csv`` with the earlier measures: cow_morpho's path
 metrics (``00_Path_Summary``, aggregated per vessel by :func:`aggregate_summary_by_vessel`), the
@@ -166,7 +166,7 @@ VOLUMETRY_COLUMNS: tuple[str, ...] = (
 )
 #: Same quantity under the same name in ``vessel_summary.csv``: kept once.
 _SAME_MEANING = frozenset({"volume_mm3", "surface_area_mm2", "mesh_volume_mm3"})
-#: Literature tortuosity (``centerlines/tortuosity_metrics.csv``) → how it is combined per vessel.
+#: Literature tortuosity (``centerlines/tortuosity_metrics.csv``) -> how it is combined per vessel.
 TORTUOSITY_COLUMNS: dict[str, str] = {
     "tortuosity_index": "weighted", "inflection_count_metric": "weighted",
     "sum_of_angles_metric_deg_per_mm": "weighted", "total_curvature_deg_per_mm": "weighted",
@@ -177,7 +177,7 @@ TORTUOSITY_COLUMNS: dict[str, str] = {
 def _read_csv(path: Path) -> pd.DataFrame:
     try:
         return pd.read_csv(path) if path.is_file() else pd.DataFrame()
-    except Exception:  # noqa: BLE001 — an unreadable table is an absent one
+    except Exception:  # noqa: BLE001 (an unreadable table is an absent one)
         return pd.DataFrame()
 
 
@@ -194,7 +194,7 @@ def _volumetry(stage7_dir: Path) -> pd.DataFrame:
 
 
 def _vessel_of(name: str, vessel_names: list[str]) -> str:
-    """The vessel a centerline file name belongs to (``LPCA_P2_M2i`` → ``LPCA_P2``)."""
+    """The vessel a centerline file name belongs to (``LPCA_P2_M2i`` -> ``LPCA_P2``)."""
     matches = [v for v in vessel_names if name == v or name.startswith(v + "_")]
     return max(matches, key=len) if matches else ""
 
@@ -294,7 +294,7 @@ def _hypoplasia_from_topology(vessels: pd.DataFrame) -> pd.DataFrame:
         from nvitk.measure.morpho.topology_io import load_eicab_topology
 
         return pd.DataFrame(hypoplasia_rows(vessels, load_eicab_topology()))
-    except Exception:  # noqa: BLE001 — a non-eICAB label map has no main vessels to check
+    except Exception:  # noqa: BLE001 (a non-eICAB label map has no main vessels to check)
         return pd.DataFrame()
 
 

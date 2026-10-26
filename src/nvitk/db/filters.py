@@ -13,9 +13,7 @@ import pandas as pd
 
 from .exceptions import FilterError
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Operators & condition model
-# ──────────────────────────────────────────────────────────────────────────────
 
 _SEQUENCE_TYPES = (list, tuple, set, frozenset, pd.Index)
 _SUPPORTED_OPS = {
@@ -77,7 +75,7 @@ def _normalize_op(op: str) -> str:
 
 def normalize_filters(filters: Mapping[str, Any] | None) -> dict[str, list[FilterCondition]]:
     """
-    Turn API filter dicts into column → list of :class:`FilterCondition`.
+    Turn API filter dicts into column -> list of :class:`FilterCondition`.
 
     Values may be scalars (``eq``), sequences (``in``), ``None`` (``is_null``), mappings of
     ``{$op: value}``, or :class:`FilterCondition` instances.
@@ -110,9 +108,7 @@ def normalize_filters(filters: Mapping[str, Any] | None) -> dict[str, list[Filte
     return normalized
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # DataFrame masks
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _mask_for_condition(series: pd.Series, condition: FilterCondition) -> pd.Series:
@@ -180,9 +176,7 @@ def apply_filters(df: pd.DataFrame, filters: Mapping[str, Any] | None) -> pd.Dat
     return df.loc[mask].copy()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # SQLite WHERE compilation
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def escape_identifier(identifier: str) -> str:
@@ -254,9 +248,7 @@ def build_sql_where(filters: Mapping[str, Any] | None) -> tuple[str, list[Any]]:
     return " AND ".join(clauses), params
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Helpers
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def merge_filters(*filters: Mapping[str, Any] | None) -> dict[str, Any]:

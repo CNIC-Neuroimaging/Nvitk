@@ -31,17 +31,13 @@ from nvitk.pipes.pesa_fat.ct_pet_v5.labels import (
 )
 
 
-# ---------------------------------------------------------------------------
 # Pipeline identity
-# ---------------------------------------------------------------------------
 
 PIPELINE_NAME: str = "ct-pet-v5"
 SGE_JOB_PREFIX: str = "PESAFat_CTPET"
 
 
-# ---------------------------------------------------------------------------
 # Filesystem fragments (relative to BatchLayout.results_dir / nifti_dir)
-# ---------------------------------------------------------------------------
 
 STAGE1_DIR: str = "res_segmentation_ct"        # <subj>/CT/<task>.nii.gz
 STAGE2_DIR: str = "res_post_processing_ct"     # <subj>/CT/{MO,FAT,BODY,ORGANS,MUSCLES}[_VOL].nii.gz
@@ -52,9 +48,7 @@ INPUT_STEM: str = "CT"
 PET_STEM: str = "PT"
 
 
-# ---------------------------------------------------------------------------
 # TotalSegmentator task plan
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -121,9 +115,7 @@ FAT_TASK: str = "tissue_4_types"
 FAT_TASK_FALLBACK: str = "tissue_types"
 
 
-# ---------------------------------------------------------------------------
 # Stage-2 post-processing knobs
-# ---------------------------------------------------------------------------
 
 # Extra in-plane (XY only) erosion steps applied to the L3/L4 bone marrow after the
 # isotropic-in-voxels erosion. CT voxels are ~3x thicker than wide, so that erosion
@@ -164,9 +156,7 @@ MUSCLES_BIGGEST_CC_PER_SIDE: tuple[str, ...] = ("TRAPECIOS",)
 MUSCLES_SIDE_MIN_RATIO: float = 0.1
 
 
-# ---------------------------------------------------------------------------
 # Stage-3 measurement specs
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -271,9 +261,7 @@ VOL_SPECS: tuple[VolSpec, ...] = (
 )
 
 
-# ---------------------------------------------------------------------------
 # SGE / Singularity defaults
-# ---------------------------------------------------------------------------
 
 SGE_PROJECT: str = "GPU"
 SGE_ACCOUNT: str = "Prod"

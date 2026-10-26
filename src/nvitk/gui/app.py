@@ -125,7 +125,7 @@ def _scrollable_tab(widget: Any) -> Any:
     screen.
 
     ``widgetResizable`` keeps the page filling the tab whenever it fits, so tables
-    and canvases still expand — only content taller than the dock scrolls.
+    and canvases still expand, only content taller than the dock scrolls.
     """
     from qtpy.QtCore import Qt
     from qtpy.QtWidgets import QScrollArea
@@ -165,7 +165,7 @@ def run_app() -> None:
         from nvitk.gui.core.performance import apply_performance
 
         apply_performance()
-    except Exception:  # noqa: BLE001 — a preference must never block a launch
+    except Exception:  # noqa: BLE001 (a preference must never block a launch)
         pass
     # Register before the viewer exists so its chrome is painted from the nvitk
     # palette on the first frame, rather than flashing Napari's default dark.
@@ -587,7 +587,7 @@ def run_app() -> None:
         from nvitk.gui.labels.layer_list import install_layer_list_label_buttons
 
         label_delegate = install_layer_list_label_buttons(viewer)
-    except Exception as exc:  # noqa: BLE001 — Napari's own layer list still works
+    except Exception as exc:  # noqa: BLE001 (Napari's own layer list still works)
         label_delegate = None
         gui_log(f"Layer-list label buttons unavailable: {exc}", error=True)
 
@@ -596,7 +596,7 @@ def run_app() -> None:
         from nvitk.gui.core.layer_folders import install_layer_folders
 
         install_layer_folders(viewer, label_delegate)
-    except Exception as exc:  # noqa: BLE001 — the flat list still works
+    except Exception as exc:  # noqa: BLE001 (the flat list still works)
         gui_log(f"Layer folders unavailable: {exc}", error=True)
 
     # The orthogonal views open with the window. Created before the saved layout
@@ -606,7 +606,7 @@ def run_app() -> None:
         from nvitk.gui.viz.ortho_panel import open_ortho_views
 
         ortho_panel = open_ortho_views(viewer, None)
-    except Exception as exc:  # noqa: BLE001 — a missing panel must not block a launch
+    except Exception as exc:  # noqa: BLE001 (a missing panel must not block a launch)
         from nvitk.gui.core.log_panel import gui_log as _gui_log
 
         _gui_log(f"Orthogonal views unavailable: {exc}", error=True)
@@ -614,7 +614,7 @@ def run_app() -> None:
     # Both nvitk docks now exist, so a saved layout has something to match
     # against. Napari's own restore ran inside ``napari.Viewer(...)`` far above,
     # when neither of these existed, and ``restoreState`` silently drops entries
-    # whose objectName it cannot find — hence a second, explicit restore here.
+    # whose objectName it cannot find, hence a second, explicit restore here.
     try:
         from nvitk.gui.core.prefs import (
             ensure_prefs_file,
@@ -637,7 +637,7 @@ def run_app() -> None:
             # Saved when the panels were tabs of one "nvitk" dock: the state
             # places Napari's docks and the ortho views, but knows none of the
             # panel docks, and Qt stacks those one under another. Tab them back
-            # together, once — the next save is in the new format.
+            # together, once: the next save is in the new format.
             for panel_dock in panel_docks[1:]:
                 if not panel_dock.isFloating() and qt_main.dockWidgetArea(panel_dock) != Qt.NoDockWidgetArea:
                     qt_main.tabifyDockWidget(tools_dock, panel_dock)
@@ -656,12 +656,12 @@ def run_app() -> None:
                 _move_tab_after(qt_main, data_dock, labeling_dock)
             if stored_version < 6:
                 _move_tab_after(qt_main, dicom_browser_dock, spectral_dock)
-    except Exception:  # noqa: BLE001 — a stored layout must not block a launch
+    except Exception:  # noqa: BLE001 (a stored layout must not block a launch)
         pass
     if panel_manager is not None:
         panel_manager.watch_all()
     # On screen at launch whatever the stored layout says: a layout saved before
-    # the dock existed — or with it closed — would otherwise leave it hidden.
+    # the dock existed (or with it closed) would otherwise leave it hidden.
     ortho_dock = getattr(ortho_panel, "_nvitk_dock", None)
     if ortho_dock is not None:
         ortho_dock.show()
@@ -681,8 +681,8 @@ def run_app() -> None:
         _emitter.connect(lambda _event=None: _summary_timer.start())
 
     # Panels whose contents are rebuilt from the active layer. Refreshing one that
-    # nobody is looking at — tabbed behind another, closed, or in a hidden
-    # workspace — is pure latency on every click in the layer list, so it only
+    # nobody is looking at (tabbed behind another, closed, or in a hidden
+    # workspace) is pure latency on every click in the layer list, so it only
     # records that it is out of date and catches up when it is next shown. The
     # panels themselves still refresh on demand, so direct callers (and tests)
     # are unaffected.
@@ -780,7 +780,7 @@ def run_app() -> None:
                     panel_manager.save()
                     # Its own window: left open, it would keep the app running.
                     panel_manager.shutdown()
-            except Exception:  # noqa: BLE001 — never block a close on a preference
+            except Exception:  # noqa: BLE001 (never block a close on a preference)
                 pass
             if _orig_close is not None:
                 _orig_close(event)

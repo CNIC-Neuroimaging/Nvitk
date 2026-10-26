@@ -1,4 +1,4 @@
-"""``nvitk-morph`` CLI — morphological image tools."""
+"""``nvitk-morph`` CLI: morphological image tools."""
 
 from __future__ import annotations
 

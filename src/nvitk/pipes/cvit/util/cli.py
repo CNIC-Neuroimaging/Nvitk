@@ -1,8 +1,8 @@
 """
 Shared Click plumbing for the CViT stage CLIs.
 
-Every stage module is runnable on its own (``python -m nvitk.pipes.cvit.stageN …``) — that is
-what an SGE job executes — and takes the same ``--<root>`` flags. :func:`root_options` adds them
+Every stage module is runnable on its own (``python -m nvitk.pipes.cvit.stageN ...``) (that is
+what an SGE job executes), and takes the same ``--<root>`` flags. :func:`root_options` adds them
 and :func:`paths_from_options` turns them into a :class:`~nvitk.pipes.cvit.util.paths.CViTPaths`:
 explicit flags win, missing ones fall back to ``sge.json``'s ``local_*`` keys.
 """
@@ -65,7 +65,7 @@ def paths_from_options(roots: dict[str, Path | None], *, require_config: bool = 
 
 
 def parse_int_list(text: str | None) -> list[int]:
-    """``"0,1,2"`` → ``[0, 1, 2]``; empty → ``[]``."""
+    """``"0,1,2"`` -> ``[0, 1, 2]``; empty -> ``[]``."""
     return [int(t) for t in str(text or "").replace(" ", "").split(",") if t != ""]
 
 

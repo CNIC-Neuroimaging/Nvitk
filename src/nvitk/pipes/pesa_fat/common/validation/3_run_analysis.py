@@ -1,5 +1,5 @@
 """
-Paso 3 — Análisis: gráficas, métricas y reporte HTML
+Paso 3: Análisis: gráficas, métricas y reporte HTML
 =====================================================
 Lee la tabla combinada (producida por el paso 2) y genera:
   - Figuras scatter + Bland-Altman por grupo (normal + versión con etiquetas)
@@ -42,9 +42,7 @@ OUT_DIR = output_dir(create=True)
 
 log = Logger()
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Estilo gráfico
-# ─────────────────────────────────────────────────────────────────────────────
 
 PALETTE = {
     "scatter": "#2E86AB", "identity": "#E84855", "regression": "#F4A261",
@@ -64,10 +62,10 @@ def darken_hex(hex_color, factor=0.8):
     """Darken a ``#rrggbb`` hex color by scaling its HLS lightness by *factor*."""
     hex_color = hex_color.lstrip('#')
     
-    # HEX → RGB (0-255)
+    # HEX -> RGB (0-255)
     r, g, b = [int(hex_color[i:i+2], 16) for i in (0, 2, 4)]
     
-    # RGB → HLS (0-1)
+    # RGB -> HLS (0-1)
     r, g, b = r/255, g/255, b/255
     h, l, s = colorsys.rgb_to_hls(r, g, b)
     
@@ -78,13 +76,11 @@ def darken_hex(hex_color, factor=0.8):
     r, g, b = colorsys.hls_to_rgb(h, l, s)
     r, g, b = int(r*255), int(g*255), int(b*255)
     
-    # RGB → HEX
+    # RGB -> HEX
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Pares de comparación por grupo/figura
-# ─────────────────────────────────────────────────────────────────────────────
 
 COMPARISONS = {
 
@@ -284,9 +280,7 @@ PAIR_COLS = [
 ]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Métricas de concordancia
-# ─────────────────────────────────────────────────────────────────────────────
 
 def compute_ccc(x, y):
     """Lin's concordance correlation coefficient for *x* vs *y*, with a 95% Fisher-z CI."""
@@ -338,9 +332,7 @@ def compute_metrics(manual_vals, auto_vals):
     return out
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Funciones de graficado
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _fmt(v):
     """Format *v* to 3 decimals, or ``"n/d"`` if None/NaN."""
@@ -504,9 +496,7 @@ def bland_altman_panel(ax, x, y, label, units, metrics, note=False, point_labels
     ax.set_xlim(xline[0], xline[1] + (pad_x * 3.5 if has_m else 0))
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Heatmap resumen
-# ─────────────────────────────────────────────────────────────────────────────
 
 def make_heatmap(summary_df, title, out_path):
     """Save a combined correlation/concordance heatmap + Bland-Altman summary table figure."""
@@ -562,9 +552,7 @@ def make_heatmap(summary_df, title, out_path):
     return out_path
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Excel de métricas
-# ─────────────────────────────────────────────────────────────────────────────
 
 def export_excel(summary, comp_table, out_path):
     """Write the formatted metrics + comparative-data Excel workbook (colored headers,
@@ -658,9 +646,7 @@ def export_excel(summary, comp_table, out_path):
     log.info(f"  OK {out_path}")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Reporte HTML
-# ─────────────────────────────────────────────────────────────────────────────
 
 def build_html(summary, comp_table, all_fig_paths, out_sum_suv, out_sum_dix, out_path):
     """Assemble and write the interactive HTML report (embedded figures, metrics table,
@@ -874,9 +860,7 @@ Scripts: <code>CODE/1_build_manual_table.py</code> &rarr; <code>2_build_combined
     log.info(f"  OK {out_path}")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Main
-# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     log.info("Paso 3 — Ejecutando an\u00e1lisis…")
@@ -888,7 +872,7 @@ if __name__ == "__main__":
     df = pd.read_excel(COMBINED_TABLE_PATH, index_col=0)
     log.info(f"  Tabla combinada: {df.shape[0]} participantes, {df.shape[1]} variables")
 
-    # ── Calcular métricas ─────────────────────────────────────────────────
+    # Calcular métricas
     log.info("  Calculando m\u00e9tricas\u2026")
     all_metrics = {}
     for gkey, ginfo in COMPARISONS.items():
@@ -899,7 +883,7 @@ if __name__ == "__main__":
             m["label"] = comp["label"].replace("\n", " "); m["units"] = comp["units"]
             all_metrics[key] = m
 
-    # ── Generar figuras ───────────────────────────────────────────────────
+    # Generar figuras
     all_fig_paths = {}
     all_ids = np.array(df.index.astype(str))
 
@@ -949,7 +933,7 @@ if __name__ == "__main__":
         fig_lbl.savefig(out_lbl); plt.close(fig_lbl)
         log.info(f"  OK {out_lbl}")
 
-    # ── Heatmaps ──────────────────────────────────────────────────────────
+    # Heatmaps
     summary_rows = []
     for gkey, ginfo in COMPARISONS.items():
         for comp in ginfo["pairs"]:
@@ -972,7 +956,7 @@ if __name__ == "__main__":
     make_heatmap(summary[summary["Modalidad"] == "SUV"],  "Resumen m\u00e9tricas \u2013 SUV (PET-CT)",  out_sum_suv)
     make_heatmap(summary[summary["Modalidad"] == "DIXON"], "Resumen m\u00e9tricas \u2013 DIXON (MRI)", out_sum_dix)
 
-    # ── Tabla comparativa por participante ─────────────────────────────────
+    # Tabla comparativa por participante
     comp_rows = []
     for pesa_id, row in df.iterrows():
         entry = {"pesa_id": pesa_id}
@@ -988,10 +972,10 @@ if __name__ == "__main__":
     comp_table = pd.DataFrame(comp_rows)
     comp_table = comp_table.dropna(subset=[f"Man_{lbl}" for _, _, lbl, _ in PAIR_COLS], how="all")
 
-    # ── Excel ─────────────────────────────────────────────────────────────
+    # Excel
     export_excel(summary, comp_table, METRICS_PATH)
 
-    # ── Consola ───────────────────────────────────────────────────────────
+    # Consola
     log.info("\n" + "=" * 95)
     log.info("  RESUMEN DE M\u00c9TRICAS \u2014 MANUAL vs AUTOM\u00c1TICO")
     log.info("=" * 95)
@@ -1014,7 +998,7 @@ if __name__ == "__main__":
         ))
     log.info("=" * 95)
 
-    # ── HTML ──────────────────────────────────────────────────────────────
+    # HTML
     build_html(summary, comp_table, all_fig_paths, out_sum_suv, out_sum_dix, REPORT_PATH)
 
     log.info(f"\nFicheros generados en: {OUT_DIR}")

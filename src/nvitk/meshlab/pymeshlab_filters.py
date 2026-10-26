@@ -330,11 +330,11 @@ class FilterInfo:
 class MeshLabResult:
     """What a filter run produced."""
 
-    #: New meshes / point clouds the filter added (reconstructions, samplings, pieces…).
+    #: New meshes / point clouds the filter added (reconstructions, samplings, pieces...).
     meshes: list[Mesh | PointCloud] = field(default_factory=list)
     #: The input after the filter, when the filter changed its geometry.
     current: Mesh | PointCloud | None = None
-    #: Per-vertex quality of the input after the filter, when it changed (curvature, distances…).
+    #: Per-vertex quality of the input after the filter, when it changed (curvature, distances...).
     quality: np.ndarray | None = None
     #: Per-vertex selection of the input after the filter (0 / 1), when it changed.
     selected: np.ndarray | None = None
@@ -342,9 +342,7 @@ class MeshLabResult:
     values: dict[str, Any] = field(default_factory=dict)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Availability
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @lru_cache(maxsize=1)
@@ -375,9 +373,7 @@ def pymeshlab_version() -> str:
         return "unknown"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Conversion
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _identifier(name: str) -> str:
@@ -425,7 +421,7 @@ def add_to_meshset(ms: Any, obj: Mesh | PointCloud, name: str = "mesh", *,
         if arr.ndim == 1 and len(arr) == n and np.issubdtype(arr.dtype, np.number):
             try:
                 m.add_vertex_custom_scalar_attribute(np.nan_to_num(arr.astype(np.float64)), _identifier(key))
-            except Exception:  # noqa: BLE001 — attributes are a convenience
+            except Exception:  # noqa: BLE001 (attributes are a convenience)
                 pass
     return ms.current_mesh_id()
 
@@ -466,9 +462,7 @@ def _selection_of(m: Any) -> np.ndarray:
         return np.zeros(m.vertex_number(), dtype=bool)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Running a filter
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _value(pml: Any, kind: str, value: Any) -> Any:
@@ -623,7 +617,7 @@ def meshlab_defaults(obj: Mesh | PointCloud | None, name: str) -> dict[str, Any]
     ms.add_mesh(to_pymeshlab(obj))
     try:
         values = ms.filter_parameter_values(name)
-    except Exception:  # noqa: BLE001 — fall back to the catalog's defaults
+    except Exception:  # noqa: BLE001 (fall back to the catalog's defaults)
         return {}
     out: dict[str, Any] = {}
     for p in info.params:
@@ -670,9 +664,7 @@ def _plain(value: Any) -> Any:
     return value
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # The filter catalog
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _cache_path() -> Path:
@@ -817,7 +809,7 @@ def _catalog_raw() -> dict[str, Any]:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(raw))
-    except Exception:  # noqa: BLE001 — an unwritable cache only costs time
+    except Exception:  # noqa: BLE001 (an unwritable cache only costs time)
         pass
     return raw
 
@@ -860,7 +852,7 @@ def meshlab_groups() -> list[str]:
 def _info_or_none(name: str) -> FilterInfo | None:
     try:
         return next((f for f in meshlab_filters() if f.name == name), None)
-    except Exception:  # noqa: BLE001 — running a filter does not need the catalog
+    except Exception:  # noqa: BLE001 (running a filter does not need the catalog)
         return None
 
 
@@ -892,6 +884,6 @@ __all__ = [
 ]
 
 
-if __name__ == "__main__":  # pragma: no cover — the catalog child process
+if __name__ == "__main__":  # pragma: no cover: the catalog child process
     if len(sys.argv) == 3 and sys.argv[1] == "--catalog":
         Path(sys.argv[2]).write_text(json.dumps(_introspect_here()))

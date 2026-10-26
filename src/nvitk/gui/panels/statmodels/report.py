@@ -1,5 +1,5 @@
 """
-Model info panel — stat chips over tabbed tables.
+Model info panel: stat chips over tabbed tables.
 
 Description
 -----------
@@ -7,7 +7,7 @@ Replaces the monospace summary dump with something you can read at a glance and 
 stat chips (n, groups, convergence, AIC/BIC/LLF) over tabs holding real tables. The coefficient table
 sorts numerically, right-aligns its numbers, shades p-values by significance, and copies as TSV.
 
-The classic fixed-width report is still there, verbatim, in the **Raw** tab — nothing that used to be
+The classic fixed-width report is still there, verbatim, in the **Raw** tab: nothing that used to be
 visible has been taken away.
 
 Mediation results reuse the same shell: the tabs become Paths / By level / Raw, and a warning banner
@@ -16,9 +16,7 @@ carries the engine's caveat (pooled OLS, skipped levels, non-converged draws).
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -58,9 +56,7 @@ from .theme import (
 _PVALUE_COLUMNS = {"p_value", "pval"}
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Table model
-# ──────────────────────────────────────────────────────────────────────────────
 class ResultTableModel(QAbstractTableModel):
     """
     Read-only model over a results frame, with numeric sorting and p-value shading.
@@ -165,7 +161,7 @@ class ResultTableView(QWidget):
         # Interaction terms produce names like
         # ``C(tacsctot_group, Treatment('g0'))[T.g3]:C(territory, ...)[T.Posterior Circulation]``.
         # Sized to content they consume the whole viewport and push every number out of sight, so
-        # cap the width and elide — the full name stays available as a tooltip.
+        # cap the width and elide: the full name stays available as a tooltip.
         header.setMaximumSectionSize(360)
         header.setStretchLastSection(True)
         self._table.setTextElideMode(Qt.ElideMiddle)
@@ -215,9 +211,7 @@ class ResultTableView(QWidget):
         QApplication.clipboard().setText("\n".join(lines))
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Stat chips
-# ──────────────────────────────────────────────────────────────────────────────
 class _StatChip(QFrame):
     """A single labeled statistic, rendered as a bordered chip."""
 
@@ -243,9 +237,7 @@ class _StatChip(QFrame):
         )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Report panel
-# ──────────────────────────────────────────────────────────────────────────────
 class ModelReportPanel(QWidget):
     """
     Model info: a chip strip over Summary / Coefficients / Random effects / Raw tabs.
@@ -280,7 +272,7 @@ class ModelReportPanel(QWidget):
 
         self.clear()
 
-    # ---- shell ----------------------------------------------------------------
+    # shell
     def clear(self) -> None:
         """Drop every chip and tab, showing the placeholder."""
         self._set_chips([])
@@ -315,7 +307,7 @@ class ModelReportPanel(QWidget):
         view.set_frame(frame, headers=headers)
         self._tabs.addTab(view, title)
 
-    # ---- MixedLM --------------------------------------------------------------
+    # MixedLM
     def set_mixedlm(self, info: dict[str, Any], *, raw_text: str, note: str = "") -> None:
         """
         Render a :func:`~nvitk.stats.mixedlm.mixedlm_info_dict` bundle.
@@ -375,7 +367,7 @@ class ModelReportPanel(QWidget):
             info["random_effects"],
             headers={"component": "Component", "kind": "Kind", "var": "Variance", "sd": "SD"},
         )
-        # Only for models that actually fit one line per group. The population coefficient table can
+        # Only for models that fit one line per group. The population coefficient table can
         # read as if a slope were shared across groups; this is where each group's own value lives.
         group_effects = info.get("group_effects")
         if isinstance(group_effects, pd.DataFrame) and not group_effects.empty:
@@ -384,8 +376,8 @@ class ModelReportPanel(QWidget):
                 group_effects,
                 headers={"factor": "Factor", "level": "Level"},
             )
-        # A measurement model is a different table from the structural one — a loading says how well
-        # an indicator measures its factor, a path says how one variable predicts another — so it
+        # A measurement model is a different table from the structural one (a loading says how well
+        # an indicator measures its factor, a path says how one variable predicts another), so it
         # gets its own tab rather than being concatenated into the coefficients.
         loadings = info.get("sem_loadings")
         if isinstance(loadings, pd.DataFrame) and not loadings.empty:
@@ -403,7 +395,7 @@ class ModelReportPanel(QWidget):
                     "sig": "Sig",
                 },
             )
-        # Where the model misfits. Diagnostics, not results — see ``sem_modification_indices``.
+        # Where the model misfits. Diagnostics, not results; see ``sem_modification_indices``.
         modindices = info.get("sem_modification_indices")
         if isinstance(modindices, pd.DataFrame) and not modindices.empty:
             self._add_table_tab(
@@ -437,7 +429,7 @@ class ModelReportPanel(QWidget):
         self._tabs.setVisible(True)
         self._placeholder.setVisible(False)
 
-    # ---- Mediation ------------------------------------------------------------
+    # Mediation
     def set_mediation(self, bundle: Mapping[str, Any], *, raw_text: str) -> None:
         """Render a :func:`~nvitk.stats.mediation.run_mediation` bundle."""
         from nvitk.stats.mediation import ENGINE_LABELS

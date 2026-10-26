@@ -1,5 +1,4 @@
 """General mixed-effects modeling utilities built on top of statsmodels."""
-# """TODO: GPU implementation Cupy + cuDF"""
 
 from __future__ import annotations
 
@@ -16,7 +15,7 @@ log = Logger()
 
 
 def _safe_col(name: str) -> str:
-    """Sanitize a name into a valid patsy/statsmodels column identifier (non-alphanumeric chars → underscore)."""
+    """Sanitize a name into a valid patsy/statsmodels column identifier (non-alphanumeric chars -> underscore)."""
     return re.sub(r"[^0-9a-zA-Z_]+", "_", str(name))
 
 
@@ -46,7 +45,7 @@ def formula_columns(
     Columns of *columns* referenced by the fixed-effects *formula* and the random-effects /
     variance-component specs.
 
-    Used to align the NA-drop set with the rows patsy will actually keep: patsy silently drops rows
+    Used to align the NA-drop set with the rows patsy will keep: patsy silently drops rows
     with missing values in formula terms, while ``groups`` / ``exog_re`` keep their full length,
     which makes statsmodels raise ``Shape mismatch between endog/exog and extra 2d arrays``.
     """
@@ -63,9 +62,9 @@ def _coerce_object_numerics(df: pd.DataFrame, columns: Iterable[str]) -> pd.Data
     """
     Coerce object/string columns that look numeric to ``float64``.
 
-    Patsy treats object-dtype columns as categoricals (``Hematocrit[T.36.0]``, …) even when every
+    Patsy treats object-dtype columns as categoricals (``Hematocrit[T.36.0]``, ...) even when every
     cell is a float. That happens when clinical wide frames mix numeric and text variables into one
-    ``value`` series before the pivot. Skip columns wrapped in ``C(...)`` by the caller — we only
+    ``value`` series before the pivot. Skip columns wrapped in ``C(...)`` by the caller: we only
     receive bare column names here.
     """
     out = df
@@ -107,7 +106,7 @@ def _lighten(color: Any, amount: float = 0.55) -> tuple[float, float, float]:
 
 
 def _z_critical(ci_level: float) -> float:
-    """Two-sided normal critical value for a confidence level (0.95 → 1.959964…)."""
+    """Two-sided normal critical value for a confidence level (0.95 -> 1.959964...)."""
     from scipy.stats import norm
 
     level = min(max(float(ci_level), 0.5), 0.9999)
@@ -150,10 +149,10 @@ def _prediction_standard_errors(
     Delta-method standard error of the fixed-effects prediction along *x*, once per group level.
 
     Each level gets its own design matrix with the grouping column pinned to that level, so when the
-    group appears in the formula (``C(territory)``) its interval reflects that level's own precision
-    — a level with few observations gets a visibly wider band than a well-sampled one. When the
+    group appears in the formula (``C(territory)``) its interval reflects that level's own precision:
+a level with few observations gets a visibly wider band than a well-sampled one. When the
     group is only a random effect the design is identical across levels and every band comes out the
-    same width, which is the honest answer: the fit holds no level-specific fixed-effect
+    same width, which is the correct answer: the fit holds no level-specific fixed-effect
     information.
 
     Returns
@@ -161,7 +160,7 @@ def _prediction_standard_errors(
     dict
         ``{None: (prediction, se)}`` for the overall fixed-effects line, plus
         ``{str(level): (prediction, se)}`` per level. Levels whose design matrix cannot be built are
-        simply absent. The prediction is on the link scale; the caller applies the inverse link.
+        absent. The prediction is on the link scale; the caller applies the inverse link.
     """
     import patsy
 
@@ -188,8 +187,8 @@ def _prediction_standard_errors(
     base_refs = {k: v for k, v in covariate_refs.items() if k != x}
     grouped = bool(group) and group in df.columns and group != x
 
-    # The black "fixed effect" line is drawn with every group contrast at zero — i.e. at the
-    # grouping factor's reference level — so its band has to be evaluated there to match.
+    # The black "fixed effect" line is drawn with every group contrast at zero, i.e. at the
+    # grouping factor's reference level, so its band has to be evaluated there to match.
     overall_refs = dict(base_refs)
     if grouped and group not in overall_refs:
         reference_levels = sorted(df[group].dropna().astype(str).unique())
@@ -263,7 +262,6 @@ def _default_fit_function(
     """Default mixed-effects model fitter: ``statsmodels`` MixedLM via a formula/groups/random-effects spec."""
     import warnings
 
-    # from statsmodels.regression.mixed_linear_model import MixedLM
     from statsmodels.tools.sm_exceptions import ConvergenceWarning
     import statsmodels.formula.api as smf
 
@@ -324,7 +322,7 @@ def fit_or_load_mixedlm(
     df = data.copy()
     df.columns = [_safe_col(c) for c in df.columns]
 
-    # Patsy formula tokens that are *not* wrapped in C() — coerce object-numerics among these so
+    # Patsy formula tokens that are *not* wrapped in C(): coerce object-numerics among these so
     # Hematocrit/age/sex stay continuous even if the upstream wide frame upcast them to object.
     formula_cols = formula_columns(
         df.columns,
@@ -406,9 +404,7 @@ def fit_or_load_mixedlm(
     return result, df, metadata
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Model reporting — structured extraction, then rendering
-# ──────────────────────────────────────────────────────────────────────────────
+# Model reporting: structured extraction, then rendering
 def significance_stars(pval: float) -> str:
     """Conventional significance marker: ``***`` <0.001, ``**`` <0.01, ``*`` <0.05, ``.`` <0.1,
     ``NS`` otherwise, and ``""`` for a missing p-value."""
@@ -449,7 +445,7 @@ def model_inverse_link(result: Any) -> Callable[[Any], Any]:
     Map a linear predictor back to the response scale.
 
     Identity for OLS and MixedLM; the family's inverse link for a GLM, which is where a GLM's
-    non-linearity lives — predictions are linear on the link scale and curved on the response scale.
+    non-linearity lives: predictions are linear on the link scale and curved on the response scale.
     """
     family = getattr(getattr(result, "model", None), "family", None)
     link = getattr(family, "link", None)
@@ -475,7 +471,7 @@ def mixedlm_coef_frame(result: Any, *, alpha: float = 0.05) -> pd.DataFrame:
     fe = model_params(result)
     fe_se = getattr(result, "bse_fe", getattr(result, "bse", pd.Series(dtype=float)))
     fe_p = getattr(result, "pvalues_fe", getattr(result, "pvalues", pd.Series(dtype=float)))
-    # 1.959964… for the default alpha; computed so a caller can widen/narrow the interval.
+    # 1.959964... for the default alpha; computed so a caller can widen/narrow the interval.
     from scipy.stats import norm
 
     crit = float(norm.ppf(1.0 - alpha / 2.0))
@@ -559,11 +555,11 @@ def mixedlm_group_coefficients(result: Any, *, factor: str = "Group") -> pd.Data
     Per-group coefficients of a MixedLM: each level's own intercept and slopes.
 
     A random-slope model gives every group its own line, but those live in the random effects, not
-    in the fixed-effects table — so a coefficient table showing one ``age_c`` row can read as if the
+    in the fixed-effects table, so a coefficient table showing one ``age_c`` row can read as if the
     slope were shared. This makes the per-level values explicit.
 
     Two numbers per term: the **total** (fixed effect + that level's random deviation), which is the
-    line actually fitted for the group, and the **deviation** alone, which says how far the group
+    line fitted for the group, and the **deviation** alone, which says how far the group
     sits from the population average.
 
     Returns
@@ -606,12 +602,12 @@ def mixedlm_info_dict(
     Returns
     -------
     dict
-        ``header``  — ``formula`` (``None`` when the model does not expose one), ``n_obs``,
+        ``header``: ``formula`` (``None`` when the model does not expose one), ``n_obs``,
         ``n_groups``, ``group_name``, ``outcome_name``, ``vc_group_name``;
-        ``fixed_effects``  — :func:`mixedlm_coef_frame` output;
-        ``random_effects`` — :func:`mixedlm_random_effects_frame` output;
-        ``cov_re``         — the raw group covariance matrix (empty frame when absent);
-        ``fit_statistics`` — ``llf``, ``aic``, ``bic``, ``converged``, ``scale``, ``resid_sd``
+        ``fixed_effects``: :func:`mixedlm_coef_frame` output;
+        ``random_effects``: :func:`mixedlm_random_effects_frame` output;
+        ``cov_re``: the raw group covariance matrix (empty frame when absent);
+        ``fit_statistics``: ``llf``, ``aic``, ``bic``, ``converged``, ``scale``, ``resid_sd``
         (keys are omitted when the result does not expose them).
 
     Raises
@@ -624,7 +620,7 @@ def mixedlm_info_dict(
     if missing:
         raise ValueError(f"Object does not look like MixedLMResults. Missing attributes: {missing}")
 
-    # ---- 1. Header: formula is best-effort, some fitters do not carry one ------
+    # 1. Header: formula is best-effort, some fitters do not carry one
     try:
         formula = str(result.model.formula)
     except Exception:
@@ -642,7 +638,7 @@ def mixedlm_info_dict(
         "vc_group_name": vc_group_name,
     }
 
-    # ---- 2. Fit statistics, each guarded so a partial result still reports -----
+    # 2. Fit statistics, each guarded so a partial result still reports
     fit_stats: dict[str, Any] = {}
     for attr in ("llf", "aic", "bic"):
         if hasattr(result, attr):
@@ -708,7 +704,7 @@ def render_mixedlm_info(info: dict[str, Any]) -> str:
     if info.get("has_vcomp"):
         re_frame = info["random_effects"]
         # ``vcomp`` is statsmodels' name for these; the R engines label them ``ranef``. Both belong
-        # in this section — filtering on one spelling silently emptied it for the other.
+        # in this section: filtering on one spelling silently emptied it for the other.
         shown = re_frame[re_frame["kind"].isin(["vcomp", "ranef"])]
         _w(f"Variance components ({header.get('vc_group_name', 'Variance Components')})")
         _w("-" * 88)
@@ -793,7 +789,7 @@ def plot_mixedlm_params(
     ----------
     restrict_to_orders : bool
         By default ``group_order`` / ``hue_order`` / ``categorical_order`` only select which model
-        curves are drawn — the raw observations still show every level. Set this to also subset
+        curves are drawn; the raw observations still show every level. Set this to also subset
         ``df_fit`` to the listed levels, so hiding a group hides its points and lets the axes
         autoscale to what remains. The fit itself is untouched: the fixed-effect line is still the
         all-group estimate.
@@ -805,17 +801,17 @@ def plot_mixedlm_params(
         Confidence level for those intervals.
     include_points : bool
         Overlay the observed data. In continuous mode this is a scatter of individual rows; in
-        categorical mode it is the **mean of y within each (x, hue) cell** — an unadjusted
+        categorical mode it is the **mean of y within each (x, hue) cell**: an unadjusted
         counterpart to the model's marginal means, drawn dashed and in a lighter tone.
     excluded_points : pandas.DataFrame, optional
         Observations a filter removed, drawn in grey beneath the kept ones. They are **not** in
-        *df_fit* — the fit was run on the filtered frame — so they have to be supplied separately;
+        *df_fit* (the fit was run on the filtered frame), so they have to be supplied separately;
         showing them is what tells you whether a filter took out a coherent cluster or scattered
         noise. They never affect the axes' autoscale-driving data or the model curves.
     display : {"overview", "grouped"}
         ``"overview"`` draws every level on one pair of axes. ``"grouped"`` splits them into a grid
         of anatomical panels (carotids / anterior / posterior / venous for vessels, lobes for
-        cortical parcels — see :mod:`nvitk.stats.region_groups`), each autoscaled to its own range.
+        cortical parcels; see :mod:`nvitk.stats.region_groups`), each autoscaled to its own range.
         The model is untouched: the panels are a view of one fit, and the dashed population line is
         the same all-level estimate in each of them. Raises when no level maps to a known region.
     """
@@ -839,7 +835,7 @@ def plot_mixedlm_params(
     if mode not in {"continuous", "categorical"}:
         raise ValueError("mode must be one of: auto, continuous, categorical")
 
-    # ---- 0. Optionally subset the raw data to the requested levels --------------
+    # 0. Optionally subset the raw data to the requested levels
     # Done before anything reads ``df`` so the scatter/pointplot cloud, the x-range and the
     # categorical tick order all follow the selection.
     if restrict_to_orders:
@@ -852,7 +848,7 @@ def plot_mixedlm_params(
         if df.empty:
             raise ValueError("No rows left after restricting to the selected levels.")
 
-    # ---- 1. Resolve the categorical axis order once ----------------------------
+    # 1. Resolve the categorical axis order once
     # Every panel of a grouped display must share one x axis, so this cannot be left to the
     # per-axes drawing where each subset would order its own observed levels.
     if mode == "categorical":
@@ -918,13 +914,13 @@ def _draw_grouped_panels(
     common: dict[str, Any],
 ) -> tuple[Any, list[Any], dict[str, str]]:
     """
-    One axes per anatomical panel — carotids, anterior, posterior, venous — instead of one crowded
+    One axes per anatomical panel (carotids, anterior, posterior, venous) instead of one crowded
     axes for every level.
 
     Each panel is drawn from the rows of its own levels, so it autoscales to its own range: a venous
-    ``log(PI)`` around −1.0 no longer flattens a carotid one around −0.2. The palette restarts in
+    ``log(PI)`` around -1.0 no longer flattens a carotid one around -0.2. The palette restarts in
     every panel, which is what keeps four curves legible where thirteen were not. The population
-    (fixed-effect) line is unchanged by the split — it is the all-level estimate — so it repeats
+    (fixed-effect) line is unchanged by the split (it is the all-level estimate), so it repeats
     identically across panels and remains the common reference between them.
     """
     from nvitk.stats.region_groups import panel_grid, resolve_panels
@@ -975,7 +971,7 @@ def _categorical_axis_order(
     Order of the categorical x axis.
 
     ``pd.unique`` returns first-appearance order, which puts the levels in whatever sequence the
-    rows happen to arrive in (g1, g2, g0, g3) — meaningless to read and different on every reload.
+    rows happen to arrive in (g1, g2, g0, g3): meaningless to read and different on every reload.
     """
     if categorical_order is not None:
         return list(categorical_order)
@@ -989,7 +985,7 @@ def _categorical_axis_order(
 
 
 def _finish_mixedlm_axes(ax: Any, *, title: str, x_label: str, y_label: str) -> None:
-    """Titles, grid and a de-duplicated legend — applied identically to every axes."""
+    """Titles, grid and a de-duplicated legend: applied identically to every axes."""
     ax.set_title(title)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
@@ -1024,7 +1020,7 @@ def _draw_mixedlm_axes(
     excluded_points: pd.DataFrame | None = None,
 ) -> dict[str, str]:
     """
-    Draw one model plot onto *ax* — the body shared by the overview and the grouped panels.
+    Draw one model plot onto *ax*: the body shared by the overview and the grouped panels.
 
     Everything that varies between panels arrives as an argument: *df* is already restricted to the
     panel's rows and *group_order* to its levels, which is what makes each panel autoscale and
@@ -1034,7 +1030,7 @@ def _draw_mixedlm_axes(
     Returns
     -------
     dict
-        ``{"emm_error": …}`` / ``{"ci_error": …}`` for failures that degrade the plot rather than
+        ``{"emm_error": ...}`` / ``{"ci_error": ...}`` for failures that degrade the plot rather than
         abort it, so a caller can report why the model curves are missing.
     """
     import seaborn as sns
@@ -1097,7 +1093,7 @@ def _draw_mixedlm_axes(
         )
 
         # Fixed-effects prediction and its standard error along the line, per group. Needed both to
-        # draw per-group bands and — for models with no random effects — to draw the per-group
+        # draw per-group bands and (for models with no random effects) to draw the per-group
         # lines at all.
         crit = _z_critical(ci_level)
         predictions: dict[str | None, tuple[np.ndarray, np.ndarray]] = {}
@@ -1129,7 +1125,7 @@ def _draw_mixedlm_axes(
                 label=f"{int(round(ci_level * 100))}% CI (fixed effect)",
             )
 
-        # Does the grouping factor actually appear in the model? If every level predicts the same
+        # Does the grouping factor appear in the model? If every level predicts the same
         # curve it does not, and drawing one identical line per level would be pure clutter.
         level_predictions = {k: v for k, v in predictions.items() if k is not None}
         group_is_in_model = len(level_predictions) > 1 and not all(
@@ -1147,7 +1143,7 @@ def _draw_mixedlm_axes(
                 eta = (b_int + extra + re_int) + (b_x + re_x) * x_line
             elif group_is_in_model and entry is not None:
                 # OLS / GLM: no random effects, so the group's line *is* its fixed-effects
-                # prediction — which only differs between levels when the formula contains the
+                # prediction, which only differs between levels when the formula contains the
                 # grouping factor.
                 eta = entry[0]
             else:
@@ -1179,7 +1175,7 @@ def _draw_mixedlm_axes(
         elif group is not None and group != x:
             facet_col = group
 
-        # ---- Colours, fixed once so the model curves and the observed means stay in step --------
+        # Colours, fixed once so the model curves and the observed means stay in step
         facet_order: list[Any] = []
         if facet_col is not None:
             if facet_col == hue and hue_order is not None:
@@ -1206,7 +1202,7 @@ def _draw_mixedlm_axes(
                 grid = pd.DataFrame({x: order})
 
             for cov_name, cov_val in covariate_refs.items():
-                # Never overwrite the two columns the grid varies — a caller that pins every
+                # Never overwrite the two columns the grid varies: a caller that pins every
                 # non-outcome term would otherwise collapse the x axis or the facet to a constant.
                 if cov_name in {x, facet_col}:
                     continue
@@ -1222,7 +1218,7 @@ def _draw_mixedlm_axes(
             # For a GLM the linear predictor lives on the link scale; map the estimate and both
             # interval endpoints back through the inverse link so the plot is on the scale of the
             # data. Transforming the endpoints (rather than building a symmetric interval around the
-            # transformed mean) is what keeps the interval valid — on the response scale it becomes
+            # transformed mean) is what keeps the interval valid, on the response scale it becomes
             # asymmetric, which is correct for a log or logit link.
             inverse = model_inverse_link(result)
             emm = grid.copy()

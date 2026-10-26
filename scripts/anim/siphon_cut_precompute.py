@@ -1,6 +1,6 @@
 """Precompute the real ICA siphon-correction stages on a PESA subject for ``siphon_cut_manim.py``.
 
-The animation must show what :mod:`nvitk.morphology.siphon_cut` actually does on a real looped
+The animation must show what :mod:`nvitk.morphology.siphon_cut` does on a real looped
 ICA, not a cartoon. This script runs the library on PESA13727025's eICAB mask (whose right ICA
 closes a siphon loop) and records every intermediate:
 
@@ -32,7 +32,7 @@ import nibabel as nib
 import numpy as np
 
 DEFAULT_EICAB_DIR = Path("/home/imarcoss/DATA/PESA-Brain/Morphometrics/RESULTS/PESA13727025/eicab")
-#: Display block (voxels per side): 2 → 1 mm cubes on the 0.5 mm grid.
+#: Display block (voxels per side): 2 -> 1 mm cubes on the 0.5 mm grid.
 BLOCK = 2
 #: Crop margin around the label (voxels).
 PAD = 4
@@ -124,7 +124,7 @@ def compute(eicab_dir: Path, label: int | None) -> tuple[dict[str, np.ndarray], 
     tof = np.asanyarray(nib.load(eicab_dir / "TOF_resampled.nii.gz").dataobj).astype(np.float64)
     sp = np.asarray(sc.spacing_of(aff), float)
 
-    # ---- 1. The ICA to show: the one that still has a loop after pretess ------------------
+    # 1. The ICA to show: the one that still has a loop after pretess
     candidates = [label] if label else [2, 1]
     lid = None
     for c in candidates:
@@ -145,7 +145,7 @@ def compute(eicab_dir: Path, label: int | None) -> tuple[dict[str, np.ndarray], 
     others = (lab[box] != 0) & ~m0
     origin = np.array([s.start for s in box])
 
-    # ---- 2. pretess, then the loop repair (instrumented) ----------------------------------
+    # 2. pretess, then the loop repair (instrumented)
     b_raw = sc.betti(m0)
     m1, pinfo = sc.pretess(m0, inten, mode="remove", protect=others)
     b_pre = sc.betti(m1)
@@ -190,7 +190,7 @@ def compute(eicab_dir: Path, label: int | None) -> tuple[dict[str, np.ndarray], 
     cut_voxels = np.argwhere(to_crop(call["cut"])).astype(float)
     pretess_removed = np.argwhere(m0 & ~m1).astype(float)
 
-    # ---- 3. Centerlines before / after ----------------------------------------------------
+    # 3. Centerlines before / after
     before = compute_centerlines(m0.astype(np.int32), labels=[1], min_points=3).get(1)
     before = np.zeros((0, 3)) if before is None else np.asarray(before, float)[:, :3]
     after, after_info = sc.siphon_centerline(m2, affine=aff, spacing=sp)
@@ -199,7 +199,7 @@ def compute(eicab_dir: Path, label: int | None) -> tuple[dict[str, np.ndarray], 
     def length_mm(p: np.ndarray) -> float:
         return float(np.linalg.norm(np.diff(p, axis=0) * sp, axis=1).sum()) if len(p) > 1 else 0.0
 
-    # ---- 4. Display blocks (1 mm) --------------------------------------------------------
+    # 4. Display blocks (1 mm)
     b = BLOCK
     occ0, occ1, occ2 = _blocks(m0, b), _blocks(m1, b), _blocks(m2, b)
     present = (occ0 > 0) | (occ1 > 0) | (occ2 > 0)

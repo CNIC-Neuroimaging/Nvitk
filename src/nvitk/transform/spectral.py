@@ -6,13 +6,13 @@ Description
 A dual-energy (or dual-layer) CT measures attenuation at two effective energies, and in the
 diagnostic range every material's attenuation is, to a good approximation, a mix of two
 processes with fixed energy dependences: photoelectric absorption (falling as ~E^-3) and
-Compton scatter (the Klein–Nishina cross-section, proportional to electron density). The
+Compton scatter (the Klein-Nishina cross-section, proportional to electron density). The
 Philips spectral base images (:mod:`nvitk.io.conversors.philips_sbi`) store exactly that pair:
 for each voxel, how much of the attenuation at a reference energy each process contributes
 (HU + 1000 units, so the two add up to the conventional image). Everything else follows from
 the pair:
 
-* **virtual monoenergetic** images at any energy (40–200 keV): a linear combination of the two;
+* **virtual monoenergetic** images at any energy (40-200 keV): a linear combination of the two;
 * **iodine density** (mg/mL) and **virtual non-contrast** (VNC, HU): a water / iodine
   two-material decomposition;
 * **effective atomic number** (Z_eff): from the photoelectric-to-scatter ratio per electron;
@@ -22,20 +22,20 @@ the pair:
 The physics model
 -----------------
 Water's attenuation (NIST, Hubbell & Seltzer) is fitted as ``a (E_ref/E)^n + b KN(E)/KN(E_ref)``
-(photoelectric-like and Klein–Nishina; within 0.2 % from 30 to 200 keV); iodine's (NIST, above
+(photoelectric-like and Klein-Nishina; within 0.2 % from 30 to 200 keV); iodine's (NIST, above
 its K edge) on the same two functions. A vendor's basis pair need not be the pure physical one
-— each of its two images may carry a little of the other process — so the pair is mapped onto
+(each of its two images may carry a little of the other process), so the pair is mapped onto
 the physical basis by two constants of the vendor's decomposition (:class:`SpectralCalibration`):
 the share of water's attenuation in the photoelectric image, and the share of iodine's. For
 Philips SBI V5.1 at 120 kVp they were measured on a clinical cardiac study (water 0.100 from
-the fat–soft-tissue line, iodine 0.957 from the contrast-filled blood pool against soft tissue,
+the fat-soft-tissue line, iodine 0.957 from the contrast-filled blood pool against soft tissue,
 the same within 1 % across three reconstructions), with the conventional image taken as the
 70 keV equivalent. With them, water is flat at 0 HU at every energy, iodine follows its NIST
 curve, and the 70 keV image reproduces the conventional one.
 
 **These are nvitk's derivations, not the vendor's calibrated results** (Philips derives them
-with proprietary lookup tables). Expect the same behaviour — iodine bright at low keV, bone
-and iodine separated from water, Z_eff ~7.4 for soft tissue — and values within the model's
+with proprietary lookup tables). Expect the same behaviour (iodine bright at low keV, bone
+and iodine separated from water, Z_eff ~7.4 for soft tissue), and values within the model's
 accuracy, not the workstation's numbers to the HU.
 
 Arrays follow the current backend (``setup(globals())``): the inputs are made backend arrays,
@@ -77,7 +77,7 @@ KEV_RANGE = (40.0, 200.0)
 
 
 def klein_nishina(kev: Any) -> Any:
-    """Klein–Nishina total cross-section per electron (cm²) at *kev* — host values: the
+    """Klein-Nishina total cross-section per electron (cm²) at *kev*: host values: the
     model's constants are a handful of scalars, computed on the CPU."""
     with using("cpu"):
         k = np.asarray(kev, dtype=float) / _ME_KEV
@@ -120,7 +120,7 @@ class _Model:
     water_a: float            # water = a (E_ref/E)^n + b KN(E)/KN(E_ref)
     water_b: float
     iodine_hu_per_mg: float   # HU per mg/mL of iodine at E_ref
-    to_physical: tuple[float, float, float, float]   # (u1, u2, v1, v2): vendor (P, S) → physical (p, c)
+    to_physical: tuple[float, float, float, float]   # (u1, u2, v1, v2): vendor (P, S) -> physical (p, c)
 
 
 def _fit_two(mu: Any, energies: Any, e_ref: float, exponent: float) -> tuple[float, float]:
@@ -154,7 +154,7 @@ def _model(calibration: SpectralCalibration) -> _Model:
         ia, ib = _fit_two([_IODINE[k] for k in keep], [_E_TABLE[k] for k in keep], e_ref, n)
         iodine_photo = ia / (ia + ib)
         hu_per_mg = 1000.0 * 1e-3 * (ia + ib) / water_mu
-        # Vendor photoelectric image P and scatter image S → physical (p, c):
+        # Vendor photoelectric image P and scatter image S -> physical (p, c):
         #   p = u1 P + u2 S, c = v1 P + v2 S, with u + v = 1 for each image (both are
         # attenuation at E_ref), water and iodine landing on their physical shares.
         pw, pi = float(calibration.water_photo_share), float(calibration.iodine_photo_share)
@@ -177,7 +177,7 @@ def model_summary(calibration: SpectralCalibration = PHILIPS_SBI_V51) -> dict[st
 
 def monoenergetic_weights(kev: float, calibration: SpectralCalibration = PHILIPS_SBI_V51) -> tuple[float, float, float]:
     """``(w_photo, w_scatter, offset)`` with HU(kev) = w_photo·photo + w_scatter·scatter + offset,
-    *photo* / *scatter* in the SBI convention (contribution − 1000)."""
+    *photo* / *scatter* in the SBI convention (contribution - 1000)."""
     m = _model(calibration)
     e_ref, e = float(calibration.reference_kev), float(kev)
     phi_p = (e_ref / e) ** m.exponent
@@ -197,7 +197,7 @@ def _on_gpu() -> bool:
 def _chunked(compute: Callable[[Any, Any], Any], photo: Any, scatter: Any, out: Any = None) -> Any:
     """``compute(photo, scatter)`` element-wise as float32: in one go on the GPU; on the CPU
     in slabs along the last axis on worker threads (NumPy releases the GIL), written into
-    *out* when given (a float32 array of the same shape) — the volumes are hundreds of MB."""
+    *out* when given (a float32 array of the same shape); the volumes are hundreds of MB."""
     if _on_gpu():
         result = compute(as_backend_array(photo).astype(np.float32), as_backend_array(scatter).astype(np.float32))
         result = result.astype(np.float32)
@@ -237,7 +237,7 @@ def monoenergetic(photo: Any, scatter: Any, kev: float,
 
 
 def _decomposition_matrix(calibration: SpectralCalibration) -> tuple[tuple[float, float], tuple[float, float]]:
-    """Inverse of [[water], [iodine]] in (P, S): (P, S) → (water g/mL, iodine mg/mL) (host scalars)."""
+    """Inverse of [[water], [iodine]] in (P, S): (P, S) -> (water g/mL, iodine mg/mL) (host scalars)."""
     m = _model(calibration)
     pw, pi = float(calibration.water_photo_share), float(calibration.iodine_photo_share)
     k = m.iodine_hu_per_mg

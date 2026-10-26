@@ -41,7 +41,7 @@ _EXPAND_CONNECTIVITY = 3
 
 
 def run_stage1(input_volume_node) -> tuple[np.ndarray, np.ndarray]:
-    """N4 (Slicer N4ITK CLI) → blood flood from-scratch → label CCs.
+    """N4 (Slicer N4ITK CLI) -> blood flood from-scratch -> label CCs.
 
     Parameters
     ----------

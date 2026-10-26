@@ -38,7 +38,7 @@ def _distinct_colors(n: int, *, sat: float = 0.65, val: float = 0.95) -> list[tu
 
 
 def _qualitative_color_pool() -> list[tuple[float, float, float]]:
-    """Build a pool of perceptually distinct RGB colors (0–1)."""
+    """Build a pool of perceptually distinct RGB colors (0-1)."""
     pool: list[tuple[float, float, float]] = []
     try:
         import matplotlib
@@ -73,7 +73,7 @@ def _high_contrast_colors(n: int) -> list[tuple[float, float, float]]:
         return [pool[0]]
     if n >= len(pool):
         return [pool[i % len(pool)] for i in range(n)]
-    # Prime stride spreads picks across the pool (adjacent vertebrae → distant hues).
+    # Prime stride spreads picks across the pool (adjacent vertebrae -> distant hues).
     stride = 7
     while stride % len(pool) == 0 or len({(i * stride) % len(pool) for i in range(n)}) < n:
         stride += 2

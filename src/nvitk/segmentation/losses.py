@@ -6,17 +6,17 @@ Description
 Overlap losses (Dice, cross-entropy) treat every foreground voxel alike. For vessel trees that
 is a poor match to how the result is judged: a segmentation can score well on Dice while being
 broken into disconnected fragments, because a one-voxel gap costs almost no overlap but
-destroys the topology. Challenges in this area score connectivity explicitly — centerline Dice,
-connected-component error — so the training objective should too.
+destroys the topology. Challenges in this area score connectivity explicitly (centerline Dice,
+connected-component error), so the training objective should too.
 
 This module provides the topology-aware terms, plus a focal loss for the extreme foreground
 imbalance typical of angiography (vessels occupy well under 1 % of a head volume):
 
-- :func:`soft_skeletonize` — differentiable morphological skeleton (iterative soft opening)
-- :class:`SoftClDiceLoss` — centerline Dice, the differentiable analogue of the clDice metric
-- :class:`SkeletonRecallLoss` — recall measured on the reference skeleton only
-- :class:`FocalLoss` — down-weights the easy background that dominates the gradient
-- :class:`CompoundLoss` — weighted sum of any of the above with a base loss
+- :func:`soft_skeletonize`: differentiable morphological skeleton (iterative soft opening)
+- :class:`SoftClDiceLoss`: centerline Dice, the differentiable analogue of the clDice metric
+- :class:`SkeletonRecallLoss`: recall measured on the reference skeleton only
+- :class:`FocalLoss`: down-weights the easy background that dominates the gradient
+- :class:`CompoundLoss`: weighted sum of any of the above with a base loss
 
 Torch dependency
 ----------------
@@ -62,9 +62,7 @@ DEFAULT_CLASS_CHUNK: int = 4
 _EPS: float = 1e-6
 
 
-# ---------------------------------------------------------------------------
 # Soft morphology
-# ---------------------------------------------------------------------------
 
 
 def _soft_erode(img: torch.Tensor) -> torch.Tensor:
@@ -93,7 +91,7 @@ def soft_skeletonize(img: torch.Tensor, iters: int = DEFAULT_SKEL_ITERS) -> torc
     """Differentiable morphological skeleton of a soft mask.
 
     Implements the iterative soft-skeleton of the clDice formulation: repeatedly erode, and
-    accumulate whatever the opening removes — those are the medial voxels that would
+    accumulate whatever the opening removes; those are the medial voxels that would
     disappear, i.e. the centerline.
 
     Parameters
@@ -121,9 +119,7 @@ def soft_skeletonize(img: torch.Tensor, iters: int = DEFAULT_SKEL_ITERS) -> torc
     return skel
 
 
-# ---------------------------------------------------------------------------
 # Helpers shared by the topology losses
-# ---------------------------------------------------------------------------
 
 
 def _foreground_pairs(
@@ -140,7 +136,7 @@ def _foreground_pairs(
     16 GB card; the reference masks are built by comparison (``target == c``) instead, one
     chunk at a time.
 
-    With *per_class* false a single pair is yielded for the merged vessel tree — much cheaper,
+    With *per_class* false a single pair is yielded for the merged vessel tree: much cheaper,
     and still targeting the connectivity that the topology metrics measure. With *per_class*
     true the foreground classes are yielded in groups of *class_chunk*, so peak memory is set
     by the chunk size rather than by the class count.
@@ -172,7 +168,7 @@ def _foreground_pairs(
 
 
 def _ratio(numerator: torch.Tensor, denominator: torch.Tensor, smooth: float) -> torch.Tensor:
-    """``(num + smooth) / (den + smooth)`` — 1.0 when both are empty, never NaN."""
+    """``(num + smooth) / (den + smooth)``: 1.0 when both are empty, never NaN."""
     return (numerator + smooth) / (denominator + smooth)
 
 
@@ -189,13 +185,11 @@ def _skeletonize_pred(pred: torch.Tensor, iters: int, use_checkpoint: bool) -> t
     return checkpoint(soft_skeletonize, pred, iters, use_reentrant=False)
 
 
-# ---------------------------------------------------------------------------
 # Losses
-# ---------------------------------------------------------------------------
 
 
 class SoftClDiceLoss(nn.Module):
-    """Soft centerline Dice — the differentiable analogue of the clDice metric.
+    """Soft centerline Dice: the differentiable analogue of the clDice metric.
 
     Combines two ratios: how much of the *predicted* skeleton falls inside the reference mask
     (topology precision), and how much of the *reference* skeleton falls inside the prediction
@@ -209,7 +203,7 @@ class SoftClDiceLoss(nn.Module):
         Soft-skeletonisation iterations.
     per_class
         Skeletonise each foreground class separately instead of the merged vessel tree.
-        Costly — see :func:`_foreground_probabilities`.
+        Costly; see :func:`_foreground_pairs`.
     smooth
         Added to numerator and denominator so an empty patch yields 0 rather than NaN. The
         0.2-0.5 % foreground rate of angiographic data makes empty patches common.
@@ -262,7 +256,7 @@ class SkeletonRecallLoss(nn.Module):
     """Recall measured only on the reference skeleton.
 
     Asks one question: of the voxels on the reference centerline, how many did the model
-    predict as foreground? Unlike Dice it cannot be satisfied by getting thick vessels right —
+    predict as foreground? Unlike Dice it cannot be satisfied by getting thick vessels right:
     every branch contributes centerline voxels roughly in proportion to its *length*, not its
     calibre, so thin side branches carry as much weight as the large trunks. That matches a
     scoring scheme whose detection metric is dominated by small vessels.
@@ -302,7 +296,7 @@ class SkeletonRecallLoss(nn.Module):
 
 
 class FocalLoss(nn.Module):
-    """Multiclass focal loss — cross-entropy with easy examples down-weighted.
+    """Multiclass focal loss: cross-entropy with easy examples down-weighted.
 
     At a 0.2-0.5 % foreground rate, background voxels the model already classifies confidently
     still supply most of the gradient. The ``(1 - p_t) ** gamma`` factor suppresses them so the

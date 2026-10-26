@@ -3,7 +3,7 @@
 Top to bottom: the active layer (size, area, volume) with open / save; the
 selection tools; the operation pickers, the selected operation's parameters and Run; how the layer is
 drawn (Display: colour by a field, colormap, solid colour, opacity, wireframe,
-point size…); moving it by hand (Move: live, then Apply or Reset); a frame
+point size...); moving it by hand (Move: live, then Apply or Reset); a frame
 slider for mesh time series; and a plot for profiles and curves over time.
 
 The Selection card, always on screen under the active layer, holds the
@@ -13,7 +13,7 @@ Replace say how each one combines with the selection; All, Invert, Clear, Grow,
 Shrink, Delete, Keep only and Copy out act on it at once (Delete and Keep only
 can be undone).
 
-Operations that need a point — a cross-section, a cut, an edit — do not read
+Operations that need a point (a cross-section, a cut, an edit) do not read
 the cursor: Run arms them and they wait for a click on the surface (in 3D, the
 click is cast into the scene and lands on the front-most face; dragging still
 rotates). A marker shows where the click landed; edits can be undone. The
@@ -168,7 +168,7 @@ def _swatch(rgba: Any, size: int = 12) -> QIcon:
 
 
 def ray_hit(origin: np.ndarray, direction: np.ndarray, triangles: np.ndarray) -> np.ndarray | None:
-    """Front-most intersection of a line with triangles (Möller–Trumbore, vectorised).
+    """Front-most intersection of a line with triangles (Möller-Trumbore, vectorised).
 
     The line is infinite: of all its hits, the one furthest *against* *direction*
     (nearest the camera, for Napari's view direction) is returned.
@@ -345,7 +345,7 @@ class MeshPanel(QWidget):
         self._on_category(self._category.currentText())
         self._on_active()
 
-    # ── cards ────────────────────────────────────────────────────────────────
+    # cards
 
     def _build_info_card(self) -> Card:
         info = Card("Active layer")
@@ -527,7 +527,7 @@ class MeshPanel(QWidget):
             return
         try:
             sel = selection_of(layer)
-        except Exception:  # noqa: BLE001 — a layer mid-change
+        except Exception:  # noqa: BLE001 (a layer mid-change)
             return
         what = "vertices" if type(layer).__name__ == "Surface" else "points"
         n = int(sel.sum())
@@ -551,10 +551,10 @@ class MeshPanel(QWidget):
         try:
             with activity(f"Meshlab: {op.label} on “{layer.name}”"):
                 result = op.run(ctx)
-        except ValueError as exc:  # nothing selected, the whole surface would go…
+        except ValueError as exc:  # nothing selected, the whole surface would go...
             self._sel_status.setText(str(exc))
             return None
-        except Exception as exc:  # noqa: BLE001 — report, never crash the panel
+        except Exception as exc:  # noqa: BLE001 (report, never crash the panel)
             from nvitk.gui.tools.runner import log_tool_failure
 
             log_tool_failure(exc)
@@ -812,7 +812,7 @@ class MeshPanel(QWidget):
         self._play_timer.timeout.connect(self._play_tick)
         return card
 
-    # ── pickers and form ─────────────────────────────────────────────────────
+    # pickers and form
 
     def _current_op(self) -> Any:
         return operation(str(self._operation.currentData() or ""))
@@ -867,7 +867,7 @@ class MeshPanel(QWidget):
 
             obj = layer_to_mesh(layer) if type(layer).__name__ == "Surface" else layer_to_point_cloud(layer)
             return meshlab_defaults(obj, op.id[len(MESHLAB_PREFIX):])
-        except Exception:  # noqa: BLE001 — the catalog's defaults are a fine fallback
+        except Exception:  # noqa: BLE001 (the catalog's defaults are a fine fallback)
             return {}
 
     def _on_operation(self) -> None:
@@ -910,7 +910,7 @@ class MeshPanel(QWidget):
             if name in self._widgets:
                 try:
                     self.set_param(name, value)
-                except Exception:  # noqa: BLE001 — a value that no longer fits is dropped
+                except Exception:  # noqa: BLE001 (a value that no longer fits is dropped)
                     pass
         output = self._widgets.get("surface_output")
         if isinstance(output, QComboBox) and self._groups_row is not None:
@@ -1064,7 +1064,7 @@ class MeshPanel(QWidget):
         elif isinstance(w, QLineEdit):
             w.setText(str(value))
 
-    # ── active layer ─────────────────────────────────────────────────────────
+    # active layer
 
     def _on_active(self, _event: Any = None) -> None:
         layer = self._viewer.layers.selection.active
@@ -1247,10 +1247,10 @@ class MeshPanel(QWidget):
             n_lab = len(present_label_ids(layer)) if is_mask else 0
             labs = f" · {n_lab} label(s)" if n_lab else ""
             return f"{type(layer).__name__} {name}<br>{shape} voxels{labs} — Create → Surfaces from labels."
-        except Exception as exc:  # noqa: BLE001 — a summary must never break the panel
+        except Exception as exc:  # noqa: BLE001 (a summary must never break the panel)
             return f"{name}: {exc}"
 
-    # ── running ──────────────────────────────────────────────────────────────
+    # running
 
     def _on_run_clicked(self) -> None:
         if self._picking is not None and self._pick_from_card:
@@ -1303,7 +1303,7 @@ class MeshPanel(QWidget):
         try:
             with activity(f"Meshlab: {op.label} on “{getattr(layer, 'name', '')}”"):
                 result = op.run(ctx)
-        except Exception as exc:  # noqa: BLE001 — report, never crash the panel
+        except Exception as exc:  # noqa: BLE001 (report, never crash the panel)
             from nvitk.gui.tools.runner import log_tool_failure
 
             log_tool_failure(exc)
@@ -1343,7 +1343,7 @@ class MeshPanel(QWidget):
     def _run_many(self, op: Any, targets: list[Any]) -> Any:
         """Run *op* on each of *targets*, as the labels of one multilabel mesh.
 
-        One combined result (a table with a row — or a block of rows — per layer,
+        One combined result (a table with a row (or a block of rows) per layer,
         every layer's curves on one plot, row clicks highlighting in the right
         layer), one undo step for every layer it changed, and the selection left
         as it was.
@@ -1371,7 +1371,7 @@ class MeshPanel(QWidget):
                             remember=lambda ly, prev: changed.append((weakref.ref(ly), prev)))
             try:
                 result = op.run(ctx)
-            except Exception as exc:  # noqa: BLE001 — one layer failing must not stop the rest
+            except Exception as exc:  # noqa: BLE001 (one layer failing must not stop the rest)
                 log_tool_failure(exc)
                 failures.append(f"{layer.name}: {exc}")
                 continue
@@ -1413,13 +1413,13 @@ class MeshPanel(QWidget):
         self._status.setText(summary)
         return result
 
-    # ── picking a point ──────────────────────────────────────────────────────
+    # picking a point
 
     def start_pick(self, op: Any = None, *, from_card: bool = False) -> None:
         """Arm *op* (default: the selected operation): it runs on the next click in
         the viewer (the selection tools: on every brush stroke or box, until Done).
-        From the Selection card (*from_card*) the tool stays on — every click, stroke
-        or box — until it is switched off, and it follows the active layer."""
+        From the Selection card (*from_card*) the tool stays on (every click, stroke
+        or box) until it is switched off, and it follows the active layer."""
         op = op if op is not None else self._current_op()
         layer = self._viewer.layers.selection.active
         if op is None or layer is None or not accepts(op, layer):
@@ -1511,11 +1511,11 @@ class MeshPanel(QWidget):
             return
         self.pick_at(point, view_dir)
 
-    # ── selecting with the brush and the box ─────────────────────────────────
+    # selecting with the brush and the box
 
     def _stroke_cache(self, *, fresh_selection: bool = False) -> dict[str, Any]:
         """The picked layer's geometry, kept for the length of the tool, and its
-        selection — read again from the layer at the start of every stroke or box
+        selection: read again from the layer at the start of every stroke or box
         (*fresh_selection*): Clear, Invert, an undo or any other operation may have
         changed it while the tool stayed armed."""
         from scipy.spatial import cKDTree
@@ -1704,7 +1704,7 @@ class MeshPanel(QWidget):
         else:
             marker.data = pt
 
-    # ── undo ─────────────────────────────────────────────────────────────────
+    # undo
 
     def _push_undo(self, layer: Any, previous: Any) -> None:
         """Remember *layer*'s content before an edit (one undo step)."""
@@ -1742,7 +1742,7 @@ class MeshPanel(QWidget):
         self._status.setText(f"Undone on {', '.join(restored)} ({len(self._undo_steps)} more step(s) to undo).")
         self._on_active()
 
-    # ── display ──────────────────────────────────────────────────────────────
+    # display
 
     def _sync_display_card(self) -> None:
         targets = self._targets()
@@ -1909,7 +1909,7 @@ class MeshPanel(QWidget):
             except Exception:  # noqa: BLE001
                 pass
 
-    # ── moving by hand ───────────────────────────────────────────────────────
+    # moving by hand
 
     def _reset_move_boxes(self) -> None:
         for key, box in getattr(self, "_move_boxes", {}).items():
@@ -2000,7 +2000,7 @@ class MeshPanel(QWidget):
         self._move_state = None
         self._reset_move_boxes()
 
-    # ── time ─────────────────────────────────────────────────────────────────
+    # time
 
     def _sync_time_card(self) -> None:
         ctrl = series_controller(self._layer)
@@ -2048,7 +2048,7 @@ class MeshPanel(QWidget):
         self._play_timer.setInterval(int(1000 / max(1, self._fps.value())))
         self._frame.setValue((self._frame.value() + 1) % len(ctrl.series))
 
-    # ── plot ─────────────────────────────────────────────────────────────────
+    # plot
 
     def _show_plot(self, plot: dict[str, Any], title: str) -> None:
         try:
@@ -2087,7 +2087,7 @@ class MeshPanel(QWidget):
         self._plot_canvas.draw_idle()
         self._plot_card.setVisible(True)
 
-    # ── files ────────────────────────────────────────────────────────────────
+    # files
 
     def open_paths(self, paths: list[str], *, as_series: bool = False) -> list[Any]:
         """Add meshes / point clouds from *paths* (one series when *as_series*)."""

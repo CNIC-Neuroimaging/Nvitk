@@ -27,7 +27,7 @@ path uses the fixed ``output.mha``, because only that path can ever be a real su
 One image, both tracks
 ----------------------
 Grand Challenge populates exactly one socket per run. Which one it is already names the
-modality, and that is the primary signal — but it is cross-checked against the intensities,
+modality, and that is the primary signal, but it is cross-checked against the intensities,
 because feeding a TOF volume through the CT harmonisation produces a confident wrong
 segmentation rather than an error, and that is the failure worth spending a check on. On a
 genuine conflict the run stops.
@@ -38,7 +38,7 @@ What this reads from the image
 many input channels the network wants and the exact intensity windows stage 0 applied. Nothing
 about harmonisation is hard-coded here: the container applies what its own build recorded.
 
-``postprocess.json`` carries the post-processing selection, for the same reason — so the
+``postprocess.json`` carries the post-processing selection, for the same reason, so the
 pipeline the submission applies is provably the one that was measured.
 
 The only first-party code in the image is :mod:`topbrain_algo` (harmonisation and component
@@ -132,7 +132,7 @@ def declared_modality() -> str | None:
     The platform generates this file listing the sockets it filled. Reading it is the documented
     contract, and it is unambiguous where scanning directories is merely usually right. Returns
     ``None`` when the file is absent (local testing) or names nothing recognised, so the caller
-    falls back to looking at what is actually on disk.
+    falls back to looking at what is on disk.
     """
     manifest = INPUT_ROOT / INPUTS_MANIFEST
     if not manifest.is_file():
@@ -158,7 +158,7 @@ def find_inputs() -> list[tuple[Path, str]]:
     a hand-assembled local directory holds several -- several files in one socket, or both
     sockets filled at once, which is a natural way to keep a couple of test cases side by side.
 
-    Returning them all rather than the first is the point. The earlier version stopped at the
+    All of them are returned, not just the first. The earlier version stopped at the
     first socket that had anything, so a directory holding a CT *and* an MR silently segmented
     the CT and discarded the MR without a word.
 
@@ -197,8 +197,8 @@ def detect_modality(data: np.ndarray) -> str | None:
 
     CT is calibrated: air sits near -1000 HU and a head scan is mostly air, so a large negative
     population is decisive. MR and TOF carry arbitrary non-negative units with no such
-    population. Returns ``None`` rather than guessing for a volume that is neither — an
-    already-normalised one, say — so an inconclusive reading never overrides the socket.
+    population. Returns ``None`` rather than guessing for a volume that is neither (an
+    already-normalised one, say), so an inconclusive reading never overrides the socket.
     """
     if data.size == 0:
         return None
@@ -215,7 +215,7 @@ def detect_modality(data: np.ndarray) -> str | None:
 def resolve_modality(data: np.ndarray, socket_modality: str) -> str:
     """Reconcile the socket with what the intensities show.
 
-    The socket is authoritative — the platform routes by track — but a measured contradiction is
+    The socket is authoritative (the platform routes by track), but a measured contradiction is
     refused rather than obeyed. Harmonising TOF with an HU window does not fail, it just
     produces a worse answer, and a submission is not the place to discover that.
 
@@ -514,7 +514,7 @@ def build_predictor(model_dir: Path, entry: dict[str, Any]):
         allow_tqdm=False,
     )
     # initialize_from_trained_model_folder reads the trainer name out of the model folder and
-    # resolves the class to rebuild the architecture — which only works because the in-tree
+    # resolves the class to rebuild the architecture, which only works because the in-tree
     # build (carrying the ToPBrain trainers) is the nnunetv2 on PYTHONPATH here.
     predictor.initialize_from_trained_model_folder(
         str(model_dir),
@@ -575,8 +575,8 @@ def segment(image, array: np.ndarray, *, predictor, entry: dict[str, Any], model
     mask = sitk.GetArrayFromImage(mask_image)
 
     # The selection is read from postprocess.json, which stage 5 wrote beside this file, rather
-    # than hard-coded: the whole point is that the pipeline the submission applies is the one
-    # that was measured in stage 3, not a second copy of it that can drift.
+    # than hard-coded, so the pipeline the submission applies is the one that was measured in
+    # stage 3, not a second copy of it that can drift.
     from topbrain_algo import postprocess as pp
 
     steps, min_volume_mm3 = pp.read_config(ALGORITHM_ROOT)

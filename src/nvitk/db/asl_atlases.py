@@ -6,9 +6,7 @@ from .exceptions import FilterError
 from .storage import normalize_variable_id
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Presets
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _norm_regions(raw: tuple[str, ...]) -> tuple[str, ...]:
