@@ -2,10 +2,22 @@
 
 from __future__ import annotations
 
+import math
+
 from nvitk.core.array import as_backend_array
 from nvitk.core.backend import setup
 
 setup(globals())
+
+
+def _counts_above(values, thresholds):
+    """``count_nonzero(values > t)`` for every *t*, from one sort instead of one pass per *t*.
+
+    Integer counts identical to the per-threshold loop. Only valid for NaN-free *values*
+    and finite *thresholds*; callers fall back to the loop otherwise.
+    """
+    flat = np.sort(values.ravel())
+    return flat.size - np.searchsorted(flat, thresholds, side="right")
 
 
 def binary_mask_sliding_threshold_3d(
@@ -28,9 +40,12 @@ def binary_mask_sliding_threshold_3d(
         return np.zeros(cd.shape, dtype=bool), 0.0
 
     x = np.arange(0.0, up_thresh + step * 0.5, step, dtype=np.float64)
-    sval = np.empty(x.shape, dtype=np.float32)
-    for i, n in enumerate(x):
-        sval[i] = float(np.count_nonzero(cdcrop > (max_val * n)))
+    if math.isfinite(max_val):
+        sval = _counts_above(cdcrop, max_val * x).astype(np.float64).astype(np.float32)
+    else:
+        sval = np.empty(x.shape, dtype=np.float32)
+        for i, n in enumerate(x):
+            sval[i] = float(np.count_nonzero(cdcrop > (max_val * n)))
 
     smf = int(max(1, smf))
     kernel = np.ones(smf, dtype=np.float64) / float(smf)
@@ -87,7 +102,10 @@ def binary_mask_sliding_threshold_2d(
         return np.zeros(img.shape, dtype=bool)
 
     x = np.arange(0.0, up_thresh + step * 0.5, step, dtype=np.float64)
-    sval = np.array([float(np.count_nonzero(img > (max_val * n))) for n in x], dtype=np.float64)
+    if math.isfinite(max_val):
+        sval = _counts_above(img, max_val * x).astype(np.float64)
+    else:
+        sval = np.array([float(np.count_nonzero(img > (max_val * n))) for n in x], dtype=np.float64)
     smf = int(max(1, smf))
     kernel = np.ones(smf, dtype=np.float64) / float(smf)
     y = np.convolve(sval, kernel, mode="same")
