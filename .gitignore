@@ -17,6 +17,8 @@
 docs/_build/
 .config/
 .config/*
+audit/
+audit/*
 # .nvitk/xnat.json
 # .nvitk/xnat-dev.json
 dataset/
