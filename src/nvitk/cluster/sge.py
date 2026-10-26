@@ -309,8 +309,8 @@ def build_qsub_command(
     ]
     if spec.resources.queue:
         argv.extend(["-q", spec.resources.queue])
-    if spec.resources.pe_smp:
-        argv.extend(["-pe", "smp", str(spec.resources.pe_smp)])
+    # if spec.resources.pe_smp:
+    #     argv.extend(["-pe", "smp", str(spec.resources.pe_smp)])
     if array_tasks is not None:
         argv.extend(["-t", f"1-{int(array_tasks)}"])
         if task_concurrency is not None:
