@@ -179,7 +179,7 @@ def _venc_from_json_payload(payload: dict[str, Any]) -> float | None:
                 return v
     for field_name in ("VelocityEncoding", "PhaseEncodingVelocity"):
         if field_name in payload:
-            # Legacy nvitk sidecars: store cm/s–scale; multiply to mm/s (unchanged).
+            # Legacy nvitk sidecars: store cm/s-scale; multiply to mm/s (unchanged).
             try:
                 return float(payload[field_name]) * 10.0
             except (TypeError, ValueError):

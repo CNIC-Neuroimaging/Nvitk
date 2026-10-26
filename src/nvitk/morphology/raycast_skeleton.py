@@ -4,27 +4,27 @@ Implements the interior-geometry exploration and descriptor stages of
 
     M. A. Layachi, A. Nouri, S. Eddarouich, F. Autrusseau, "Exploiting Interior Geometry for
     Intracranial Aneurysm Detection and Segmentation on 3D Point Clouds via GNNs" (EXPIGEO),
-    MICCAI 2026, LNCS 16885, pp. 254–263. https://doi.org/10.1007/978-3-032-38091-3_25
+    MICCAI 2026, LNCS 16885, pp. 254-263. https://doi.org/10.1007/978-3-032-38091-3_25
 
 re-implemented from the paper's equations (the GNN stage is not part of nvitk):
 
-1. **Ray probing** — every surface point ``o`` (normal ``n_o``) casts ``K`` rays into an inward cone
-   ``dᵀ(−n_o) ≥ cos θmax``; a surface point ``t`` is *hit* when its perpendicular distance to the
-   ray is ≤ δ = γ · d̄_k (mean k-NN spacing of the cloud). Rays are marched through a KD-tree, all
+1. **Ray probing**: every surface point ``o`` (normal ``n_o``) casts ``K`` rays into an inward cone
+   ``dᵀ(-n_o) >= cos θmax``; a surface point ``t`` is *hit* when its perpendicular distance to the
+   ray is <= δ = γ · d̄_k (mean k-NN spacing of the cloud). Rays are marched through a KD-tree, all
    at once, and stop at their first hit.
-2. **Centerline and radius** (Eq. 1) — ``cᵢ = (oᵢ + t̃ᵢ)/2`` with ``t̃ᵢ`` the spatial (geometric)
-   median of the hits, ``rᵢ = ½ · median‖t − oᵢ‖``; kept when the hit dispersion is coherent and the
+2. **Centerline and radius** (Eq. 1): ``cᵢ = (oᵢ + t̃ᵢ)/2`` with ``t̃ᵢ`` the spatial (geometric)
+   median of the hits, ``rᵢ = ½ · median‖t - oᵢ‖``; kept when the hit dispersion is coherent and the
    local spacing is not an outlier (``d̄ᵢ < μ_d + η σ_d``).
-3. **Skeleton** — the centerline cloud is voxelized (vertex = spatial median, density = count,
+3. **Skeleton**: the centerline cloud is voxelized (vertex = spatial median, density = count,
    re-centred on the median of a ball of centres), joined by a minimum spanning tree, spurious
    branches pruned iteratively, and close vertices merged with the adaptive threshold
    τ_merge = λ · median(nearest-neighbour distance) (Eq. 2).
-4. **Descriptors** — radius-gradient magnitude ‖∇R‖ (weighted least squares, Eq. 3), termination
+4. **Descriptors**: radius-gradient magnitude ‖∇R‖ (weighted least squares, Eq. 3), termination
    likelihood ``P_term`` (Eq. 4), blockage ``β`` at leaves, geometric sphericity ``φ`` (Eq. 5) and
    projected flow ``F_proj``, broadcast to every surface point through its nearest skeleton vertex
    (the 9-column feature matrix of the paper's graph).
 
-Status: experimental — available as the ``raycast`` skeleton method and Mesh-panel tool, never a
+Status: experimental: available as the ``raycast`` skeleton method and Mesh-panel tool, never a
 default. NumPy / SciPy (+ VTK for the mask/mesh helpers) only.
 """
 
@@ -48,7 +48,7 @@ class RaycastParams:
     #: Neighbours for the local spacing d̄ᵢ (paper: k = 10) and the density tolerance η (0.05).
     k_spacing: int = 10
     eta: float = 0.05
-    #: Hit coherence: keep a source when std(hit distances) ≤ this fraction of their median.
+    #: Hit coherence: keep a source when std(hit distances) <= this fraction of their median.
     max_hit_dispersion: float = 0.25
     #: A source needs at least this many of its rays to hit.
     min_hits: int = 3
@@ -56,7 +56,7 @@ class RaycastParams:
     max_ray_length: float | None = None
     #: Skeleton voxel size (mm; ``None`` = half the median centerline radius, at least 2 × spacing).
     voxel_size: float | None = None
-    #: Spurious-branch pruning (repeated until stable): a leaf branch (leaf → nearest junction)
+    #: Spurious-branch pruning (repeated until stable): a leaf branch (leaf -> nearest junction)
     #: shorter than prune_length (``None`` = 2 × median radius, i.e. one vessel diameter) is
     #: removed, and so is a leaf with density below prune_density (``None`` = a quarter of the
     #: median vertex density). Chains joining two leaves are never removed (the vessel's ends).
@@ -149,9 +149,7 @@ class RaycastSkeleton:
         return self.vertices[path], self.radius[path]
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 1–2. Ray probing → centerline cloud
-# ──────────────────────────────────────────────────────────────────────────────
+# 1-2. Ray probing -> centerline cloud
 
 
 def _cone_directions(normals_in: np.ndarray, n_rays: int, theta_max: float, rng) -> np.ndarray:
@@ -196,7 +194,7 @@ def ray_probe(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Ray probing (Sec. 2.1, Eq. 1): ``(centerline_points, radius, source_index)``.
 
-    *normals* must point **outward** (rays go along −normal).
+    *normals* must point **outward** (rays go along -normal).
     """
     from scipy.spatial import cKDTree
 
@@ -269,9 +267,7 @@ def ray_probe(
     return np.asarray(centers), np.asarray(radii), np.asarray(keep_src, dtype=np.int64)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # 3. Skeleton
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _edge_graph(vertices: np.ndarray, edges: np.ndarray):
@@ -347,8 +343,8 @@ def _prune_leaves(vertices, radius, density, edges, length_max, density_max, ite
 
     The paper prunes leaves by incident edge length (short spurious branches) and density
     (low-confidence outliers). Applied edge by edge, a length test would also erode the vessel's
-    real ends, so here the length test applies to whole leaf branches — the chain from a leaf to
-    its nearest junction — and only where that junction exists; low-density leaves are dropped
+    real ends, so here the length test applies to whole leaf branches (the chain from a leaf to
+    its nearest junction), and only where that junction exists; low-density leaves are dropped
     anywhere. Repeated until nothing changes (or *iterations* passes).
     """
     keep = np.ones(len(vertices), dtype=bool)
@@ -421,7 +417,7 @@ def raycast_skeleton(
     normals: np.ndarray,
     params: RaycastParams = RaycastParams(),
 ) -> RaycastSkeleton:
-    """Full EXPIGEO interior exploration: ray probing → centerline cloud → pruned, merged MST."""
+    """Full EXPIGEO interior exploration: ray probing -> centerline cloud -> pruned, merged MST."""
     pts = np.asarray(points, dtype=float).reshape(-1, 3)
     centers, radii, src = ray_probe(pts, normals, params)
     if len(centers) < 2:
@@ -451,9 +447,7 @@ def raycast_skeleton(
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # 4. Geometric descriptors
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -478,7 +472,7 @@ class ExpigeoDescriptors:
     )
 
     def surface_fields(self) -> dict[str, np.ndarray]:
-        """Per-surface-point fields (columns 3–8 of :attr:`features`) by name."""
+        """Per-surface-point fields (columns 3-8 of :attr:`features`) by name."""
         return {name: self.features[:, i] for i, name in enumerate(self.FEATURE_NAMES) if i >= 3}
 
 
@@ -505,7 +499,7 @@ def radius_gradient_magnitude(points: np.ndarray, radius: np.ndarray, k: int = 1
 
 
 def _vertex_directions(skel: RaycastSkeleton) -> np.ndarray:
-    """Skeletal direction at each vertex (leaves point outward, ``d_v = (v − u)/‖v − u‖``)."""
+    """Skeletal direction at each vertex (leaves point outward, ``d_v = (v - u)/‖v - u‖``)."""
     adj = skel.adjacency()
     v = skel.vertices
     out = np.zeros_like(v)
@@ -587,7 +581,7 @@ def expigeo_descriptors(
         sphericity[i] = eps_cyl / (eps_cyl + eps_sph + float(epsilon))
     sphericity = np.where(np.isnan(sphericity), float(np.nanmedian(sphericity)) if np.isfinite(sphericity).any() else 0.0, sphericity)
 
-    # Projected flow: (p − v_p)ᵀ d_{v_p}.
+    # Projected flow: (p - v_p)ᵀ d_{v_p}.
     f_proj = ((surf - verts[owner]) * direction[owner]).sum(axis=1)
 
     features = np.column_stack([
@@ -611,9 +605,7 @@ def expigeo_descriptors(
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Mask / mesh helpers
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def surface_points_normals(surface: Any) -> tuple[np.ndarray, np.ndarray]:

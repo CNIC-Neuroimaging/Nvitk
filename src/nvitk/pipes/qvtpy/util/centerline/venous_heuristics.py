@@ -37,9 +37,7 @@ from nvitk.pipes.qvtpy.labels import (
 
 log = Logger()
 
-# ---------------------------------------------------------------------------
 # Constants
-# ---------------------------------------------------------------------------
 
 _MIN_BRANCH_POINTS = 12
 _MIN_ASSIGN_SCORE = 0.005
@@ -55,9 +53,7 @@ _RAS_DIR_PRIORS: dict[str, np.ndarray] = {
 _STRV_REF_VOX = np.array([0.0, 1.0, 1.0], dtype=np.float64)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Types
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -81,9 +77,7 @@ class RasAxes:
     si_sign: int  # +1: increasing index -> Superior
 
 
-# ---------------------------------------------------------------------------
 # RAS orientation
-# ---------------------------------------------------------------------------
 
 
 def _axis_for_code(codes: tuple[str, ...], letter: str) -> tuple[int, int]:
@@ -173,9 +167,7 @@ def _unit(v: np.ndarray) -> np.ndarray:
     return x / n if n > 1e-9 else np.array([0.0, 0.0, 1.0], dtype=np.float64)
 
 
-# ---------------------------------------------------------------------------
 # Geometry helpers
-# ---------------------------------------------------------------------------
 
 
 def _principal_direction(points: np.ndarray) -> np.ndarray:
@@ -224,9 +216,7 @@ def _oriented_direction_ana(
     return d
 
 
-# ---------------------------------------------------------------------------
 # Skeleton branch extraction (split at all junctions / endpoints)
-# ---------------------------------------------------------------------------
 
 
 def extract_branch_polylines(
@@ -242,7 +232,7 @@ def extract_branch_polylines(
 
     Default venous behaviour:
     - prune tiny skeleton loops and short spurs (oversegmentation artifacts)
-    - prefer significant centerline bifurcations (≥3 long arms) as split points
+    - prefer significant centerline bifurcations (>=3 long arms) as split points
     - if no significant bifurcation remains, keep one main path per CC
     """
     m = to_numpy(venous_binary.astype(bool, copy=False))
@@ -259,8 +249,8 @@ def extract_branch_polylines(
     )
     polylines: list[np.ndarray] = []
     # Arm length gate for "significant" multi-way junction: keep modest so
-    # torcular (degree ≥3 including ≥4) is found even when
-    # --venous-min-branch-points is large (e.g. 30 → arm≥7, not 15).
+    # torcular (degree >=3 including >=4) is found even when
+    # --venous-min-branch-points is large (e.g. 30 -> arm>=7, not 15).
     min_arm = max(4, min(8, int(min_points) // 4))
     # After junction split, sinus arms can be shorter than the CC gate; keep
     # them as assignable candidates (SSSV stub often < min_points).
@@ -281,7 +271,7 @@ def extract_branch_polylines(
         n_after_spur = n_skel
         work = coords
         # Only strip tiny noise spurs before split. Aggressive spur prune
-        # (min_points//2) deletes real transverse arms and collapses SSSV↔LTSV
+        # (min_points//2) deletes real transverse arms and collapses SSSV<->LTSV
         # trees into a single chain (see PESA10758400).
         spur_min = max(2, min(4, int(min_points) // 8))
         if prune_tiny_loops:
@@ -344,9 +334,7 @@ def extract_branch_polylines(
     return polylines
 
 
-# ---------------------------------------------------------------------------
 # RAS-aware SSSV / STRV / LTSV / RTSV scoring
-# ---------------------------------------------------------------------------
 
 
 def _lr_location_fractions(
@@ -411,7 +399,7 @@ def _hemisphere_x_gate(
     if not on_side or frac_side < 0.55:
         gate *= 0.04
     elif frac_mid > 0.70 and depth < 0.5:
-        # Almost entirely midline — not a transverse.
+        # Almost entirely midline: not a transverse.
         gate *= 0.08
     return float(np.clip(gate, 0.0, 1.0))
 
@@ -822,7 +810,7 @@ def assign_venous_polylines(
     min_assign_score: float = _MIN_ASSIGN_SCORE,
     prefer_ras: bool | None = None,
 ) -> dict[str, np.ndarray]:
-    """Greedy SSSV→STRV→LTSV→RTSV assignment from junction-split polylines."""
+    """Greedy SSSV->STRV->LTSV->RTSV assignment from junction-split polylines."""
     if not candidates:
         log.info("venous assign: no candidate chains")
         return {}
@@ -911,7 +899,7 @@ def assign_venous_branches(
     min_assign_score: float = _MIN_ASSIGN_SCORE,
     affine: np.ndarray | None = None,
 ) -> dict[str, np.ndarray]:
-    """Assign junction-split skeleton chains to SSSV/STRV/LTSV/RTSV (0–4 vessels).
+    """Assign junction-split skeleton chains to SSSV/STRV/LTSV/RTSV (0-4 vessels).
 
     Prefers significant bifurcations after tiny-loop/spur pruning, then assigns
     branches greedily in vessel order using RAS direction priors (preferred when
@@ -945,11 +933,11 @@ def assign_venous_branches(
     )
 
 
-# ---- Label id mapping --------------------------------------------------------
+# Label id mapping
 
 
 def venous_name_to_label_id(name: str, name_to_id: dict[str, int] | None = None) -> int:
-    """Map venous vessel name to fixed segmentation label id (31–34)."""
+    """Map venous vessel name to fixed segmentation label id (31-34)."""
     if name_to_id and name in name_to_id:
         return int(name_to_id[name])
     key = name.strip().upper()

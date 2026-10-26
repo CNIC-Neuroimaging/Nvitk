@@ -56,7 +56,7 @@ _EICAB_CONTAINER_PWD = "/tmp/ved_cwd"
 def _metric_scratch_job_dir_expr(root: str) -> str:
     """Shell path expression for this job's node-local scratch (expands at job runtime)."""
     r = (root or _DEFAULT_METRIC_SCRATCH_ROOT).rstrip("/") or _DEFAULT_METRIC_SCRATCH_ROOT
-    # Only JOB_ID — SGE_TASK_ID is unset/“undefined” on non-array jobs here.
+    # Only JOB_ID: SGE_TASK_ID is unset/“undefined” on non-array jobs here.
     return f"{r}/nvitk_eicab_${{JOB_ID:-$$}}"
 
 

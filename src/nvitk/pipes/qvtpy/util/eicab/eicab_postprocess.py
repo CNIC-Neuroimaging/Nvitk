@@ -175,7 +175,7 @@ def postprocess_eicab_labels(
     pretess: bool = True,
 ) -> dict[str, Any]:
     """Post-process eICAB *labels* against the TOF *intensity* (module docstring); *labels* is
-    modified in place. *affine* (voxel → world) gives the voxel size and the superior direction.
+    modified in place. *affine* (voxel -> world) gives the voxel size and the superior direction.
 
     Steps, each switchable: drop *remove_ids*; re-segment every label (*resegment*); extend
     *trunk_ids* to the image floor (*extend*; the basilar into the vertebrals, split off when

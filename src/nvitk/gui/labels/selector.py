@@ -54,7 +54,7 @@ LABEL_SELECTOR_SCROLL_MIN = 80
 
 class _LabelFilterHub(QObject):
     """Announces that a layer's live label filter changed, so every picker bound to
-    that layer — the Labels panel, the Tools picker, a layer-list popup — shows it.
+    that layer (the Labels panel, the Tools picker, a layer-list popup) shows it.
 
     ``names_changed``: a label of the layer was named by hand. ``labels_changed``:
     an edit added or removed labels (deleted, merged, painted a new id).
@@ -94,7 +94,7 @@ def apply_selection_to_layer(selector: "LabelSelectorWidget", viewer: Any) -> No
 def set_layer_visible_ids(
     layer: Any, ids: list[int], viewer: Any, *, present: list[int] | None = None
 ) -> None:
-    """Show only *ids* of *layer* — every id present clears the filter — and tell
+    """Show only *ids* of *layer* (every id present clears the filter), and tell
     every picker bound to it."""
     if present is None:
         present = layer_label_ids(layer)
@@ -141,7 +141,7 @@ def _swatch_stylesheet(rgba: np.ndarray) -> str:
 
 
 class LabelSelectorWidget(QGroupBox):
-    """Select label ids using an optional named vocabulary (eICAB, QVTpy, TS, …)."""
+    """Select label ids using an optional named vocabulary (eICAB, QVTpy, TS, ...)."""
 
     selection_changed = Signal()
 
@@ -350,7 +350,7 @@ class LabelSelectorWidget(QGroupBox):
     def set_schema_key(self, key: str, *, refresh: bool = True) -> None:
         """Select a catalog schema by key (e.g. ``ts:total``, ``eicab``).
 
-        With ``refresh=False`` only the choice changes — for a caller about to
+        With ``refresh=False`` only the choice changes, for a caller about to
         bind a new layer, which would otherwise rebuild the list for the old one
         first.
         """
@@ -578,7 +578,7 @@ class LabelSelectorWidget(QGroupBox):
         self._apply_filter()
         # No selection_changed here: the boxes now show the layer's own filter, so
         # there is nothing to apply. Emitting made every picker re-apply its state
-        # a beat after a rebind — over the top of an edit made meanwhile in another.
+        # a beat after a rebind, over the top of an edit made meanwhile in another.
 
     def filter_text(self) -> str:
         """The current filter text."""
@@ -645,7 +645,7 @@ class LabelSelectorWidget(QGroupBox):
         return sorted(out)
 
     def available_ids(self) -> list[int]:
-        """Label ids actually present in the bound layer, as of the last refresh."""
+        """Label ids present in the bound layer, as of the last refresh."""
         return list(self._layer_ids)
 
     def selected_names(self) -> list[str]:

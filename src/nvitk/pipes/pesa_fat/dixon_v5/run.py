@@ -104,9 +104,7 @@ def _stage_resources(stage: str, *, device: str = "gpu") -> SgeResources:
     )
 
 
-# ---------------------------------------------------------------------------
 # Local execution
-# ---------------------------------------------------------------------------
 
 
 def _run_local(
@@ -166,9 +164,7 @@ def _aggregate_stage3(lay: BatchLayout, subjects: list[str]) -> Path | None:
     return aggregate_stage3_summary(lay, subjects, "dixon-v5")
 
 
-# ---------------------------------------------------------------------------
 # SGE execution
-# ---------------------------------------------------------------------------
 
 
 def _build_python_cmd(
@@ -379,9 +375,7 @@ def _run_sge(
     return all_jids
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 
 
 @click.command("nvitk-pesa-fat-dixon")

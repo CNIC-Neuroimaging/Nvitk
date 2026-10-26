@@ -1,5 +1,5 @@
 """
-Spectral (dual-energy / photon-counting) CT *results* — classification and energy stacks.
+Spectral (dual-energy / photon-counting) CT *results*: classification and energy stacks.
 
 Description
 -----------
@@ -10,12 +10,12 @@ iodine-removed (virtual non-contrast) images, effective atomic number, electron 
 acid and calcium-suppressed images. They convert like any CT series; this module adds what
 makes them usable afterwards:
 
-- :func:`classify_spectral` names the result type, its units and — for a monoenergetic image —
+- :func:`classify_spectral` names the result type, its units and (for a monoenergetic image)
   the energy, so every output carries ``spectral_result`` / ``spectral_energy_kev`` /
   ``spectral_units`` in its metadata and an unambiguous file name;
 - :func:`stack_monoenergetic` turns monoenergetic series of one reconstruction at several
-  energies into one ``X x Y x Z x E`` volume ordered by keV — the spectral counterpart of a
-  cardiac phase stack — so the GUI's curve tool plots the spectral attenuation curve (HU vs keV)
+  energies into one ``X x Y x Z x E`` volume ordered by keV (the spectral counterpart of a
+  cardiac phase stack), so the GUI's curve tool plots the spectral attenuation curve (HU vs keV)
   of any region.
 
 Detection order
@@ -23,7 +23,7 @@ Detection order
 1. The DICOM multi-energy attributes: ``MonoenergeticEnergyEquivalent`` (0018,937C), searched at
    the top level and inside the multi-energy / per-frame sequences, and the multi-energy
    ``ImageType`` values (``VMI``, ``MAT_SPECIFIC``, ``MAT_REMOVED``, ``EFF_ATOMIC_NUM``,
-   ``ELECTRON_DENSITY`` …).
+   ``ELECTRON_DENSITY`` ...).
 2. Otherwise the series description / image comments, with patterns covering the usual vendor
    wording (``MonoE 70keV[HU]``, ``VMI 40 keV``, ``Iodine Density``, ``Iodine no Water``,
    ``Z Effective``, ``Electron Density``, ``VNC`` / ``Virtual Non-Contrast``, ``Uric Acid``,
@@ -31,7 +31,7 @@ Detection order
 
 .. note::
    The description patterns follow common vendor naming but have **not yet been checked
-   against exported Philips spectral-result series** — the ES17774 study ships only the raw
+   against exported Philips spectral-result series**: the ES17774 study ships only the raw
    Spectral Base Images. ``classify_spectral`` records which source it used
    (``spectral_source``) so a misclassification is visible in the sidecar.
 
@@ -51,11 +51,9 @@ from nvitk.core.logger import Logger
 
 log = Logger()
 
-# ---------------------------------------------------------------------------
 # Result catalogue
-# ---------------------------------------------------------------------------
 
-#: result key → (human label, default units, short file-name label)
+#: result key -> (human label, default units, short file-name label)
 SPECTRAL_RESULTS: dict[str, tuple[str, str, str]] = {
     "monoe": ("Virtual monoenergetic", "HU", "monoE"),
     "iodine_density": ("Iodine density", "mg/mL", "iodine"),
@@ -67,7 +65,7 @@ SPECTRAL_RESULTS: dict[str, tuple[str, str, str]] = {
     "calcium_suppressed": ("Calcium suppression", "HU", "CaSupp"),
 }
 
-#: ``70 keV``, ``70keV``, ``70.5 kev`` — the energy token.
+#: ``70 keV``, ``70keV``, ``70.5 kev``: the energy token.
 _KEV = re.compile(r"(?<![\d.])(\d{2,3}(?:\.\d+)?)\s*kev", re.IGNORECASE)
 
 #: Description patterns, most specific first (so "iodine no water" is not "iodine").
@@ -82,7 +80,7 @@ _DESCRIPTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("monoe", re.compile(r"\bmono[\s_-]*e\b|monoe|mono[\s_-]*energ|\bvmi\b|\bmonochromatic\b", re.I)),
 )
 
-#: DICOM multi-energy ``ImageType`` values → result key.
+#: DICOM multi-energy ``ImageType`` values -> result key.
 _IMAGE_TYPE_RESULTS: dict[str, str] = {
     "VMI": "monoe",
     "MAT_REMOVED": "vnc",
@@ -92,9 +90,7 @@ _IMAGE_TYPE_RESULTS: dict[str, str] = {
 }
 
 
-# ---------------------------------------------------------------------------
 # Classification
-# ---------------------------------------------------------------------------
 
 
 def _find_tag(obj: Any, keyword: str, depth: int = 0) -> Any:
@@ -164,7 +160,7 @@ def classify_spectral(ds: Any = None, md: dict[str, Any] | None = None) -> dict[
     sources = [s for s in (ds, md) if s is not None]
     if not sources:
         return None
-    # ---- 1. Standard multi-energy attributes ----------------------------------
+    # 1. Standard multi-energy attributes
     energy = None
     for src in sources:
         val = _find_tag(src, "MonoenergeticEnergyEquivalent")
@@ -184,7 +180,7 @@ def classify_spectral(ds: Any = None, md: dict[str, Any] | None = None) -> dict[
             if hit:
                 result, source = hit, "ImageType"
                 break
-    # ---- 2. Description / comments --------------------------------------------
+    # 2. Description / comments
     text = " ".join(
         _text(src, key) for src in sources for key in ("SeriesDescription", "ImageComments")
     )
@@ -216,7 +212,7 @@ def classify_spectral(ds: Any = None, md: dict[str, Any] | None = None) -> dict[
 
 
 def spectral_file_label(info: dict[str, Any]) -> str:
-    """Short file-name label: ``monoE70keV``, ``iodine``, ``Zeff`` …"""
+    """Short file-name label: ``monoE70keV``, ``iodine``, ``Zeff`` ..."""
     short = SPECTRAL_RESULTS.get(info.get("result", ""), ("", "", info.get("result", "")))[2]
     energy = info.get("energy_kev")
     if info.get("result") == "monoe" and energy:
@@ -239,9 +235,7 @@ def annotate_spectral(md: dict[str, Any], ds: Any = None) -> dict[str, Any]:
     return md
 
 
-# ---------------------------------------------------------------------------
 # Energy stacks
-# ---------------------------------------------------------------------------
 
 
 def _strip_energy(text: Any) -> str:
@@ -266,7 +260,7 @@ def energy_stack_key(md: dict[str, Any], shape: tuple[int, ...], affine: np.ndar
 def find_energy_groups(
     paths: Sequence[str | Path], *, min_levels: int = 2
 ) -> list[list[tuple[float, Path, dict]]]:
-    """Group converted 3D monoenergetic NIfTIs into energy stacks (``[(keV, path, md), …]``)."""
+    """Group converted 3D monoenergetic NIfTIs into energy stacks (``[(keV, path, md), ...]``)."""
     from ._dicom_phases import read_header_metadata
 
     try:
@@ -327,7 +321,7 @@ def stack_monoenergetic(
 
     The fourth axis is energy, ascending; ``spectral_energies_kev`` lists the levels and the
     axis step is recorded in keV (``t_units = "keV"``), so nvitk's time tools treat the volume
-    like a series whose "frames" are energies — the curve tool then draws HU against keV.
+    like a series whose "frames" are energies: the curve tool then draws HU against keV.
 
     Returns the stack files written (or found, with *skip_existing*).
     """

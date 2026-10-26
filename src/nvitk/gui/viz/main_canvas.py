@@ -2,18 +2,18 @@
 
 Three switches act on the main canvas alone:
 
-* **a layer hidden on the canvas only** — ``visible`` stays True, so the layer list,
+* **a layer hidden on the canvas only**: ``visible`` stays True, so the layer list,
   the orthogonal views and the tools still see it (the "Main" column of the views'
   layer table);
-* **resampling into world space** — Napari draws every layer in world space through
+* **resampling into world space**: Napari draws every layer in world space through
   its affine: an oblique or flipped acquisition is turned and placed where it lies in
   the scanner, and a layer on another grid is resampled onto the screen aligned with
   the others. Off, every image and label layer is drawn **as stored, on its own voxel
-  grid**: its voxel size kept, but no rotation, flip, obliquity or offset — the way the
+  grid**: its voxel size kept, but no rotation, flip, obliquity or offset; the way the
   orthogonal views lay a volume out. Layers on the same grid still overlay exactly;
   layers on other grids are shown, not aligned. Meshes, points and shapes stay in
   world space (they are stored there);
-* **the whole canvas** — hidden, the docks (the orthogonal views first) take its
+* **the whole canvas**: hidden, the docks (the orthogonal views first) take its
   place and Napari stops rendering it.
 
 Resampling off is a *display* state. Each overridden layer keeps its real transform
@@ -41,7 +41,7 @@ PREF_CANVAS = "main_canvas"
 
 #: The real transform of a layer drawn on its own grid (see :func:`true_transform`).
 TRUE_ATTR = "_nvitk_true_transform"
-#: The data → world matrix the override gave Napari, to recognise a later outside write.
+#: The data -> world matrix the override gave Napari, to recognise a later outside write.
 SHOWN_ATTR = "_nvitk_native_shown"
 #: The components the override set (an outside write changes some of them, not all).
 SHOWN_PARTS_ATTR = "_nvitk_native_parts"
@@ -49,7 +49,7 @@ SHOWN_PARTS_ATTR = "_nvitk_native_parts"
 _TOL = 1e-6
 
 
-# ── transforms ───────────────────────────────────────────────────────────────
+# transforms
 
 
 def _parts(layer: Any) -> dict[str, np.ndarray]:
@@ -64,7 +64,7 @@ def _parts(layer: Any) -> dict[str, np.ndarray]:
 
 
 def _composite(layer: Any) -> np.ndarray:
-    """*layer*'s full data → world matrix as Napari composes it."""
+    """*layer*'s full data -> world matrix as Napari composes it."""
     return np.asarray(layer._data_to_world.affine_matrix, dtype=float)
 
 
@@ -87,7 +87,7 @@ def _set_parts(layer: Any, parts: dict[str, np.ndarray]) -> None:
 
 def _native_parts(layer: Any, composite: np.ndarray) -> dict[str, np.ndarray]:
     """Scale-only components drawing *layer* on its own voxel grid: each axis's voxel
-    size (the length of its column in the real data → world matrix), nothing else."""
+    size (the length of its column in the real data -> world matrix), nothing else."""
     n = composite.shape[0] - 1
     spacing = np.linalg.norm(composite[:n, :n], axis=0)
     spacing = np.where(spacing > 1e-12, spacing, 1.0)
@@ -103,7 +103,7 @@ def _native_parts(layer: Any, composite: np.ndarray) -> dict[str, np.ndarray]:
 def overridable(layer: Any) -> bool:
     """Whether *layer* is drawn on its own grid when resampling is off.
 
-    Image and Labels layers — the voxel grids — and the orthogonal views' box outlines,
+    Image and Labels layers (the voxel grids), and the orthogonal views' box outlines,
     which are in their volume's voxel coordinates. Meshes, points and shapes are stored
     in world space and stay there (the Mesh panel also moves them through their affine).
     """
@@ -158,7 +158,7 @@ class MainCanvasFilter(QObject):
         if not self._resample:
             self.schedule()
 
-    # ── per-layer visibility ─────────────────────────────────────────────────
+    # per-layer visibility
 
     def is_manually_hidden(self, layer: Any) -> bool:
         return id(layer) in self._manual
@@ -171,7 +171,7 @@ class MainCanvasFilter(QObject):
             self._manual.discard(id(layer))
         self.apply()
 
-    # ── resampling ───────────────────────────────────────────────────────────
+    # resampling
 
     def resample(self) -> bool:
         return self._resample
@@ -188,7 +188,7 @@ class MainCanvasFilter(QObject):
         self.apply()
         try:
             self._viewer.reset_view()
-        except Exception:  # noqa: BLE001 — a view that cannot be reset keeps its camera
+        except Exception:  # noqa: BLE001 (a view that cannot be reset keeps its camera)
             pass
 
     def _native_wanted(self) -> bool:
@@ -223,7 +223,7 @@ class MainCanvasFilter(QObject):
         return True
 
     def _composite_of(self, layer: Any, parts: dict[str, np.ndarray]) -> np.ndarray:
-        """The data → world matrix *parts* give *layer* (computed by setting them briefly)."""
+        """The data -> world matrix *parts* give *layer* (computed by setting them briefly)."""
         if np.allclose(_parts_matrix(layer), _parts_matrix_from(parts), atol=_TOL):
             return _composite(layer)
         saved = _parts(layer)
@@ -273,7 +273,7 @@ class MainCanvasFilter(QObject):
                 pass
         return True
 
-    # ── applying ─────────────────────────────────────────────────────────────
+    # applying
 
     def schedule(self, _event: Any = None) -> None:
         """Re-decide on the next event-loop turn (folds bursts of events)."""
@@ -292,7 +292,7 @@ class MainCanvasFilter(QObject):
                     changed |= self._go_native(layer)
                 elif true_transform(layer) is not None:
                     changed |= self._go_world(layer)
-            except Exception:  # noqa: BLE001 — one odd layer must not stop the others
+            except Exception:  # noqa: BLE001 (one odd layer must not stop the others)
                 continue
             hidden = self.is_manually_hidden(layer)
             if canvas_hidden(layer) == hidden:
@@ -327,7 +327,7 @@ class MainCanvasFilter(QObject):
     def _visuals(self) -> dict[Any, Any] | None:
         try:
             return self._viewer.window._qt_viewer.canvas.layer_to_visual
-        except Exception:  # noqa: BLE001 — headless viewer without a canvas
+        except Exception:  # noqa: BLE001 (headless viewer without a canvas)
             return None
 
     def _on_layers_changed(self, event: Any = None) -> None:
@@ -355,7 +355,7 @@ class MainCanvasFilter(QObject):
                 emitter.connect(self.schedule)
                 self._subs.append((emitter, self.schedule))
 
-    # ── the whole canvas ─────────────────────────────────────────────────────
+    # the whole canvas
 
     def canvas_shown(self) -> bool:
         return self._canvas_shown
@@ -448,7 +448,7 @@ def main_canvas_filter(viewer: Any) -> MainCanvasFilter | None:
 def world_geometry(viewer: Any) -> Iterator[None]:
     """Run a block with every layer in its real (world) placement.
 
-    For code that reads or writes layer transforms directly — tools, orientation
+    For code that reads or writes layer transforms directly: tools, orientation
     changes, scene saving. A no-op when resampling is on or there is no filter.
     """
     canvas = main_canvas_filter(viewer) if viewer is not None else None

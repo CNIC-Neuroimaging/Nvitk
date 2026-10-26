@@ -155,7 +155,7 @@ def _ensure_nifti_path(layer: Any, *, prefix: str) -> Path:
     or a tool output inherits its source's metadata, so a cropped layer used to be
     registered as the whole image it came from. An untouched layer writes the very
     grid of its file, so a transform estimated on it still applies to that file.
-    Uncompressed — it is read once — and removed by :func:`_remove_temp_inputs`.
+    Uncompressed (it is read once), and removed by :func:`_remove_temp_inputs`.
     """
     from nvitk.gui.io.export import layer_to_image as export_image
     from nvitk.io import imsave
@@ -190,7 +190,7 @@ def _bridge_same_label_components(seg: Any, *, max_gap: int = 24) -> Any:
     from scipy import ndimage as ndi
 
     # Force host arrays: scipy.ndimage / MST bridge are CPU-only.
-    # Use stock NumPy — module ``np`` may be a CuPy proxy via ``setup(globals())``.
+    # Use stock NumPy: module ``np`` may be a CuPy proxy via ``setup(globals())``.
     out = numpy.asarray(to_numpy(seg), dtype=numpy.int32).copy()
     labels = [int(x) for x in numpy.unique(out) if int(x) != 0]
     for lab in labels:
@@ -313,7 +313,7 @@ def multilabel_selection(
     Label ids a per-label run should iterate, or ``[]`` when the ordinary binary path applies.
 
     Per-label routing is only *different* from the ordinary path when there is more than one label
-    in play — with a single label the two agree exactly, and taking the plain path there keeps the
+    in play, with a single label the two agree exactly, and taking the plain path there keeps the
     long-standing behaviour of every binary tool byte-identical.
 
     Shared with :mod:`nvitk.gui.sge.submit`, which stages the same decision for the cluster.
@@ -346,12 +346,12 @@ def _run_multilabel(
     Run *tool_id* once per label and recombine, keeping the original ids.
 
     The per-label run is a plain single-label invocation of the same dispatcher, so the operation a
-    label sees here is *exactly* the one it would see if it were the only label selected — there is
+    label sees here is *exactly* the one it would see if it were the only label selected: there is
     no second implementation of any tool to keep in step with the first.
 
     Ordering: earlier ids in *label_ids* win where two results overlap, matching
     :func:`~nvitk.segmentation.labels.apply_per_label`'s ``overlap="first"``. Inputs are disjoint by
-    construction; outputs need not be — a dilation of two adjacent labels overlaps by design.
+    construction; outputs need not be: a dilation of two adjacent labels overlaps by design.
     """
     from nvitk.gui.labels.visibility import label_source_data
 
@@ -384,7 +384,7 @@ def _run_multilabel(
 
 
 def _multilabel_dtype(source: np.ndarray, label_ids: list[int]) -> Any:
-    """Integer dtype for a recombined per-label output — the input's own, else the smallest that fits."""
+    """Integer dtype for a recombined per-label output: the input's own, else the smallest that fits."""
     import numpy as numpy_host  # module ``np`` may be a CuPy proxy via ``setup(globals())``
 
     if numpy_host.issubdtype(source.dtype, numpy_host.integer):
@@ -401,7 +401,7 @@ def prepare_layer_data(
     target_mode: str,
     label_ids: list[int] | None,
 ) -> tuple[np.ndarray, str]:
-    """Reduce layer *data* to the array a tool should actually operate on given *target_mode*
+    """Reduce layer *data* to the array a tool should operate on given *target_mode*
     (``"raw"``, ``"binary_mask"``, ``"label"``, or ``"all_labels"``), returning ``(array, mode_tag)``;
     raises ``ValueError`` for missing label ids or an unknown mode."""
     mode = target_mode.strip().lower()
@@ -439,12 +439,12 @@ def prepare_layer_data(
 
 
 def coerce_tool_output(out: Any) -> np.ndarray:
-    """Napari-safe NumPy output (never implicit CuPy → NumPy conversion)."""
+    """Napari-safe NumPy output (never implicit CuPy -> NumPy conversion)."""
     return napari_array(out)
 
 
 def coerce_label_output(out: Any) -> np.ndarray:
-    """Napari-safe output for a **label map** — keeps the integer dtype the ids live in."""
+    """Napari-safe output for a **label map**: keeps the integer dtype the ids live in."""
     return napari_label_array(out)
 
 
@@ -862,7 +862,7 @@ def _run_gui_tool(
                 )
             )
 
-    # ---- Per-label routing --------------------------------------------------------------------
+    # Per-label routing
     # A multi-label selection on a per-label tool runs the tool once on each label and recombines,
     # so the output carries the same parcellation the input did. Placed here so it is decided before
     # ``prepare_layer_data`` collapses the selection into its binary union.
@@ -877,7 +877,7 @@ def _run_gui_tool(
         #
         # "All labels" deliberately does *not* seed the list from the active
         # layer. A structure the reference has and the prediction missed
-        # entirely would then never appear in the report — the one result you
+        # entirely would then never appear in the report: the one result you
         # most need to see. _run_mask_comparison takes the union of both maps.
         ids = list(label_ids or []) if target_mode == "label" else []
         _run_mask_comparison(tool_id, layer, viewer, data, ids, params=params)
@@ -904,8 +904,8 @@ def _run_gui_tool(
         proc_data = as_backend_array(to_numpy(proc_data))
     img = layer_to_image(layer, proc_data)
 
-    # A geometric transform moves a label map's ids — only the selected ones when labels
-    # are picked — not the binary union the label target modes reduce it to.
+    # A geometric transform moves a label map's ids (only the selected ones when labels
+    # are picked), not the binary union the label target modes reduce it to.
     geo_labels = False
     if spec.geometric:
         from nvitk.gui.labels.visibility import is_label_like_layer
@@ -1788,7 +1788,7 @@ def _run_gui_tool(
     raise NotImplementedError(f"Tool '{tool_id}' is not implemented in the GUI runner.")
 
 
-# ── registration ─────────────────────────────────────────────────────────────
+# registration
 
 
 def _transform_list(params: dict[str, Any]) -> list[Path]:
@@ -1852,7 +1852,7 @@ def _add_volume_file(viewer: Any, path: Path, name: str, *, labels: bool = False
 
 
 def _label_on_moving_grid(layer: Any, moving_path: Path, *, prefix: str) -> Path:
-    """*layer* — a label map in the moving image's space — as a temp NIfTI on that image's grid.
+    """*layer* (a label map in the moving image's space) as a temp NIfTI on that image's grid.
 
     A registration transform is defined on the moving image's own grid (an FSL ``.mat``
     on its voxel grid), so a label map stored on another grid is first resampled onto
@@ -2271,7 +2271,7 @@ def _phase_arrays_from_layers_or_disk(
         from nvitk.gui.core.spatial import layer_source_order
 
         # In the file's axis order (time last), which velocity_mm_s_from_phases
-        # expects — a 3D+t layer is shown time-first, its .data is TXYZ.
+        # expects: a 3D+t layer is shown time-first, its .data is TXYZ.
         def _phase(name: str):
             layer_ = _resolve_layer(viewer, name)
             return as_backend_array(layer_source_order(layer_)).astype(np.float64)
@@ -2491,7 +2491,7 @@ def _run_centerline_to_polyline(
         min_bp = int(raw_min) if raw_min is not None else 0
     except (TypeError, ValueError):
         min_bp = 0
-    # 0 / negative → keep all edges (None semantics).
+    # 0 / negative -> keep all edges (None semantics).
     min_branch_points = None if min_bp <= 0 else min_bp
 
     from nvitk.gui.viz.centerline import mask_is_thin
@@ -3095,7 +3095,7 @@ def _run_totalsegmentator(
     """Run TotalSegmentator on *img* and return the multilabel mask.
 
     Returns the array rather than adding a layer, which is what lets the same code
-    serve the local run and the headless SGE worker — the worker's contract is one
+    serve the local run and the headless SGE worker: the worker's contract is one
     array in, one array out. Always ``--ml``: a single multilabel mask is what the
     label picker, the SGE retrieval and the Labels layer all expect.
     """
@@ -3160,7 +3160,7 @@ def _run_totalsegmentator(
 def _run_skimage_filter(tool_id: str, img: Image, params: dict[str, Any]) -> np.ndarray:
     """Run one of the ``skimage.filters`` wrappers and hand back its array.
 
-    scikit-image is host-only, so every branch runs under ``using("numpy")`` —
+    scikit-image is host-only, so every branch runs under ``using("numpy")``:
     the same contract the Hessian, Jerman and snakes filters follow.
     """
     from nvitk.filters import skimage_filters as skfilters
@@ -3250,7 +3250,7 @@ def _label_schema_for(layer: Any, params: dict[str, Any]) -> str:
     """The label vocabulary to name ids with: the picker's, or a guess from *layer*.
 
     The picker sits on "generic" until someone chooses or guesses, and generic
-    names nothing — so fall back to the same guess its own button makes, rather
+    names nothing, so fall back to the same guess its own button makes, rather
     than reporting every vessel as a bare number.
     """
     key = str(params.get("label_schema") or "").strip()
@@ -3299,7 +3299,7 @@ def _stage_topbrain_channels(
     """Write one harmonised channel per input the model wants; returns the directory.
 
     Each channel is the same volume under a different intensity window, which is
-    what stage 0 produced for training. Only CT is built this way — an MR model
+    what stage 0 produced for training. Only CT is built this way: an MR model
     with several channels would be some other recipe, and windowing TOF by
     Hounsfield units is meaningless.
     """
@@ -3334,7 +3334,7 @@ def _run_topbrain(img: Image, params: dict[str, Any]) -> np.ndarray:
     """Segment *img* with a trained ToPBrain nnU-Net and return the multilabel mask.
 
     Returns the array rather than adding a layer, which is what lets the same code
-    serve the local run and the headless SGE worker — the worker's contract is one
+    serve the local run and the headless SGE worker: the worker's contract is one
     array in, one array out, the same shape TotalSegmentator's branch has.
 
     Roots come from :func:`layout_auto`, which prefers the cluster ones when they
@@ -3803,7 +3803,7 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
             mask_layer = viewer.add_labels(
                 bridged.astype(numpy.int32, copy=False), name=mask_name, opacity=0.45, **same_look, **spatial,
             )
-        except Exception:  # noqa: BLE001 — a colormap Napari will not copy: its default colours
+        except Exception:  # noqa: BLE001 (a colormap Napari will not copy: its default colours)
             mask_layer = viewer.add_labels(
                 bridged.astype(numpy.int32, copy=False), name=mask_name, opacity=0.45, **spatial,
             )
@@ -3940,9 +3940,9 @@ def _run_viz_pet_hotspots(
 def _run_cross_sections_generic(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
     """Cross-sections for any segmentation, without the 4D-flow apparatus.
 
-    The active layer is the mask. Everything the 4D-flow tool insists on — a
+    The active layer is the mask. Everything the 4D-flow tool insists on: a
     complex-difference volume, the AP/RL/FH phase triple, and a qvtpy stage
-    directory to read named branches and venous vocabulary out of — is either
+    directory to read named branches and venous vocabulary out of: is either
     optional here or absent, because none of it exists for a segmentation that
     did not come from that pipeline. What remains is the part that was always
     generic: skeletonise, pick a point, cut the perpendicular plane, measure it.
@@ -4591,7 +4591,7 @@ def _run_mask_image(
     """Keep or remove an image's voxels by a mask's labels (tool ``seg_mask_image``).
 
     The image and the mask are the two layer parameters, either left on “none”
-    for the active layer. The labels: the ids typed, else — with the mask active —
+    for the active layer. The labels: the ids typed, else (with the mask active)
     the picker's, else the ones the mask shows (its live filter), else every one.
     The result is a new image layer placed like the image (or replaces its data),
     optionally cropped to the kept region. Returns the layer written.
@@ -4691,7 +4691,7 @@ def _run_mask_image(
             lo[d] = lo_sp[k]
         out = out[tuple(index)].copy()  # host array: a contiguous copy of the crop
         # The crop moves the origin: the affine (and the file's affine) shift by it,
-        # so it shows — and is saved — where it came from.
+        # so it shows (and is saved), where it came from.
         spatial_kwargs, cropped_meta = crop_placement(image_layer, lo)
         out_metadata = copy_layer_metadata_for_output(cropped_meta)
     elif keep is False and bool(params.get("crop")):
@@ -4735,14 +4735,14 @@ def _run_mask_image(
 
 
 def _label_display(viewer: Any, layer: Any, label_id: int) -> str:
-    """``"3 — Left ICA"`` when the label has a name (given by hand, or the schema's), ``"3"`` when not."""
+    """``"3: Left ICA"`` when the label has a name (given by hand, or the schema's), ``"3"`` when not."""
     try:
         from nvitk.gui.labels.catalog import label_name
 
         name = label_name(layer, int(label_id))
         if name:
             return f"{int(label_id)} — {name}"
-    except Exception:  # noqa: BLE001 — an unnamed label is still a usable row
+    except Exception:  # noqa: BLE001 (an unnamed label is still a usable row)
         pass
     return str(int(label_id))
 
@@ -4865,7 +4865,7 @@ def _notify_results(
             viewer, title, payload, subtitle=subtitle, row_header=row_header, note=note,
             label_layer=label_layer if row_labels else None, row_labels=row_labels,
         )
-    except Exception:  # noqa: BLE001 — a window failure must not lose the numbers
+    except Exception:  # noqa: BLE001 (a window failure must not lose the numbers)
         text = _format_metrics(payload) if isinstance(payload, dict) else str(payload)
     notify(text)
 
@@ -4907,7 +4907,7 @@ def _run_eicab_postprocess(viewer: Any, layer: Any, params: dict[str, Any]) -> N
         meta = dict(pp_layer.metadata or {})
         meta[LABEL_NAMES_KEY] = {int(k): v for k, v in EICAB_ID_TO_NAME.items() if int(k) > 0}
         pp_layer.metadata = meta
-    except Exception:  # noqa: BLE001 — names are cosmetic
+    except Exception:  # noqa: BLE001 (names are cosmetic)
         pass
     ext = (summary.get("extension") or {}).get("labels", {})
     dist = (summary.get("distal_growth") or {}).get("labels", {})

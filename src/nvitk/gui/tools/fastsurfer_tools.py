@@ -1,19 +1,19 @@
 """FastSurfer tools of the Tools panel (category *FastSurfer*).
 
-Each tool becomes a :class:`FastSurferPlan` — the command, and how to describe what it
-produced as an import manifest (:mod:`nvitk.gui.tools.external_io`) — built by
+Each tool becomes a :class:`FastSurferPlan`, the command, and how to describe what it
+produced as an import manifest (:mod:`nvitk.gui.tools.external_io`), built by
 :func:`build_fastsurfer` from a :class:`~nvitk.gui.tools.external_io.ToolInputs`:
 
 * **locally**, the inputs are the viewer's layers, written to the run folder; the
   segmentation tools run as :class:`~nvitk.gui.core.external_jobs.ExternalJob`\\ s (the GUI
-  stays usable — the surface pipeline takes about an hour — with progress and Cancel in
+  stays usable (the surface pipeline takes about an hour) with progress and Cancel in
   the Jobs window) and their results open when they finish;
 * **on the cluster** (*Run SGE*), the inputs are the files staged with the job, and the
   SGE worker runs the same plan headless (:func:`run_fastsurfer_headless`) and sends the
   manifest back, so the results open exactly as a local run's.
 
 Label maps arrive as Labels layers named and coloured from FastSurfer's lookup tables,
-placed by their own affine — on the input's grid with *native image* on (the default),
+placed by their own affine, on the input's grid with *native image* on (the default),
 else on FastSurfer's conformed 1 mm grid; ``.stats`` tables go to the results window.
 The surface and longitudinal tools also need FreeSurfer 7.4.1 and its license.
 """
@@ -131,12 +131,12 @@ def _surface_settings(inputs: ToolInputs) -> tuple[Path | None, Path | None]:
     if remember:
         try:
             external_tools.remember(**remember)
-        except Exception:  # noqa: BLE001 — remembering is a convenience
+        except Exception:  # noqa: BLE001 (remembering is a convenience)
             pass
     return fs_home, lic
 
 
-# ── plans ────────────────────────────────────────────────────────────────────
+# plans
 
 
 @dataclass
@@ -295,7 +295,7 @@ def run_fastsurfer_headless(tool_id: str, inputs: StagedInputs, *, gpu: bool) ->
     return manifest
 
 
-# ── results ──────────────────────────────────────────────────────────────────
+# results
 
 
 def load_subject(viewer: Any, subject_dir: Path, *, keys: tuple[str, ...] | None = None, surfaces: bool = True,
@@ -308,7 +308,7 @@ def load_subject(viewer: Any, subject_dir: Path, *, keys: tuple[str, ...] | None
     return load_manifest(viewer, manifest, subject_dir, prefix=prefix or subject_dir.name)
 
 
-# ── tools ────────────────────────────────────────────────────────────────────
+# tools
 
 
 def run_fastsurfer_tool(tool_id: str, viewer: Any, layer: Any, params: dict[str, Any]) -> None:

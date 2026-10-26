@@ -26,7 +26,7 @@ def sge_backend_is_gpu(backend: str) -> bool:
 
 
 def sge_stage_ngpu(backend: str, *, request_gpu: bool | None = None) -> int:
-    """``qsub -l ngpu=…`` count; ``0`` omits the request (CPU job)."""
+    """``qsub -l ngpu=...`` count; ``0`` omits the request (CPU job)."""
     from nvitk.pipes.qvtpy import config as cfg
 
     if request_gpu is False:

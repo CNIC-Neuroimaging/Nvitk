@@ -8,7 +8,7 @@ the whole cohort. That is enough for a folder somebody assembled by hand, and wr
 published release, which typically ships one image directory holding **both** modalities with
 the modality encoded in the filename, and its masks under a differently-named sibling.
 
-A :class:`CohortLayout` describes such a release once — where the images and masks live
+A :class:`CohortLayout` describes such a release once, where the images and masks live
 relative to the release root, how to read the modality and the subject out of a filename, and
 whether the masks are human annotation. Callers then name the release and its root::
 
@@ -20,7 +20,7 @@ Why the modality has to come per case
 -------------------------------------
 Stage 0 picks its intensity-harmonisation branch from the modality: a Hounsfield window for CTA,
 robust percentiles for TOF. Applying the CT branch to arbitrary-unit MR produces a plausible
-looking volume that is completely wrong, so the modality is never guessed — a layout must be
+looking volume that is completely wrong, so the modality is never guessed: a layout must be
 able to state it for every case, or the cohort needs an explicit one.
 
 Pseudo-labelled releases
@@ -80,7 +80,7 @@ class CohortLayout:
     """Fixed modality for releases that do not encode one per file."""
 
     pseudo_labels: bool = False
-    """The masks are model predictions — see the module docstring."""
+    """The masks are model predictions; see the module docstring."""
 
     def iter_cases(
         self, root: Path, *, only_modality: str | None = None
@@ -91,7 +91,7 @@ class CohortLayout:
         ----------
         only_modality
             Keep just ``"ct"`` or ``"mr"``. A release that mixes modalities is often worth
-            taking one half of — 109 CTA cases against a 25-case real CT cohort closes a much
+            taking one half of: 109 CTA cases against a 25-case real CT cohort closes a much
             bigger gap than 307 more MRA does, and it keeps the pseudo-to-real ratio sane.
 
         Raises

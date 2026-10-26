@@ -1,4 +1,4 @@
-"""qvtpy stage 0 (convert): DICOM → NIfTI conversion and reorganization.
+"""qvtpy stage 0 (convert): DICOM -> NIfTI conversion and reorganization.
 
 **Inputs**
 
@@ -6,10 +6,10 @@
 
 **Outputs**
 
-- ``<nifti_root>/<subject>/4DFlow/{AP,RL,FH}/`` — ``*_m.nii.gz`` / ``*_ph.nii.gz`` + JSON sidecars.
+- ``<nifti_root>/<subject>/4DFlow/{AP,RL,FH}/``: ``*_m.nii.gz`` / ``*_ph.nii.gz`` + JSON sidecars.
 - ``<nifti_root>/<subject>/TOF/TOF.nii.gz``.
 - Optional derived volumes via :func:`nvitk.io.conversors.phase2volume.phase2volume`
-  (``Angiography_3D``, ``ComplexDifference_3D/4D``, …) when ``--compute-phase-derived``.
+  (``Angiography_3D``, ``ComplexDifference_3D/4D``, ...) when ``--compute-phase-derived``.
 """
 
 from __future__ import annotations
@@ -29,9 +29,7 @@ from . import config as cfg
 
 log = Logger()
 
-# ---------------------------------------------------------------------------
 # Constants (expected layout / derivatives)
-# ---------------------------------------------------------------------------
 
 REQUIRED_FLOW_DIRS: tuple[str, ...] = ("AP", "RL", "FH")
 # Required when ``--compute-phase-derived`` is on (default in ``nvitk-qvtpy``).
@@ -49,9 +47,7 @@ DERIVED_FILES: tuple[str, ...] = (
     "VelocityMeanComponents",
 )
 
-# ---------------------------------------------------------------------------
 # DICOM stem classification + NIfTI export
-# ---------------------------------------------------------------------------
 
 
 def _iter_subjects(dicom_root: Path) -> list[str]:
@@ -172,9 +168,7 @@ def _export_nifti_move(src: Path, dst: Path) -> None:
         src.unlink(missing_ok=True)
 
 
-# ---------------------------------------------------------------------------
 # Per-subject convert + reorganize + phase2volume
-# ---------------------------------------------------------------------------
 
 
 def convert_subject(
@@ -183,7 +177,7 @@ def convert_subject(
     *,
     skip_existing: bool = False,
 ) -> None:
-    """Run DICOM→NIfTI conversion (dcm2nii) into a flat subject output folder."""
+    """Run DICOM->NIfTI conversion (dcm2nii) into a flat subject output folder."""
     subject_out_dir.mkdir(parents=True, exist_ok=True)
     if skip_existing and any(_iter_nifti(subject_out_dir)):
         log.info(f"[{subject_dicom_dir.name}] stage0: skipping existing conversion")
@@ -256,9 +250,7 @@ def reorganize_subject(subject_out_dir: Path) -> None:
         log.warning(f"[{subject_out_dir.name}] leaving unclassified JSON at subject root: {js.name}")
 
 
-# ---------------------------------------------------------------------------
 # Stage 0 convert entrypoint
-# ---------------------------------------------------------------------------
 
 
 def run_subject(
@@ -321,9 +313,7 @@ def _iter_subjects_nifti(nifti_root: Path) -> list[str]:
     return sorted(p.name for p in nifti_root.iterdir() if p.is_dir())
 
 
-# ---------------------------------------------------------------------------
 # QC report
-# ---------------------------------------------------------------------------
 
 
 def print_nifti_qc_report(
@@ -340,7 +330,7 @@ def print_nifti_qc_report(
     - ``TOF/TOF.nii*`` is present
 
     When ``check_derived=True``, additionally list per-subject missing optional
-    derived images under ``4DFlow/`` (informational only — derived misses do not
+    derived images under ``4DFlow/`` (informational only: derived misses do not
     flag a subject as incomplete).
 
     Returns a summary dict with ``root``, ``complete``, ``incomplete``,
@@ -432,9 +422,7 @@ def print_nifti_qc_report(
     }
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 
 
 @click.command("qvtpy-stage0")

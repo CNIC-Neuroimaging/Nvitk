@@ -1,13 +1,13 @@
 """
 The FSL suite (FMRIB Software Library) from nvitk: structural (BET, FAST, FIRST, fsl_anat,
-SIENA/X …), registration (FNIRT, MCFLIRT, epi_reg … — FLIRT itself is
+SIENA/X ...), registration (FNIRT, MCFLIRT, epi_reg ...; FLIRT itself is
 :mod:`nvitk.registration.fsl`), diffusion (TOPUP, EDDY, DTIFIT, BEDPOSTX, PROBTRACKX2, TBSS,
 XTRACT), functional (MELODIC, SUSAN, slice timing, FUGUE), ASL perfusion (BASIL:
-:mod:`nvitk.fsl.asl` — oxford_asl, basil, asl_file, asl_calib) and utilities (fslmaths,
-fslstats, cluster …).
+:mod:`nvitk.fsl.asl`; oxford_asl, basil, asl_file, asl_calib) and utilities (fslmaths,
+fslstats, cluster ...).
 
-Every wrapper returns an :class:`~nvitk.fsl.run.FslCommand` — argv, expected outputs, whether
-it is long-running — and :meth:`~nvitk.fsl.run.FslCommand.run` runs it on the FSL installation
+Every wrapper returns an :class:`~nvitk.fsl.run.FslCommand` (argv, expected outputs, whether
+it is long-running), and :meth:`~nvitk.fsl.run.FslCommand.run` runs it on the FSL installation
 :func:`~nvitk.fsl.env.resolve_fsldir` picks (``$FSLDIR``, or nvitk's own core from
 ``nvitk-fsl install``)::
 

@@ -1,7 +1,7 @@
 """XNAT input mode for PESA-Fat (IA_PET_V5).
 
 This module downloads the required DICOM resources from XNAT into the existing
-PESA-Fat DICOM layout so the rest of the pipeline (stage0_convert → stages 1-3)
+PESA-Fat DICOM layout so the rest of the pipeline (stage0_convert -> stages 1-3)
 can run unchanged.
 """
 

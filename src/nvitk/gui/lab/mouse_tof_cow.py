@@ -1,6 +1,6 @@
 """Mouse TOF Circle-of-Willis lab workflow (GUI).
 
-Stage 1: N4 → blood flood from-scratch → label connected components.
+Stage 1: N4 -> blood flood from-scratch -> label connected components.
 Stage 2: Interactively assign CCs to Left ICA / Right ICA / Basilar trees,
 then finalize with a multilabel blood-flood expand.
 """
@@ -84,7 +84,7 @@ def _emit_visibility() -> None:
 
 
 def run_stage1(image: Image | np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """N4 → blood flood from-scratch → label CCs.
+    """N4 -> blood flood from-scratch -> label CCs.
 
     Returns
     -------

@@ -1,5 +1,5 @@
 """
-CViT stage 3b — attention-usage probe: does the trained model actually use its transformer?
+CViT stage 3b: attention-usage probe: does the trained model use its transformer?
 
 Description
 -----------
@@ -23,11 +23,11 @@ Indices (``usage.json``)
 ------------------------
 Per case, on the class-averaged Dice (and per label):
 
-``AR``  attention reliance ``(D_full − D_tokens_off) / D_full``
-``SR``  skip reliance ``(D_full − D_skips_off) / D_full``
-``TR``  transformer reliance ``(D_full − D_transformer_off) / D_full``
-``LR``  long-range gain ``D_full − D_attn_local@R`` (one per radius)
-``PR``  pattern reliance ``D_full − D_attn_uniform``
+``AR``  attention reliance ``(D_full - D_tokens_off) / D_full``
+``SR``  skip reliance ``(D_full - D_skips_off) / D_full``
+``TR``  transformer reliance ``(D_full - D_transformer_off) / D_full``
+``LR``  long-range gain ``D_full - D_attn_local@R`` (one per radius)
+``PR``  pattern reliance ``D_full - D_attn_uniform``
 
 reported as median and inter-quartile range across cases, so one outlier cannot drive them.
 High AR with low LR means attention is used, but only locally; high SR with AR ≈ 0 is the
@@ -75,9 +75,7 @@ log = Logger()
 
 METRICS: tuple[str, ...] = ("dice", "cl_dice", "b0_error", "hd95")
 
-# ---------------------------------------------------------------------------
 # Summary statistics
-# ---------------------------------------------------------------------------
 
 
 def _quantiles(values: Sequence[float]) -> dict[str, float]:
@@ -184,9 +182,7 @@ def plot_layers(summary: dict[str, Any], stats: dict[str, Any], path: Path) -> b
     return True
 
 
-# ---------------------------------------------------------------------------
 # Library entry point
-# ---------------------------------------------------------------------------
 
 
 def run_probe(
@@ -251,9 +247,7 @@ def run_probe(
     return summary
 
 
-# ---------------------------------------------------------------------------
 # SGE + CLI
-# ---------------------------------------------------------------------------
 
 
 def _worker_argv(**o: Any) -> list[str]:

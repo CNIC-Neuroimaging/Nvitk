@@ -44,7 +44,7 @@ def register_cmd(
     device: str,
     verbose: bool,
 ) -> None:
-    """Register MOVING→FIXED using FireANTs (wraps fireantsRegistration)."""
+    """Register MOVING->FIXED using FireANTs (wraps fireantsRegistration)."""
     res = fireants_register(
         fixed_path=fixed_path,
         moving_path=moving_path,

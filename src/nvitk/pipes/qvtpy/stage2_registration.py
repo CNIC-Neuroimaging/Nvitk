@@ -1,4 +1,4 @@
-"""qvtpy stage 2: rigid eICAB TOF (resampled) → 4D-flow reference (FSL FLIRT).
+"""qvtpy stage 2: rigid eICAB TOF (resampled) -> 4D-flow reference (FSL FLIRT).
 
 **Inputs**
 
@@ -6,7 +6,7 @@
 
 **Outputs**
 
-- ``<output>/<subject>/qvtpy/stage2_registration/`` — FLIRT matrix, warped TOF, ``registration_meta.json``.
+- ``<output>/<subject>/qvtpy/stage2_registration/``: FLIRT matrix, warped TOF, ``registration_meta.json``.
 """
 
 from __future__ import annotations
@@ -41,16 +41,12 @@ from nvitk.registration.fsl.flirt import flirt_register_rigid
 
 log = Logger()
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Types
-# ──────────────────────────────────────────────────────────────────────────────
 
 ReferenceKind = Literal["angio", "cd"]
 
 
-# ---------------------------------------------------------------------------
 # Path helpers
-# ---------------------------------------------------------------------------
 
 
 def _default_nvitk_src_dir() -> Path:
@@ -88,9 +84,7 @@ def _done_marker(out_dir: Path) -> Path:
     return out_dir / "registration_meta.json"
 
 
-# ---------------------------------------------------------------------------
 # Stage 2: FLIRT rigid registration
-# ---------------------------------------------------------------------------
 
 
 def run_subject(
@@ -152,9 +146,7 @@ def run_subject(
     return out_dir
 
 
-# ---------------------------------------------------------------------------
 # CLI + SGE submission
-# ---------------------------------------------------------------------------
 
 
 def _subject_sge_spec(

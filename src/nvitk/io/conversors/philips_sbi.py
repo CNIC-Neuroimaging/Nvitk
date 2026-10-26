@@ -21,7 +21,7 @@ reconstruction. Their "pixels" are not an image but a container, read here as fo
 
 The scatter and photoelectric components add up to the conventional image (each is the
 part of the attenuation, in HU + 1000, that one process contributes), so they are the
-two-material basis every spectral result is derived from — see
+two-material basis every spectral result is derived from; see
 :mod:`nvitk.transform.spectral`.
 
 Example::
@@ -46,7 +46,7 @@ from typing import Any, Callable, Sequence
 
 import numpy
 
-#: Component ids → names (the series' ``COMB_SCATT_PE_N_B_U_C``).
+#: Component ids -> names (the series' ``COMB_SCATT_PE_N_B_U_C``).
 COMPONENTS: dict[int, str] = {
     4: "conventional",
     11: "scatter",
@@ -62,9 +62,7 @@ DEFAULT_COMPONENTS = ("conventional", "photo", "scatter")
 _RUN, _ABSOLUTE = 0xA5, 0x5A
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # One stream
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _markers(candidates: numpy.ndarray) -> numpy.ndarray:
@@ -122,9 +120,7 @@ def decode_pmsct_rle(stream: bytes | numpy.ndarray) -> numpy.ndarray:
     return ((running + base) & 0xFFFF).astype(numpy.uint16)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # One slice
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -132,7 +128,7 @@ class SbiSlice:
     """The decoded components of one SBI instance."""
 
     version: int
-    #: Component name → (pixel values as a 2D array (rows, columns), slope, intercept).
+    #: Component name -> (pixel values as a 2D array (rows, columns), slope, intercept).
     components: dict[str, tuple[numpy.ndarray, float, float]]
 
 
@@ -164,9 +160,7 @@ def parse_sbi_payload(payload: bytes, *, wanted: Sequence[str] | None = None) ->
     return SbiSlice(version=version, components=components)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # A series
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -254,7 +248,7 @@ def _series_metadata(first: Any, n_slices: int, version: int, components: Sequen
     }
     try:
         meta["sbi_layout"] = str(first[0x01F7, 0x10CC].value)
-    except Exception:  # noqa: BLE001 — informational
+    except Exception:  # noqa: BLE001 (informational)
         pass
     for key in ("WindowCenter", "WindowWidth"):
         value = first.get(key, None)
@@ -327,7 +321,7 @@ def read_sbi_series(
             values = pixels.astype(numpy.float32) * slope + intercept
             if name in ("photo", "scatter"):
                 # Outside the reconstructed circle (and along its rim) the streams hold 0 or
-                # near it ("no data"): a contribution far below air's is not physical —
+                # near it ("no data"): a contribution far below air's is not physical;
                 # nothing attenuates there.
                 values[values < -1100.0] = -1000.0
             # Rows of the decoded image run along the column direction: X is the column index.
@@ -346,7 +340,7 @@ def read_sbi_series(
     lps[:3, 1] = col_dir * spacing[0]
     lps[:3, 2] = normal * dz
     lps[:3, 3] = positions[0]
-    affine = numpy.diag([-1.0, -1.0, 1.0, 1.0]) @ lps     # DICOM LPS → RAS
+    affine = numpy.diag([-1.0, -1.0, 1.0, 1.0]) @ lps     # DICOM LPS -> RAS
     metadata = _series_metadata(first, n, first_slice.version, names)
     return SbiVolume(components=volumes, affine=affine, metadata=metadata)
 

@@ -1,4 +1,4 @@
-"""Tissue-segmentation DICOM private tags → numpy volumes."""
+"""Tissue-segmentation DICOM private tags -> numpy volumes."""
 
 from __future__ import annotations
 

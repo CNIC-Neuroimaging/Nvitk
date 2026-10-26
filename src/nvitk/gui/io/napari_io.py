@@ -1,4 +1,4 @@
-"""Load images into Napari via :mod:`nvitk.io` (NIfTI, DICOM, TIFF, MHA, ND2, Blosc2, …)."""
+"""Load images into Napari via :mod:`nvitk.io` (NIfTI, DICOM, TIFF, MHA, ND2, Blosc2, ...)."""
 
 from __future__ import annotations
 
@@ -85,7 +85,7 @@ def _resolution_for_axis(md: dict[str, Any], axis_char: str) -> float | None:
 
 
 def _napari_scale(img: Image, ndim: int) -> tuple[float, ...] | None:
-    """Per-array-axis scale aligned with ``img.axes`` (e.g. XYZT → x,y,z,t)."""
+    """Per-array-axis scale aligned with ``img.axes`` (e.g. XYZT -> x,y,z,t)."""
     axes = (img.axes or default_nifti_axes(ndim)).upper()
     if len(axes) != ndim:
         axes = default_nifti_axes(ndim)
@@ -118,7 +118,7 @@ def _nvitk_layer_metadata(
     *,
     affine_source: np.ndarray | None,
 ) -> dict[str, Any]:
-    """Napari ``metadata`` dict (nested nvitk fields only — no invalid layer kwargs)."""
+    """Napari ``metadata`` dict (nested nvitk fields only: no invalid layer kwargs)."""
     nvitk_md = dict(img.metadata) if img.metadata else {}
     nvitk_md["source"] = str(path)
     try:
@@ -283,7 +283,7 @@ def _prepare_layer_tuple(img: Image, path: Path) -> LayerData:
 
 def _dicom_series_name(img: Image) -> str | None:
     """A layer name for a DICOM series: its description, else its protocol, else
-    its number — with the part a mixed series was split into (``COR``, ``SAG``,
+    its number, with the part a mixed series was split into (``COR``, ``SAG``,
     ``512x512``) in parentheses. ``None`` when *img* carries no series tags."""
     md = img.metadata or {}
 
@@ -309,7 +309,7 @@ def _name_image(img: Image, path: Path, suffix: str = "") -> None:
 
     A DICOM series (folder or file) is named by its description rather than by the
     folder it was read from: a study folder holds a dozen series, and the folder name made them
-    all ``studyid_<uid>``, ``[1]``, ``[2]``… An explicit name the reader chose is
+    all ``studyid_<uid>``, ``[1]``, ``[2]``... An explicit name the reader chose is
     kept; the folder/file name is only the fallback.
     """
     default = {path.name, path.stem, f"{path.stem}{suffix}"}
@@ -713,7 +713,7 @@ def install_nvitk_io(viewer: Any) -> None:
         )
 
     def _open_folder_dialog(choose_plugin: bool = False) -> None:
-        """File ▸ Open Folder… takes several folders at once (Ctrl / Shift-click):
+        """File ▸ Open Folder... takes several folders at once (Ctrl / Shift-click):
         several DICOM series folders, say, loaded in one go."""
         from nvitk.gui.core.dialogs import choose_directories
 
@@ -753,12 +753,12 @@ def install_nvitk_io(viewer: Any) -> None:
 
 
 def _route_dropped_dicom(viewer: Any, parent: Any, paths: list[Path]) -> list[Path]:
-    """DICOM among dropped *paths*: loaded, or opened in the DICOM browser — as the user
+    """DICOM among dropped *paths*: loaded, or opened in the DICOM browser, as the user
     answers the small prompt (or as remembered). Returns what is left to load."""
     try:
         from nvitk.gui.panels.dicom_browser import ask_dicom_drop, drop_action, open_in_dicom_browser
         from nvitk.io.dicom_index import contains_dicom
-    except Exception:  # noqa: BLE001 — without the browser, everything just loads
+    except Exception:  # noqa: BLE001 (without the browser, everything just loads)
         return paths
     if getattr(viewer, "_nvitk_dicom_browser", None) is None:
         return paths
@@ -779,9 +779,9 @@ def _route_dropped_dicom(viewer: Any, parent: Any, paths: list[Path]) -> list[Pa
 
 
 def _add_open_folders_action(viewer: Any, opener: Callable[[], None]) -> None:
-    """*File ▸ Open Folders… (several)*, right after Napari's single-folder entry.
+    """*File ▸ Open Folders... (several)*, right after Napari's single-folder entry.
 
-    Napari's own *Open Folder…* is an app-model command bound to the class method, so
+    Napari's own *Open Folder...* is an app-model command bound to the class method, so
     it keeps its one-folder dialog; this sits beside it.
     """
     try:

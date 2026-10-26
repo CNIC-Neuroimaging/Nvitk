@@ -1,4 +1,4 @@
-"""Long-form image measurements → Statmodels analysis frames.
+"""Long-form image measurements -> Statmodels analysis frames.
 
 Uses ``DataRepo.image(..., wide=False)`` so region/variable columns stay
 explicit (avoids single-variable wide pivots that drop ``_{variable}`` suffixes).
@@ -40,7 +40,7 @@ KIND_MODALITY: dict[str, str] = {
 QVTPY_VESSEL_FEATURES: tuple[str, ...] = ("flow_mean", "pi", "ri", "psf", "flow_tseries")
 
 #: Variables stored one row per cardiac frame rather than one row per vessel. They load as a *set*
-#: of columns — ``flow_tseries``, ``flow_tseries_f1``, … — because the waveform is the measurement;
+#: of columns (``flow_tseries``, ``flow_tseries_f1``, ...), because the waveform is the measurement;
 #: averaging it back to a scalar just recomputes ``flow_mean``.
 TIMESERIES_FEATURES: frozenset[str] = frozenset({"flow_tseries"})
 
@@ -61,7 +61,7 @@ ASL_FEATURES: tuple[str, ...] = ("mean_cbf", "cov_cbf", "att_mean", "att_cov")
 #: the subcortical intensity statistics. ``t1_cortical_volume`` / ``t1_subcortical_volume`` are the
 #: pre-``import_t1_regions`` variables, kept last so saved configs that name them still resolve.
 T1_FEATURES: tuple[str, ...] = (
-    # ---- cortical parcels (Desikan-Killiany, lateralized) ---------------------
+    # cortical parcels (Desikan-Killiany, lateralized)
     "t1_gray_volume",
     "t1_thickness_avg",
     "t1_thickness_std",
@@ -71,7 +71,7 @@ T1_FEATURES: tuple[str, ...] = (
     "t1_gaussian_curvature",
     "t1_folding_index",
     "t1_curvature_index",
-    # ---- subcortical structures and whole-brain scalars -----------------------
+    # subcortical structures and whole-brain scalars
     # eTIV is *not* a variable of its own: it is one region of ``t1_volume_mm3``, alongside
     # BrainSegVol, CortexVol and the rest. Reach it with the measurement's region filter
     # (``regions=("etiv",)``) rather than by publishing a parallel variable that would have to be
@@ -84,7 +84,7 @@ T1_FEATURES: tuple[str, ...] = (
     "t1_intensity_max",
     "t1_intensity_range",
     "t1_index_unitless",
-    # ---- superseded ------------------------------------------------------------
+    # superseded
     "t1_cortical_volume",
     "t1_subcortical_volume",
 )
@@ -168,7 +168,7 @@ def grouping_choices_for(kind: str, variable_id: str) -> list[tuple[str, str]]:
     family = feature_family(kind, variable_id)
     kind = str(kind).strip().lower()
     # ``territory`` is offered on every vessel-level modality because it is the only grouping whose
-    # keys are shared with ASL — it is what makes a joint 4D-flow + perfusion frame possible.
+    # keys are shared with ASL: it is what makes a joint 4D-flow + perfusion frame possible.
     if kind == "qvtpy" and family == "tree":
         return [
             ("By tree (L_ICA / R_ICA / Basilar)", "tree"),
@@ -189,8 +189,8 @@ def grouping_choices_for(kind: str, variable_id: str) -> list[tuple[str, str]]:
         ]
     if kind == "asl":
         # ``lobe`` is offered for the Desikan atlas and is a real reduction in multiplicity
-        # (68 parcels → 8 lobes). The pipeline publishes its own lobe rows, so this grouping uses
-        # those rather than re-averaging parcels — see ``_select_region_granularity``.
+        # (68 parcels -> 8 lobes). The pipeline publishes its own lobe rows, so this grouping uses
+        # those rather than re-averaging parcels; see ``_select_region_granularity``.
         return [
             ("Atlas region", "region"),
             ("By lobe (Desikan; uses the published lobe rows)", "lobe"),
@@ -199,8 +199,8 @@ def grouping_choices_for(kind: str, variable_id: str) -> list[tuple[str, str]]:
         ]
     if kind == "t1":
         # Cortical parcels are lateralized and subcortical structures mostly are too, so both a
-        # left/right pairing and a lobe pooling are meaningful — and each is a real reduction in
-        # multiplicity: 68 parcels → 34 pairs → 6 lobes.
+        # left/right pairing and a lobe pooling are meaningful, and each is a real reduction in
+        # multiplicity: 68 parcels -> 34 pairs -> 6 lobes.
         return [
             ("Region (parcel / structure)", "region"),
             ("By hemisphere (avg L/R pairs)", "hemisphere"),
@@ -212,7 +212,7 @@ def grouping_choices_for(kind: str, variable_id: str) -> list[tuple[str, str]]:
 
 # Canonical spelling of every hemisphere key. Applied last in
 # :func:`region_to_hemisphere_pair_key` so the same vessel reaches the same key whichever way it was
-# published — ``LMCA``, ``LEFT_MCA`` and ASL's ``left_mca_8`` must all become ``MCA``, or a joint
+# published: ``LMCA``, ``LEFT_MCA`` and ASL's ``left_mca_8`` must all become ``MCA``, or a joint
 # 4D-flow + perfusion frame silently fails to align.
 _HEMISPHERE_CANONICAL: dict[str, str] = {
     "mca": "MCA",
@@ -248,7 +248,7 @@ def _canonical_hemisphere_key(token: str) -> str:
 
 def region_to_hemisphere_pair_key(region_id: str) -> str:
     """
-    Collapse L/R counterparts to one key (ICA, MCA, …); midline stays itself.
+    Collapse L/R counterparts to one key (ICA, MCA, ...); midline stays itself.
 
     The result is canonicalized through :data:`_HEMISPHERE_CANONICAL`, so spellings that differ only
     in separator or case land on the same key. That is what lets a 4D-flow measurement grouped by
@@ -292,7 +292,7 @@ def available_region_ids(
     Published ``region_id``s for one measurement, for populating a region picker.
 
     Reads ``image_measurements`` directly rather than through :meth:`DataRepo.image` so the list is
-    what the table actually holds — a catalog default pipeline or a cohort restriction would
+    what the table holds: a catalog default pipeline or a cohort restriction would
     otherwise hide regions the user can legitimately select. Never raises: an unreadable table just
     yields an empty list, and the picker falls back to free text.
     """
@@ -355,8 +355,8 @@ def asl_region_id_to_hemisphere(region_id: str) -> str:
 
     ASL vascular parcels are published per side and per smoothing kernel (``left_mca_8``,
     ``right_pca_8``, ``watershed_8``). Stripping the kernel suffix and the side prefix yields
-    ``MCA`` / ``ACA`` / ``PCA`` / ``ICA`` / ``Basilar`` — exactly the keys
-    :func:`region_to_hemisphere_pair_key` gives for ``LMCA`` / ``RMCA`` / …, so the two modalities
+    ``MCA`` / ``ACA`` / ``PCA`` / ``ICA`` / ``Basilar``: exactly the keys
+    :func:`region_to_hemisphere_pair_key` gives for ``LMCA`` / ``RMCA`` / ..., so the two modalities
     can be joined vessel by vessel rather than only at the coarse territory level.
 
     Watershed parcels have no 4D-flow counterpart and keep their own ``Watershed`` key; Desikan
@@ -444,11 +444,11 @@ def clinical_measurement_variable_ids(repo: Any) -> set[str]:
 
 def subject_attribute_entries(repo: Any) -> list[dict[str, Any]]:
     """
-    Subject-level covariates (``sex``, …) available on the ``subjects`` table, in the same
+    Subject-level covariates (``sex``, ...) available on the ``subjects`` table, in the same
     ``{"variable_id", "label", "domain"}`` shape as :meth:`Catalog.variable_entries`.
 
     Bookkeeping / identifier / timestamp columns are excluded, as are names already available as
-    clinical measurements (catalog entry **or** rows in ``clinical_measurements``) — the measurement
+    clinical measurements (catalog entry **or** rows in ``clinical_measurements``): the measurement
     table always wins over the entity column.
     """
     try:
@@ -493,13 +493,13 @@ def subject_image_annotation_entries(repo: Any) -> list[dict[str, Any]]:
     """
     Image variables holding **one value per subject** rather than one per vessel.
 
-    These are the manual QC annotations — ``cow_config`` / ``venous_config``, see
-    :mod:`nvitk.db.qvtpy_anatomy` — which describe the subject's anatomy as a whole and so carry no
+    These are the manual QC annotations (``cow_config`` / ``venous_config``, see
+    :mod:`nvitk.db.qvtpy_anatomy`), which describe the subject's anatomy as a whole and so carry no
     ``region_id``. They cannot be measurements in an analysis frame (there is no region to join on),
     but they are exactly what a model wants as a subject-level factor, so they are offered
     alongside the clinical covariates.
 
-    Recognized by ``scope == "subject"`` on the catalog entry, plus the known annotation ids —
+    Recognized by ``scope == "subject"`` on the catalog entry, plus the known annotation ids:
     a dataset whose catalog was written by an older run may carry the rows without the flag.
     """
     try:
@@ -608,9 +608,7 @@ def _subject_attribute_frame(repo: Any, names: list[str]) -> pd.DataFrame:
     return frame[keep].drop_duplicates(subset=["subject_uid"], keep="first")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Composite territory labels
-# ──────────────────────────────────────────────────────────────────────────────
 COMPOSITE_DEFINITIONS: dict[str, dict[str, Any]] = {
     "TCBF": {
         "label": "TCBF — total cerebral blood flow (RICA + LICA + BASILAR)",
@@ -654,7 +652,7 @@ def _composite_rows(long: pd.DataFrame, name: str, *, value_column: str = "value
     Returns
     -------
     pandas.DataFrame
-        Long-form rows (``subject_uid``, ``region_id``, ``variable_id``, ``value``, …) carrying the
+        Long-form rows (``subject_uid``, ``region_id``, ``variable_id``, ``value``, ...) carrying the
         composite as their ``region_id``, or an empty frame when no subject has every component.
     """
     definition = COMPOSITE_DEFINITIONS[name]
@@ -706,10 +704,8 @@ def _composite_rows(long: pd.DataFrame, name: str, *, value_column: str = "value
     return rows
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Analysis-frame building blocks
-# ──────────────────────────────────────────────────────────────────────────────
-#: Which published granularity each grouping wants — see :func:`_select_region_granularity`.
+#: Which published granularity each grouping wants; see :func:`_select_region_granularity`.
 _GROUPING_GRANULARITY: dict[str, str] = {
     "region": "parcel",
     "vessel": "parcel",
@@ -736,21 +732,21 @@ def _select_region_granularity(
     ``ctx-lh-precuneus`` (a parcel), ``ctx-Left-Parietal-Lobe`` (the lobe that contains it),
     ``ctx-left-hemisphere`` and ``ctx-whole-brain``. Loading all of them as levels of one factor
     means a model compares a parcel against a sum it is part of, and the brain map paints a lobe on
-    top of the parcels it pools — both wrong, and neither announces itself.
+    top of the parcels it pools: both wrong, and neither announces itself.
 
     So the grouping decides the granularity:
 
     ``region`` / ``vessel``
-        parcels only — the finest level, and what "atlas region" means.
+        parcels only: the finest level, and what "atlas region" means.
     ``lobe`` / ``hemisphere``
         the **published** aggregate when the pipeline provides one, because that is the pipeline's
         own volume-weighted summary; parcels re-averaged unweighted are a different (worse) number.
         Falls back to deriving from parcels when no aggregate row exists.
     ``territory``
-        parcels, because a territory is the mean of the parcels inside it — pooling the parcels
+        parcels, because a territory is the mean of the parcels inside it: pooling the parcels
         *and* the whole-brain summary that contains them weights that summary as one more parcel.
 
-    An explicit ``regions=`` filter always wins — naming an id is an unambiguous request for it.
+    An explicit ``regions=`` filter always wins: naming an id is an unambiguous request for it.
     """
     from nvitk.stats.region_groups import region_granularity
 
@@ -798,7 +794,7 @@ def build_feature_territory_frame(
     rows for a single ``variable_id``, assigns the ``territory`` group key implied by *grouping*, and
     aggregates within each ``(subject_uid, territory)`` cell. Keeping it separate is what lets
     several measurements from *different* pipelines be joined on a shared key before any covariate
-    merge happens — attaching covariates per measurement would compound their inner merge.
+    merge happens: attaching covariates per measurement would compound their inner merge.
 
     Parameters
     ----------
@@ -824,7 +820,7 @@ def build_feature_territory_frame(
         importers.
 
         The filter runs *after* composites are built, so naming ``TCBF`` here keeps the composite
-        while dropping the vessels it was summed from — which is the point of asking for it. It is
+        while dropping the vessels it was summed from. It is
         what makes a whole-head scalar usable: ``t1_volume_mm3`` publishes 61 regions, of which
         ``etiv`` is one, and a model wanting head size wants that row and no other.
 
@@ -894,7 +890,7 @@ def build_feature_territory_frame(
     long["region_id"] = long["region_id"].astype(str)
     source_region_ids = sorted(long["region_id"].unique())
 
-    # ---- Composite labels are summed over raw vessels, so they must be built before grouping ----
+    # Composite labels are summed over raw vessels, so they must be built before grouping
     for name in composites:
         if name not in COMPOSITE_DEFINITIONS:
             log.warning("Unknown composite territory %r — skipped.", name)
@@ -903,7 +899,7 @@ def build_feature_territory_frame(
         if not extra.empty:
             long = pd.concat([long, extra], ignore_index=True)
 
-    # ---- Region pre-filter, after composites so a composite label can be selected ---------------
+    # Region pre-filter, after composites so a composite label can be selected
     if regions:
         wanted = {_region_match_key(r) for r in regions if str(r).strip()}
         keep = long["region_id"].map(lambda r: _region_match_key(r) in wanted)
@@ -932,7 +928,7 @@ def build_feature_territory_frame(
             variable_id, len(matched), len(source_region_ids), ", ".join(matched[:8]),
         )
 
-    # ---- Granularity: never mix a parcel with a sum that already contains it --------------------
+    # Granularity: never mix a parcel with a sum that already contains it
     long = _select_region_granularity(
         long, grouping=grouping, variable_id=variable_id, explicit_regions=bool(regions)
     )
@@ -943,7 +939,7 @@ def build_feature_territory_frame(
         )
         for rid in long["region_id"].astype(str)
     ]
-    # A composite is its own label whatever the grouping — it is already an aggregate, so collapsing
+    # A composite is its own label whatever the grouping: it is already an aggregate, so collapsing
     # it into a territory (or leaving it "Unmapped") would defeat the point of asking for it.
     composite_names = {n for n in composites if n in COMPOSITE_DEFINITIONS}
     if composite_names:
@@ -996,7 +992,7 @@ def collapse_visits_to_subject(
     ``clinical_measurements`` pivots on ``(subject_uid, visit_id)``, so a cohort whose variables were
     collected at different visits gets one row per visit with the *other* visits' variables blank.
     Anything downstream that assumes one row per subject then keeps a single visit and silently
-    discards the rest — which is how requesting carotid plaque (visit 3) alongside the rest of the
+    discards the rest, which is how requesting carotid plaque (visit 3) alongside the rest of the
     clinical panel (visit 4) can null out the panel.
 
     Each column is filled from the first non-missing value in visit order, so variables measured at
@@ -1008,9 +1004,9 @@ def collapse_visits_to_subject(
         Which visit wins for a variable recorded at more than one. ``latest`` takes the most recent.
     visit_overrides : mapping, optional
         ``{column: visit_id}`` pinning a named column to one visit, whatever *policy* says. This is
-        what makes "plaque volume as measured at visit 3" a different model from "…at visit 4"
+        what makes "plaque volume as measured at visit 3" a different model from "...at visit 4"
         rather than an accident of which visit happens to be last. A pinned column is **missing**
-        for a subject with no value at that visit — falling back to another visit would silently
+        for a subject with no value at that visit: falling back to another visit would silently
         mix the two, which is the thing being pinned against.
 
     Returns
@@ -1090,15 +1086,15 @@ def resolve_covariate_frame(
     visit_series : sequence of str, optional
         Clinical / cognitive variables to load at **every** visit rather than collapsed: each
         becomes a visit family ``<variable>_v<visit>`` (see :mod:`nvitk.stats.visit_series`),
-        from which longitudinal derivatives — change, AUC, slope… — are computed downstream.
+        from which longitudinal derivatives (change, AUC, slope...) are computed downstream.
 
     Returns
     -------
     (covariates, present)
         *covariates* is one row per ``subject_uid`` (outer-merged across sources, duplicated columns
-        dropped from the right frame); *present* lists the requested names that actually resolved.
+        dropped from the right frame); *present* lists the requested names that resolved.
         ``covariates.attrs["visit_provenance"]`` maps each column to the visits it came from.
-        A source that raises is skipped silently — a missing cognitive table must not block a model
+        A source that raises is skipped silently: a missing cognitive table must not block a model
         that only needs clinical covariates.
     """
     clinical_vars = list(clinical_vars or [])
@@ -1113,7 +1109,7 @@ def resolve_covariate_frame(
     # Covariates. Prefer ``clinical_measurements`` whenever the requested name has rows there
     # (covers a stale in-memory catalog after ``import_sex.py``). Only fall back to the
     # ``subjects`` entity table for names that exist solely as subject attributes, and to
-    # ``image_measurements`` for the subject-level manual annotations (``cow_config``, …).
+    # ``image_measurements`` for the subject-level manual annotations (``cow_config``, ...).
     clinical_present = clinical_measurement_variable_ids(repo)
     annotation_names = set(subject_image_annotation_columns(repo)) - clinical_present
     annotation_vars = [v for v in clinical_vars if v in annotation_names]
@@ -1167,7 +1163,7 @@ def resolve_covariate_frame(
     )
     present = [c for c in covariate_vars if c in covariates.columns] if not covariates.empty else []
 
-    # ---- visit families: one column per visit for the "all visits" variables ----
+    # visit families: one column per visit for the "all visits" variables
     series_columns: list[str] = []
     if series_clinical or series_cognitive:
         from nvitk.stats.visit_series import pivot_visits
@@ -1216,16 +1212,16 @@ def finalize_analysis_frame(
 
     In order: ``group_key`` (a copy of ``territory``, used as the default MixedLM grouping), the
     friendly outcome aliases the default formulas reference (``flow`` for ``flow_mean``, and the
-    inverse of :data:`FEATURE_ALIASES`), ``patient_id``, the ``hematocrit`` → ``Hematocrit`` rename,
+    inverse of :data:`FEATURE_ALIASES`), ``patient_id``, the ``hematocrit`` -> ``Hematocrit`` rename,
     numeric coercion of catalog-numeric covariates, and the mean-centered ``age_c``.
 
     Parameters
     ----------
     primary_variable_id : str, optional
-        Measurement to alias. With several measurements loaded, only the first one gets aliases —
+        Measurement to alias. With several measurements loaded, only the first one gets aliases:
         the aliases exist for the legacy single-feature default formulas.
     """
-    # A subject-grain frame has no territory column — each region became its own variable. There is
+    # A subject-grain frame has no territory column: each region became its own variable. There is
     # then exactly one group, and saying so keeps every downstream consumer (plot facets, mixed-model
     # grouping defaults, summaries) working off one column name instead of branching on the grain.
     if "territory" in wide.columns:
@@ -1250,7 +1246,7 @@ def finalize_analysis_frame(
 
     # Belt-and-suspenders: numeric clinical/cognitive covariates can arrive as object dtype when the
     # wide pivot mixed them with text variables. Coerce them here so the preview table and formulas
-    # see floats (Patsy otherwise expands Hematocrit into Hematocrit[T.36.0], …).
+    # see floats (Patsy otherwise expands Hematocrit into Hematocrit[T.36.0], ...).
     try:
         numeric_ids = {
             str(e.get("variable_id"))
@@ -1276,9 +1272,7 @@ def finalize_analysis_frame(
     return wide
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Measurement specs and multi-measurement frames
-# ──────────────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class MeasurementSpec:
     """
@@ -1286,8 +1280,8 @@ class MeasurementSpec:
 
     A spec is self-contained: it names its own pipeline kind, pipeline, feature, atlas and grouping,
     so measurements from different modalities can be combined as long as their *grouping* produces
-    commensurate ``territory`` keys (e.g. qvtpy ``hemisphere`` → ``MCA``/``ACA``/``PCA`` against ASL
-    ``territory`` → the same vascular-territory labels).
+    commensurate ``territory`` keys (e.g. qvtpy ``hemisphere`` -> ``MCA``/``ACA``/``PCA`` against ASL
+    ``territory`` -> the same vascular-territory labels).
 
     Parameters
     ----------
@@ -1315,7 +1309,7 @@ class MeasurementSpec:
         return str(self.alias or resolve_feature_id(self.feature))
 
     def label(self) -> str:
-        """One-line description for list widgets, e.g. ``"qvtpy · latest · pi · hemisphere → pi"``."""
+        """One-line description for list widgets, e.g. ``"qvtpy · latest · pi · hemisphere -> pi"``."""
         parts = [self.pipeline_kind, self.pipeline, self.feature, self.grouping]
         if self.atlas:
             parts.append(self.atlas)
@@ -1377,7 +1371,7 @@ def _join_on_subject(
     Combine measurements on ``subject_uid`` alone, spreading each one's territories into columns.
 
     The territory column is dropped rather than kept, because after this join there is no single
-    territory a row belongs to — that is the point of the grain. Anything downstream that wants to
+    territory a row belongs to at this grain. Anything downstream that wants to
     group by region works off the ``@territory`` suffix instead.
     """
     wide: pd.DataFrame | None = None
@@ -1423,7 +1417,7 @@ def subject_wide_frame(
     Spread one measurement's territories across columns, leaving one row per subject.
 
     Turns the long ``(subject, territory, value)`` shape into ``subject`` plus one column per
-    territory, named ``value__territory`` — ``flow_mean__LICA``, ``mean_cbf__left_mca_8``. A
+    territory, named ``value__territory``: ``flow_mean__LICA``, ``mean_cbf__left_mca_8``. A
     measurement with a single territory keeps its plain name, since ``mean_cbf__ctx_whole_brain``
     carries no more information than ``mean_cbf`` when that is the only one there is.
 
@@ -1434,8 +1428,8 @@ def subject_wide_frame(
     This is what makes cross-modality models possible. Territories are only comparable *within* a
     parcellation: a 4D-flow vessel, an ASL vascular territory and a FreeSurfer parcel name different
     kinds of thing, so joining them on a shared territory key is not a constraint to relax but a
-    question with no answer. Joining on the subject instead asks something that does have one —
-    "does this subject's whole-brain perfusion track their carotid flow" — and puts both on one row.
+    question with no answer. Joining on the subject instead asks something that does have one (
+    "does this subject's whole-brain perfusion track their carotid flow"), and puts both on one row.
 
     Returns
     -------
@@ -1445,7 +1439,7 @@ def subject_wide_frame(
     if frame.empty or column not in frame.columns:
         return pd.DataFrame()
     if region_column not in frame.columns:
-        # Already one row per subject — nothing to spread.
+        # Already one row per subject: nothing to spread.
         out = frame.set_index("subject_uid")[[column]]
         out.attrs["value_columns"] = [column]
         return out
@@ -1464,7 +1458,7 @@ def subject_wide_frame(
 
 #: Columns of an analysis frame that hold the *same* region label under different names.
 #: :func:`finalize_analysis_frame` copies ``territory`` into ``group_key`` so downstream consumers
-#: have one name to rely on, which means a frame carries the region twice — and a formula may name
+#: have one name to rely on, which means a frame carries the region twice, and a formula may name
 #: either. Anything that changes one of them (a reference level, a recode) has to change all of
 #: them, or the model silently uses the untouched copy.
 REGION_ALIAS_COLUMNS: tuple[str, ...] = ("territory", "group_key", "region_id")
@@ -1517,20 +1511,20 @@ def melt_subject_frame(
     Melt one measurement's ``value__region`` columns of a subject-grain frame back to long.
 
     This is the shape a model needs when the *region* is a term rather than a set of separate
-    variables. A frame joined on the subject can hold measurements from unrelated parcellations —
-    a 4D-flow vessel beside a whole-head eTIV — but ``flow_mean ~ psqeduca * territory`` cannot be
+    variables. A frame joined on the subject can hold measurements from unrelated parcellations (
+    a 4D-flow vessel beside a whole-head eTIV), but ``flow_mean ~ psqeduca * territory`` cannot be
     written against it, because there is no territory column to interact with. Melting one family
     restores that column while leaving every *other* column repeated down the rows, so the eTIV and
     the covariates ride along and stay usable as predictors.
 
     Only the named family moves. To melt several families together, use
-    :func:`melt_subject_families` — regions are aligned on ``(subject, territory)``, with missing
+    :func:`melt_subject_families`: regions are aligned on ``(subject, territory)``, with missing
     values where a family lacks a region column.
 
     Parameters
     ----------
     family : str
-        Measurement prefix, e.g. ``flow_mean`` for ``flow_mean__LICA`` … ``flow_mean__TCBF``.
+        Measurement prefix, e.g. ``flow_mean`` for ``flow_mean__LICA`` ... ``flow_mean__TCBF``.
     region_column : str
         Name for the recovered region column.
 
@@ -1543,7 +1537,7 @@ def melt_subject_frame(
     Raises
     ------
     ValueError
-        When no column carries the ``family__`` prefix — melting would otherwise silently produce
+        When no column carries the ``family__`` prefix: melting would otherwise silently produce
         an empty frame.
     """
     prefix = f"{family}__"
@@ -1604,7 +1598,7 @@ def melt_subject_families(
     Parameters
     ----------
     families : sequence of str
-        Measurement prefixes, e.g. ``("pi", "flow_mean")`` for ``pi__LICA``, ``flow_mean__LICA``, …
+        Measurement prefixes, e.g. ``("pi", "flow_mean")`` for ``pi__LICA``, ``flow_mean__LICA``, ...
 
     See Also
     --------
@@ -1691,12 +1685,12 @@ def _suggest_compatible_groupings(
     second_regions: Sequence[str],
 ) -> str:
     """
-    Name a grouping combination that would actually make two measurements joinable.
+    Name a grouping combination that would make two measurements joinable.
 
     Rather than guessing, this replays :func:`assign_group_key` over both measurements' real region
     ids for every grouping the UI offers, and reports the pairing with the largest key overlap. That
     matters because the intuitive advice is often wrong: qvtpy ``hemisphere`` yields ``MCA``/``ACA``
-    while ASL ``territory`` yields ``Anterior Circulation`` — only ``territory`` on *both* sides
+    while ASL ``territory`` yields ``Anterior Circulation``, only ``territory`` on *both* sides
     lines up.
     """
     if not first_regions or not second_regions:
@@ -1749,8 +1743,8 @@ def attach_vessel_qc(
     """
     Merge the published per-vessel QC metrics onto an analysis frame.
 
-    They live in ``image_measurements`` keyed on ``(subject_uid, region_id)`` — the same grain as a
-    measurement — but they are not measurements anyone selects, so nothing would load them. Without
+    They live in ``image_measurements`` keyed on ``(subject_uid, region_id)`` (the same grain as a
+    measurement), but they are not measurements anyone selects, so nothing would load them. Without
     this the QC filters are permanently greyed out on a dataset that has them, which is exactly the
     dataset where they matter.
 
@@ -1763,7 +1757,7 @@ def attach_vessel_qc(
     -------
     (frame, attached)
         The frame with any QC columns added, and their names. Both unchanged/empty when the dataset
-        carries none — a dataset that has not run stage 9 is the normal case, not an error.
+        carries none: a dataset that has not run stage 9 is the normal case, not an error.
     """
     if wide.empty or "subject_uid" not in wide.columns or "territory" not in wide.columns:
         return wide, []
@@ -1801,7 +1795,7 @@ def attach_vessel_qc(
     out = wide.copy()
     out["subject_uid"] = out["subject_uid"].astype(str)
     out["territory"] = out["territory"].astype(str)
-    # Never overwrite a column the frame already has — a derived one of the same name wins.
+    # Never overwrite a column the frame already has: a derived one of the same name wins.
     attached = [c for c in wanted if c not in out.columns]
     if not attached:
         return wide, []
@@ -1834,7 +1828,7 @@ def build_multi_feature_analysis_frame(
     Each measurement is loaded independently by :func:`build_feature_territory_frame` and the
     results are joined on ``(subject_uid, territory)``. With ``join="inner"`` (the default) only
     subject/territory cells present in *every* measurement survive, which is the right grain for a
-    model like ``att_mean ~ pi + …``: every row then has all its predictors observed.
+    model like ``att_mean ~ pi + ...``: every row then has all its predictors observed.
 
     Covariates are merged **once**, after the measurement join. The covariate merge is an inner
     merge on ``subject_uid``, so attaching it per measurement would apply it repeatedly.
@@ -1852,14 +1846,14 @@ def build_multi_feature_analysis_frame(
         :func:`resolve_covariate_frame`).
     grain : {"territory", "subject"}
         What a row is. ``"territory"`` keeps the long shape and joins on the shared
-        ``(subject, territory)`` cell — right when the measurements share a parcellation, and the
+        ``(subject, territory)`` cell: right when the measurements share a parcellation, and the
         only way to fit a model with a territory term. ``"subject"`` gives one row per subject and
         spreads each measurement's territories into ``value@territory`` columns, which is the only
         way to relate measurements whose parcellations name different kinds of region: an ASL
         whole-brain CBF against a 4D-flow vessel, or a FreeSurfer parcel against either.
     attach_qc : bool
-        Merge the published per-vessel autoQC metrics (``qc_flow_plausible``, ``qc_score``, …) onto
-        the frame. They are what the QC filter presets read, so turning this off greys those out —
+        Merge the published per-vessel autoQC metrics (``qc_flow_plausible``, ``qc_score``, ...) onto
+        the frame. They are what the QC filter presets read, so turning this off greys those out,
         but it also keeps five columns nobody asked for out of a frame built for something else,
         and skips their lookup on a dataset where the stage never ran.
 
@@ -1868,7 +1862,7 @@ def build_multi_feature_analysis_frame(
     (frame, meta)
         *meta* carries ``measurements`` (per-spec row/subject/territory counts), ``key_overlap``
         (fraction of measurement 0's keys retained after each join), ``n_rows``, ``covariates``, and
-        ``warnings`` — a list of human-readable problems worth surfacing in a UI, most importantly a
+        ``warnings``: a list of human-readable problems worth surfacing in a UI, most importantly a
         disjoint ``territory`` vocabulary between two pipelines.
 
     Raises
@@ -1882,7 +1876,7 @@ def build_multi_feature_analysis_frame(
     if not specs:
         raise ValueError("At least one measurement is required.")
 
-    # ---- 1. Reject colliding output columns before doing any I/O ---------------
+    # 1. Reject colliding output columns before doing any I/O
     seen: dict[str, int] = {}
     for i, spec in enumerate(specs):
         col = spec.column()
@@ -1895,7 +1889,7 @@ def build_multi_feature_analysis_frame(
 
     meta: dict[str, Any] = {"measurements": [], "warnings": [], "join": join}
 
-    # ---- 2. Load each measurement on its own grouping --------------------------
+    # 2. Load each measurement on its own grouping
     frames: list[pd.DataFrame] = []
     for spec in specs:
         frame = build_feature_territory_frame(
@@ -1922,7 +1916,7 @@ def build_multi_feature_analysis_frame(
             }
         )
 
-    # ---- 3. Join, either on the shared (subject, territory) cell or per subject -
+    # 3. Join, either on the shared (subject, territory) cell or per subject
     if grain == "subject":
         wide = _join_on_subject(specs, frames, meta, join=join)
     else:
@@ -1959,7 +1953,7 @@ def build_multi_feature_analysis_frame(
                 "'subject'."
             )
 
-    # ---- 4. Covariates once, then the shared finalization ----------------------
+    # 4. Covariates once, then the shared finalization
     covariates, present = resolve_covariate_frame(
         repo,
         clinical_vars=clinical_vars,
@@ -1978,7 +1972,7 @@ def build_multi_feature_analysis_frame(
     meta["covariates"] = present
 
     # Mixing visits is a legitimate thing to want (plaque at one visit, cognition at another) but it
-    # is a modeling decision, so say so rather than letting it happen quietly.
+    # is a modeling decision, so say so rather than letting it happen silently.
     provenance = dict(covariates.attrs.get("visit_provenance") or {})
     meta["visit_provenance"] = provenance
     visits_used = {v for visits in provenance.values() for v in visits}

@@ -35,9 +35,7 @@ from nvitk.core.logger import Logger
 
 log = Logger()
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Constants
-# ──────────────────────────────────────────────────────────────────────────────
 
 #: Environment variables nnU-Net reads for its three data roots.
 NNUNET_ENV_KEYS: tuple[str, ...] = ("nnUNet_raw", "nnUNet_preprocessed", "nnUNet_results")
@@ -52,9 +50,7 @@ _ROCKET_OVERRIDE = "rocket_preprocessed"
 ENGINES_DIR: Path = Path(__file__).resolve().parent
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Locating the trees
-# ──────────────────────────────────────────────────────────────────────────────
 
 def nnunet_root() -> Path:
     """The in-tree nnU-Net build (the directory holding ``nnunetv2/``).
@@ -80,7 +76,7 @@ def nnssl_root() -> Path:
 
 
 def nnssl_src_dir() -> Path:
-    """The nnssl clone's ``src`` directory — what must be on ``sys.path``/``PYTHONPATH``.
+    """The nnssl clone's ``src`` directory: what must be on ``sys.path``/``PYTHONPATH``.
 
     Raises
     ------
@@ -120,9 +116,7 @@ def _prepend_pythonpath(*entries: str, fallback: tuple[str, ...] = ()) -> str:
     return os.pathsep.join(out)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # nnU-Net
-# ──────────────────────────────────────────────────────────────────────────────
 
 def nnunet_env(
     raw: Path | str,
@@ -162,9 +156,7 @@ def nnunet_env(
     return env
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # nnssl
-# ──────────────────────────────────────────────────────────────────────────────
 
 def install_typing_override_shim() -> bool:
     """Backfill ``typing.override`` on Python < 3.12; returns whether a shim was installed.
@@ -223,7 +215,7 @@ def apply_nnssl_env(
 ) -> None:
     """Export the nnssl roots into this process and put the clone on ``sys.path``.
 
-    Must be called before the first ``import nnssl`` — see the module docstring.
+    Must be called before the first ``import nnssl``; see the module docstring.
 
     Parameters
     ----------
@@ -242,7 +234,7 @@ def apply_nnssl_env(
         "nnssl_results": str(results),
     }
 
-    # ---- 1. Refuse a stale binding ------------------------------------------------------
+    # 1. Refuse a stale binding
     if "nnssl.paths" in sys.modules:
         bound = sys.modules["nnssl.paths"]
         stale = {
@@ -257,7 +249,7 @@ def apply_nnssl_env(
                 "first nnssl import."
             )
 
-    # ---- 2. Environment + import path ---------------------------------------------------
+    # 2. Environment + import path
     if _ROCKET_OVERRIDE in os.environ:
         log.warning(
             "Unsetting %s=%r — it silently overrides nnssl_preprocessed.",

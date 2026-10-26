@@ -4,10 +4,10 @@
 # Regenerate: python MouseTOFMorphometricsLib/vendor_sync.py
 # The only change from upstream is the root package rename nvitk -> nvitk_vendor.
 # ─────────────────────────────────────────────────────────────────────────
-"""VMTK import guard, script runner, and NumPy ↔ VTK conversion helpers.
+"""VMTK import guard, script runner, and NumPy <-> VTK conversion helpers.
 
-Depends only on NumPy and VTK (VMTK is imported lazily), so the package stays importable — and
-vendorable into the Slicer module — without the rest of nvitk_vendor.
+Depends only on NumPy and VTK (VMTK is imported lazily), so the package stays importable (and
+vendorable into the Slicer module) without the rest of nvitk_vendor.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ def _import_vmtk() -> tuple[Any, Any] | None:
             from vmtk import vmtkscripts, vtkvmtk  # noqa: PLC0415
 
             _VMTK_STATE["mods"] = (vmtkscripts, vtkvmtk)
-        except Exception as exc:  # noqa: BLE001 — any import failure means "not usable"
+        except Exception as exc:  # noqa: BLE001 (any import failure means "not usable")
             _VMTK_STATE["mods"] = None
             _VMTK_STATE["error"] = exc
     return _VMTK_STATE["mods"]
@@ -90,9 +90,7 @@ def run_script(name: str, *, quiet: bool = True, **members: Any) -> Any:
     return script
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# NumPy ↔ VTK
-# ──────────────────────────────────────────────────────────────────────────────
+# NumPy <-> VTK
 
 
 def points_of(poly: Any) -> np.ndarray:
@@ -135,7 +133,7 @@ def line_point_ids(poly: Any) -> list[np.ndarray]:
 
 
 def polylines_of(poly: Any, arrays: Sequence[str] = ()) -> list[dict[str, np.ndarray]]:
-    """Each line cell as ``{"points": (n, 3), <array>: (n,) …}``."""
+    """Each line cell as ``{"points": (n, 3), <array>: (n,) ...}``."""
     pts = points_of(poly)
     data = {name: point_array(poly, name) for name in arrays}
     out = []

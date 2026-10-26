@@ -1,7 +1,7 @@
 """ToPBrain stage 1: obtain the pre-trained model.
 
 Produces a **pre-trained bundle** the training stage can consume, from one of two sources. It
-deliberately never touches the labelled training data prepared by stage 0 — pre-training on the
+deliberately never touches the labelled training data prepared by stage 0: pre-training on the
 same volumes you fine-tune on buys little and muddies the evaluation.
 
 ``--source openmind`` *(default)*
@@ -25,7 +25,7 @@ The bundle
     Architecture and the encoder/stem key layout. Several nnssl trainers drop the copy embedded
     in the checkpoint, so the sidecar is authoritative.
 ``segmentation_model.pth``
-    A **materialised end-to-end segmentation network** — the pre-trained encoder with a
+    A **materialised end-to-end segmentation network**: the pre-trained encoder with a
     segmentation decoder and head attached, at the plan's recommended patch size. Portable and
     inspectable on its own, and it proves the weights instantiate before any training is queued.
     Stage 2 does not read it: the training build regenerates the head for the actual class count
@@ -71,7 +71,7 @@ from nvitk.pipes.topbrain.util.sge_stage import (
 
 log = Logger()
 
-#: nnssl spacing styles. ``onemmiso`` is accepted but discouraged — see :func:`run_pretrain`.
+#: nnssl spacing styles. ``onemmiso`` is accepted but discouraged; see :func:`run_pretrain`.
 SPACING_STYLES: tuple[str, ...] = ("median", "noresample", "onemmiso")
 
 #: Class count used for the materialised generic segmentation model. A placeholder: stage 2
@@ -86,7 +86,7 @@ BUNDLE_META: str = "bundle.json"
 
 
 #: Written *last* by nnssl's ``preprocess_dataset``, after every case has been mapped. Its
-#: presence is therefore the only trustworthy "preprocessing finished" signal — the per-case
+#: presence is therefore the only trustworthy "preprocessing finished" signal: the per-case
 #: outputs appear as work proceeds and say nothing about whether the run completed.
 PREPROCESS_DONE_MARKER: str = "valid_imgs.json"
 
@@ -96,7 +96,7 @@ PLANS_FILE: str = "nnsslPlans.json"
 
 
 def corpus_preprocessed_dir(paths: TopBrainPaths, modality: str = "both") -> Path:
-    """``<nnssl_preprocessed>/Dataset5XX_TopBrainCorpus*`` — where planning and preprocessing land.
+    """``<nnssl_preprocessed>/Dataset5XX_TopBrainCorpus*``: where planning and preprocessing land.
 
     One directory per corpus modality: a CT-only corpus is a different collection, not a
     rebuild of the mixed one, so a domain-adaptive CT pre-training and the mixed pre-training
@@ -114,13 +114,13 @@ def corpus_signature(paths: TopBrainPaths, modality: str = "both") -> str | None
     """Content hash of the corpus descriptor's volume list, or ``None`` when it is absent.
 
     Hashes the sorted set of ``.nii.gz`` references in ``pretrain_data.json`` rather than the
-    file's bytes: that captures exactly what matters — *which volumes are in the corpus* —
+    file's bytes: that captures exactly what matters (*which volumes are in the corpus*)
     while ignoring key ordering and any formatting change. The descriptor carries no
     timestamps, so the same corpus always hashes the same.
 
     This is what makes adding a source detectable. Stage 0 rewrites the descriptor whenever the
     corpus is rebuilt, but an mtime comparison would force a re-preprocess after *every* stage 0
-    run even when nothing changed; the hash only fires when the composition genuinely differs.
+    run even when nothing changed; the hash only fires when the composition differs.
     """
     descriptor = Path(paths.nnssl_raw) / corpus_dataset_name_for(modality) / "pretrain_data.json"
     if not descriptor.is_file():
@@ -172,7 +172,7 @@ def planning_complete(paths: TopBrainPaths, modality: str = "both") -> tuple[boo
         if not (directory / name).is_file():
             return False, f"{name} is missing"
 
-    # The fingerprint is a summary of the corpus — median spacing, intensity statistics — so a
+    # The fingerprint is a summary of the corpus (median spacing, intensity statistics), so a
     # corpus that gained a source invalidates it just as surely as it invalidates the
     # preprocessed data. Reusing it would preprocess the new volumes to the old corpus's plan.
     signature = corpus_signature(paths, modality)
@@ -193,8 +193,8 @@ def preprocessing_complete(
 ) -> tuple[bool, str]:
     """Whether the corpus is already preprocessed **for this configuration**.
 
-    nnssl re-reads, re-resamples and re-writes every volume unconditionally —
-    ``preprocess_and_save`` has no existence check — so on a corpus of several hundred volumes
+    nnssl re-reads, re-resamples and re-writes every volume unconditionally (
+    ``preprocess_and_save`` has no existence check), so on a corpus of several hundred volumes
     an accidental repeat is hours of work for nothing. This is the guard that makes a re-run
     cheap.
 
@@ -212,7 +212,7 @@ def preprocessing_complete(
     Returns
     -------
     tuple
-        ``(complete, reason)`` — the reason is logged either way, so a decision to redo hours
+        ``(complete, reason)``: the reason is logged either way, so a decision to redo hours
         of preprocessing is never silent.
     """
     directory = corpus_preprocessed_dir(paths, modality)
@@ -246,7 +246,7 @@ def preprocessing_complete(
     if count == 0:
         return False, f"{identifier}/ holds no preprocessed volumes"
 
-    # ---- Does this preprocessed data belong to the corpus we are about to use? ----
+    # Does this preprocessed data belong to the corpus we are about to use?
     # Adding a --corpus-source changes the corpus but touches nothing above, so without this
     # the run would silently pre-train on the previous corpus.
     signature = corpus_signature(paths, modality)
@@ -302,7 +302,7 @@ def _import_trainer(trainer_name: str):
                 f"{known.unusable_reason}."
             )
         # A module that failed to import is skipped rather than aborting the scan, so a
-        # trainer can be genuinely present yet unreachable. Distinguish the two: "not found"
+        # trainer can be present yet unreachable. Distinguish the two: "not found"
         # sends you looking for a typo, which is the wrong place when the real cause is a
         # broken optional dependency.
         from nnssl.utilities.find_class_by_name import SKIPPED_MODULES
@@ -370,7 +370,7 @@ def export_segmentation_model(
 ) -> dict[str, Any]:
     """Materialise an end-to-end segmentation network carrying the pre-trained encoder.
 
-    Builds the architecture the adaptation plan names — ResEnc-L or Primus — attaches a
+    Builds the architecture the adaptation plan names (ResEnc-L or Primus) attaches a
     segmentation decoder and head, loads the encoder and stem, and saves the whole network.
 
     Returns
@@ -505,7 +505,7 @@ def run_pretrain(
         otherwise loses everything it did.
     overwrite
         Redo planning and preprocessing even when they are already complete. Without it both
-        are reused — nnssl itself has no such check and would re-resample every volume.
+        are reused: nnssl itself has no such check and would re-resample every volume.
     tensorboard
         Mirror the nnssl trainer's per-epoch log into TensorBoard events under
         ``<results_root>/tensorboard/stage1/`` while it trains. Only meaningful for
@@ -525,7 +525,7 @@ def run_pretrain(
     # at import time, so this must precede any nnssl import.
     apply_nnssl_env(paths, create=True)
 
-    # ---- Route A: a published checkpoint ------------------------------------
+    # Route A: a published checkpoint
     if source == "openmind":
         resolved = ckpt_util.resolve_checkpoint(
             source="checkpoint", checkpoint=checkpoint, checkpoint_name=checkpoint_name,
@@ -552,7 +552,7 @@ def run_pretrain(
     if source != "scratch":
         raise ValueError(f"Unknown --source {source!r}; expected 'openmind' or 'scratch'.")
 
-    # ---- Route B: pre-train with nnssl --------------------------------------
+    # Route B: pre-train with nnssl
     trainer_name = trainer_name or cfg.DEFAULT_SSL_TRAINER
     configuration_name = configuration_name or cfg.DEFAULT_SSL_CONFIG
     ssl_loss_config = dict(ssl_loss_config or {})
@@ -584,7 +584,7 @@ def run_pretrain(
             "0.3-0.6 mm across; sub-millimetre structures will not survive it."
         )
 
-    # ---- Planning: reuse what is on disk unless asked to redo it -------------
+    # Planning: reuse what is on disk unless asked to redo it
     plan_done, plan_reason = planning_complete(paths, corpus_modality)
     if skip_planning:
         log.info("stage1: --skip-planning (%s).", plan_reason)
@@ -599,7 +599,7 @@ def run_pretrain(
         plan_experiments([corpus_dataset_id(corpus_modality)])
         write_corpus_signature(paths, corpus_modality, planned=True)
 
-    # ---- Preprocessing: the expensive half -----------------------------------
+    # Preprocessing: the expensive half
     preprocess_done, preprocess_reason = preprocessing_complete(paths, corpus_modality, configuration_name)
     if skip_preprocessing:
         log.info("stage1: --skip-preprocessing (%s).", preprocess_reason)
@@ -654,7 +654,7 @@ def run_pretrain(
     if applied:
         log.info("Trainer overrides: %s", applied)
 
-    # ---- Resume before anything touches the weights --------------------------
+    # Resume before anything touches the weights
     resumed_from: str | None = None
     if continue_training:
         latest = Path(trainer.output_folder) / "checkpoint_latest.pth"
@@ -721,9 +721,7 @@ def run_pretrain(
     )
 
 
-# ---------------------------------------------------------------------------
 # CLI + SGE submission
-# ---------------------------------------------------------------------------
 
 
 def _worker_argv(**o) -> list[str]:

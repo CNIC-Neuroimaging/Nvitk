@@ -1,5 +1,5 @@
 """
-CViT — Convolutional Vision Transformer segmentation pipeline.
+CViT: Convolutional Vision Transformer segmentation pipeline.
 
 A ViT tokenises a volume with a linear projection of flattened patches, which discards the
 geometric priors of convolutions exactly where local shape lives. CViT tokenises with
@@ -13,13 +13,13 @@ inference) and nnssl (self-supervised masked image modelling) engines in
 
 Entry points
 ------------
-``nvitk-cvit`` (:mod:`nvitk.pipes.cvit.run`) — all stages, local or SGE.
-``nvitk-cvit-infer`` (:mod:`nvitk.pipes.cvit.stage4_infer`) — standalone inference.
+``nvitk-cvit`` (:mod:`nvitk.pipes.cvit.run`): all stages, local or SGE.
+``nvitk-cvit-infer`` (:mod:`nvitk.pipes.cvit.stage4_infer`): standalone inference.
 
 Stages
 ------
 ``stage0``   dataset validation / conversion to nnU-Net raw (+ optional nnssl corpus)
-``stage1``   self-supervised pre-training (SimMIM / MAE) → encoder bundle
+``stage1``   self-supervised pre-training (SimMIM / MAE) -> encoder bundle
 ``stage2``   CViT plans, preprocessing and per-fold training
 ``stage3``   cross-validation evaluation (Dice / HD95 / clDice per label)
 ``stage3b``  attention-usage probe (interventions + attention statistics)

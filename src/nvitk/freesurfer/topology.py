@@ -9,7 +9,7 @@ helpers below move data in and out:
   TOF / T1 it came from);
 - :func:`read_surface` / :func:`write_surface` read and write FreeSurfer geometry in scanner-RAS
   millimetres;
-- :func:`surface_euler` counts V − E + F in Python, so any mesh can be checked without
+- :func:`surface_euler` counts V - E + F in Python, so any mesh can be checked without
   FreeSurfer.
 
 The fixers were built for the cortex: they map a closed surface to the sphere, find the defects
@@ -20,9 +20,9 @@ scaled so the mask's median is 110 (``brain.mgz`` / ``norm.mgz``). They are offe
 compare, for instance against :mod:`nvitk.morphology.siphon_cut`.
 
 FreeSurfer's tessellation order (``recon-all``, FastSurfer's ``recon-surf``):
-``mri_pretess`` → ``mri_mc`` → ``mris_extract_main_component`` → ``mris_smooth`` →
-``mris_inflate`` → ``mris_sphere -q`` (or FastSurfer's spectral projection) →
-``mris_fix_topology`` (``mris_topo_fixer`` when the first leaves defects) →
+``mri_pretess`` -> ``mri_mc`` -> ``mris_extract_main_component`` -> ``mris_smooth`` ->
+``mris_inflate`` -> ``mris_sphere -q`` (or FastSurfer's spectral projection) ->
+``mris_fix_topology`` (``mris_topo_fixer`` when the first leaves defects) ->
 ``mris_remove_intersection``.
 """
 
@@ -51,7 +51,7 @@ def _q(path: Any) -> str:
     return shlex.quote(str(path))
 
 
-# ── data in and out ──────────────────────────────────────────────────────────
+# data in and out
 
 
 def write_volume(data: Any, affine: Any, path: str | Path, *, dtype: Any = np.uint8) -> Path:
@@ -140,8 +140,8 @@ def write_surface(path: str | Path, vertices: Any, faces: Any, *, orient: bool =
 
 
 def surface_euler(vertices: Any, faces: Any) -> dict[str, Any]:
-    """Euler characteristic of a triangle mesh, per connected piece: ``χ = V − E + F`` and, for a
-    closed piece, its genus ``(2 − χ) / 2`` (handles)."""
+    """Euler characteristic of a triangle mesh, per connected piece: ``χ = V - E + F`` and, for a
+    closed piece, its genus ``(2 - χ) / 2`` (handles)."""
     from scipy.sparse import coo_matrix
     from scipy.sparse.csgraph import connected_components
 
@@ -168,7 +168,7 @@ def surface_euler(vertices: Any, faces: Any) -> dict[str, Any]:
             "per_piece": pieces}
 
 
-# ── single programs ──────────────────────────────────────────────────────────
+# single programs
 
 
 def pretess(volume: str | Path, label: int, intensity: str | Path, out: str | Path) -> FsCommand:
@@ -235,8 +235,8 @@ def spectral_project(surface: str | Path, out: str | Path, *, fastsurfer_home: s
     """FastSurfer's spectral spherical projection of *surface* into *out*, for any shape.
 
     FastSurfer's ``spherically_project_surface`` expects a hemisphere: the first three
-    Laplace–Beltrami eigenfunctions running anterior–posterior (y), superior–inferior (z) and
-    left–right (x), and it refuses other layouts. The surface is therefore first turned so that
+    Laplace-Beltrami eigenfunctions running anterior-posterior (y), superior-inferior (z) and
+    left-right (x), and it refuses other layouts. The surface is therefore first turned so that
     its principal axes, longest first, lie along y, z and x, then projected; the sphere is turned
     back. The sphere is a parametrisation, so its orientation is free. Runs in this Python (needs
     ``lapy``); no FreeSurfer."""
@@ -277,7 +277,7 @@ def spectral_project(surface: str | Path, out: str | Path, *, fastsurfer_home: s
 def spectral_sphere(surface: str | Path, out: str | Path, *, python: str | None = None,
                     fastsurfer_home: str | Path | None = None) -> FsCommand:
     """FastSurfer's spectral spherical projection (:func:`spectral_project`, needs ``lapy``): the
-    first three non-constant Laplace–Beltrami eigenfunctions as a sphere, which FastSurfer uses
+    first three non-constant Laplace-Beltrami eigenfunctions as a sphere, which FastSurfer uses
     instead of ``mris_sphere -q``. Runs in Python, no FreeSurfer license needed. It fails on a
     surface that is not genus 0 (FastSurfer's area checks); :func:`fix_topology` then falls back
     to ``mris_sphere -q`` as FastSurfer does."""
@@ -299,7 +299,7 @@ def rewrite_oriented(surface: str | Path, *, python: str | None = None,
                       f"{surface}.noorient"], "FastSurfer rewrite_oriented_surface", requires=())
 
 
-# ── the topology fix, as recon-all runs it ───────────────────────────────────
+# the topology fix, as recon-all runs it
 
 
 def fix_topology(

@@ -1,4 +1,4 @@
-"""Binary morphology — NumPy/SciPy stand-in for ``nvitk.morphology.binary``.
+"""Binary morphology: NumPy/SciPy stand-in for ``nvitk.morphology.binary``.
 
 Hand-written (not synced). Only :func:`close` is reachable from the
 morphometrics pipeline, and only when ``BRIDGE_LABEL_CLOSE_RADIUS > 0``

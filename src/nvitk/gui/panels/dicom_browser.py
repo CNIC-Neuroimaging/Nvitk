@@ -1,11 +1,11 @@
 """The DICOM browser: look inside a DICOM folder before loading anything.
 
-Scan a folder (or files): every study, its series — split as nvitk's loader
-splits them into volumes — and each series' files are listed, from the headers
+Scan a folder (or files): every study, its series (split as nvitk's loader
+splits them into volumes), and each series' files are listed, from the headers
 alone. Click a series or a file to read its header; tick series or single files
 to load them into the viewer or to export just those as DICOM. Headers can be
 edited (double-click a value, add or delete a tag) and de-identified; the changes
-are kept as pending edits, shown in the header, and written only on export —
+are kept as pending edits, shown in the header, and written only on export:
 the original files are never touched.
 """
 
@@ -174,7 +174,7 @@ def _date(text: str) -> str:
 
 
 def _time(text: str) -> str:
-    """``143706.155`` → ``14:37:06``."""
+    """``143706.155`` -> ``14:37:06``."""
     return f"{text[:2]}:{text[2:4]}:{text[4:6]}" if len(text) >= 6 and text[:6].isdigit() else text
 
 
@@ -237,7 +237,7 @@ class _Job:
     def cancel(self) -> None:
         self._cancel = True
 
-    def isRunning(self) -> bool:  # noqa: N802 — QThread-like
+    def isRunning(self) -> bool:  # noqa: N802 (QThread-like)
         return self._thread.is_alive()
 
     def wait(self, msecs: int | None = None) -> None:
@@ -527,7 +527,7 @@ class DicomBrowserPanel(QWidget):
             worker.cancel()
             worker.wait(10000)
 
-    # ── scanning ──────────────────────────────────────────────────────────────
+    # scanning
 
     def _start_dir(self) -> str:
         first = (self._source or [""])[0]
@@ -547,11 +547,11 @@ class DicomBrowserPanel(QWidget):
         if folders:
             self.scan(folders, add=bool(self._studies))
 
-    def dragEnterEvent(self, event: Any) -> None:  # noqa: N802 — Qt naming
+    def dragEnterEvent(self, event: Any) -> None:  # noqa: N802 (Qt naming)
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
-    def dropEvent(self, event: Any) -> None:  # noqa: N802 — Qt naming
+    def dropEvent(self, event: Any) -> None:  # noqa: N802 (Qt naming)
         paths = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
         if paths:
             event.acceptProposedAction()
@@ -579,7 +579,7 @@ class DicomBrowserPanel(QWidget):
     def scan(self, paths: list[str] | str, *, add: bool = False, wait: bool = False) -> None:
         """Read the headers under *paths* (folders and / or files) in the background.
 
-        With *add*, they join what is listed — the same study or series found in
+        With *add*, they join what is listed: the same study or series found in
         several folders is merged, and pending edits and ticks are kept. *wait*
         blocks until done (scripts, tests).
         """
@@ -660,12 +660,12 @@ class DicomBrowserPanel(QWidget):
         self._drop_pref.setCurrentIndex(max(self._drop_pref.findData(drop_action()), 0))
         self._drop_pref.blockSignals(False)
 
-    def showEvent(self, event: Any) -> None:  # noqa: N802 — Qt naming
+    def showEvent(self, event: Any) -> None:  # noqa: N802 (Qt naming)
         self.sync_drop_pref()
         super().showEvent(event)
 
     def request_scan(self, paths: list[str], *, add: bool = True) -> None:
-        """Scan *paths* — now, or after the scan or export still running."""
+        """Scan *paths*: now, or after the scan or export still running."""
         if self._worker is not None:
             self._pending.append((list(paths), add))
             self._status.setText(f"Queued: {', '.join(os.path.basename(os.path.normpath(p)) for p in paths)}")
@@ -772,7 +772,7 @@ class DicomBrowserPanel(QWidget):
         if first is not None and first.childCount():
             self._tree.setCurrentItem(first.child(0))
 
-    # ── tree ──────────────────────────────────────────────────────────────────
+    # tree
 
     def _populate(self, item: QTreeWidgetItem) -> None:
         """Put the files under a series item (on first expansion)."""
@@ -840,7 +840,7 @@ class DicomBrowserPanel(QWidget):
         return out
 
     def tick(self, key: str, files: list[str] | None = None) -> None:
-        """Tick series *key* (or only its *files*) — scripting and tests."""
+        """Tick series *key* (or only its *files*): scripting and tests."""
         for item in self._series_items():
             if item.data(0, _ROLE)[1] != key:
                 continue
@@ -895,7 +895,7 @@ class DicomBrowserPanel(QWidget):
         if data and data[0] == "series" and _can_load(self._series[data[1]]):
             self.load({data[1]: self._series[data[1]].paths})
 
-    # ── header ────────────────────────────────────────────────────────────────
+    # header
 
     def _show_item(self, item: QTreeWidgetItem | None) -> None:
         if item is None:
@@ -995,7 +995,7 @@ class DicomBrowserPanel(QWidget):
             return
         self.set_tag(tag, item.text(3))
 
-    # ── edits ─────────────────────────────────────────────────────────────────
+    # edits
 
     def scope_paths(self, scope: str | None = None) -> list[str]:
         """The files an edit with *scope* (default: the panel's choice) goes to."""
@@ -1115,7 +1115,7 @@ class DicomBrowserPanel(QWidget):
         if dlg.exec() == QDialog.Accepted:
             self.anonymize(scope=dlg.scope.currentText(), **dlg.options())
 
-    # ── load and export ───────────────────────────────────────────────────────
+    # load and export
 
     def load_ticked(self) -> list[Any]:
         """Load each ticked series (or its ticked files) as volumes into the viewer."""

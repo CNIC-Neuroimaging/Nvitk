@@ -16,9 +16,7 @@ from nvitk.core.exceptions import BackendUnavailableError, ValidationError
 from .._common import default_nifti_axes, reorder_axes
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Helpers
-# ──────────────────────────────────────────────────────────────────────────────
 
 _NIFTI_RESERVED_KEYS = {
     "axes",
@@ -28,7 +26,7 @@ _NIFTI_RESERVED_KEYS = {
 
 
 def _jsonable(value: Any) -> Any:
-    """Recursively coerce a metadata value to a JSON-serializable type (arrays → lists, bytes → str, else ``str()``)."""
+    """Recursively coerce a metadata value to a JSON-serializable type (arrays -> lists, bytes -> str, else ``str()``)."""
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, bytes):
@@ -65,9 +63,7 @@ def _extract_zooms(metadata: dict[str, Any], ndim: int) -> tuple[float, ...]:
     return tuple(defaults[:ndim])
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # write_nifti
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def write_nifti(
@@ -128,7 +124,8 @@ def write_nifti(
         }
         if payload:
             encoded = json.dumps(payload, ensure_ascii=True).encode("utf-8")
-            # Use code 16 (comment) to keep nibabel interoperability for JSON payloads.
+            # JSON payload under extension code 16. The NIfTI registry assigns 16 to PYPICKLE
+            # (6 is COMMENT); read_nifti decodes any extension that parses as JSON.
             nifti_img.header.extensions.append(nib.nifti1.Nifti1Extension(16, encoded))
 
     out = Path(path)

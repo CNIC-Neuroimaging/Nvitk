@@ -5,18 +5,18 @@ This module mirrors the upstream TotalSegmentator v2 class taxonomy, as
 captured in the legacy :code:`BioImaging/src/values.py`. Every numeric label
 ID matches the order used by TotalSegmentator's multi-label outputs so that
 downstream mask extraction can look up by integer directly (no extra
-name→id lookup table is needed).
+name->id lookup table is needed).
 
 Contents
 --------
-- :data:`CLASS_MAPS` — task-name → ``{id: class_name}`` dict.
-- :data:`AVAILABLE_TASKS` — tuple of every task key in :data:`CLASS_MAPS`.
-- :data:`CLASS_MAP_5_PARTS` — TotalSegmentator CT "5 parts" grouping.
-- :data:`CLASS_MAP_PARTS_MR` — TotalSegmentator MR parts grouping.
-- :data:`CLASS_MAP_PARTS_HEADNECK_MUSCLES` — head/neck muscle parts grouping.
-- :data:`MAP_TASKID_TO_PARTNAME_CT` / ``_MR`` / ``_HEADNECK_MUSCLES`` —
-  nnU-Net task-id → part-name lookup tables (upstream project metadata).
-- :data:`COMMERCIAL_MODELS` — upstream commercial model ids; metadata only.
+- :data:`CLASS_MAPS`: task-name -> ``{id: class_name}`` dict.
+- :data:`AVAILABLE_TASKS`: tuple of every task key in :data:`CLASS_MAPS`.
+- :data:`CLASS_MAP_5_PARTS`: TotalSegmentator CT "5 parts" grouping.
+- :data:`CLASS_MAP_PARTS_MR`: TotalSegmentator MR parts grouping.
+- :data:`CLASS_MAP_PARTS_HEADNECK_MUSCLES`: head/neck muscle parts grouping.
+- :data:`MAP_TASKID_TO_PARTNAME_CT` / ``_MR`` / ``_HEADNECK_MUSCLES``:
+  nnU-Net task-id -> part-name lookup tables (upstream project metadata).
+- :data:`COMMERCIAL_MODELS`: upstream commercial model ids; metadata only.
 
 The helper accessors :func:`get_class_map`, :func:`get_class_id` and
 :func:`get_class_name` have not changed in shape; they dispatch through
@@ -636,7 +636,7 @@ task id with its ``CLASS_MAPS`` key.
 
 
 def get_class_map(task: str) -> Mapping[int, str]:
-    """Return the id→name map for *task*."""
+    """Return the id->name map for *task*."""
     try:
         return CLASS_MAPS[task]
     except KeyError as exc:

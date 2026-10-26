@@ -7,9 +7,7 @@ from typing import Any
 from .backend import is_cupy_array, is_numpy_array, to_cupy, to_numpy
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Coercion
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def as_backend_array(

@@ -31,7 +31,7 @@ def sge_virtual_gpu_resource_name(project: str | None) -> str | None:
 
     Projects whose ``-P`` name starts with ``L``, ``S``, or ``XS`` (e.g. ``LGPU``,
     ``SGPU``, ``XSGPU``) use ``-l lgpu=0``, ``-l sgpu=0``, or ``-l xsgpu=0`` instead of
-    ``-l ngpu=…``. The original ``GPU`` / ``MCC_GPU`` projects keep ``-l ngpu``.
+    ``-l ngpu=...``. The original ``GPU`` / ``MCC_GPU`` projects keep ``-l ngpu``.
     """
     proj = str(project or "").strip().upper()
     for prefix, resource in _VIRTUAL_GPU_PROJECT_PREFIXES:
@@ -309,8 +309,7 @@ def build_qsub_command(
     ]
     if spec.resources.queue:
         argv.extend(["-q", spec.resources.queue])
-    # if spec.resources.pe_smp:
-    #     argv.extend(["-pe", "smp", str(spec.resources.pe_smp)])
+    # No parallel environment is requested: resources.pe_smp is not passed to qsub.
     if array_tasks is not None:
         argv.extend(["-t", f"1-{int(array_tasks)}"])
         if task_concurrency is not None:
@@ -349,7 +348,7 @@ def build_array_worker_script(
 
     Task ``k`` waits for ``${JOB_ID}.(k-1).done`` before running (except task 1).
     With ``-tc 1`` the predecessor has already left the queue when task ``k``
-    starts, so the wait is only for NFS/marker visibility — not the predecessor
+    starts, so the wait is only for NFS/marker visibility, not the predecessor
     runtime. An ``EXIT`` trap writes a marker whenever bash gets to run it.
     """
     if not tasks:
@@ -435,10 +434,10 @@ def emit_array_job_block(
     use_nv: bool = True,
     hold_jid: str | Sequence[str] | None = None,
 ) -> str:
-    """Emit one ``qsub -t 1-N -tc …`` block; return shell ``$jid_…`` reference.
+    """Emit one ``qsub -t 1-N -tc ...`` block; return shell ``$jid_...`` reference.
 
     *hold_jid* is applied to the whole array (classic ``-hold_jid``), e.g. so a
-    per-subject stage0 job completes before the stage1–3 array starts.
+    per-subject stage0 job completes before the stage1-3 array starts.
     """
     if not tasks:
         raise ValueError("tasks must be non-empty")
@@ -510,7 +509,7 @@ def submit_array_job(
     dry_run: bool = False,
     emit: TextIO | None = None,
 ) -> str:
-    """Submit or emit one SGE array job; return jid (or ``$jid_…`` / ``DRY_RUN``)."""
+    """Submit or emit one SGE array job; return jid (or ``$jid_...`` / ``DRY_RUN``)."""
     if emit is not None:
         return emit_array_job_block(
             emit,
@@ -695,7 +694,7 @@ def format_sge_driver_script_variables(
     script_text: str,
     script_path: Path | None = None,
 ) -> str:
-    """Extract ``log_dir`` / ``err_dir`` / first ``qsub_*=(…)`` flags for terminal echo."""
+    """Extract ``log_dir`` / ``err_dir`` / first ``qsub_*=(...)`` flags for terminal echo."""
     lines: list[str] = ["[nvitk|SGE] remote submission (variables)"]
     if script_path is not None:
         lines.append(f"  script_path={script_path}")
@@ -751,7 +750,7 @@ _SHELL_VAR_SAFE = re.compile(r"[^A-Za-z0-9_]")
 
 
 def _shell_var(job_name: str) -> str:
-    """Sanitize a job name into a valid bash variable name (non-alphanumeric chars → underscore)."""
+    """Sanitize a job name into a valid bash variable name (non-alphanumeric chars -> underscore)."""
     return _SHELL_VAR_SAFE.sub("_", job_name)
 
 

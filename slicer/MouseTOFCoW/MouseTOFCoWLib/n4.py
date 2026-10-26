@@ -30,7 +30,7 @@ def n4_bias_field_correction(
     spline_distance
         Optional N4ITK spline distance in **mm**. ``None`` / ``0`` leaves the
         CLI default (auto). Do not pass the Lab ANTs voxel ``spline_param=6``
-        here — units differ.
+        here: units differ.
     remove_temp_nodes
         Delete the temporary output volume and CLI node after reading voxels.
     """

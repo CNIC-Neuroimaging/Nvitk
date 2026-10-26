@@ -603,7 +603,7 @@ def import_att_vascular_xlsx(
     """Import vascular-atlas ATT from a wide Excel sheet (``mri_id`` × region columns).
 
     Unlike the Desikan ``ATT_native_results.csv`` (long: region / corrected_mean / cov), these
-    sheets are wide: one row per ``mri_id``, one column per vascular parcel (``Left_ACA-0``, …).
+    sheets are wide: one row per ``mri_id``, one column per vascular parcel (``Left_ACA-0``, ...).
     ``mri_id`` is resolved to ``subject_uid`` via sessions (same lookup as :func:`import_att_csv`).
     """
     if variable_id not in _ATT_VASCULAR_LABELS:

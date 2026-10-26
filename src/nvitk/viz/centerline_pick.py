@@ -226,7 +226,7 @@ def choose_plane_normal_sense(
     Resolve ±plane normal using centerline polyline orientation (one sense only).
 
     The tangent from finite differences is ambiguous; align it with the direction
-    along the ordered centerline (index → index+1, or index−1 → index at the end).
+    along the ordered centerline (index -> index+1, or index-1 -> index at the end).
     """
     _ = plane_center, click_xyz
     t = unit_vector(np.asarray(tangent, dtype=np.float64).reshape(3))

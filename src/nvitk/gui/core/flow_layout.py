@@ -6,7 +6,7 @@ Description
 A toolbar of controls laid out with ``QHBoxLayout`` has a minimum width equal to the sum of every
 control in it. That is invisible while the row is short and becomes a hard failure once it is not:
 Qt propagates the layout's minimum up to the window, so the window can no longer be resized below
-it — and if the sum exceeds the display, the window cannot be made to fit the screen at all. The
+it, and if the sum exceeds the display, the window cannot be made to fit the screen at all. The
 controls that fall past the edge are then unreachable, and no amount of dragging recovers them,
 because the constraint is a *minimum*, not a preference.
 
@@ -19,9 +19,7 @@ one above.
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from typing import Any
 
 from qtpy.QtCore import QMargins, QPoint, QRect, QSize, Qt
@@ -56,13 +54,13 @@ class FlowLayout(QLayout):
         self._v_spacing = int(v_spacing)
         self.setContentsMargins(QMargins(margin, margin, margin, margin))
         if parent is not None:
-            # Without this the parent layout hands the widget ``sizeHint().height()`` — one row —
+            # Without this the parent layout hands the widget ``sizeHint().height()`` (one row)
             # and every wrapped row below it is clipped out of view.
             policy = parent.sizePolicy()
             policy.setHeightForWidth(True)
             parent.setSizePolicy(policy)
 
-    # ---- QLayout plumbing -----------------------------------------------------
+    # QLayout plumbing
     def addItem(self, item: Any) -> None:  # noqa: N802 - Qt naming
         """Append *item* (called by ``addWidget`` / ``addLayout``)."""
         self._items.append(item)
@@ -82,13 +80,13 @@ class FlowLayout(QLayout):
     def expandingDirections(self) -> Any:  # noqa: N802 - Qt naming
         """Nothing: the layout takes the width it is given and wraps within it.
 
-        ``Qt.Orientation(0)`` rather than ``Qt.Orientations(...)`` — PyQt6 dropped the plural
+        ``Qt.Orientation(0)`` rather than ``Qt.Orientations(...)``: PyQt6 dropped the plural
         flag alias, and qtpy does not paper over it.
         """
         return Qt.Orientation(0)
 
     def hasHeightForWidth(self) -> bool:  # noqa: N802 - Qt naming
-        """Height depends on width — that is the whole point of wrapping."""
+        """Height depends on width, since the rows wrap."""
         return True
 
     def heightForWidth(self, width: int) -> int:  # noqa: N802 - Qt naming
@@ -129,7 +127,7 @@ class FlowLayout(QLayout):
             size.height() + margins.top() + margins.bottom(),
         )
 
-    # ---- geometry -------------------------------------------------------------
+    # geometry
     def _spacing(self, orientation: Any) -> int:
         """Configured gap, or the style's default for *orientation*."""
         configured = self._h_spacing if orientation == Qt.Horizontal else self._v_spacing
@@ -157,7 +155,7 @@ class FlowLayout(QLayout):
         for item in self._items:
             widget = item.widget()
             if widget is not None and widget.isHidden():
-                # A hidden control must not reserve a slot — the brain-map options are hidden
+                # A hidden control must not reserve a slot: the brain-map options are hidden
                 # unless that display is selected, and reserving their width would put the gap
                 # back that this layout exists to remove.
                 continue
@@ -196,8 +194,8 @@ class FlowRow(QWidget):
     ``QBoxLayout`` is documented to honour ``heightForWidth``, and in practice does not do so
     reliably for a child whose height depends on its width: the row computes the right answer and
     the parent allocates one line anyway, clipping every wrapped line below it. Rather than fight
-    that, the row pins its own minimum height on each resize — the height then always matches what
-    the layout actually needs, whatever the parent decides to do.
+    that, the row pins its own minimum height on each resize: the height then always matches what
+    the layout needs, whatever the parent decides to do.
 
     Use :meth:`add` to append controls.
     """

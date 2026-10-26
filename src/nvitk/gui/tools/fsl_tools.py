@@ -1,7 +1,7 @@
 """FSL tools of the Tools panel (category *FSL*).
 
-Each tool writes the layers it needs to a run folder, runs the :mod:`nvitk.fsl` wrapper — the
-same one ``nvitk-fsl`` runs — and opens the outputs as layers placed by their own affine (FSL
+Each tool writes the layers it needs to a run folder, runs the :mod:`nvitk.fsl` wrapper (the
+same one ``nvitk-fsl`` runs), and opens the outputs as layers placed by their own affine (FSL
 reorients, crops and resamples, so nothing is assumed to share the input's grid). Label maps
 (masks, FAST/FIRST segmentations, cluster indices) open as Labels layers; reports and tables
 (SIENA/SIENAX, fslstats, cluster, smoothest) go to the results window.
@@ -9,8 +9,8 @@ reorients, crops and resamples, so nothing is assumed to share the input's grid)
 The ASL tools (category *ASL perfusion*) run BASIL: the oxford_asl pipeline (CBF, arrival
 time, aCBV, GM/WM means and region tables), the BASIL fit alone, asl_file and asl_calib.
 
-Short commands run in the foreground (seconds); long ones — FAST, FIRST, fsl_anat, FNIRT,
-EDDY, BEDPOSTX, TBSS, BASIL … — run as background jobs (Jobs window, cancellable) and open their
+Short commands run in the foreground (seconds); long ones (FAST, FIRST, fsl_anat, FNIRT,
+EDDY, BEDPOSTX, TBSS, BASIL ...) run as background jobs (Jobs window, cancellable) and open their
 outputs when they finish. With no FSL installed the tool offers to install nvitk's FSL core.
 """
 
@@ -56,14 +56,14 @@ class _Load:
 class _Plan:
     loads: list[_Load] = field(default_factory=list)
     #: ``(cmd) -> [(title, payload)]`` tables for the results window (or ``(title, payload,
-    #: row_header)`` for a table whose rows are regions, labels …).
+    #: row_header)`` for a table whose rows are regions, labels ...).
     tables: Callable[[Any], list[tuple[str, dict]]] | None = None
     #: Also open every NIfTI under this output role's directory (hidden).
     load_dir: str | None = None
     note: Callable[[Any], str] | None = None
 
 
-# ── builders: tool id → (FslCommand, _Plan) ──────────────────────────────────
+# builders: tool id -> (FslCommand, _Plan)
 
 _FAST_NAMES = {3: {1: "CSF", 2: "GM", 3: "WM"}, 2: {1: "non-brain/CSF", 2: "tissue"}}
 
@@ -410,7 +410,7 @@ def _smoothest(c: ToolInputs):
     return cmd, _Plan(tables=lambda cmd: [("smoothest", utils.parse_smoothest(cmd.stdout))])
 
 
-# ── ASL perfusion (BASIL) ────────────────────────────────────────────────────
+# ASL perfusion (BASIL)
 
 
 def _asl_delays(c: ToolInputs) -> dict[str, Any]:
@@ -555,7 +555,7 @@ _OUT_TOKEN = re.compile(r"\{out:([^}]+)\}")
 
 
 def _expand_layers(c: ToolInputs, text: str) -> str:
-    """``{layer:NAME}`` → that layer's file (quoted)."""
+    """``{layer:NAME}`` -> that layer's file (quoted)."""
     return _LAYER_TOKEN.sub(lambda m: shlex.quote(str(c.named_layer_file(m.group(1)))), text)
 
 
@@ -596,7 +596,7 @@ _BUILDERS: dict[str, Callable[[ToolInputs], tuple[Any, _Plan]]] = {
 FSL_TOOL_IDS: frozenset[str] = frozenset(_BUILDERS) | {"fsl_install"}
 
 
-# ── running ──────────────────────────────────────────────────────────────────
+# running
 
 
 def plan_manifest(cmd: Any, plan: _Plan, base: Path) -> dict[str, Any]:

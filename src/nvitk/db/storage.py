@@ -16,9 +16,7 @@ import numpy as np
 import pandas as pd
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # JSON & time
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def utc_now_iso() -> str:
@@ -41,9 +39,7 @@ def write_json(path: str | Path, payload: dict[str, Any]) -> None:
         handle.write("\n")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Measurement table column allowlists (long-form storage only)
-# ──────────────────────────────────────────────────────────────────────────────
 
 CLINICAL_MEASUREMENT_COLUMNS: tuple[str, ...] = (
     "subject_uid",
@@ -105,9 +101,7 @@ def restrict_to_manifest_columns(
     return df.loc[:, keep].copy()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Manifest dtypes & DataFrames
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def infer_manifest_dtypes(df: pd.DataFrame) -> dict[str, str]:
@@ -184,9 +178,7 @@ def coerce_dataframe_to_manifest(df: pd.DataFrame, columns: dict[str, str]) -> p
     return out
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Parquet
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def read_parquet_table(path: str | Path, columns: list[str] | None = None) -> pd.DataFrame:
@@ -198,30 +190,12 @@ def write_parquet_table(path: str | Path, df: pd.DataFrame) -> None:
     """Write *df* to Parquet (no index); creates parent directories."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    
-    # DJC: prueba de diagnóstico
-    # print("shape:", df.shape)
-    # print("target:", target)
-    # tmp = "/tmp/debug_image_measurements.parquet"
-    # df.to_parquet(tmp, index=False, engine="pyarrow")
-    # print(f"tmp write OK: {tmp}")
-    # # prueba de diagnóstico
-    # debug_target = "<dataset>/tables/test2.parquet"
-    # df.to_parquet(
-    #     debug_target,
-    #     index=False,
-    #     engine="pyarrow",
-    # )
-    # print("DEBUG write OK:", debug_target)
-    # # DJC: prueba de diagnóstico
-    
+
     print(f"Writing Parquet table to {target}")
     df.to_parquet(target, index=False, engine="pyarrow")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Values & identifiers
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def coerce_bool(value: Any) -> bool:

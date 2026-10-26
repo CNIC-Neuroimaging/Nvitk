@@ -8,8 +8,8 @@ that spends them. The GUI exposes it as a preference, the CLI through
 ``NVITK_WORKERS``, and library code asks :func:`get_worker_count` instead of
 guessing.
 
-Threads, not processes: the heavy host kernels nvitk leans on — ``scipy.ndimage``
-interpolation, NumPy ufuncs on large arrays, ``scipy.fft`` — release the GIL, so
+Threads, not processes: the heavy host kernels nvitk leans on (``scipy.ndimage``
+interpolation, NumPy ufuncs on large arrays, ``scipy.fft``) release the GIL, so
 threads scale on them (measured ~7.5x with 8 threads on ``map_coordinates`` and a
 slab-split ``affine_transform`` of a 300x512x512 volume) without pickling
 multi-gigabyte volumes into child processes.
@@ -18,11 +18,11 @@ Worker specification
 --------------------
 :func:`resolve_workers` accepts every way a person might say it:
 
-- ``None`` / ``"auto"`` → :data:`DEFAULT_WORKER_FRACTION` of the usable cores;
-- an ``int`` ``n > 0`` → exactly ``n`` (clamped to the usable cores);
-- ``0`` / ``"all"`` → every usable core;
-- a negative ``int`` ``-k`` → all cores but ``k`` (leave some for the desktop);
-- a non-integer ``float`` in ``(0, 1)`` or a ``"75%"`` string → that fraction
+- ``None`` / ``"auto"`` -> :data:`DEFAULT_WORKER_FRACTION` of the usable cores;
+- an ``int`` ``n > 0`` -> exactly ``n`` (clamped to the usable cores);
+- ``0`` / ``"all"`` -> every usable core;
+- a negative ``int`` ``-k`` -> all cores but ``k`` (leave some for the desktop);
+- a non-integer ``float`` in ``(0, 1)`` or a ``"75%"`` string -> that fraction
   of the cores (an integer-valued float such as ``4.0`` is a count).
 
 Nesting
@@ -55,9 +55,7 @@ log = Logger()
 T = TypeVar("T")
 R = TypeVar("R")
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Constants
-# ──────────────────────────────────────────────────────────────────────────────
 
 #: Share of the usable cores taken when nothing more specific was asked for.
 #: Three quarters keeps a desktop session responsive while a volume is resampled.
@@ -79,9 +77,7 @@ def physical_memory_bytes() -> int:
     except (AttributeError, ValueError, OSError):
         return 0
 
-# ──────────────────────────────────────────────────────────────────────────────
 # State
-# ──────────────────────────────────────────────────────────────────────────────
 
 _lock = threading.RLock()
 _worker_count: int | None = None
@@ -90,13 +86,11 @@ _pool_size = 0
 _local = threading.local()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Worker budget
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def cpu_count() -> int:
-    """Cores this process may actually run on (affinity-aware, never below 1)."""
+    """Cores this process may run on (affinity-aware, never below 1)."""
     try:
         return max(len(os.sched_getaffinity(0)), 1)
     except (AttributeError, OSError):
@@ -202,16 +196,16 @@ def configure_library_threads(n: int | None = None) -> dict[str, bool]:
     count = int(n if n is not None else get_worker_count())
     applied: dict[str, bool] = {}
 
-    # ---- BLAS / OpenMP inside NumPy and SciPy ---------------------------------
+    # BLAS / OpenMP inside NumPy and SciPy
     try:
         from threadpoolctl import threadpool_limits
 
         threadpool_limits(limits=count)
         applied["threadpoolctl"] = True
-    except Exception:  # noqa: BLE001 — optional dependency
+    except Exception:  # noqa: BLE001 (optional dependency)
         applied["threadpoolctl"] = False
 
-    # ---- numba (napari's shape triangulation, some nvitk kernels) ------------
+    # numba (napari's shape triangulation, some nvitk kernels)
     try:
         import numba
 
@@ -220,7 +214,7 @@ def configure_library_threads(n: int | None = None) -> dict[str, bool]:
     except Exception:  # noqa: BLE001
         applied["numba"] = False
 
-    # ---- torch intra-op pool (CPU inference) ---------------------------------
+    # torch intra-op pool (CPU inference)
     try:
         import sys
 
@@ -232,7 +226,7 @@ def configure_library_threads(n: int | None = None) -> dict[str, bool]:
     except Exception:  # noqa: BLE001
         applied["torch"] = False
 
-    # ---- SimpleITK / ITK ------------------------------------------------------
+    # SimpleITK / ITK
     os.environ.setdefault("ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS", str(count))
     try:
         import sys
@@ -247,9 +241,7 @@ def configure_library_threads(n: int | None = None) -> dict[str, bool]:
     return applied
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Shared pool
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def shared_thread_pool() -> ThreadPoolExecutor:

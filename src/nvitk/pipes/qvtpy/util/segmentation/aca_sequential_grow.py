@@ -2,7 +2,7 @@
 
 Called from :func:`~nvitk.pipes.qvtpy.util.segmentation.vessel_cd_segmentation.build_seg_4dflow_local`
 when ``aca_sequential_grow`` is enabled: grow present ACA(s) with explore-style
-segmentation/centerline barriers (MCA, ICA, comms, …). When both L/R are present
+segmentation/centerline barriers (MCA, ICA, comms, ...). When both L/R are present
 and a junction is known, allow overlap only near AComm, plane-split there, then
 geodesic-Voronoi relabel the ACA union from A1 seeds (fixes distal hemisphere mix).
 Missing one ACA grows unilaterally without junction half-space / Voronoi.
@@ -54,7 +54,7 @@ setup(globals())
 
 log = Logger()
 
-_ACA_MAX_GROW_FRAC: float = 25.0  # seed-multiple cap (was None → RACA blob floods)
+_ACA_MAX_GROW_FRAC: float = 25.0  # seed-multiple cap (was None -> RACA blob floods)
 _ACA_MAX_IMAGE_FRAC: float = 0.003  # ~20k vox on typical 4D-flow grids; stops big spots
 _ACA_SEED_DILATE_RADIUS: int = 1
 _ACA_PRUNE_MIN_RETAIN_FRAC: float = 0.55
@@ -62,7 +62,7 @@ _ACOMM_JUNCTION_RADIUS_DEFAULT: int = 10
 _ACOMM_BRIDGE_DILATE_RADIUS: int = 1  # kept for ipsilateral launch dilation
 _ACA_SPLIT_AXIS_NAMES: tuple[str, str] = ("x", "y")
 # Proximal A1-only seeds: grow into distal ACA with ipsilateral half-space.
-_ACA_LR_AXIS: int = 0  # array axis treated as L↔R (matches typical RAS lr=0)
+_ACA_LR_AXIS: int = 0  # array axis treated as L<->R (matches typical RAS lr=0)
 _ACA_LR_HALFSPACE_SLACK: int = 2  # voxels of midline tolerance
 _ACA_ICA_TAKEOFF_CLEAR_RADIUS: int = 4  # clear parent-ICA wall near A1 / junction
 _NEI26: tuple[tuple[int, int, int], ...] = tuple(
@@ -271,7 +271,7 @@ def _mask_outside_proximity(mask: np.ndarray, proximity: np.ndarray | None) -> n
 def _aca_neighbour_label_ids(label_id: int) -> frozenset[int]:
     """MCA + PComms as neighbour walls; parent ICA omitted (cleared at A1 takeoff)."""
     lid = int(label_id)
-    # AComm and parent ICA intentionally omitted — ICA is cleared near takeoff;
+    # AComm and parent ICA intentionally omitted: ICA is cleared near takeoff;
     # AComm must not wall ACA growth.
     pcomms = frozenset({int(QVTPY_LPCOMM), int(QVTPY_RPCOMM)})
     return frozenset(int(x) for x in (QVTPY_MCA_IDS | pcomms) if int(x) != lid)

@@ -5,9 +5,7 @@ from __future__ import annotations
 from nvitk.core.exceptions import NvitkError
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dataset / repository
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class DatasetError(NvitkError):

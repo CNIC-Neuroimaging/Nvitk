@@ -29,11 +29,11 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 
-#: PESA10061584 shows every step: ICAs 37–47 mm below eICAB's box, the basilar into the
+#: PESA10061584 shows every step: ICAs 37-47 mm below eICAB's box, the basilar into the
 #: vertebrals (split off as LVA / RVA), both ACAs with the AComm (the midline guard), and a right
 #: ICA siphon loop.
 DEFAULT_EICAB_DIR = Path("/home/imarcoss/DATA/PESA-Brain/Morphometrics/RESULTS/PESA10061584/eicab")
-#: Display block (voxels per side): 6 → 3 mm cubes on the 0.5 mm grid (~1,600 cubes).
+#: Display block (voxels per side): 6 -> 3 mm cubes on the 0.5 mm grid (~1,600 cubes).
 BLOCK = 6
 PAD = 6
 STAGES = ("raw", "noacha", "reseg", "ext", "va", "distal", "final")
@@ -257,7 +257,7 @@ def compute(eicab_dir: Path, block: int = BLOCK) -> tuple[dict[str, np.ndarray],
     snaps = {"raw": raw, **rec.snap}
     assert all(k in snaps for k in STAGES), sorted(snaps)
 
-    # ---- distal growth in the full frame: tree, owner, arrival cost -------------------------
+    # distal growth in the full frame: tree, owner, arrival cost
     sp = vr.spacing_of(aff)
     dbox = vr._bbox(vr._isin(rec.snap["va"], rec.compete["ids"]), vr._vox(vr.DISTAL_MAX_MM + 5.0, sp))
     tree = np.zeros(raw.shape, bool)
@@ -265,7 +265,7 @@ def compute(eicab_dir: Path, block: int = BLOCK) -> tuple[dict[str, np.ndarray],
     best = np.full(raw.shape, np.inf)
     tree[dbox], owner[dbox], best[dbox] = rec.compete["tree"], rec.compete["owner"], rec.compete["best"]
 
-    # ---- display crop and blocks ------------------------------------------------------------
+    # display crop and blocks
     union = np.zeros(raw.shape, bool)
     for k in STAGES:
         union |= snaps[k] > 0

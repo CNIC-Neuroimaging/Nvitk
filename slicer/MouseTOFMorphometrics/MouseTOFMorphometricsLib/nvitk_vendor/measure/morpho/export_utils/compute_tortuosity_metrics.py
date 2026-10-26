@@ -33,22 +33,19 @@ except ImportError as exc:
     raise SystemExit("Missing dependency: pandas.") from exc
 
 
-# ============================================================================
 # CONFIG FOR DIRECT RUN (paths must be supplied at runtime; no host defaults)
-# ============================================================================
 INPUT_PATH = None
-OUTPUT_CSV = None   # None → <input folder>/tortuosity_metrics.csv
-OUTPUT_XLSX = None  # None → <input folder>/tortuosity_metrics.xlsx
+OUTPUT_CSV = None   # None -> <input folder>/tortuosity_metrics.csv
+OUTPUT_XLSX = None  # None -> <input folder>/tortuosity_metrics.xlsx
 SAVE_POINTWISE_SHEETS = False
 SAVE_DEBUG_VTPS = True
-DEBUG_VTP_DIR = None  # None → <input folder>/tortuosity_debug_vtps
+DEBUG_VTP_DIR = None  # None -> <input folder>/tortuosity_debug_vtps
 BEND_TOLERANCE_FRACTION = 0.07
 BEND_MIN_TOLERANCE_MM = 0.50
 RESAMPLE_STEP_MM = 0.2
 MIN_SEGMENT_LENGTH_MM = 1e-6
 INFLECTION_SMOOTH_SIGMA_MM = 2.0
 MIN_INFLECTION_LOBE_MM = 2.0
-# ============================================================================
 
 
 # Summary sheets: the numbered cow_morpho-style ones and the compact tables / sheet index.
@@ -484,8 +481,8 @@ def compute_metrics(name: str, points: np.ndarray) -> Tuple[dict, pd.DataFrame]:
 
     Cleans/resamples the polyline, then derives tortuosity index, signed
     curvature + inflection points, RDP bend events, per-bend deflection angles,
-    and chord-distance-based bending. Returns ``(summary_dict, pointwise_df)``
-    — a one-row summary plus a per-point table (for the debug VTP / detail sheet).
+    and chord-distance-based bending. Returns ``(summary_dict, pointwise_df)``:
+a one-row summary plus a per-point table (for the debug VTP / detail sheet).
     """
     points = remove_duplicate_points(points, MIN_SEGMENT_LENGTH_MM)
     points = resample_polyline_by_arclength(points, RESAMPLE_STEP_MM)

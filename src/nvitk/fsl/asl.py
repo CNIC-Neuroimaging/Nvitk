@@ -1,19 +1,19 @@
-"""FSL BASIL — Bayesian Inference for Arterial Spin Labelling MRI: perfusion (CBF), arrival time
+"""FSL BASIL: Bayesian Inference for Arterial Spin Labelling MRI: perfusion (CBF), arrival time
 (ATT) and arterial blood volume (aCBV) from ASL data.
 
-* :func:`oxford_asl` — the whole pipeline: label-control subtraction, motion correction,
+* :func:`oxford_asl`: the whole pipeline: label-control subtraction, motion correction,
   the BASIL fit, calibration to ml/100g/min, registration to a structural image (and
   through ``fsl_anat`` to MNI), partial-volume correction and region analysis;
-* :func:`basil` — the BASIL fit alone, on label-control *differenced* data;
-* :func:`asl_file` — subtraction, averaging and splitting of ASL series;
-* :func:`asl_calib` — M0 from a calibration image in a reference region (CSF, WM, GM),
+* :func:`basil`: the BASIL fit alone, on label-control *differenced* data;
+* :func:`asl_file`: subtraction, averaging and splitting of ASL series;
+* :func:`asl_calib`: M0 from a calibration image in a reference region (CSF, WM, GM),
   and a perfusion image calibrated with it.
 
 pCASL takes post-labelling delays (*plds*), pASL inversion times (*tis*); the labelling
 (bolus) duration is *bolus* (one value, or one per delay). Single-delay data are fitted
 with the bolus, arrival time and arterial component fixed, as ``oxford_asl`` does.
 
-:func:`oxford_asl` writes ``<out>/native_space/`` — ``perfusion`` (arbitrary units),
+:func:`oxford_asl` writes ``<out>/native_space/``: ``perfusion`` (arbitrary units),
 ``perfusion_calib`` (ml/100g/min, with a calibration image or M0), ``arrival`` (s),
 ``aCBV`` / ``aCBV_calib`` (%), their variances, ``mask``, and with a structural image the
 GM/WM partial-volume maps, ``perfusion_calib_gm_mean.txt``-style summaries and, with
@@ -45,7 +45,7 @@ TISSUE_REFS: tuple[str, ...] = ("csf", "wm", "gm", "none")
 CALIB_MODES: tuple[str, ...] = ("longtr", "satrecov")
 PE_DIRECTIONS: tuple[str, ...] = ("x", "y", "z", "-x", "-y", "-z")
 
-#: BASIL parameter → oxford_asl output name (the ``mean_<param>`` images of a BASIL step).
+#: BASIL parameter -> oxford_asl output name (the ``mean_<param>`` images of a BASIL step).
 BASIL_PARAMS: dict[str, str] = {
     "ftiss": "perfusion", "delttiss": "arrival", "fblood": "aCBV", "fwm": "perfusion_wm", "deltwm": "arrival_wm",
 }
@@ -59,11 +59,11 @@ _REQUIRES = {
 }
 
 
-# ── small helpers ────────────────────────────────────────────────────────────
+# small helpers
 
 
 def parse_times(value: str | float | Iterable[float] | None) -> list[float]:
-    """Delays / durations from ``"0.25, 0.5,0.75"``, a number or a sequence (empty → ``[]``)."""
+    """Delays / durations from ``"0.25, 0.5,0.75"``, a number or a sequence (empty -> ``[]``)."""
     if value is None:
         return []
     if isinstance(value, (int, float)):
@@ -99,17 +99,17 @@ def _delays(labelling: str, plds: Sequence[float], tis: Sequence[float]) -> tupl
     return "tis", list(tis)
 
 
-# ── oxford_asl ───────────────────────────────────────────────────────────────
+# oxford_asl
 
 
 def oxford_asl_outputs(out_dir: Path, *, cmethod: str | None = None, calibrated: bool = False, pvcorr: bool = False,
                        structural: bool = False, pv_maps: bool = False, standard: bool = False) -> dict[str, Path]:
-    """The images :func:`oxford_asl` writes, by role (``perfusion_calib``, ``arrival`` …).
+    """The images :func:`oxford_asl` writes, by role (``perfusion_calib``, ``arrival`` ...).
 
     With ``cmethod="both"`` the voxelwise results are the main roles and the reference-region
     ones carry a ``refregion_`` prefix. *pv_maps*: GM/WM partial-volume maps were available (a
     structural image, or given), so their ASL-space copies and the GM/WM ROIs are written.
-    *standard*: a structural → MNI registration was given (``fsl_anat``), so ``std_space/``
+    *standard*: a structural -> MNI registration was given (``fsl_anat``), so ``std_space/``
     holds the maps in MNI space (``std_`` roles).
     """
     native = Path(out_dir) / "native_space"
@@ -201,9 +201,9 @@ def oxford_asl(
     subtracted; *ibf* how the delays are ordered). *calib* (an M0 / proton-density image)
     or *m0* (a value) give perfusion in ml/100g/min; *cmethod* ``voxel`` divides by the M0
     image voxel by voxel, ``single`` by one M0 measured in a reference region (*tissref*,
-    CSF by default — needs a structural image or *csf_mask*). A *structural* (whole head;
+    CSF by default: needs a structural image or *csf_mask*). A *structural* (whole head;
     *structural_brain* if already brain-extracted) or an *fslanat* folder adds registration,
-    GM/WM summaries, structural-space outputs and — with *fslanat*'s MNI warp — standard
+    GM/WM summaries, structural-space outputs and (with *fslanat*'s MNI warp) standard
     space and *region_analysis*. *pvcorr* separates GM and WM perfusion, with partial-volume
     maps from the structural segmentation or given as *pvgm* / *pvwm* (in ASL space; they also
     give the GM / WM summaries without a structural image).
@@ -302,7 +302,7 @@ def oxford_asl(
     return FslCommand(argv, "BASIL (oxford_asl)", outputs, long=True, requires=_REQUIRES["oxford_asl"])
 
 
-# ── basil ────────────────────────────────────────────────────────────────────
+# basil
 
 
 def basil_options(
@@ -318,7 +318,7 @@ def basil_options(
     batsd: float | None = None,
     slicedt: float = 0.0,
 ) -> list[str]:
-    """The lines of a BASIL options file (``--casl``, ``--ti<n>``, ``--tau``, ``--t1`` …).
+    """The lines of a BASIL options file (``--casl``, ``--ti<n>``, ``--tau``, ``--t1`` ...).
 
     BASIL takes inversion times: for pCASL, TI = PLD + labelling duration (as oxford_asl
     computes them). The arrival-time prior is oxford_asl's: mean *bat* (1.3 s pCASL, 0.7 s
@@ -374,10 +374,10 @@ def basil(
 ) -> FslCommand:
     """The BASIL fit on label-control *differenced* data (:func:`asl_file` ``diff``).
 
-    BASIL reads the volumes grouped by delay — every repeat of the first delay, then of the
-    second … (*ibf* ``tis``, :func:`asl_file` with ``obf="tis"``); data in acquisition order
+    BASIL reads the volumes grouped by delay: every repeat of the first delay, then of the
+    second ... (*ibf* ``tis``, :func:`asl_file` with ``obf="tis"``); data in acquisition order
     (*ibf* ``rpt``: all delays, repeated) are reordered with ``asl_file`` first.
-    BASIL writes ``<out>/basil/step<n>/`` per inference step (``basil_2`` … on a rerun); the last step's mean images are
+    BASIL writes ``<out>/basil/step<n>/`` per inference step (``basil_2`` ... on a rerun); the last step's mean images are
     copied to ``<out>/final/`` (``mean_ftiss`` perfusion, ``mean_delttiss`` arrival,
     ``mean_fblood`` arterial component; ``mean_fwm`` / ``mean_deltwm`` with *pvgm* / *pvwm*).
     Perfusion is in the data's units: divide by M0·α and multiply by 6000 for ml/100g/min
@@ -400,7 +400,7 @@ def basil(
     optfile.parent.mkdir(parents=True, exist_ok=True)
     optfile.write_text("\n".join(options) + "\n", encoding="utf-8")
     # BASIL writes to "<dir>+" when its folder exists: give it a fresh one (a rerun in the same
-    # folder keeps the earlier steps, in basil_2 …).
+    # folder keeps the earlier steps, in basil_2 ...).
     steps = out_dir / "basil"
     k = 2
     while steps.exists():
@@ -439,7 +439,7 @@ def _quote(value: str) -> str:
     return shlex.quote(str(value))
 
 
-# ── asl_file ─────────────────────────────────────────────────────────────────
+# asl_file
 
 #: What :func:`asl_file` does: subtract the pairs, split them into tag and control, or only average.
 ASL_FILE_OPERATIONS: tuple[str, ...] = ("diff", "split-pairs", "mean")
@@ -494,7 +494,7 @@ def asl_file(
     return FslCommand(argv, f"asl_file ({operation})", outputs, requires=_REQUIRES["asl_file"])
 
 
-# ── asl_calib ────────────────────────────────────────────────────────────────
+# asl_calib
 
 
 def asl_calib(
@@ -546,7 +546,7 @@ def asl_calib(
     return FslCommand(argv, "asl_calib (M0)", outputs, requires=_REQUIRES["asl_calib"])
 
 
-# ── reading the results ──────────────────────────────────────────────────────
+# reading the results
 
 
 def read_value(path: Path) -> float | None:
@@ -566,8 +566,8 @@ _PRETTY = {
 
 
 def summary(native_dir: Path) -> dict[str, dict[str, float]]:
-    """``{set: {"perfusion_calib gm": value, …}}`` from the ``*_mean.txt`` summaries oxford_asl
-    writes under *native_dir* (one set per folder: ``native``, ``pvcorr``, ``voxelwise`` …)."""
+    """``{set: {"perfusion_calib gm": value, ...}}`` from the ``*_mean.txt`` summaries oxford_asl
+    writes under *native_dir* (one set per folder: ``native``, ``pvcorr``, ``voxelwise`` ...)."""
     native_dir = Path(native_dir)
     out: dict[str, dict[str, float]] = {}
     for path in sorted(native_dir.rglob("*_mean.txt")):
@@ -588,7 +588,7 @@ def summary(native_dir: Path) -> dict[str, dict[str, float]]:
     return out
 
 
-#: oxford_asl region-analysis CSV suffix → what its rows measure.
+#: oxford_asl region-analysis CSV suffix -> what its rows measure.
 _REGION_TABLES = {
     "": "CBF (ml/100g/min)", "_gm": "GM CBF (ml/100g/min)", "_wm": "WM CBF (ml/100g/min)",
     "_arrival": "ATT (s)", "_arrival_gm": "GM ATT (s)", "_arrival_wm": "WM ATT (s)",
@@ -596,7 +596,7 @@ _REGION_TABLES = {
 
 
 def region_table_title(csv_path: Path) -> str:
-    """What one of oxford_asl's region-analysis CSVs reports (``region_analysis_gm.csv`` → GM CBF).
+    """What one of oxford_asl's region-analysis CSVs reports (``region_analysis_gm.csv`` -> GM CBF).
 
     With partial-volume correction the GM / WM tables are the corrected GM and WM maps; without
     it, the plain maps in voxels above the GM / WM purity thresholds.

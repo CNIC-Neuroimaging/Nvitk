@@ -2,7 +2,7 @@
 
 Workstations do not have ``qsub``: SGE submission goes through a login node. The pipelines
 therefore emit their whole submission as a bash driver script, copy it to the cluster over
-sshfs, and run it there — see :mod:`nvitk.cluster.sge_remote` for the staging half.
+sshfs, and run it there; see :mod:`nvitk.cluster.sge_remote` for the staging half.
 
 :func:`prompt_ssh_credentials` is the shared entry point for obtaining the host, user and
 password, so every pipeline asks for them the same way and resolves the same host aliases.
@@ -28,7 +28,7 @@ def prompt_ssh_credentials(
 
     *remote_host* is looked up in *host_aliases* first, so a pipeline's short name for the
     cluster works wherever a hostname is accepted. The password is always prompted for and
-    never read from an argument or the environment — it should not end up in a shell history,
+    never read from an argument or the environment: it should not end up in a shell history,
     a process listing, or a log.
 
     Raises

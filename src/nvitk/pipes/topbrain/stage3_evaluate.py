@@ -2,29 +2,29 @@
 
 **Inputs**
 
-- Cross-validated predictions — by default the *held-out* validation output nnU-Net writes per
+- Cross-validated predictions: by default the *held-out* validation output nnU-Net writes per
   fold, gathered across folds (``--predictions-from cv``); or an explicit folder
   (``--predictions-from folder``, e.g. stage 4's ``postprocessed/``)
 - The reference masks, i.e. stage 0's ``labelsTr``
 
 Which predictions to score
 --------------------------
-``cv`` is the default and the only setting that yields an honest number. nnU-Net writes each
+``cv`` is the default and the only setting that yields an unbiased number. nnU-Net writes each
 fold's predictions for the cases that fold **held out**, so gathering them across folds gives one
 prediction per case, each from a model that never saw it. Pointing this stage at predictions made
-over the whole training set instead — which is what inference on ``imagesTr`` produces — scores
+over the whole training set instead (which is what inference on ``imagesTr`` produces) scores
 the model partly on its own training data and inflates every metric, silently.
 
 **Outputs**
 
-- ``<results_root>/stage3_evaluate/<run>/metrics.json`` — per-case and cohort summary
+- ``<results_root>/stage3_evaluate/<run>/metrics.json``: per-case and cohort summary
 - ``.../metrics_per_case.csv`` and ``.../metrics_per_class.csv``
-- ``.../topbrain_stage3.json`` — provenance
+- ``.../topbrain_stage3.json``: provenance
 
 Reported metrics
 ----------------
-The six the challenge weights equally — class-average Dice, centerline Dice, connected-component
-(β0) error, HD95, invalid-neighbour error, and side-road detection F1 — plus per-modality
+The six the challenge weights equally, class-average Dice, centerline Dice, connected-component
+(β0) error, HD95, invalid-neighbour error, and side-road detection F1, plus per-modality
 breakdowns, because a single modality-agnostic model can hide a large CT/MRA gap behind a
 respectable average.
 
@@ -87,7 +87,7 @@ def collect_cv_predictions(
     Returns
     -------
     tuple
-        ``(destination, missing_folds)`` — folds whose validation directory was absent, so a
+        ``(destination, missing_folds)``: folds whose validation directory was absent, so a
         partial cross-validation is visible rather than silently scored as if complete.
 
     Raises
@@ -112,7 +112,7 @@ def collect_cv_predictions(
         for prediction in sorted(validation.glob("*.nii.gz")):
             target = destination / prediction.name
             if target.exists():
-                # A case predicted by two folds means the splits overlap — that is a broken
+                # A case predicted by two folds means the splits overlap: that is a broken
                 # cross-validation, not a mergeable duplicate.
                 duplicates.append(prediction.name)
                 continue
@@ -144,7 +144,7 @@ def _match_cases(prediction_dir: Path, reference_dir: Path) -> list[tuple[str, P
     Raises
     ------
     FileNotFoundError
-        If nothing matches, naming both directories — the usual cause is pointing at the wrong
+        If nothing matches, naming both directories: the usual cause is pointing at the wrong
         stage-5 subdirectory.
     """
     pairs: list[tuple[str, Path, Path]] = []
@@ -166,10 +166,10 @@ def _match_cases(prediction_dir: Path, reference_dir: Path) -> list[tuple[str, P
 
 
 def load_case_aggregates(source: Path) -> dict[str, dict[str, float]]:
-    """Read a previous run's per-case aggregate metrics; case id → metric → value.
+    """Read a previous run's per-case aggregate metrics; case id -> metric -> value.
 
-    Accepts a ``metrics.json`` file or any directory containing one — a stage 3 output
-    directory, most usefully — so the baseline can be named the way it is actually remembered.
+    Accepts a ``metrics.json`` file or any directory containing one (a stage 3 output
+    directory, most usefully), so the baseline can be named the way it is remembered.
 
     Raises
     ------
@@ -195,7 +195,7 @@ def load_case_aggregates(source: Path) -> dict[str, dict[str, float]]:
 
 
 def read_case_folds(splits_path: Path) -> dict[str, int]:
-    """Case id → index of the fold that held it out, from ``splits_final.json``.
+    """Case id -> index of the fold that held it out, from ``splits_final.json``.
 
     Needed to report the fold-to-fold spread: with five folds of five patients, the spread is
     what says whether a difference between two runs is a result or a coin toss.
@@ -317,7 +317,7 @@ def run_evaluate(
     Parameters
     ----------
     baseline
-        A previous stage 3 run to compare against, case by case — most usefully the
+        A previous stage 3 run to compare against, case by case: most usefully the
         ``--from-scratch`` control, which is the only comparison that says whether the
         pre-training bought anything. Cohort means cannot answer that at this cohort size: see
         :func:`~nvitk.measure.segmentation_metrics.paired_comparison`.
@@ -340,7 +340,7 @@ def run_evaluate(
         len(pairs), label_set, len(labels), len(sideroad),
     )
 
-    # With post-processing selected, every case is scored twice — once raw, once cleaned — so
+    # With post-processing selected, every case is scored twice (once raw, once cleaned), so
     # the comparison is paired on the same cases and the same references. Scoring only the
     # cleaned masks would tell you how good they are, not what the cleaning bought.
     spec = postproc.spec_from_options(
@@ -399,14 +399,14 @@ def run_evaluate(
         if subset:
             by_modality[modality] = aggregate_cases(subset)
 
-    # ---- Per-fold spread: the yardstick any difference has to clear ----------
+    # Per-fold spread: the yardstick any difference has to clear
     case_folds = read_case_folds(
         Path(splits_path) if splits_path is not None
         else Path(reference_dir).parent / "splits_final.json"
     )
     spread = fold_spread(cases, case_folds) if case_folds else {}
 
-    # ---- Paired comparison against a baseline run ----------------------------
+    # Paired comparison against a baseline run
     comparison: list[PairedComparison] = []
     if baseline is not None:
         comparison = paired_comparison(
@@ -414,7 +414,7 @@ def run_evaluate(
             {case.case_id: case.aggregate for case in cases},
         )
 
-    # ---- Raw vs post-processed, paired on the same cases ---------------------
+    # Raw vs post-processed, paired on the same cases
     postprocess_comparison: list[PairedComparison] = []
     if raw_cases:
         postprocess_comparison = paired_comparison(
@@ -487,9 +487,7 @@ def run_evaluate(
     return output_dir
 
 
-# ---------------------------------------------------------------------------
 # CLI + SGE submission
-# ---------------------------------------------------------------------------
 
 
 def _worker_argv(

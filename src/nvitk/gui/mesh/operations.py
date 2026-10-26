@@ -1,6 +1,6 @@
 """The Mesh panel's operations: what each does, what it takes, and how it runs.
 
-Every operation is a :class:`MeshOp` — an id, a category and label for the
+Every operation is a :class:`MeshOp`: an id, a category and label for the
 pickers, the kinds of active layer it accepts, its parameters (the Tools
 panel's :class:`~nvitk.gui.tools.registry.ParamSpec`), whether it needs a point
 clicked in the viewer (:attr:`MeshOp.pick`), and a runner. Runners read the
@@ -79,7 +79,7 @@ class OpResult:
     plot: dict[str, Any] | None = None
     row_header: str = ""
     #: Called with a table row's key when that row is clicked (``None`` when the
-    #: highlight should go): shows the branch, frame… it describes in the viewer.
+    #: highlight should go): shows the branch, frame... it describes in the viewer.
     on_row: Callable[[str | None], None] | None = None
 
 
@@ -98,7 +98,7 @@ class OpContext:
     #: Called with the layer and its previous content before an edit replaces it (undo).
     remember: Callable[[Any, Any], None] | None = None
 
-    # -- inputs -----------------------------------------------------------------
+    # inputs
 
     def layer_named(self, key: str, *, required: bool = True) -> Any | None:
         name = str(self.params.get(key) or "").strip()
@@ -143,7 +143,7 @@ class OpContext:
     def name(self) -> str:
         return str(getattr(self.layer, "name", "mesh"))
 
-    # -- outputs ----------------------------------------------------------------
+    # outputs
 
     def put_mesh(self, mesh: Mesh, suffix: str, *, values: np.ndarray | None = None, colormap: str = "turbo",
                  force_replace: bool = False) -> Any:
@@ -208,13 +208,11 @@ class MeshOp:
     url: str = ""
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Helpers
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _vec3(text: Any, default: float = 0.0) -> np.ndarray:
-    """``"1, 2, 3"`` / ``"2"`` → a 3-vector."""
+    """``"1, 2, 3"`` / ``"2"`` -> a 3-vector."""
     parts = [p for p in str(text or "").replace(";", ",").replace(" ", ",").split(",") if p.strip()]
     if not parts:
         return np.full(3, float(default))
@@ -379,7 +377,7 @@ def present_label_ids(layer: Any) -> list[int]:
 
 
 def parse_groups(text: str, available: list[int]) -> list[tuple[str, list[int]]]:
-    """``"Left: 1,2 ; Right: 3-5 ; 7,8"`` → ``[("Left", [1, 2]), ("Right", [3, 4, 5]), ("group 3", [7, 8])]``."""
+    """``"Left: 1,2 ; Right: 3-5 ; 7,8"`` -> ``[("Left", [1, 2]), ("Right", [3, 4, 5]), ("group 3", [7, 8])]``."""
     groups = []
     for k, chunk in enumerate([c for c in str(text or "").replace("|", ";").split(";") if c.strip()], 1):
         name, _, spec = chunk.rpartition(":")
@@ -446,13 +444,11 @@ def _gather(ctx: OpContext, layers: list[Any], name: str) -> None:
     if folders is not None and len(layers) > 1:
         try:
             folders.create_folder(layers, name)
-        except Exception:  # noqa: BLE001 — folders are a convenience
+        except Exception:  # noqa: BLE001 (folders are a convenience)
             pass
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Create
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _run_surfaces(ctx: OpContext) -> OpResult:
@@ -587,9 +583,7 @@ def _run_hull(ctx: OpContext) -> OpResult:
     return OpResult(f"Convex hull: {mesh.n_faces} faces, volume {_fmt(volume(mesh), ' mm³')}.")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Edit (picked point)
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _run_erase(ctx: OpContext) -> OpResult:
@@ -642,9 +636,7 @@ def _run_smooth_spot(ctx: OpContext) -> OpResult:
     return OpResult(f"Smoothed within {r:g} mm of the click.")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Select
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _selection_or_fail(ctx: OpContext) -> np.ndarray:
@@ -747,9 +739,7 @@ def _run_sel_keep(ctx: OpContext) -> OpResult:
     return OpResult(f"{out.n_faces:,} faces {'copied to a new layer' if copy_only else 'kept'}.")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Clean, smooth, remesh
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _run_clean(ctx: OpContext) -> OpResult:
@@ -885,9 +875,7 @@ def _run_clip(ctx: OpContext) -> OpResult:
     return OpResult(f"Clipped {ctx.name} at {np.round(origin, 1).tolist()}: {out.n_faces} faces kept.")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Transform & align
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _put_surface(ctx: OpContext, obj: Mesh | PointCloud, suffix: str) -> None:
@@ -951,9 +939,7 @@ def _run_pca_align(ctx: OpContext) -> OpResult:
     return OpResult(f"Principal axes of {ctx.name} on x/y/z; extents {', '.join(_fmt(e) for e in extents)} mm.")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Measure / compare
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _run_measure(ctx: OpContext) -> OpResult:
@@ -969,7 +955,7 @@ def _run_measure(ctx: OpContext) -> OpResult:
 
 
 def _per_frame(ctx: OpContext, fn: Callable[[Mesh], np.ndarray]) -> np.ndarray | list[np.ndarray]:
-    """*fn* on the mesh — on every frame for a series."""
+    """*fn* on the mesh, on every frame for a series."""
     ctrl = series_controller(ctx.layer)
     if ctrl is None:
         return fn(ctx.mesh())
@@ -1072,9 +1058,7 @@ def _run_distance(ctx: OpContext) -> OpResult:
                     table=table, title=f"Surface distance: {ctx.name} ↔ {ref_layer.name}")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Vessels & tubes
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _run_centerlines(ctx: OpContext) -> OpResult:
@@ -1312,7 +1296,7 @@ class CenterlineHighlighter:
                 if len(xyz) == len(mask):
                     mask &= np.linalg.norm(xyz - centre, axis=1) <= reach
             self._highlight_field(points, mask)
-        except Exception:  # noqa: BLE001 — the points' colours are a bonus
+        except Exception:  # noqa: BLE001 (the points' colours are a bonus)
             pass
 
     def _highlight_lines(self, bids: list[int]) -> None:
@@ -1328,7 +1312,7 @@ class CenterlineHighlighter:
                 if bid in segs:
                     colours[segs[bid]] = (1.0, 0.25, 0.1, 1.0)
             lines.edge_color = colours
-        except Exception:  # noqa: BLE001 — the line colours are a bonus
+        except Exception:  # noqa: BLE001 (the line colours are a bonus)
             pass
 
     def _restore(self) -> None:
@@ -1371,9 +1355,7 @@ def _run_thickness(ctx: OpContext) -> OpResult:
                     title=f"Thickness: {ctx.name}")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Convert
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _run_to_mask(ctx: OpContext) -> OpResult:
@@ -1512,9 +1494,7 @@ def _run_probe(ctx: OpContext) -> OpResult:
                     title=f"{img_layer.name} on {ctx.name}")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Point clouds
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _run_pc_downsample(ctx: OpContext) -> OpResult:
@@ -1555,9 +1535,7 @@ def _run_pc_normals(ctx: OpContext) -> OpResult:
     return OpResult(f"Normals estimated for {cloud.n_points} points.")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Time (3D+t)
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _run_series_measure(ctx: OpContext) -> OpResult:
@@ -1650,9 +1628,7 @@ def _run_series_frame(ctx: OpContext) -> OpResult:
     return OpResult(f"Frame {ctrl.frame} of {ctx.name} as its own mesh.")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Catalogue
-# ──────────────────────────────────────────────────────────────────────────────
 
 _SMOOTH = _P("smooth_iterations", "Smooth (Taubin iterations, 0 = off)", "int", 10, min=0, max=500)
 _DECIMATE = _P("decimate_reduction", "Decimate (fraction removed, 0 = off)", "float", 0.0, min=0.0, max=0.99)
@@ -1942,9 +1918,7 @@ OPERATIONS = OPERATIONS + _vmtk_operations(_op, {
 })
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # MeshLab filters (PyMeshLab), one operation each
-# ──────────────────────────────────────────────────────────────────────────────
 
 #: The layer-picker entry meaning "the active layer" (MeshLab filters on two meshes).
 ACTIVE_LAYER = "(active layer)"
@@ -2132,7 +2106,7 @@ def meshlab_operations() -> tuple[MeshOp, ...]:
             from nvitk.meshlab.pymeshlab_filters import meshlab_filters
 
             _MESHLAB_OPS = tuple(_meshlab_op(info) for info in meshlab_filters())
-        except Exception as exc:  # noqa: BLE001 — MeshLab is optional; the native tools still work
+        except Exception as exc:  # noqa: BLE001 (MeshLab is optional; the native tools still work)
             from nvitk.gui.core.log_panel import gui_log
 
             gui_log(f"MeshLab filters unavailable: {exc}", error=True)
@@ -2162,9 +2136,7 @@ def operation(op_id: str) -> MeshOp | None:
     return next((op for op in all_operations() if op.id == op_id), None)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Several meshes at once
-# ──────────────────────────────────────────────────────────────────────────────
 
 #: Most curves one combined plot draws (a legend past that reads as noise).
 _MAX_COMBINED_LINES = 12
@@ -2203,7 +2175,7 @@ def combine_results(title: str, results: list[tuple[str, OpResult]]) -> OpResult
             if cb is not None:
                 try:
                     cb(None)
-                except Exception:  # noqa: BLE001 — one stale run must not stop the others
+                except Exception:  # noqa: BLE001 (one stale run must not stop the others)
                     pass
         hit = route.get(str(key)) if key is not None else None
         if hit is not None and callbacks[hit[0]] is not None:

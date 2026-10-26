@@ -3,16 +3,16 @@ Split bilateral label masks into left/right hemispheres.
 
 Two strategies are provided:
 
-- :func:`split_lr_by_cc` — connected-components driven: keeps the *n* largest
+- :func:`split_lr_by_cc`: connected-components driven: keeps the *n* largest
   CCs in *mask* and assigns Left/Right from their world-space x centroids. This
   is what ct-pet-v5 and dixon-v5 use for the `deltoid` TotalSegmentator label
   which ships bilaterally without native L/R classes.
-- :func:`split_lr_by_midline` — geometric fallback: split on a sagittal plane
+- :func:`split_lr_by_midline`: geometric fallback, split on a sagittal plane
   (specified by voxel x or auto-detected from the affine origin).
 
-Both functions work for images in any voxel orientation: the sign of the
-affine's first column determines which voxel-space side maps to anatomical
-"left" in world coordinates.
+:func:`split_lr_by_cc` compares world-space (RAS) centroids, so it works for any voxel
+orientation. :func:`split_lr_by_midline` cuts along voxel axis 0 and reads the side from
+the sign of ``affine[0, 0]``, so it assumes axis 0 is the left-right axis.
 """
 
 from __future__ import annotations
@@ -56,11 +56,10 @@ def split_lr_by_cc(mask: Image, *, n: int = 2, structure: Any = None) -> tuple[I
 
     The top-*n* CCs (by size) are kept and labeled L/R via their centroids'
     world-space x coordinate (computed with ``mask.affine``). The convention
-    used is the radiology/anatomical one: **Left** means the subject's left
-    side, which in a right-handed RAS/LAS coordinate system has the *lower* x
-    world coordinate; in LPS/LPI it has the *higher* x coordinate. This is
-    derived from the sign of ``affine[0, 0]`` so it works with either
-    convention.
+    used is the anatomical one: **Left** means the subject's left side, the
+    component whose centroid has the *lower* world x. That holds for RAS
+    affines, which is what nvitk's readers store; an LPS affine would swap the
+    two outputs.
 
     Parameters
     ----------

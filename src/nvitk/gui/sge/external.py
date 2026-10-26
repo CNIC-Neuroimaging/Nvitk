@@ -1,20 +1,20 @@
 """FastSurfer and FSL tools on the cluster (the Tools panel's *Run SGE*).
 
 The image tools send one layer and get one array back. These tools take several inputs
-— layers chosen in the form, layers named in a command, bvecs/bvals, acquisition files,
-a BEDPOSTX folder, the FreeSurfer license — and produce a set of outputs. So a job is
+(layers chosen in the form, layers named in a command, bvecs/bvals, acquisition files,
+a BEDPOSTX folder, the FreeSurfer license), and produce a set of outputs. So a job is
 staged as:
 
-* ``data/input.nii.gz`` — the active layer (when the tool has one);
-* ``data/<param>.nii.gz`` — each layer the form names, and ``data/named_<k>.nii.gz`` for
+* ``data/input.nii.gz``: the active layer (when the tool has one);
+* ``data/<param>.nii.gz``: each layer the form names, and ``data/named_<k>.nii.gz`` for
   layers named in a command (``{layer:NAME}``) or the longitudinal time points;
-* ``data/files/<param>/…`` — every file or folder a path parameter names, the parameter
+* ``data/files/<param>/...``: every file or folder a path parameter names, the parameter
   rewritten to the container path it lands on;
-* ``data/job.json`` — the usual job, its params rewritten.
+* ``data/job.json``: the usual job, its params rewritten.
 
 On the node the worker (:mod:`nvitk.gui.sge.worker`) rebuilds the tool's inputs from
 those files (:class:`~nvitk.gui.tools.external_io.StagedInputs`), runs the same tool
-definition a local run uses — headless, in the foreground — and writes the import
+definition a local run uses (headless, in the foreground), and writes the import
 manifest into ``.done``. The GUI downloads the files the manifest lists and opens them
 exactly as a local run would (:func:`~nvitk.gui.tools.external_io.load_manifest`).
 
@@ -87,7 +87,7 @@ def wants_gpu(tool_id: str) -> bool:
     return str(tool_id) in GPU_TOOLS
 
 
-# ── staging (GUI side) ───────────────────────────────────────────────────────
+# staging (GUI side)
 
 
 def _export(layer: Any, path: Path) -> None:
@@ -231,7 +231,7 @@ def stage_external_job(
     return staging, job
 
 
-# ── running (node side) ──────────────────────────────────────────────────────
+# running (node side)
 
 
 def run_external_job(job: GuiSgeJob, data_dir: Path, output_dir: Path) -> tuple[list[str], dict[str, Any]]:

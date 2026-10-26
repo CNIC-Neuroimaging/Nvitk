@@ -267,7 +267,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Left ICA → Right ICA → Basilar; then a final multilabel blood-flood expand "
         "(labels 1/2/3) on the raw TOF volume."
     ),
-    # ── FastSurfer ───────────────────────────────────────────────────────────
+    # FastSurfer
     "fastsurfer_seg": (
         "FastSurfer (Deep-MI) on the active T1: whole-brain aparc.DKTatlas+aseg segmentation, and "
         "by default cerebellum (CerebNet), hypothalamus (HypVINN) and corpus callosum. Runs in the "
@@ -324,7 +324,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Download (≈9.5 GB, resumable) and unpack FreeSurfer 7.4.1, which FastSurfer's surface and "
         "longitudinal pipelines need. The license is free: register at surfer.nmr.mgh.harvard.edu."
     ),
-    # ── FSL ──────────────────────────────────────────────────────────────────
+    # FSL
     "fsl_bet": "FSL BET brain extraction of the active image: brain and brain-mask layers.",
     "fsl_fast": (
         "FSL FAST: CSF / GM / WM segmentation (Labels), partial-volume maps (hidden) and the "

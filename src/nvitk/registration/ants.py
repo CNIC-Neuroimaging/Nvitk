@@ -79,8 +79,8 @@ ANTSPY_TYPE_OF_TRANSFORM: tuple[str, ...] = (
 
 
 #: ``type_of_transform`` values the GUI offers: :data:`ANTSPY_TYPE_OF_TRANSFORM` with the
-#: templated entries (``TV[n]``, ``antsRegistrationSyN[x]``…) spelled out, since ANTsPy
-#: needs the concrete value — ``[r]`` rigid, ``[a]`` affine, ``[s]`` rigid+affine+SyN,
+#: templated entries (``TV[n]``, ``antsRegistrationSyN[x]``...) spelled out, since ANTsPy
+#: needs the concrete value; ``[r]`` rigid, ``[a]`` affine, ``[s]`` rigid+affine+SyN,
 #: ``[b]`` rigid+affine+B-spline SyN.
 ANTSPY_TRANSFORM_CHOICES: tuple[str, ...] = (
     *(t for t in ANTSPY_TYPE_OF_TRANSFORM if "[" not in t),
@@ -139,7 +139,7 @@ _REGISTRATION_OPTIONS: frozenset[str] = frozenset({
 
 
 def parse_int_tuple(text: Any) -> tuple[int, ...] | None:
-    """``"40,20,0"`` / ``"40x20x0"`` / ``[40, 20, 0]`` → ``(40, 20, 0)``; empty → ``None``."""
+    """``"40,20,0"`` / ``"40x20x0"`` / ``[40, 20, 0]`` -> ``(40, 20, 0)``; empty -> ``None``."""
     if text is None:
         return None
     if isinstance(text, (list, tuple)):
@@ -184,9 +184,9 @@ def ants_register(
 ) -> AntsRegistrationResult:
     """Register MOVING to FIXED and write outputs under *out_dir*.
 
-    *options* are passed to ``ants.registration`` — the stage metrics
+    *options* are passed to ``ants.registration``: the stage metrics
     (``aff_metric``, ``syn_metric``), sampling, ``grad_step`` / ``flow_sigma`` /
-    ``total_sigma``, iteration schedules (``reg_iterations``, ``aff_iterations``…;
+    ``total_sigma``, iteration schedules (``reg_iterations``, ``aff_iterations``...;
     tuples or ``"40,20,0"`` strings) and ``random_seed``. Unknown keys raise.
     *initial_transform* is a transform file (or ``"Identity"``) to start from; the
     masks restrict the metric to a region of the fixed / moving image.

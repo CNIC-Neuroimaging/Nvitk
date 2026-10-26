@@ -13,7 +13,7 @@
 #
 # The version is v2.5.4, the newest release that runs on nvitk's Python 3.11: v2.6.0 and
 # later need Python >= 3.12 (PEP 695 generics throughout). FastSurfer's own torch pin
-# (2.7.*) is advisory here — the tree runs on the environment's torch.
+# (2.7.*) is advisory here: the tree runs on the environment's torch.
 #
 # Environment:
 #   PREFIX                          target environment (required)

@@ -1,11 +1,11 @@
 """
-Cardiac phase stacking — single-phase reconstructions → one 3D+t volume.
+Cardiac phase stacking: single-phase reconstructions -> one 3D+t volume.
 
 Description
 -----------
 A prospectively gated cardiac CT (or a retrospective one reconstructed at a few
 phases) arrives as one *series per phase*: ``IMR, 73%``, ``IMR, 78%``,
-``IMR, 83%`` — the same acquisition and reconstruction, different R-R phase.
+``IMR, 83%``; the same acquisition and reconstruction, different R-R phase.
 Each converts to its own 3D NIfTI. This module finds those siblings among the
 converted outputs and writes them as one ``X x Y x Z x T`` volume ordered by
 phase, so the GUI can play them as a cine and any 3D+t tool can use them.
@@ -49,13 +49,11 @@ except Exception:  # pragma: no cover
 
 log = Logger()
 
-#: ``73%``, ``73 %``, ``73.5%`` — the phase token in a series description.
+#: ``73%``, ``73 %``, ``73.5%``: the phase token in a series description.
 _PHASE_TOKEN = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d+)?)\s*%")
 
 
-# ---------------------------------------------------------------------------
 # Metadata
-# ---------------------------------------------------------------------------
 
 
 def _sidecar_path(nifti_path: Path) -> Path:
@@ -150,9 +148,7 @@ def stack_key(md: dict[str, Any], shape: tuple[int, ...], affine: np.ndarray) ->
     )
 
 
-# ---------------------------------------------------------------------------
 # Grouping
-# ---------------------------------------------------------------------------
 
 
 def find_phase_groups(paths: Sequence[str | Path], *, min_phases: int = 2) -> list[list[tuple[float, Path, dict]]]:
@@ -162,7 +158,7 @@ def find_phase_groups(paths: Sequence[str | Path], *, min_phases: int = 2) -> li
     Returns
     -------
     list of groups
-        Each group is ``[(phase_percent, path, metadata), …]`` sorted by phase,
+        Each group is ``[(phase_percent, path, metadata), ...]`` sorted by phase,
         with at least *min_phases* distinct phases. Outputs that are not 3D, have
         no phase, or have no sibling are left out.
     """
@@ -173,7 +169,7 @@ def find_phase_groups(paths: Sequence[str | Path], *, min_phases: int = 2) -> li
         path = Path(raw)
         try:
             img = nib.load(str(path))
-        except Exception:  # noqa: BLE001 — a file another step wrote badly is not ours to fail on
+        except Exception:  # noqa: BLE001 (a file another step wrote badly is not ours to fail on)
             continue
         if len(img.shape) != 3:
             continue
@@ -197,13 +193,11 @@ def find_phase_groups(paths: Sequence[str | Path], *, min_phases: int = 2) -> li
     return groups
 
 
-# ---------------------------------------------------------------------------
 # Writing
-# ---------------------------------------------------------------------------
 
 
 def _phase_label(phase: float) -> str:
-    """``73`` or ``73.5`` — a phase for a file name."""
+    """``73`` or ``73.5``: a phase for a file name."""
     return f"{phase:g}".replace(".", "p")
 
 
@@ -269,7 +263,7 @@ def write_volume_stack(
         image.header.extensions.append(
             nib.nifti1.Nifti1Extension(16, json.dumps(md, default=str).encode("utf-8"))
         )
-    except Exception:  # noqa: BLE001 — metadata is a convenience; the volume is the product
+    except Exception:  # noqa: BLE001 (metadata is a convenience; the volume is the product)
         pass
     out = Path(output_path)
     nib.save(image, str(out))

@@ -24,7 +24,7 @@ def get_current_backend() -> str:
 
 
 def get_ops(name: str | None = None, allow_fallback: bool = True) -> tuple[Any, Any, Any]:
-    """The ``(xp, scipy, ndi)`` triple — always the NumPy/SciPy one."""
+    """The ``(xp, scipy, ndi)`` triple: always the NumPy/SciPy one."""
     return _np, _scipy, _ndi
 
 

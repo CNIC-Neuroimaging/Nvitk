@@ -72,7 +72,7 @@ def _fmt_parts(parts: list[str]) -> str:
 
 def anatomy_config_rows() -> list[dict[str, Any]]:
     """
-    The manual anatomy rows that head the review table — one per configuration variable.
+    The manual anatomy rows that head the review table: one per configuration variable.
 
     These carry no measured value: their ``Value`` cell is a dropdown the reviewer fills in, and
     they are ``review_optional`` because a config is an annotation, not an OK/FAIL verdict on a
@@ -103,12 +103,12 @@ def load_qc_measurement_rows(
 
     Grouping
     --------
-    1. **LOC / vessel** — one OK/FAIL covering flow (time-avg + timeseries), PI, RI.
-    2. **PITC / territory** — one OK/FAIL per LICA / RICA / BASILAR covering slope +
+    1. **LOC / vessel**: one OK/FAIL covering flow (time-avg + timeseries), PI, RI.
+    2. **PITC / territory**: one OK/FAIL per LICA / RICA / BASILAR covering slope +
        intercept (all stations in that territory).
-    3. **PWV / territory** — one OK/FAIL per territory covering Bjornfoot + Fielding.
-    4. **Stenosis / vessel** — informational morphometrics rows from stage-7 Path Summary
-       (max stenosis %, length, segment count). Empty ``variable_ids`` → display only.
+    3. **PWV / territory**: one OK/FAIL per territory covering Bjornfoot + Fielding.
+    4. **Stenosis / vessel**: informational morphometrics rows from stage-7 Path Summary
+       (max stenosis %, length, segment count). Empty ``variable_ids`` -> display only.
 
     Branch-level PITC/PWV rows are omitted; only territory (root) values are shown.
     """
@@ -164,7 +164,7 @@ def load_qc_measurement_rows(
 
     if hemo_csv.is_file():
         df = pd.read_csv(hemo_csv)
-        # Territory roots only — skip named-branch damping / empty PITC-PWV rows.
+        # Territory roots only: skip named-branch damping / empty PITC-PWV rows.
         if "row_kind" in df.columns:
             roots = df[df["row_kind"].astype(str).str.lower() == "root"]
         else:
@@ -272,7 +272,7 @@ def load_qc_measurement_rows(
 
 
 #: Labels for the automatic metrics, mirroring ``stage9_autoqc.QC_LABELS`` without importing the
-#: pipeline into the viewer — the GUI must open on a machine that has no qvtpy stage installed.
+#: pipeline into the viewer: the GUI must open on a machine that has no qvtpy stage installed.
 QC_VESSEL_METRIC_LABELS: dict[str, str] = {
     "qc_flow_plausible": "Flow plausibility (literature band)",
     "qc_hypoplastic": "Plausibly hypoplastic (<0.8 mm)",
@@ -295,9 +295,7 @@ QC_METRIC_LABELS: dict[str, str] = {
     **QC_SUBJECT_METRIC_LABELS,
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Automatic-QC colouring
-# ──────────────────────────────────────────────────────────────────────────────
 #: Row tints for the automatic metrics, dark enough to keep the light table text readable.
 _QC_GOOD = QColor(STATUS_COLORS["ok"])
 _QC_WARN = QColor(STATUS_COLORS["warn"])
@@ -313,7 +311,7 @@ def qc_metric_colour(metric: str, value: Any) -> QColor:
     Each metric reads differently, so the mapping is per metric rather than one shared scale:
     a plausibility of 0 is bad while a conservation residual of 0 is perfect, and a hypoplasia
     flag is anatomy rather than a verdict. A missing value is tinted as *unknown* rather than as
-    passing — never having been checked is not the same as having passed.
+    passing, never having been checked is not the same as having passed.
     """
     if value is None:
         return _QC_UNKNOWN
@@ -360,8 +358,8 @@ def load_autoqc_for_subject(
     """
     Per-vessel automatic QC metrics for one subject, keyed ``{metric: {region: value}}``.
 
-    Read from ``image_measurements`` — the qvtpy stage 9 writes them there as ordinary rows — so the
-    panel colours by whatever the dataset actually holds rather than recomputing anything.
+    Read from ``image_measurements`` (the qvtpy stage 9 writes them there as ordinary rows), so the
+    panel colours by whatever the dataset holds rather than recomputing anything.
 
     Regions are keyed **both** by their published spelling and by their canonical vessel, because a
     dataset can carry two importers' conventions (``LICA`` and ``left_ica``) while the review table
@@ -428,7 +426,7 @@ def load_subject_autoqc(
     Subject-level automatic QC metrics for one subject, keyed ``{metric: value}``.
 
     Stage 9 publishes these to ``clinical_measurements`` (``qc_ap_share``, ``qc_ap_flag``,
-    ``qc_subject_flag``). Never raises — missing data simply yields an empty dict.
+    ``qc_subject_flag``). Never raises: missing data yields an empty dict.
     """
     metrics: dict[str, float] = {}
     subject = str(subject_uid).strip()
@@ -511,7 +509,7 @@ class QcMeasurementsPanel(QWidget):
             ["Region / vessel", "Metric", "Value", "OK / FAIL", "Comment"]
         )
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        # Uniform row color — alternating rows hide light text on dark Napari UI.
+        # Uniform row color: alternating rows hide light text on dark Napari UI.
         self._table.setAlternatingRowColors(False)
 
         # Subject-level autoQC summary (clinical_measurements). Shown above the vessel table so
@@ -558,7 +556,7 @@ class QcMeasurementsPanel(QWidget):
         self._subject_qc_row.setVisible(False)
 
         # Colour-by picker for the automatic QC metrics published by stage 9. Populated on load
-        # from whatever that stage actually wrote, so a dataset without it simply shows "none".
+        # from whatever that stage wrote, so a dataset without it shows "none".
         self._colour_by = QComboBox()
         self._colour_by.addItem("No colouring", "")
         self._colour_by.currentIndexChanged.connect(self._apply_colouring)
@@ -583,7 +581,7 @@ class QcMeasurementsPanel(QWidget):
         root.addWidget(self._btn_revise)
         self.setLayout(root)
 
-    # ---- automatic-QC colouring ----------------------------------------------
+    # automatic-QC colouring
     def set_autoqc(
         self,
         values: Mapping[str, Mapping[str, float]] | None,
@@ -716,7 +714,7 @@ class QcMeasurementsPanel(QWidget):
         Load and populate the review table for *subject_uid* from *stage6_dir* (and its sibling
         stage-7 morphometrics directory).
 
-        Returns the number of **measured** rows, excluding the two manual anatomy rows — those are
+        Returns the number of **measured** rows, excluding the two manual anatomy rows: those are
         always present, so counting them would hide the "no measurement CSVs found" case from the
         caller.
         """
@@ -795,7 +793,7 @@ class QcMeasurementsPanel(QWidget):
         """
         Render one manual-anatomy row: a vocabulary dropdown in ``Value``, nothing else editable.
 
-        The OK/FAIL and comment cells are placeholders — an anatomy config is not a verdict on a
+        The OK/FAIL and comment cells are placeholders: an anatomy config is not a verdict on a
         number, and a comment typed here would have nowhere to go in ``image_measurements``. The
         variable's description becomes the row tooltip so the vocabulary is explained in place.
         """
@@ -850,7 +848,7 @@ class QcMeasurementsPanel(QWidget):
         True when there is something to publish.
 
         Normally that means every required row is marked. A subject whose stage-6 CSVs are missing
-        has no required rows at all, and there the anatomy configs are the only thing to save — so
+        has no required rows at all, and there the anatomy configs are the only thing to save, so
         a chosen config is enough to enable the button rather than leaving the reviewer stuck.
         """
         if self._all_marked():
@@ -862,7 +860,7 @@ class QcMeasurementsPanel(QWidget):
         self._btn_revise.setEnabled(self._revise_ready())
 
     def _collect_anatomy_values(self) -> dict[str, str]:
-        """``{variable_id: code}`` for the anatomy rows the reviewer actually filled in."""
+        """``{variable_id: code}`` for the anatomy rows the reviewer filled in."""
         out: dict[str, str] = {}
         for i, row in enumerate(self._rows):
             variable_id = str(row.get("anatomy_variable") or "")
@@ -947,7 +945,7 @@ class QcMeasurementsPanel(QWidget):
                     build_sqlite_index=True,
                 )
             except Exception as exc:
-                # The QC decisions are already saved — report the anatomy failure on its own rather
+                # The QC decisions are already saved: report the anatomy failure on its own rather
                 # than making the whole revise look like it did not happen.
                 notify(f"QC saved, but anatomy configs failed: {exc}", error=True)
                 if self._on_revised is not None:

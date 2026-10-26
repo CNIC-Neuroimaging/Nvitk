@@ -1,26 +1,26 @@
 """Drawing labels in the orthogonal views (:mod:`nvitk.gui.viz.ortho_panel`).
 
 The axial / coronal / sagittal views take the same tools as the main canvas,
-read off the label layer being edited — the Labeling tab's, else the active
+read off the label layer being edited: the Labeling tab's, else the active
 Labels layer:
 
-* **Paint** / **Erase** — Napari's brush (its size, its round-in-scale shape,
+* **Paint** / **Erase**: Napari's brush (its size, its round-in-scale shape,
   *preserve labels*, a disc in the plane or a ball through slices with the 3D
   brush); a drag is one stroke, one Ctrl+Z;
-* **Fill** — Napari's bucket, in the plane clicked (or the volume with 3D fill);
-* **Pick** — the label clicked becomes the active one;
-* **Wand**, **Flood**, **Vessel** — the Labeling tab's region tools: a click
+* **Fill**: Napari's bucket, in the plane clicked (or the volume with 3D fill);
+* **Pick**: the label clicked becomes the active one;
+* **Wand**, **Flood**, **Vessel**: the Labeling tab's region tools: a click
   grows a region from the voxel clicked, a drag adds one at every voxel reached
   (one undo step), Alt+drag tunes the tool's setting live, Shift+click takes a
   region out;
-* **Tracer** — click points along a vessel, in any view and slice; double-click
+* **Tracer**: click points along a vessel, in any view and slice; double-click
   fills the tube;
-* **Smart brush** — a brush painting only the voxels like its centre's;
-* **Polygon** — click the corners in a view, then double-click (or click the
+* **Smart brush**: a brush painting only the voxels like its centre's;
+* **Polygon**: click the corners in a view, then double-click (or click the
   first corner) to fill it with the active label in that plane; Esc cancels;
-* **Right-drag** — erases with the brush whatever the tool (one stroke, one
+* **Right-drag**: erases with the brush whatever the tool (one stroke, one
   Ctrl+Z); the tool is back as soon as the button is released;
-* **Box** (the Labeling tab's Box card, Draw box) — a drag sets the box on the
+* **Box** (the Labeling tab's Box card, Draw box): a drag sets the box on the
   view's two axes. The box and a traced path are drawn in every view.
 
 With any other tool (Pan, Polygon) a click moves the crosshair, as it always
@@ -60,7 +60,7 @@ class OrthoLabelEditor:
         self._labeling_hooked = False
         #: The polygon being drawn: its view, layer, corners (row-axis, col-axis voxels).
         self._poly: dict[str, Any] | None = None
-        #: A region tool's stroke in progress, and — for Alt+drag — where the tuning began.
+        #: A region tool's stroke in progress, and (for Alt+drag), where the tuning began.
         self._region: Any | None = None
         self._tune: dict[str, float] | None = None
         #: A smart brush stroke in progress.
@@ -79,7 +79,7 @@ class OrthoLabelEditor:
         except Exception:  # noqa: BLE001
             pass
 
-    # ── what is drawn on, with what ───────────────────────────────────────────
+    # what is drawn on, with what
 
     def _labeling(self) -> Any | None:
         panel = getattr(self._viewer, "_nvitk_labeling_panel", None)
@@ -138,7 +138,7 @@ class OrthoLabelEditor:
             return "The views show a projection: turn it off to draw in them."
         return None
 
-    # ── voxels ───────────────────────────────────────────────────────────────
+    # voxels
 
     def _layer_dims(self, layer: Any) -> tuple[list[int], int | None]:
         """*layer*'s spatial axes, in the views' order, and its time axis (or ``None``)."""
@@ -175,7 +175,7 @@ class OrthoLabelEditor:
             return self._layer_dims(layer)[0]
         return self._plane_dims(layer, view_index)
 
-    # ── events from the views ───────────────────────────────────────────────
+    # events from the views
 
     def handle(self, view_index: int, kind: str, pixel: tuple[int, int] | None, event: Any) -> bool:
         """A mouse *event* (``press`` / ``move`` / ``release``) on view *view_index*;
@@ -247,7 +247,7 @@ class OrthoLabelEditor:
                 self._polygon_click(layer, view_index, pixel)
             else:
                 self._start(layer, view_index, voxel, tool)
-        except Exception as exc:  # noqa: BLE001 — shown, not raised into Qt
+        except Exception as exc:  # noqa: BLE001 (shown, not raised into Qt)
             self._abort()
             self._say(f"Could not edit “{layer.name}”: {exc}", error=True)
         return True
@@ -328,7 +328,7 @@ class OrthoLabelEditor:
         tool = self.tool(layer)
         labeling.wand_from(voxel, index, remove=remove, tool=tool if tool in REGION_TOOLS else "wand")
 
-    # ── the box ──────────────────────────────────────────────────────────────
+    # the box
 
     def _box_layer(self) -> Any | None:
         labeling = self._labeling()
@@ -412,7 +412,7 @@ class OrthoLabelEditor:
             inside = box.lo[view.axis] <= int(panel._position[view.axis]) < box.hi[view.axis]
             views[i].set_box((r0, c0, r1, c1), inside=inside)
 
-    # ── a traced vessel ──────────────────────────────────────────────────────
+    # a traced vessel
 
     def show_trace(self, layer: Any | None, points: list[Any], path: list[Any]) -> None:
         """Draw a vessel being traced on *layer* (``None``: nothing) in every view."""
@@ -445,7 +445,7 @@ class OrthoLabelEditor:
         if self._trace is not None:
             self._draw_trace()
 
-    # ── a polygon ────────────────────────────────────────────────────────────
+    # a polygon
 
     def _polygon_click(self, layer: Any, view_index: int, pixel: tuple[int, int]) -> None:
         """Add a corner (or close the polygon, back on its first corner)."""
@@ -539,7 +539,7 @@ class OrthoLabelEditor:
         if int(self._panel._position[view.axis]) != poly["key"][2]:
             self.cancel_polygon()
 
-    # ── a brush stroke ───────────────────────────────────────────────────────
+    # a brush stroke
 
     def _start(self, layer: Any, view_index: int, voxel: tuple[int, ...], tool: str) -> None:
         """Open one history item for the whole drag, as Napari's own brush does."""
@@ -617,7 +617,7 @@ class OrthoLabelEditor:
             pass
         self._panel.refresh_painted(layer, (stroke["label"],))
 
-    # ── feedback ─────────────────────────────────────────────────────────────
+    # feedback
 
     def refresh(self, _event: Any = None) -> None:
         """Re-read the target and its tool: brush outlines, cursor and the hint line."""

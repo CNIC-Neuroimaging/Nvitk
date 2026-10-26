@@ -4,11 +4,11 @@ The windows are not here: stage 5 records them in ``models.json`` and the entry 
 them in. What is here is the shape of the two transforms, which is the part that does not vary
 per run:
 
-* **CT** is calibrated, so a fixed HU window is meaningful — clamp and rescale onto ``[0, 1]``.
+* **CT** is calibrated, so a fixed HU window is meaningful: clamp and rescale onto ``[0, 1]``.
   Values outside are clamped rather than dropped: a saturated calcification is still a
   calcification, and discarding it would punch a hole in the vessel.
 * **MR / TOF** carries arbitrary units, so the window is measured per volume from robust
-  percentiles, over **non-zero voxels only** — TOF stores air as exactly 0 across most of the
+  percentiles, over **non-zero voxels only**: TOF stores air as exactly 0 across most of the
   field of view, which would otherwise pin the low percentile at 0 and waste the output range.
 
 Only the *clipping* these do survives nnU-Net's per-image z-score; an affine intensity map leaves
@@ -30,7 +30,7 @@ def _rescale(data: np.ndarray, lo: float, hi: float,
     """Affine-map ``[lo, hi]`` onto *target*, clipping outside it.
 
     A degenerate window yields a constant image rather than dividing by zero: that happens only
-    for genuinely empty or constant volumes, and a NaN volume reaching the network is far worse
+    for empty or constant volumes, and a NaN volume reaching the network is far worse
     than an obviously blank one.
     """
     t_lo, t_hi = float(target[0]), float(target[1])

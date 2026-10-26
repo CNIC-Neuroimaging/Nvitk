@@ -3,27 +3,27 @@
 A morphometrics run (the GUI *Morphometrics* tool, or a stage-7 folder loaded for viewing) is
 shown as five results, like every other measurement:
 
-``Morphometrics — vessels``
+``Morphometrics: vessels``
     one row per vessel with the stage-7 report's columns (``morphometrics_report.csv``): the
     selected features and the high-confidence lesion flags, the same table the pipeline writes and
     the database imports. Built from the run's tables when the file is missing (older runs).
-``Morphometrics — all vessel measures``
+``Morphometrics: all vessel measures``
     one row per vessel: every column of ``vessel_summary.csv`` (calibre, end-window diameters,
     bifurcation blanking, tortuosity of the first / last N mm, curvature integrals, direction
-    angles, branching, lesion counts and the worst lesion's severity / confidence…), then the
-    measures computed before the compact tables existed — the cow_morpho path metrics of
+    angles, branching, lesion counts and the worst lesion's severity / confidence...), then the
+    measures computed before the compact tables existed; the cow_morpho path metrics of
     ``00_Path_Summary`` aggregated per vessel, the label volumetry and the literature tortuosity
     workbook. A name that already means something else in ``vessel_summary.csv`` gets the suffix
     ``_legacy`` (``tortuosity_dm_legacy`` is cow's length-weighted mean over segments; the
     unsuffixed one is the main path's). Both vessel tables are label rows: *Colour labels by*
     colours the measured labels **and** the vessel surfaces by any column.
-``Morphometrics — lesions``
+``Morphometrics: lesions``
     one row per stenosis / enlargement: location, length, severity (taper %, diameter and area %
     against the proximal reference) and confidence with its flags. Clicking a row shows that
     lesion in the viewer.
-``Morphometrics — segments``
+``Morphometrics: segments``
     one row per non-overlapping segment.
-``Morphometrics — subject``
+``Morphometrics: subject``
     circle-of-Willis variants, completeness, left/right asymmetry and totals.
 
 Older outputs without the compact tables still give the vessel table (from ``00_Path_Summary``).
@@ -94,7 +94,7 @@ def _unique(key: str, used: set[str]) -> str:
 def vessel_payload(
     table: pd.DataFrame, key_of: Callable[[int, str], str] | None = None
 ) -> tuple[dict[str, dict[str, Any]], dict[str, int]]:
-    """``(rows, row → label id)`` for the results window."""
+    """``(rows, row -> label id)`` for the results window."""
     rows: dict[str, dict[str, Any]] = {}
     row_labels: dict[str, int] = {}
     if table.empty:
@@ -114,7 +114,7 @@ def vessel_payload(
     return rows, row_labels
 
 
-#: Lesion columns shown, as ``table column → csv column``.
+#: Lesion columns shown, as ``table column -> csv column``.
 _LESION_COLUMNS: dict[str, str] = {
     "vessel": "vessel_name", "kind": "kind", "segment": "segment",
     "from origin (mm)": "start_s_from_vessel_origin_mm", "length (mm)": "length_mm",
@@ -213,7 +213,7 @@ def lesion_highlighter(viewer: Any, lesion_layer: Any, keys: list[str]) -> Calla
             from nvitk.gui.viz.lesion_inspector import inspect_lesion
 
             inspect_lesion(viewer, i)
-        except Exception:  # noqa: BLE001 — the selection already happened
+        except Exception:  # noqa: BLE001 (the selection already happened)
             pass
 
     return on_select
@@ -231,8 +231,8 @@ def show_morphometrics_results(
 ) -> dict[str, int]:
     """Show a morphometrics run in the results window (module docstring); returns row counts.
 
-    *key_of* ``(label id, vessel name) → row name`` names the vessel rows (default: the vessel
-    name). With *label_layer*, *Colour labels by* colours it — and *surface_layer*'s vessels —
+    *key_of* ``(label id, vessel name) -> row name`` names the vessel rows (default: the vessel
+    name). With *label_layer*, *Colour labels by* colours it (and *surface_layer*'s vessels)
     by any vessel column; *lesion_layer* is where clicked lesions are shown.
     """
     from nvitk.gui.viz.results_window import show_results
@@ -302,7 +302,7 @@ def show_morphometrics_results(
 
 
 def default_key_of(layer: Any) -> Callable[[int, str], str]:
-    """Row names as the other measurement tables write them: ``"3 — Left ICA"`` with the label's
+    """Row names as the other measurement tables write them: ``"3; Left ICA"`` with the label's
     own name, else with the vessel name from the topology, else ``"3"``."""
 
     def key_of(lid: int, vessel: str) -> str:

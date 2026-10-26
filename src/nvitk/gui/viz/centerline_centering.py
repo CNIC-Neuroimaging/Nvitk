@@ -28,10 +28,10 @@ _GROUP_FEATURES: tuple[str, ...] = ("branch", "branch_index", "path_id", "path")
 
 
 def layer_world_matrix(layer: Any) -> np.ndarray:
-    """4 × 4 data → world transform of *layer*'s spatial (last three) dims."""
+    """4 × 4 data -> world transform of *layer*'s spatial (last three) dims."""
     try:
         mat = np.asarray(layer._data_to_world.affine_matrix, dtype=float)
-    except Exception:  # noqa: BLE001 — not a Napari layer
+    except Exception:  # noqa: BLE001 (not a Napari layer)
         return np.eye(4)
     out = np.eye(4)
     out[:3, :3] = mat[-4:-1, -4:-1]

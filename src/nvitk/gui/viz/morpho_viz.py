@@ -2,9 +2,9 @@
 
 Overlays: the measured centerlines (paths), samples along them coloured by a per-point array,
 the vessel surfaces as one Mesh-panel surface whose vertices carry the ``label`` they belong to
-(so they can be coloured per vessel, by label or by a measured value —
+(so they can be coloured per vessel, by label or by a measured value;
 :mod:`nvitk.gui.viz.morpho_results`), and the detected lesions as points. Every overlay is
-placed with the reference layer's full data → world transform.
+placed with the reference layer's full data -> world transform.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ DEFAULT_MORPHO_POINT_SIZE = 0.35
 MORPHO_POINT_CANVAS_SIZE_LIMITS = (0.5, 200.0)
 
 # Columns of the per-vessel table shown in the Morphometrics dock (the whole table, with every
-# column, is in the results window — nvitk.gui.viz.morpho_results). The legacy names cover
+# column, is in the results window: nvitk.gui.viz.morpho_results). The legacy names cover
 # outputs written before the compact tables.
 _MORPHO_TABLE_COLS: tuple[str, ...] = (
     "vessel_name",
@@ -97,7 +97,7 @@ def clear_morpho_layers(viewer: Any) -> None:
 
 
 def _vtp_mm_to_data(points_mm: np.ndarray, reference_layer: Any | None) -> np.ndarray:
-    """Map morphometrics VTP points (voxel × spacing, origin 0) → layer data indices.
+    """Map morphometrics VTP points (voxel × spacing, origin 0) -> layer data indices.
 
     The loaders return that frame for both RAS-tagged and legacy files
     (:func:`_vtp_points_in_index_mm`). Dividing by spacing recovers voxel indices that
@@ -120,7 +120,7 @@ def _vtp_mm_to_data(points_mm: np.ndarray, reference_layer: Any | None) -> np.nd
 def _vtp_points_in_index_mm(poly: Any, points: np.ndarray) -> np.ndarray:
     """VTP points in the ``voxel_index × spacing`` frame, whatever frame the file was written in.
 
-    RAS-tagged files carry the voxel→RAS affine they were mapped with; it is inverted here, so
+    RAS-tagged files carry the voxel->RAS affine they were mapped with; it is inverted here, so
     the overlay lines up with the mask without trusting any layer metadata.
     """
     from vtk.util import numpy_support
@@ -368,12 +368,12 @@ def load_stage7_surfaces(
 
 def _overlay_kwargs(reference_layer: Any | None) -> dict[str, Any]:
     """Placement of an overlay given in *reference_layer*'s data coordinates (scale, translate,
-    affine… — every part of its transform, not just the affine)."""
+    affine...: every part of its transform, not just the affine)."""
     return layer_spatial_kwargs(reference_layer) if reference_layer is not None else {}
 
 
 def label_colour_lut(label_ids: Any, label_layer: Any | None) -> dict[int, tuple[float, ...]]:
-    """Label id → RGBA: *label_layer*'s own colours, else a fixed palette."""
+    """Label id -> RGBA: *label_layer*'s own colours, else a fixed palette."""
     from matplotlib import colormaps
 
     tab = colormaps["tab20"]
@@ -444,7 +444,7 @@ def add_morpho_lesion_points(
         if lyr.name == MORPHO_LESIONS_LAYER:
             viewer.layers.remove(lyr)
     xyz = np.array(df[["x_mm", "y_mm", "z_mm"]].apply(pd.to_numeric, errors="coerce"), dtype=float)  # writable
-    # One point per lesions.csv row (the index is the lesion's); a hypoplasia — an absent vessel — has
+    # One point per lesions.csv row (the index is the lesion's); a hypoplasia (an absent vessel) has
     # no position: it sits hidden on a finite placeholder so the layer's extent stays sound.
     located = np.isfinite(xyz).all(axis=1)
     if not located.all():
@@ -750,7 +750,7 @@ def _add_or_update_morpho_points(
                     existing.refresh_colors()
         except Exception:
             existing.face_color = _scalar_rgba(display_values, lo, hi)
-        # Size only — do not touch face_color via init (breaks colormap mode).
+        # Size only: do not touch face_color via init (breaks colormap mode).
         _apply_morpho_point_size(existing, size)
         return existing
 
@@ -869,7 +869,7 @@ def _attach_summary_dock(
     color_row.addWidget(color_selector, stretch=1)
     layout.addLayout(color_row)
 
-    # Napari's layer-controls size slider is integer with min=1 — too coarse for
+    # Napari's layer-controls size slider is integer with min=1: too coarse for
     # mouse / high-res volumes. Expose a fractional size control here instead.
     size_row = QHBoxLayout()
     size_row.addWidget(QLabel("Sample point size"))

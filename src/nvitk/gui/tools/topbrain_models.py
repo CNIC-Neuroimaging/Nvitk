@@ -4,10 +4,10 @@ Stage 2 records what it trained in a provenance marker, and inference needs thos
 facts back: the plans identifier embeds a spacing ``preprocess_like_nnssl`` only
 settles at run time, and the trainer family follows from the pre-trained
 checkpoint. None of it can be reconstructed from a flag, so the dropdown lists
-what is actually on disk rather than a hardcoded set.
+what is on disk rather than a hardcoded set.
 
-Each entry carries enough provenance to tell two models apart — how many classes,
-which loss, how many folds — because "ta36" and "ta36_ct" say nothing about which
+Each entry carries enough provenance to tell two models apart (how many classes,
+which loss, how many folds), because "ta36" and "ta36_ct" say nothing about which
 one is worth running, and the alternative is an operator opening a terminal to
 find out.
 """
@@ -21,13 +21,13 @@ from typing import Any
 #: Wide enough that it cannot occur inside a label-set name.
 SELECTOR_SEPARATOR = "  —  "
 
-#: Offered when no provenance marker is reachable — a cluster mount that is down,
+#: Offered when no provenance marker is reachable: a cluster mount that is down,
 #: or a workstation where stage 2 has never run. A dropdown that is empty until
 #: the mount returns is worse than one that lets the run fail naming the model.
 FALLBACK_CHOICES: tuple[str, ...] = ("ta36", "ta36_ct", "ta36_mr", "binary")
 
 #: ``auto`` detects CT vs MR from the intensities; the named ones force it. The
-#: last entry skips harmonisation, for inputs already in nnU-Net raw form —
+#: last entry skips harmonisation, for inputs already in nnU-Net raw form:
 #: predicting on unharmonised scanner intensities is silently wrong rather than an
 #: error, so it has to be a deliberate choice.
 MODALITY_CHOICES: tuple[str, ...] = ("auto", "mr", "ct", "already harmonised")
@@ -63,7 +63,7 @@ def host_layout() -> tuple[Any, str]:
 
     Inside an SGE container the bind targets the job exported are the *only* source. The
     configured cluster paths are host paths that were never mounted, and ``sge.json`` itself
-    is a workstation file the job cannot see — reading it there used to fail the run on a
+    is a workstation file the job cannot see: reading it there used to fail the run on a
     ``local_*`` key describing a machine that is not involved.
     :func:`~nvitk.pipes.topbrain.util.paths.layout_container` therefore resolves nothing it
     was not handed.
@@ -134,7 +134,7 @@ def model_listing() -> str:
             f"ToPBrain models ({origin} roots, {paths.results_root}):\n"
             + describe_models(paths.results_root, paths.nnunet_results)
         )
-    except Exception as exc:  # noqa: BLE001 — advisory only
+    except Exception as exc:  # noqa: BLE001 (advisory only)
         return f"ToPBrain model listing unavailable: {exc}"
 
 

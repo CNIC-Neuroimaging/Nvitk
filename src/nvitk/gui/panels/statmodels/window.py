@@ -1,33 +1,31 @@
 """
-The Statmodels explorer window — one session.
+The Statmodels explorer window: one session.
 
 Description
 -----------
 One of these is one workbench: one dataframe, one model, one plot. Several of them live side by
 side as the tabs of :mod:`nvitk.gui.panels.statmodels.sessions`'s shell, which is what ``embedded``
 builds for; a session hands its frame to a neighbouring tab through
-:meth:`StatmodelsWindow.import_session`. Nothing here is shared between sessions — every piece of
+:meth:`StatmodelsWindow.import_session`. Nothing here is shared between sessions: every piece of
 state below is an instance attribute, which is what makes a second tab a second workbench rather
 than a second view.
 
 A floating, maximizable window laid out in three draggable rows:
 
-* **top** — what data to load (measurements) and what to do with it (MixedLM formula, or mediation)
-* **middle** — the plot and the model report, which get most of the height
-* **bottom** — clinical / cognitive covariate pickers and the analysis dataframe
+* **top**: what data to load (measurements) and what to do with it (MixedLM formula, or mediation)
+* **middle**: the plot and the model report, which get most of the height
+* **bottom**: clinical / cognitive covariate pickers and the analysis dataframe
 
-The frame flows one way: measurements → ``_analysis_df`` (raw, never mutated) → region combinations →
-derived columns (after melt/wide when those are active, so names like ``pi`` match the table) →
-filter rules → ``_working_df`` (what gets fitted). Both derivation and filtering are recomputed from
+The frame flows one way: measurements -> ``_analysis_df`` (raw, never mutated) -> region combinations ->
+derived columns (after melt/wide when those are active, so names like ``pi`` match the table) ->
+filter rules -> ``_working_df`` (what gets fitted). Both derivation and filtering are recomputed from
 the raw frame every time, so toggling one never compounds on the other's output, and a reload keeps
 the whole set applied.
 """
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import json
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -268,7 +266,7 @@ def _scrollable(widget: QWidget) -> QScrollArea:
     """
     Wrap *widget* in a vertical scroll area so it stops dictating the window's proportions.
 
-    A control column's ``minimumSizeHint`` is the sum of everything in it — and a
+    A control column's ``minimumSizeHint`` is the sum of everything in it, and a
     :class:`QStackedWidget` reports the *largest* of its pages, so the tall mediation form was
     forcing ~485 px of minimum height on the controls row even while the shorter MixedLM form was
     showing. A splitter cannot shrink a child below its minimum, so the figure could never get the
@@ -325,7 +323,7 @@ _VASCULAR_PLOTS: tuple[tuple[str, str], ...] = (
 )
 
 #: Sub-views of the brain map. Deliberately the same keys as :data:`_VASCULAR_PLOTS` so the two
-#: displays are interchangeable from the window's point of view — switching Display from one to the
+#: displays are interchangeable from the window's point of view: switching Display from one to the
 #: other keeps the view you were looking at instead of resetting the picker.
 _BRAIN_PLOTS: tuple[tuple[str, str], ...] = (
     ("Marginal mean per parcel", "emmeans"),
@@ -338,12 +336,12 @@ _BRAIN_PLOTS: tuple[tuple[str, str], ...] = (
 
 
 #: Display keys that draw a *map of anatomy* rather than a family of curves. They share every
-#: control the plot pane gates on — the figure picker, the group checklist, the colormap — so the
+#: control the plot pane gates on (the figure picker, the group checklist, the colormap), so the
 #: gating asks "is this a map" once instead of naming each one at every branch.
 _MAP_DISPLAYS: frozenset[str] = frozenset({"vascular", "brain", "voxelwise"})
 
 #: The one map that is *not* a view of the current fit. It reads a results folder written by
-#: ``nvitk-voxelwise``, so it must bypass every gate that requires a fitted model — and it must
+#: ``nvitk-voxelwise``, so it must bypass every gate that requires a fitted model, and it must
 #: never be offered the fit's own contrast list, which describes a different model entirely.
 _DISPLAY_VOXELWISE = "voxelwise"
 
@@ -368,8 +366,8 @@ _MEDIATION_PLOTS: tuple[tuple[str, str], ...] = (
 class _SuspendedWindows(QObject):
     """The separate windows a session took off screen, and which are still owed a comeback.
 
-    Hiding a window and closing one leave a widget in identical state — hidden, with an explicit
-    show/hide flag — so a session returning to the screen cannot tell "I took this down" from
+    Hiding a window and closing one leave a widget in identical state (hidden, with an explicit
+    show/hide flag), so a session returning to the screen cannot tell "I took this down" from
     "this was shut while I was away", and would put the second one back up. Watching for the close
     event is the only thing that separates them, which is why this is an event filter and not a
     list.
@@ -433,22 +431,22 @@ class StatmodelsWindow(QMainWindow):
         """
         super().__init__(parent)
         self._embedded = bool(embedded)
-        # The name the shell shows on this session's tab. Only used for provenance — the window
+        # The name the shell shows on this session's tab. Only used for provenance: the window
         # is perfectly usable standalone, where nothing ever sets it.
         self._session_name = ""
         self.setWindowTitle("nvitk Statmodels")
         if not self._embedded:
             self.setWindowFlags(self.windowFlags() | Qt.Window)
-            # Preferred size, clamped to whatever screen this actually opens on — 1700×1000 runs
+            # Preferred size, clamped to whatever screen this opens on: 1700×1000 runs
             # off a laptop display, taking the plot pane's right edge with it.
             fit_to_screen(self, 1700, 1000)
         apply_dark_theme(self)
 
         self._repo = open_repo()
 
-        # ---- analysis state ---------------------------------------------------
+        # analysis state
         self._analysis_df: pd.DataFrame | None = None   # as loaded, never mutated
-        self._working_df: pd.DataFrame | None = None    # + derived columns, − filtered rows
+        self._working_df: pd.DataFrame | None = None    # + derived columns, - filtered rows
         self._load_meta: dict[str, Any] | None = None
         self._derived: list[DerivedColumn] = []
         self._combinations: list[RegionCombination] = []
@@ -457,7 +455,7 @@ class StatmodelsWindow(QMainWindow):
         # derived columns, filters, reshape) is already baked into those rows, so re-applying it
         # would append a second copy of every ``mode="row"`` combination. Cleared by Reload data.
         self._prebuilt_frame: bool = False
-        # {domain: {variable_id: [visit, …]}} — one scan of each measurement table, kept for the
+        # {domain: {variable_id: [visit, ...]}}; one scan of each measurement table, kept for the
         # life of the panel because the covariate lists are rebuilt on every reload.
         self._visit_catalog: dict[str, dict[str, list[str]]] = {}
         # Wide = one row per subject, one column per vessel. Applied *after* derived columns and
@@ -468,7 +466,7 @@ class StatmodelsWindow(QMainWindow):
         # Measurement families melted back to long after the wide pivot (may be several at once).
         self._melt_families: list[str] = []
         # Visit families spread down the rows (one row per subject × visit), after the derived
-        # columns so longitudinal summaries (AUC, slope…) are computed on the wide visit columns
+        # columns so longitudinal summaries (AUC, slope...) are computed on the wide visit columns
         # and repeat on every visit row. The time column comes from *_melt_visit_time*.
         self._melt_visits: list[str] = []
         self._melt_visit_time: str = ""
@@ -482,7 +480,7 @@ class StatmodelsWindow(QMainWindow):
         # so this is applied by reordering categories rather than by rewriting the formula.
         self._reference_levels: dict[str, str] = {}
 
-        # ---- result state -----------------------------------------------------
+        # result state
         self._last_result = None
         self._last_model_df: pd.DataFrame | None = None
         self._last_fit_meta: dict[str, Any] | None = None
@@ -495,18 +493,18 @@ class StatmodelsWindow(QMainWindow):
         self._mmrm_status = None
         self._robust_status = None
 
-        # Separate windows — floated docks, modeless plot dialogs — taken off screen while
+        # Separate windows (floated docks, modeless plot dialogs) taken off screen while
         # another session has the shell. See :meth:`suspend_detached_windows`.
         self._detached_hidden = _SuspendedWindows(self)
 
-        # ---- workers ----------------------------------------------------------
+        # workers
         self._load_worker: FrameLoadWorker | None = None
         self._mediation_worker: MediationWorker | None = None
 
-        # ── Napari-style shell ────────────────────────────────────────────
+        # Napari-style shell
         # The figure is the work; everything else is a tool around it. So the
         # plot is the central widget and every control group is a dock the user
-        # can tab, move, float or close — instead of three fixed splitter rows
+        # can tab, move, float or close, instead of three fixed splitter rows
         # that all competed with the figure for the same pixels.
         self.setDockOptions(
             QMainWindow.AnimatedDocks
@@ -554,8 +552,8 @@ class StatmodelsWindow(QMainWindow):
             "frame", "Analysis dataframe", self._build_frame_box(), Qt.BottomDockWidgetArea
         )
         # The same pop-out / fullscreen controls the Napari panels carry. Only the
-        # untabbed docks get them: a tabbed one has no title bar to put them in —
-        # that is what _hide_title_bar_while_tabbed takes away — and its tab
+        # untabbed docks get them: a tabbed one has no title bar to put them in (
+        # that is what _hide_title_bar_while_tabbed takes away), and its tab
         # already names it. A table is the panel most often wanted full-screen,
         # which is why this matters here more than anywhere else in the window.
         for key, title in (("frame", "Analysis dataframe"), ("results", "Results")):
@@ -585,14 +583,14 @@ class StatmodelsWindow(QMainWindow):
         self._btn_focus.toggled.connect(self._on_focus_plot)
         status.addPermanentWidget(self._btn_focus)
 
-        # This window is often the only one on screen — maximized, or opened
-        # standalone from the CLI — so it carries its own theme switch rather than
+        # This window is often the only one on screen (maximized, or opened
+        # standalone from the CLI), so it carries its own theme switch rather than
         # sending you back to the Napari dock for it. No viewer is passed: the
         # switch finds one if this process has one, and does without if it does not.
         self._btn_theme = theme_toggle_button(parent=self)
         status.addPermanentWidget(self._btn_theme)
 
-        # Snapshot the pristine arrangement for View → Reset panel layout.
+        # Snapshot the pristine arrangement for View -> Reset panel layout.
         self._default_dock_state = self.saveState()
 
         self._connect_signals()
@@ -600,9 +598,7 @@ class StatmodelsWindow(QMainWindow):
         self._measurements.set_specs([self._data_form.spec()])
         self._sync_analysis_type()
 
-    # ──────────────────────────────────────────────────────────────────────────
     # Construction
-    # ──────────────────────────────────────────────────────────────────────────
     def _add_dock(self, key: str, title: str, widget: QWidget, area: Any) -> QDockWidget:
         """Wrap *widget* in a named dock, add it to *area*, and register it under *key*."""
         dock = QDockWidget(title, self)
@@ -673,7 +669,7 @@ class StatmodelsWindow(QMainWindow):
     def dock_sizes(self) -> dict[str, list[Any]]:
         """``{dock key: [area, size]}`` for every docked, visible panel.
 
-        The width for a panel on the left or right, the height for one on the top or bottom —
+        The width for a panel on the left or right, the height for one on the top or bottom:
         the one dimension a dock area lets the user drag. Saved beside the ``saveState`` blob
         because that blob cannot be relied on for sizes: restored into a window that is not yet
         laid out at its final size, Qt clamps the dock extents to the provisional one, and the
@@ -685,7 +681,7 @@ class StatmodelsWindow(QMainWindow):
         }
         out: dict[str, list[Any]] = {}
         for key, dock in self._docks.items():
-            # The panel actually on screen: a tab hidden behind another reports itself visible
+            # The panel on screen: a tab hidden behind another reports itself visible
             # but was never laid out, and its provisional extent would shrink the whole group.
             if dock.isFloating() or not dock.isVisible() or dock.visibleRegion().isEmpty():
                 continue
@@ -905,9 +901,9 @@ class StatmodelsWindow(QMainWindow):
         )
         self._lme4_reml_label = QLabel("Estimation")
 
-        # R / mmrm only. The covariance structure is written into the formula the way it is in R —
-        # ``+ us(territory | subject_uid)`` — so there are no separate controls for it. Only the
-        # arguments that are genuinely not part of the formula get their own widgets.
+        # R / mmrm only. The covariance structure is written into the formula the way it is in R,
+        # ``+ us(territory | subject_uid)``, so there are no separate controls for it. Only the
+        # arguments that are not part of the formula get their own widgets.
         self._mmrm_method = QComboBox()
         for key, spec in DF_METHODS.items():
             self._mmrm_method.addItem(spec.label, key)
@@ -916,7 +912,7 @@ class StatmodelsWindow(QMainWindow):
         )
         self._mmrm_method_label = QLabel("Denominator df")
 
-        # R / robustbase only. lmrob takes a plain formula — the estimator and the loss function are
+        # R / robustbase only. lmrob takes a plain formula: the estimator and the loss function are
         # what shape the fit, so they are the only extra controls.
         self._lmrob_method = QComboBox()
         for key, spec in LMROB_ESTIMATORS.items():
@@ -1055,7 +1051,7 @@ class StatmodelsWindow(QMainWindow):
         box_lay.addLayout(term_row)
 
         # Only the run action lives on this page. Save, load and redraw act on the panel rather
-        # than on a formula, and they sit below the stack so every analysis type has them — see
+        # than on a formula, and they sit below the stack so every analysis type has them; see
         # :meth:`_build_model_actions`.
         btn_row = QHBoxLayout()
         self._btn_fit = QPushButton("Fit model")
@@ -1071,7 +1067,7 @@ class StatmodelsWindow(QMainWindow):
         Save / load / redraw, below the formulation stack so they belong to the panel.
 
         These used to live inside the MixedLM formulation page, which meant selecting Mediation or
-        Non-linear — both of which are whole pages of their own, with their own run buttons —
+        Non-linear (both of which are whole pages of their own, with their own run buttons)
         switched the stack and took Save model and Load model away with it. A mediation result was
         saveable only by switching the analysis type back first, and there was nothing to say so.
         """
@@ -1119,7 +1115,7 @@ class StatmodelsWindow(QMainWindow):
     def _build_plot_options(self) -> QWidget:
         """Plot display / QC gate / mode / x / points, laid out for the plot pane's own top row."""
         # Flow, not horizontal: this row grew to a dozen-plus controls, and a QHBoxLayout's minimum
-        # width is their sum — which Qt enforces as the *window's* minimum, locking it wider than
+        # width is their sum, which Qt enforces as the *window's* minimum, locking it wider than
         # the screen. Wrapping keeps the minimum at the widest single control.
         widget = FlowRow()
         lay = widget.flow()
@@ -1198,7 +1194,7 @@ class StatmodelsWindow(QMainWindow):
         )
         self._plot_group_label = QLabel("colour by")
 
-        # ---- Vascular-map-only controls ------------------------------------------
+        # Vascular-map-only controls
         self._vasc_cmap = QComboBox()
         for label, key in _VASCULAR_COLORMAPS:
             self._vasc_cmap.addItem(label, key)
@@ -1224,10 +1220,10 @@ class StatmodelsWindow(QMainWindow):
         self._vasc_contrast.currentIndexChanged.connect(lambda *_: self._on_plot())
         self._vasc_contrast_label = QLabel("contrast")
 
-        # ---- Voxelwise-only controls ---------------------------------------------
+        # Voxelwise-only controls
         # A results folder, not a fit: this display is load-only by design. Running an analysis
         # belongs to `nvitk-voxelwise run` and the napari tool, both of which write a folder this
-        # picker then reads — one implementation, three ways in.
+        # picker then reads: one implementation, three ways in.
         self._vox_dir = QLineEdit()
         self._vox_dir.setMinimumWidth(220)
         self._vox_dir.setPlaceholderText("randomise results folder…")
@@ -1309,7 +1305,7 @@ class StatmodelsWindow(QMainWindow):
             lambda *_: (self._sync_analysis_type(), self._on_plot())
         )
 
-        # Sliders are in millimetres, and their range comes from the loaded map's own affine —
+        # Sliders are in millimetres, and their range comes from the loaded map's own affine;
         # see _sync_voxelwise_cut_ranges. A slider clamped to a hardcoded MNI box silently refuses
         # to reach half of a 4 mm or cropped grid.
         self._vox_cuts: dict[str, QSlider] = {}
@@ -1346,7 +1342,7 @@ class StatmodelsWindow(QMainWindow):
         self._vox_kind.currentIndexChanged.connect(lambda *_: self._on_voxelwise_kind_changed())
         self._vox_kind_label = QLabel("map")
 
-        # ---- Brain-map-only controls ---------------------------------------------
+        # Brain-map-only controls
         self._brain_atlas = QComboBox()
         # "auto" first and default: the right atlas is the one the measurement was made under, and
         # the measurement form already knows it. Making the user restate it invites a mismatch that
@@ -1474,7 +1470,7 @@ class StatmodelsWindow(QMainWindow):
 
         # Pairwise significance between the levels on the categorical axis, as brackets over the
         # plot. A separate mode rather than two checkboxes: "all" and "significant only" are the
-        # same annotation at two thresholds, and thirteen vessels are seventy-eight comparisons —
+        # same annotation at two thresholds, and thirteen vessels are seventy-eight comparisons,
         # which of them get drawn is the whole decision.
         self._show_signif = QCheckBox("Signif.")
         self._show_signif.setToolTip(
@@ -1500,8 +1496,8 @@ class StatmodelsWindow(QMainWindow):
         self._signif_mode.setVisible(False)
 
         # What a bracket is testing, which is a different axis from how many are drawn. The two
-        # are genuinely different questions and a model with an interaction answers them
-        # differently — which is the whole reason the choice exists.
+        # are different questions and a model with an interaction answers them
+        # differently, which is the whole reason the choice exists.
         self._signif_basis = QComboBox()
         self._signif_basis.addItem("within series", PAIRWISE_WITHIN)
         self._signif_basis.addItem("interaction (table rows)", PAIRWISE_INTERACTION)
@@ -1560,7 +1556,7 @@ class StatmodelsWindow(QMainWindow):
         Second options row: the controls that belong to the anatomical maps.
 
         Split off the general row because there are now a dozen of them, and mixing the two meant
-        the map controls reflowed into whatever gap the general ones left — different position every
+        the map controls reflowed into whatever gap the general ones left: different position every
         time the analysis type changed. Its own row keeps them together and hides them as a group.
         """
         widget = FlowRow()
@@ -1755,7 +1751,7 @@ class StatmodelsWindow(QMainWindow):
         self._mediation_form.cancelRequested.connect(self._on_cancel_mediation)
 
     def show_maximized_floating(self) -> None:
-        """Show, maximize, raise, and focus this window — or its tab, when embedded."""
+        """Show, maximize, raise, and focus this window, or its tab, when embedded."""
         if self._embedded:
             # There is no window here to maximize: the shell owns the frame, and maximizing a
             # tab page would detach it. Raising the shell is the equivalent gesture.
@@ -1773,7 +1769,7 @@ class StatmodelsWindow(QMainWindow):
         """The plot panel itself, not the scroll area it is wrapped in."""
         return self._plot
 
-    #: Panels that stay up in focus mode. The plot is read against its numbers —
+    #: Panels that stay up in focus mode. The plot is read against its numbers:
     #: hiding the results to make room for the figure takes away half of what the
     #: figure is being looked at for.
     FOCUS_KEEPS: tuple[str, ...] = ("results",)
@@ -1815,11 +1811,9 @@ class StatmodelsWindow(QMainWindow):
         if spec.pipeline_kind != kind:
             self._data_form.apply_spec(MeasurementSpec(pipeline_kind=kind))
 
-    # ──────────────────────────────────────────────────────────────────────────
     # Sessions
-    # ──────────────────────────────────────────────────────────────────────────
-    #: The half of :meth:`_config_dict` that describes the *frame* — the query behind it and every
-    #: transformation applied to it — rather than what gets fitted to it. Copying exactly these
+    #: The half of :meth:`_config_dict` that describes the *frame* (the query behind it and every
+    #: transformation applied to it), rather than what gets fitted to it. Copying exactly these
     #: keys into another session reproduces its table there without disturbing the destination's
     #: formula, engine, plot settings or panel layout. Keep it in step with :meth:`_config_dict`:
     #: a new frame-recipe key that is not listed here silently stops travelling between sessions.
@@ -1865,12 +1859,12 @@ class StatmodelsWindow(QMainWindow):
         """Every separate window this session currently has open on screen.
 
         A floated dock and the modeless column / subject plot dialogs are *windows* parented to
-        this page, not widgets inside it — so Qt leaves them up when the shell switches to another
+        this page, not widgets inside it, so Qt leaves them up when the shell switches to another
         tab, where they sit over the new session looking like they belong to it.
 
         Visible ones only: this page also parents some fifty never-shown popup frames belonging to
         its combo boxes, and "is a window" alone does not tell those apart. The search is the whole
-        subtree rather than the direct children it would find today's two cases in — a dialog
+        subtree rather than the direct children it would find today's two cases in: a dialog
         parented one level deeper is an ordinary thing to write, and one that silently stopped
         being hidden would be a strange bug to go looking for.
         """
@@ -1891,7 +1885,7 @@ class StatmodelsWindow(QMainWindow):
         """Put back exactly what :meth:`suspend_detached_windows` took down.
 
         Works from what was recorded rather than re-scanning, so coming back costs the number of
-        windows involved — usually none — instead of another walk of the widget tree. Anything
+        windows involved (usually none) instead of another walk of the widget tree. Anything
         closed in the meantime has already dropped out of that set, and a plot dialog deletes
         itself when it closes, which is the ``RuntimeError``.
         """
@@ -1906,7 +1900,7 @@ class StatmodelsWindow(QMainWindow):
         return self._analysis_df
 
     def working_frame(self) -> pd.DataFrame | None:
-        """The frame that actually gets fitted: derived, filtered and reshaped."""
+        """The frame that gets fitted: derived, filtered and reshaped."""
         return self._working_df
 
     def has_frame(self) -> bool:
@@ -1918,7 +1912,7 @@ class StatmodelsWindow(QMainWindow):
         return self._last_result is not None or self._mediation_bundle is not None
 
     def data_config(self) -> dict[str, Any]:
-        """The frame half of :meth:`_config_dict` — the keys named in :data:`DATA_CONFIG_KEYS`."""
+        """The frame half of :meth:`_config_dict`: the keys named in :data:`DATA_CONFIG_KEYS`."""
         cfg = self._config_dict()
         return {key: cfg[key] for key in self.DATA_CONFIG_KEYS if key in cfg}
 
@@ -1974,23 +1968,23 @@ class StatmodelsWindow(QMainWindow):
         """
         Take *source*'s dataframe into this session, returning a line describing what arrived.
 
-        Three readings of "the same data", because they are genuinely different things to want:
+        Three readings of "the same data", because they are different things to want:
 
         ``IMPORT_RECIPE``
-            The frame *and* the transformations that built it — region combinations, derived
-            columns, casts and reference levels, filters, the melt/wide reshape — plus the
+            The frame *and* the transformations that built it (region combinations, derived
+            columns, casts and reference levels, filters, the melt/wide reshape), plus the
             measurement and covariate picks behind it, so pressing Reload data here re-runs the
             same query. The table matches *source*'s exactly and every step stays editable, which
             is what makes this the one to reach for when fitting a second model to one frame.
         ``IMPORT_RESULT``
-            The finished table only, adopted as this session's *raw* data — the same rows and
-            columns, with the recipe spent rather than carried. That is the point: a row-producing
+            The finished table only, adopted as this session's *raw* data: the same rows and
+            columns, with the recipe spent rather than carried. That matters because a row-producing
             combination re-run over its own output appends a second copy of every synthetic row,
             and a melt finds nothing left to melt. Take this when the other session's output is
             the starting material for a new set of transformations.
         ``IMPORT_CLONE``
-            The whole session — frame recipe, formula, engine settings, plot options and panel
-            layout — as a duplicate to diverge from.
+            The whole session (frame recipe, formula, engine settings, plot options and panel
+            layout) as a duplicate to diverge from.
 
         The fit itself never crosses over, in any mode. A result belongs to the frame it was
         fitted to, and one left sitting under a frame it did not come from reads as live when it
@@ -2087,9 +2081,7 @@ class StatmodelsWindow(QMainWindow):
         notify(line)
         return line
 
-    # ──────────────────────────────────────────────────────────────────────────
     # Covariates and measurements
-    # ──────────────────────────────────────────────────────────────────────────
     def _refresh_covariate_lists(self) -> None:
         """Re-read the catalog and rebuild the clinical/cognitive checklists, preserving checks.
 
@@ -2138,7 +2130,7 @@ class StatmodelsWindow(QMainWindow):
         Visits available per variable in *domain*, cached for the life of the panel.
 
         One scan of the measurement table answers it for every variable at once, and the answer only
-        changes when the dataset is re-imported — so it is read once rather than per covariate. The
+        changes when the dataset is re-imported, so it is read once rather than per covariate. The
         cache is cleared by :meth:`_refresh_covariate_lists`' catalog refresh path below.
         """
         cached = self._visit_catalog.get(domain)
@@ -2196,9 +2188,7 @@ class StatmodelsWindow(QMainWindow):
                 "The measurement selection changed — reload to rebuild the analysis frame."
             )
 
-    # ──────────────────────────────────────────────────────────────────────────
     # Loading, deriving, filtering
-    # ──────────────────────────────────────────────────────────────────────────
     def _on_reload(self) -> None:
         """Rebuild the analysis frame from the current measurements, off the UI thread."""
         if self._load_worker is not None and self._load_worker.isRunning():
@@ -2267,7 +2257,7 @@ class StatmodelsWindow(QMainWindow):
         Adopt a dropped spreadsheet as the analysis frame.
 
         The imported table replaces what the dataset query produced, so the panel stops being a view
-        of the repo and becomes a view of that file — which is the point: a collaborator's Excel can
+        of the repo and becomes a view of that file. This way a collaborator's Excel can
         be modelled, plotted and filtered with the same machinery without being imported into the
         dataset first. Derived columns and filters are kept and re-applied, since they are the
         user's working definitions rather than a property of the source; any that name a column the
@@ -2341,8 +2331,8 @@ class StatmodelsWindow(QMainWindow):
         Whether *frame* carries the region and value columns every configured combination needs.
 
         A combination sums one measurement across rows of a region column, so it can only be
-        evaluated in the shape that has both. A subject-grain frame has neither — the regions are
-        columns (``att_mean__LICA``) and there is no ``att_mean`` — and only gets them from the
+        evaluated in the shape that has both. A subject-grain frame has neither, the regions are
+        columns (``att_mean__LICA``) and there is no ``att_mean``, and only gets them from the
         melt. All-or-nothing on purpose: splitting the set across the two shapes would evaluate
         some combinations before the filters and some after, so the same definition would mean
         different things depending on where its columns happened to live.
@@ -2358,14 +2348,14 @@ class StatmodelsWindow(QMainWindow):
 
     def _adopt_prebuilt_frame(self, frame: pd.DataFrame) -> None:
         """
-        Show a saved *training* frame — one whose recipe has already been applied to it.
+        Show a saved *training* frame: one whose recipe has already been applied to it.
 
         Only reached for a model saved before the analysis frame was stored alongside it; a current
         save restores the recipe's input instead and replays everything, which is what keeps a
         loaded model's filters and reshape editable. Pressing Reload data returns to the dataset
         query in either case.
         """
-        # The structural half of the recipe — region combinations, derived columns, melt/wide — is
+        # The structural half of the recipe (region combinations, derived columns, melt/wide) is
         # already in these rows and is not re-run: a ``mode="row"`` combination would append a
         # second copy of every synthetic row, and a melt finds no ``flow_mean__LICA`` columns left
         # to melt. Row filters *are* re-run, so editing one still does something; an IQR rule is
@@ -2432,11 +2422,11 @@ class StatmodelsWindow(QMainWindow):
             return
 
         # Region algebra before derived columns: a derived column may well be built from a
-        # combination (``log(TCBF)``), and the reverse never happens — a combination reads one
+        # combination (``log(TCBF)``), and the reverse never happens; a combination reads one
         # measurement across rows, which a within-row transform cannot produce.
         #
         # *Which shape* it runs in is not a free choice. A combination needs the long region
-        # column, and a subject-grain load has none — every region is already its own column, and
+        # column, and a subject-grain load has none: every region is already its own column, and
         # the column only comes back from the melt. That is also the shape the combinations dialog
         # read its regions from, so running here against the un-melted frame just failed with
         # "column 'territory' is not in the frame" and produced neither a row nor a column while
@@ -2491,7 +2481,7 @@ class StatmodelsWindow(QMainWindow):
         if post_derive:
             working, derr = apply_derived_columns(working, self._derived)
             derived_errors.extend(derr)
-            # The unfiltered frame in the shape the table shows — the chip bar's "n of N" needs the
+            # The unfiltered frame in the shape the table shows: the chip bar's "n of N" needs the
             # denominator, so this pass repeats the reshape and any deferred combinations without
             # the filters rather than reusing ``working``.
             reference = self._apply_reshape(combined)
@@ -2515,7 +2505,7 @@ class StatmodelsWindow(QMainWindow):
             )
 
         if reshaped:
-            # A rule can name a column that only exists *after* the reshape — an IQR fence on
+            # A rule can name a column that only exists *after* the reshape: an IQR fence on
             # 'flow_mean__TCBF', say. Those were skipped above with "column not in frame", so they
             # get a second pass here, in the shape they were written for. Rules already applied are
             # not re-run: apply_filter_rules skips what it cannot find, and a rule's column exists
@@ -2531,7 +2521,7 @@ class StatmodelsWindow(QMainWindow):
 
             # Casts and reference levels get the same second pass, and for the same reason: a melt
             # *creates* the 'territory' column, so a reference set on it could not have been applied
-            # on the first pass — it was dropped as "not a level of this column", and the model then
+            # on the first pass; it was dropped as "not a level of this column", and the model then
             # used whichever level sorted first. Re-applying is idempotent for columns already done.
             working, late_types = apply_column_types(working, self._column_types)
             working, late_refs = apply_reference_levels(working, self._reference_levels)
@@ -2539,7 +2529,7 @@ class StatmodelsWindow(QMainWindow):
                 log.info("Post-reshape recode: %s", " ".join([*late_types, *late_refs]))
 
         # Dropped columns go last of all, so a rule or a derived column defined on one still
-        # evaluated above — dropping hides a column from the model, it does not undo the frame.
+        # evaluated above: dropping hides a column from the model, it does not undo the frame.
         drop = [c for c in self._dropped_columns if c in working.columns]
         if drop:
             working = working.drop(columns=drop)
@@ -2592,7 +2582,7 @@ class StatmodelsWindow(QMainWindow):
         """
         Repopulate the colour-by combo: random grouping factors, then categorical fixed effects.
 
-        A column is offered when it has at least two levels and few enough to draw — a 510-level
+        A column is offered when it has at least two levels and few enough to draw: a 510-level
         subject factor is still listed (it is the model's own grouping) but never preselected.
         """
         previous = self._plot_group.currentText()
@@ -2619,7 +2609,7 @@ class StatmodelsWindow(QMainWindow):
                 break
         self._plot_group.blockSignals(False)
 
-    # ---- filter actions -------------------------------------------------------
+    # filter actions
     def _on_edit_column_filter(self, column: str) -> None:
         """Open the per-column filter dialog and merge its rules into the active set."""
         working = self._working_df
@@ -2652,7 +2642,7 @@ class StatmodelsWindow(QMainWindow):
             self._chips.set_rules(remaining, [])
             self._recompute_frame()
 
-    # ---- derived columns ------------------------------------------------------
+    # derived columns
     def _on_quick_transform(self, column: str, transform: str) -> None:
         """Add a canned transform of *column* straight from the header menu."""
         if self._analysis_df is None:
@@ -2675,8 +2665,8 @@ class StatmodelsWindow(QMainWindow):
             return
 
         # Region combinations aggregate one measurement *across rows of a region column*, so they
-        # need a frame that has one. A subject-grain load has none — every region is already its
-        # own column — and offering those columns as if they were regions is what made the dialog
+        # need a frame that has one. A subject-grain load has none (every region is already its
+        # own column), and offering those columns as if they were regions is what made the dialog
         # list 'flow_mean__LICA' while the table showed melted rows. Prefer the working frame when
         # it carries a usable region column, and fall back to the base otherwise.
         base = self._analysis_df
@@ -2765,7 +2755,7 @@ class StatmodelsWindow(QMainWindow):
         """
         The observations the active filters removed, in the columns the plot uses.
 
-        These are **not** in the model frame — the fit ran on the filtered data — so there is nothing
+        These are **not** in the model frame (the fit ran on the filtered data), so there is nothing
         inside it to grey out. They have to come from the unfiltered analysis frame and be drawn as
         a separate series, which is what makes it visible whether a filter took out a coherent
         cluster or scattered noise.
@@ -2784,7 +2774,7 @@ class StatmodelsWindow(QMainWindow):
         return dropped if not dropped.empty else None
 
     def _sync_filter_toggle(self) -> None:
-        """Enable the grey-out toggle only when a filter has actually removed something."""
+        """Enable the grey-out toggle only when a filter has removed something."""
         base, working = self._analysis_df, self._working_df
         removed = len(base) - len(working) if base is not None and working is not None else 0
         self._show_filtered.setEnabled(removed > 0)
@@ -2796,9 +2786,9 @@ class StatmodelsWindow(QMainWindow):
         """
         The column the plot should split and colour by.
 
-        The "colour by" picker wins whenever it names a column the fitted frame actually has. It
+        The "colour by" picker wins whenever it names a column the fitted frame has. It
         used to be consulted by the lme4 path alone, so every other engine drew by the model's own
-        grouping field regardless of what the picker said — and after a region combination that
+        grouping field regardless of what the picker said, and after a region combination that
         field is ``group_key``, which is precisely the question the picker exists to change.
 
         Falls back to *fallback*, then to the model's grouping field, then to the frame's region
@@ -2829,7 +2819,7 @@ class StatmodelsWindow(QMainWindow):
 
         The cell value is the primary measurement; subject-level covariates ride along, so
         ``age_c`` and ``sex`` stay available to every structural equation. Per-vessel coverage is
-        recorded in ``self._wide_coverage`` — with a dozen vessels in one model, listwise deletion
+        recorded in ``self._wide_coverage``, with a dozen vessels in one model, listwise deletion
         is decided by whichever vessel is measured least often, and that is the number worth
         knowing before blaming the model.
 
@@ -2949,7 +2939,7 @@ class StatmodelsWindow(QMainWindow):
         The one place that knows *where* a combination belongs, mirroring :meth:`_recompute_frame`:
         before the reshape when the base already carries the region column, after it when only the
         melt produces one. Every editor and preview that needs "the frame without the filters" goes
-        through here — otherwise a subject-grain load hands them a frame missing exactly the rows
+        through here, otherwise a subject-grain load hands them a frame missing exactly the rows
         and columns the user just created, which is how the filter dialog came to offer a level
         list without the synthetic territory in it.
         """
@@ -2994,7 +2984,7 @@ class StatmodelsWindow(QMainWindow):
 
         # Offer the families of the *un-melted* frame: once one is melted its columns are gone, so
         # asking the current frame would hide the option that is already active. This deliberately
-        # does not consult _wide_mode — a frame loaded on the subject grain is already wide.
+        # does not consult _wide_mode: a frame loaded on the subject grain is already wide.
         probe = list(self._melt_families)
         self._melt_families = []
         self._recompute_frame(announce=False)
@@ -3123,7 +3113,7 @@ class StatmodelsWindow(QMainWindow):
         frame = self._working_df
         vessels = list(frame.attrs.get("vessels", [])) if frame is not None else []
         if not vessels:
-            # The pivot bailed out and returned the long frame — keep the button honest.
+            # The pivot bailed out and returned the long frame: reset the button to match.
             self._wide_mode = False
             self._btn_reshape.setText("Reshape → wide")
             return
@@ -3211,7 +3201,7 @@ class StatmodelsWindow(QMainWindow):
         """Make *level* the treatment reference for *column*, or clear the override."""
         if not column:
             return
-        # The region is carried twice — 'territory' and 'group_key' hold the same labels — and a
+        # The region is carried twice ('territory' and 'group_key' hold the same labels), and a
         # formula may name either. Setting the reference on only the clicked one left the model
         # using the untouched copy, where R falls back to the alphabetically first level.
         from nvitk.stats._statmodels_frames import region_alias_columns
@@ -3264,7 +3254,7 @@ class StatmodelsWindow(QMainWindow):
         """
         Export per-group descriptive statistics for one measurement.
 
-        Summarises the **working** frame — derived columns computed, filters applied — so the table
+        Summarises the **working** frame (derived columns computed, filters applied), so the table
         describes the rows a model would be fitted on rather than the raw load. The export carries a
         provenance sheet and the underlying values, because a sheet of means with no record of which
         column, which grouping and which confidence level is unreadable a month later.
@@ -3323,7 +3313,7 @@ class StatmodelsWindow(QMainWindow):
         """
         Apply a ready-made quality-control filter to the analysis dataframe.
 
-        These *drop* rows, so they change the fit — unlike the plot's QC gate, which only greys
+        These *drop* rows, so they change the fit: unlike the plot's QC gate, which only greys
         observations out. Existing rules on the same columns are replaced rather than stacked, so
         re-picking a preset re-applies it instead of intersecting two copies of itself.
         """
@@ -3399,7 +3389,7 @@ class StatmodelsWindow(QMainWindow):
         Open the distribution viewer for one column.
 
         Draws from the **unfiltered** frame with the filtered-out rows marked, so the plot shows
-        what the filters removed rather than hiding it — which is the only way to tell a filter that
+        what the filters removed rather than hiding it, which is the only way to tell a filter that
         took out a coherent cluster from one that took out scattered noise.
         """
         base = self._analysis_df if self._analysis_df is not None else self._working_df
@@ -3464,7 +3454,7 @@ class StatmodelsWindow(QMainWindow):
         The target table follows the column's *source*: a transform of an image measurement becomes
         an image measurement keyed on subject × region, a transform of a clinical variable becomes a
         clinical one keyed on subject. The dialog states which and why, and nothing is written until
-        it is confirmed — this is the one action here that changes a shared dataset.
+        it is confirmed: this is the one action here that changes a shared dataset.
         """
         frame = self._working_df
         spec = next((d for d in self._derived if d.name == column), None)
@@ -3562,9 +3552,7 @@ class StatmodelsWindow(QMainWindow):
         if idx >= 0:
             self._plot_x.setCurrentIndex(idx)
 
-    # ──────────────────────────────────────────────────────────────────────────
     # Analysis type
-    # ──────────────────────────────────────────────────────────────────────────
     def _analysis_kind(self) -> str:
         """The selected analysis type."""
         return str(self._analysis_type.currentData() or ANALYSIS_MIXEDLM)
@@ -3587,7 +3575,7 @@ class StatmodelsWindow(QMainWindow):
             self._analysis_hint.setText(spec.description)
 
     def _r_backend_status(self):
-        """Probe the R backend once per window — the Rscript call takes a moment."""
+        """Probe the R backend once per window: the Rscript call takes a moment."""
         if self._r_status is None:
             self._r_status = r_backend_status()
             log.info("R/lme4 backend: %s", self._r_status.summary())
@@ -3625,7 +3613,7 @@ class StatmodelsWindow(QMainWindow):
         Describe the covariance term written in the formula, and pre-flight it against the frame.
 
         The term is part of the formula, so it is read from there rather than assembled from
-        controls — but it still drives the checks that R's own error messages do not make obvious:
+        controls, but it still drives the checks that R's own error messages do not make obvious:
         which columns it needs, whether any subject × level cell is duplicated, and whether the
         structure has more parameters than the data can support.
         """
@@ -3914,9 +3902,7 @@ class StatmodelsWindow(QMainWindow):
             combo.setCurrentIndex(max(idx, 0))
             combo.blockSignals(False)
 
-    # ──────────────────────────────────────────────────────────────────────────
     # MixedLM
-    # ──────────────────────────────────────────────────────────────────────────
     def _on_fit(self) -> None:
         """Fit the selected model on the working frame, then show its report and plot."""
         kind = self._analysis_kind()
@@ -3943,7 +3929,7 @@ class StatmodelsWindow(QMainWindow):
         )
         if kind == ANALYSIS_LMROB:
             # The weights need the fitted frame to name each row's subject and territory, which the
-            # info builder never sees — it only gets the fit.
+            # info builder never sees: it only gets the fit.
             try:
                 info["robust_weights"] = lmrob_weights_frame(result, model_df)
             except Exception as exc:
@@ -3971,7 +3957,7 @@ class StatmodelsWindow(QMainWindow):
             + f"  |  dataset={self._repo.root}"
         )
         self._sync_plot_levels(model_df, groups)
-        # The contrast list is a property of *this* fit — without a refresh here a new model keeps
+        # The contrast list is a property of *this* fit, without a refresh here a new model keeps
         # the previous one's interaction terms, or shows none because the previous one had none.
         self._sync_map_contrasts(self._map_display())
         self._on_plot()
@@ -3999,7 +3985,7 @@ class StatmodelsWindow(QMainWindow):
                 group=str(self._sem_group.currentData() or ""),
                 standardize=self._sem_standardize.isChecked(),
             )
-            # A *long* frame is only a problem for a model whose terms are vessels — those need one
+            # A *long* frame is only a problem for a model whose terms are vessels: those need one
             # column each, and a long frame has one row each. A CFA over subject-level indicators is
             # perfectly fittable on whatever grain the frame happens to be, so the refusal is
             # conditioned on the syntax rather than applied to every SEM.
@@ -4088,7 +4074,7 @@ class StatmodelsWindow(QMainWindow):
                 dropna_columns=None,
             )
         # OLS and GLM have no grouping of their own, but the plot still splits by ``groups`` when the
-        # formula contains that factor — so it is returned for every engine.
+        # formula contains that factor, so it is returned for every engine.
         return result, model_df, meta, outcome, groups
 
     def _fit_nonlinear(self):
@@ -4115,13 +4101,13 @@ class StatmodelsWindow(QMainWindow):
 
         Without the rebuild the checklist keeps the previous column's levels, and since the plot
         paths filter by what is ticked there, switching to a column whose levels share no names
-        with the old one silently selects nothing — an empty figure, or "No groups selected".
+        with the old one silently selects nothing: an empty figure, or "No groups selected".
         """
         frame = self._last_model_df if self._last_model_df is not None else self._working_df
         column = self._plot_group_column()
         if frame is not None and column:
             # Every level of the new column starts ticked: a level list the user has never seen
-            # cannot carry their intent, and showing all of it is the honest default.
+            # cannot carry their intent, and showing all of it is the safer default.
             self._pending_plot_groups = None
             self._sync_plot_levels(frame, column)
             self._plot.set_checked_levels(None)
@@ -4135,7 +4121,7 @@ class StatmodelsWindow(QMainWindow):
             levels = []
         self._plot.set_levels(column, levels)
         # A restored config named its groups before any fit told us what the levels are. An *empty*
-        # list is not a selection of nothing — it is a config saved before its checklist had been
+        # list is not a selection of nothing: it is a config saved before its checklist had been
         # built, and honouring it literally leaves every level unticked, which the engines report
         # as "No groups selected" on a model that was just loaded successfully.
         if self._pending_plot_groups:
@@ -4149,7 +4135,7 @@ class StatmodelsWindow(QMainWindow):
         Reference value for every formula term the EMM grid does not already vary.
 
         The grid patsy evaluates only carries the x axis and the facet column. Any *other* term in
-        the formula — a second measurement, a covariate, another categorical factor — is simply
+        the formula (a second measurement, a covariate, another categorical factor) is simply
         absent, and patsy raises ``NameError`` for it, which used to leave the plot showing raw
         points and no model curves at all.
 
@@ -4359,7 +4345,7 @@ class StatmodelsWindow(QMainWindow):
         unconditionally. A failure is reported rather than raised: a model whose contrasts cannot
         be computed should still show its plot, with a line saying why the brackets are missing.
 
-        Brackets when the levels are on a categorical axis, a corner listing when they are not —
+        Brackets when the levels are on a categorical axis, a corner listing when they are not:
         a continuous plot has ticks that mean x values, and a bracket across them would claim a
         range of x it does not mean.
 
@@ -4410,7 +4396,7 @@ class StatmodelsWindow(QMainWindow):
                 added, _ = annotate_significance_axes(ax, contrasts, mode=mode)
                 drawn += added
             if not drawn and axes:
-                # No level pair sits on a categorical axis — list them rather than draw nothing.
+                # No level pair sits on a categorical axis: list them rather than draw nothing.
                 drawn, _ = annotate_significance_corner(axes[0], contrasts, mode=mode)
 
         # Counted against everything the mode asked for, not per panel: a comparison whose two
@@ -4421,8 +4407,8 @@ class StatmodelsWindow(QMainWindow):
         if drawn and adjust == PAIRWISE_RAW:
             # Said plainly, because an uncorrected figure and a corrected one look identical.
             note = note.replace("Holm-adjusted", "uncorrected (raw p, as the coefficient table)")
-        # The colouring column had no fixed effect to split the comparison by — a random-effects
-        # grouping factor, or simply not in the formula. The brackets that did get drawn are
+        # The colouring column had no fixed effect to split the comparison by: a random-effects
+        # grouping factor, or not in the formula. The brackets that did get drawn are
         # correct; what they are not is per-series, and the reader has to be told which.
         if basis in PAIRWISE_INTERACTION_BASES and drawn:
             baseline = str(contrasts.attrs.get("reference") or "")
@@ -4448,7 +4434,7 @@ class StatmodelsWindow(QMainWindow):
         """
         What the brackets should compare on this plot, as kwargs for :meth:`_annotate_significance`.
 
-        The categorical axis when there is one — that is what a bracket can span. The colouring
+        The categorical axis when there is one: that is what a bracket can span. The colouring
         column then becomes ``by``, because each of its levels is a separate curve and a bracket
         drawn over one of them is claiming the effect *within* it. Averaging over the series
         instead would put one set of brackets over three curves that disagree.
@@ -4551,7 +4537,7 @@ class StatmodelsWindow(QMainWindow):
                 elif self._mmrm_plot_mode(visit) == "continuous":
                     # A continuous x has no least-squares means worth the name: emmeans holds every
                     # other predictor at one point, so it answers with a single estimate at the
-                    # covariate's own mean — one dot per level stacked in a column, which is the
+                    # covariate's own mean; one dot per level stacked in a column, which is the
                     # figure this branch exists to avoid. Predict the curve instead, exactly as the
                     # lme4 and lmrob engines do.
                     df = self._last_model_df
@@ -4678,7 +4664,7 @@ class StatmodelsWindow(QMainWindow):
                         if display == "grouped":
                             note += f"  {self._panel_note(fig)}"
             # Not the visit: the visit is what the *series* are, and the categorical axis is
-            # whatever was put on x — the plaque grouping in a `plaque * territory` fit. Brackets
+            # whatever was put on x; the plaque grouping in a `plaque * territory` fit. Brackets
             # span the axis and are computed within each series, so each territory's line carries
             # its own plaque comparisons. When x *is* the visit there is no second factor and
             # this collapses to plain visit-versus-visit.
@@ -5000,7 +4986,7 @@ class StatmodelsWindow(QMainWindow):
 
             meta = self._last_fit_meta or {}
             kind = str(self._mediation_plot.currentData() or "paths")
-            # ``latent`` is what lets a semopy fit report its loadings at all — that backend writes a
+            # ``latent`` is what lets a semopy fit report its loadings at all: that backend writes a
             # measurement line as an ordinary regression and only the spec knows which names are
             # factors.
             paths = sem_paths_frame(
@@ -5036,7 +5022,7 @@ class StatmodelsWindow(QMainWindow):
                     )
                 elif kind == "network":
                     # The matplotlib plotter is used when the model has latents: it draws them as
-                    # ellipses and orients each loading factor → indicator, which the vessel-only
+                    # ellipses and orients each loading factor -> indicator, which the vessel-only
                     # interactive diagram has no notion of.
                     if len(loadings):
                         fig = plot_sem_network(paths, title="Fitted structural model")
@@ -5078,7 +5064,7 @@ class StatmodelsWindow(QMainWindow):
 
     def _map_display(self) -> str:
         """
-        Which anatomical map is selected — ``"vascular"``, ``"brain"``, or ``""`` for neither.
+        Which anatomical map is selected: ``"vascular"``, ``"brain"``, or ``""`` for neither.
 
         Every place that used to compare the Display combo against the literal ``"vascular"`` asks
         this instead, so adding a third map is one entry in :data:`_MAP_DISPLAYS` rather than a
@@ -5093,7 +5079,7 @@ class StatmodelsWindow(QMainWindow):
 
         Discovery is anatomy-specific: an interaction term only counts if one of its factors names
         a level *this map can draw*. So the vascular map asks the vessel table and the brain map
-        asks the atlas — using the vessel resolver for a cortical model finds no interaction at all
+        asks the atlas: using the vessel resolver for a cortical model finds no interaction at all
         and silently hides the picker, which is what made the brain map's contrast views
         unreachable.
         """
@@ -5142,10 +5128,10 @@ class StatmodelsWindow(QMainWindow):
         """
         Views the vascular map can offer for the current fit.
 
-        A model whose vessel information lives in a random term — ``(1 + age_c | territory)`` — has
+        A model whose vessel information lives in a random term, ``(1 + age_c | territory)``, has
         nothing about individual vessels in its fixed effects, so the coefficient view would fall
         back to observed means without saying why. When per-group terms exist they are offered
-        first, one entry each, because they are what that model actually estimated per vessel.
+        first, one entry each, because they are what that model estimated per vessel.
         """
         from nvitk.stats.vascular_map import group_coefficient_terms
 
@@ -5195,7 +5181,7 @@ class StatmodelsWindow(QMainWindow):
 
     def _brain_atlas_key(self) -> str:
         """
-        The atlas to draw on — the picker's choice, or the one the plotted measurement was made
+        The atlas to draw on: the picker's choice, or the one the plotted measurement was made
         under.
 
         A measurement loaded under the vascular parcellation carries no Desikan parcels at all, so
@@ -5219,7 +5205,7 @@ class StatmodelsWindow(QMainWindow):
         return view if view in keys else "surface"
 
     def _sync_voxelwise_cut_controls(self, view: str) -> None:
-        """Show the projection and cut controls that *view* can actually use.
+        """Show the projection and cut controls that *view* can use.
 
         nilearn's registries differ by builder and each ``display_mode`` consumes a different
         number of coordinates, so offering all of them everywhere means half the settings fail at
@@ -5246,7 +5232,7 @@ class StatmodelsWindow(QMainWindow):
         mode = str(self._vox_display_mode.currentData() or "ortho") if modes else ""
         axes = cut_axes_for(mode) if modes else ()
         auto = self._vox_cut_auto.isChecked()
-        # A single-axis mode and 'mosaic' take a *count* rather than coordinates — that is how
+        # A single-axis mode and 'mosaic' take a *count* rather than coordinates: that is how
         # nilearn spells a montage.
         montage = bool(modes) and (mode == "mosaic" or len(axes) == 1)
         # A glass brain projects *through* the volume rather than cutting it, and nilearn's
@@ -5412,7 +5398,7 @@ class StatmodelsWindow(QMainWindow):
             mode = str(self._vox_display_mode.currentData() or "ortho")
 
             # The sliders are in millimetres on this map's grid, so their range has to follow the
-            # map that is about to be drawn — not the one that happened to be loaded first.
+            # map that is about to be drawn, not the one that happened to be loaded first.
             self._sync_voxelwise_cut_ranges(load_map(result.map_path(kind, contrast)))
             for axis, slider in self._vox_cuts.items():
                 self._vox_cut_labels[axis].setText(f"{axis} {slider.value()}")
@@ -5482,7 +5468,7 @@ class StatmodelsWindow(QMainWindow):
 
             atlas = self._brain_atlas_key()
             # Say *why* a map would be blank before drawing one. A FLAIR frame parcellates into
-            # white-matter zones, not cortical parcels, so none of its levels resolve — reporting
+            # white-matter zones, not cortical parcels, so none of its levels resolve: reporting
             # that is far more useful than an empty brain the reader has to diagnose.
             levels = [str(v) for v in pd.unique(df[groups].astype(str))]
             undrawable = regions_without_geometry(levels, atlas=atlas)
@@ -5671,7 +5657,7 @@ class StatmodelsWindow(QMainWindow):
 
             # The Groups checklist drives the map the same way it drives every other plot. Its
             # entries are published labels and the map is keyed by drawn node, so both sides go
-            # through ``nodes_for_label`` — which, unlike ``canonical_node``, expands a
+            # through ``nodes_for_label``, which, unlike ``canonical_node``, expands a
             # hemisphere-melted level such as 'ICA' to *both* carotids. Using the narrower resolver
             # here meant a hemisphere-grouped fit had its values mirrored correctly and then hid
             # every mirrored vessel, leaving only the three midline ones on the figure.
@@ -5684,7 +5670,7 @@ class StatmodelsWindow(QMainWindow):
                 hide = [node for node in values if node not in keep]
 
             mode = "pvalue" if view.startswith("pvalue") else "estimate"
-            # "all vessels" and the observed means both drop the mask — the first by request, the
+            # "all vessels" and the observed means both drop the mask: the first by request, the
             # second because a mean has no p-value and greying every vessel would say the opposite
             # of what is true.
             # The two "_all" views are the unmasked halves of their pairs; the observed mean has
@@ -5819,9 +5805,7 @@ class StatmodelsWindow(QMainWindow):
             log.debug("Non-linear plot failed: %s", exc)
             self._plot.show_error(f"Plot unavailable: {exc}")
 
-    # ──────────────────────────────────────────────────────────────────────────
     # Mediation
-    # ──────────────────────────────────────────────────────────────────────────
     def _on_run_mediation(self, spec: MediationSpec) -> None:
         """Start a mediation run on the working frame."""
         if self._working_df is None or self._working_df.empty:
@@ -5893,7 +5877,7 @@ class StatmodelsWindow(QMainWindow):
         self._mediation_plot.blockSignals(False)
 
     def _sync_mediation_plot_choices(self, bundle: dict[str, Any]) -> None:
-        """Offer only the figures this engine's result can actually produce."""
+        """Offer only the figures this engine's result can produce."""
         available = {"forest", "partial"}
         if isinstance(bundle.get("raw"), dict) and "dist" in bundle["raw"]:
             available.add("bootstrap")
@@ -5967,9 +5951,7 @@ class StatmodelsWindow(QMainWindow):
             log.debug("Mediation plot failed: %s", exc)
             self._plot.show_error(f"Plot unavailable: {exc}")
 
-    # ──────────────────────────────────────────────────────────────────────────
     # Config persistence
-    # ──────────────────────────────────────────────────────────────────────────
     def _config_dict(self) -> dict[str, Any]:
         """Serialize every panel setting to a plain dict (saved alongside a fitted model)."""
         return {
@@ -5983,7 +5965,7 @@ class StatmodelsWindow(QMainWindow):
             # Which visit a covariate came from is part of the frame recipe, not a preference: the
             # same formula fitted on plaque at visit 3 and at visit 4 is two different models.
             "visit_overrides": self._visit_overrides(),
-            # Variables loaded at every visit (visit families) — part of the frame recipe too.
+            # Variables loaded at every visit (visit families): part of the frame recipe too.
             "visit_series": self._visit_series(),
             "filters": [rule.to_dict() for rule in self._chips.rules()],
             "derived": [column.to_dict() for column in self._derived],
@@ -6063,9 +6045,9 @@ class StatmodelsWindow(QMainWindow):
         transformation applied to what that query returned.
 
         Split out of :meth:`_apply_config` because a session's dataframe is worth transplanting on
-        its own — see :meth:`import_session`. Everything the model, the plot and the panel layout
+        its own; see :meth:`import_session`. Everything the model, the plot and the panel layout
         need stays in :meth:`_apply_config`, so taking a frame from a neighbouring tab cannot
-        quietly replace the formula being worked on here.
+        silently replace the formula being worked on here.
 
         The key set this reads is :data:`DATA_CONFIG_KEYS`; a dict holding only those keys is a
         valid argument, and :func:`_migrate_config` is idempotent, so calling this from
@@ -6139,7 +6121,7 @@ class StatmodelsWindow(QMainWindow):
         allow_expressions : bool
             When ``False``, expression-kind derived columns are dropped instead of restored.
             Expressions are evaluated code, and a config file can come from anywhere the user
-            browsed to — :meth:`_on_load` decides whether the source is trusted.
+            browsed to: :meth:`_on_load` decides whether the source is trusted.
         """
         cfg = _migrate_config(cfg)
         self._apply_data_config(cfg, allow_expressions=allow_expressions)
@@ -6185,7 +6167,7 @@ class StatmodelsWindow(QMainWindow):
         sem_cfg = cfg.get("sem")
         if isinstance(sem_cfg, dict):
             # The group list is rebuilt from whatever frame is loaded, so a saved choice only
-            # restores when that column is still there — which is the correct behaviour, not a
+            # restores when that column is still there, which is the correct behaviour, not a
             # silent fallback to a different grouping.
             self._sync_sem_groups()
             for key, combo in (
@@ -6303,8 +6285,8 @@ class StatmodelsWindow(QMainWindow):
         """
         Save the fitted model, its configuration and its report under ``<statmodels_root>/<name>/``.
 
-        The engines serialize very differently — a statsmodels result pickles, an lme4 or MMRM fit
-        lives in R, a non-linear fit is a dict holding a closure — so the model artifact is written
+        The engines serialize very differently (a statsmodels result pickles, an lme4 or MMRM fit
+        lives in R, a non-linear fit is a dict holding a closure), so the model artifact is written
         best-effort and *last*. The configuration, the report and the coefficient table are written
         regardless: losing the record of a fit because its object would not pickle is the worse
         outcome, and that is exactly what used to happen.
@@ -6332,7 +6314,7 @@ class StatmodelsWindow(QMainWindow):
         attempt("config.json", lambda: (out_dir / "config.json").write_text(
             json.dumps(self._config_dict(), indent=2), encoding="utf-8"))
 
-        # The rows the model actually saw, so the saved model reproduces without the dataset being
+        # The rows the model saw, so the saved model reproduces without the dataset being
         # reachable or unchanged. config.json describes how to rebuild the frame; this *is* the
         # frame, combinations, derived columns and filters already applied.
         if self._training_frame() is not None:
@@ -6343,7 +6325,7 @@ class StatmodelsWindow(QMainWindow):
                 log.debug("Could not write the training dataset", exc_info=True)
 
         # The figure as it currently looks, so the saved model carries the picture that was being
-        # looked at when it was saved. Skipped rather than reported when nothing is displayed —
+        # looked at when it was saved. Skipped rather than reported when nothing is displayed:
         # a config-only save is a legitimate thing to do.
         if self._plot.has_figure():
             attempt("plot.png", lambda: self._plot.save_figure(out_dir / "plot.png"))
@@ -6404,7 +6386,7 @@ class StatmodelsWindow(QMainWindow):
         Grey the Display picker out for figures that are not a family of curves.
 
         MMRM offers both least-squares means, which panel, and a correlation heatmap, which is a
-        single matrix with nothing to split — so the picker follows the figure choice there.
+        single matrix with nothing to split, so the picker follows the figure choice there.
         """
         applicable = True
         if self._analysis_kind() == ANALYSIS_MMRM:
@@ -6448,7 +6430,7 @@ class StatmodelsWindow(QMainWindow):
         """
         The rows a save should carry: what the model was fitted on, else what the table shows.
 
-        ``_last_model_df`` is the frame the engine received, after its own dropna — so it is the
+        ``_last_model_df`` is the frame the engine received, after its own dropna, so it is the
         literal training set. Before a fit there is none, and the working frame is the best
         available answer to "the dataset this configuration produces".
         """
@@ -6485,11 +6467,11 @@ class StatmodelsWindow(QMainWindow):
         Two of them, because they answer different questions:
 
         ``analysis_frame``  the loaded frame *before* derived columns, region combinations, filters
-                            and reshape — the recipe's **input**. Reloading this and replaying
+                            and reshape: the recipe's **input**. Reloading this and replaying
                             ``config.json`` reproduces the model frame exactly, which is what makes
                             a loaded model's filters, melts and combinations live rather than
                             frozen: they have something to act on.
-        ``dataset``         the rows the fit actually saw, recipe already applied — the **record**,
+        ``dataset``         the rows the fit saw, recipe already applied: the **record**,
                             and what to hand a collaborator.
 
         Saving only the second is what left a loaded model unable to re-filter or re-melt: every
@@ -6543,7 +6525,7 @@ class StatmodelsWindow(QMainWindow):
         Restore a saved model's frame, preferring the one the recipe can be replayed on.
 
         ``analysis_frame`` is the recipe's input, so adopting it lets the loaded filters, melt,
-        region combinations and derived columns run exactly as they did — which is what makes them
+        region combinations and derived columns run exactly as they did, which is what makes them
         editable afterwards instead of frozen. ``dataset`` is the post-recipe training set; it is
         used only when no analysis frame was saved (a model written before this was), and then the
         frame has to be shown as-is, because re-running a melt on already-melted rows finds no
@@ -6628,7 +6610,7 @@ class StatmodelsWindow(QMainWindow):
         Write the fit's own metadata to ``fit_meta.json``.
 
         Not the same thing as ``config.json``: that records the controls the user set, this records
-        what the fit *resolved* them to — the engine, the fixed part with the covariance term
+        what the fit *resolved* them to; the engine, the fixed part with the covariance term
         stripped, the repeated and subject columns, the grouping factors. Every engine's plot path
         reads those, so without them a reloaded model can be drawn only after a refit.
         """
@@ -6653,7 +6635,7 @@ class StatmodelsWindow(QMainWindow):
 
         Loading a model must start from nothing: leaving the previous result in place is how an
         lmrob object survived into a freshly loaded MMRM and the plot asked emmeans to handle a
-        class it has never heard of. A stale model is worse than no model — no model says so.
+        class it has never heard of. A stale model is worse than no model: no model says so.
         """
         self._last_result = None
         self._last_model_df = None
@@ -6686,7 +6668,7 @@ class StatmodelsWindow(QMainWindow):
             from rpy2.robjects import r as R_
 
             # ``readRDS`` returns the object but attaches nothing, so every S3 method the fit needs
-            # — predict, summary, the emmeans extension — is unregistered until its package is
+            # (predict, summary, the emmeans extension) is unregistered until its package is
             # loaded. Done once here rather than at each call site.
             package = {ANALYSIS_MMRM: "mmrm", ANALYSIS_LMROB: "robustbase"}[engine]
             try:
@@ -6707,7 +6689,7 @@ class StatmodelsWindow(QMainWindow):
 
         Four files, because the bundle is four different kinds of thing: a tidy path table, an
         optional per-level table, the bootstrap draw distribution, and a handful of scalars. A
-        5000-draw mixedlm bootstrap is minutes of compute, so the draws are worth keeping — the
+        5000-draw mixedlm bootstrap is minutes of compute, so the draws are worth keeping: the
         distribution figure cannot be redrawn from the summary alone.
 
         Returns the file names written.
@@ -6721,7 +6703,7 @@ class StatmodelsWindow(QMainWindow):
         written.append("mediation.txt")
 
         # Through _write_frame, so the tables come back with their dtypes intact. A CSV round trip
-        # turns the ``level`` column of a pooled result from None into NaN and — worse — reads a
+        # turns the ``level`` column of a pooled result from None into NaN and (worse) reads a
         # per-level result's numeric-looking labels back as floats, so "3" becomes 3.0 and stops
         # matching the frame it came from.
         paths = bundle.get("paths")
@@ -6743,7 +6725,7 @@ class StatmodelsWindow(QMainWindow):
             "note": str(bundle.get("note") or ""),
             "spec": bundle["spec"].to_dict(),
             # Everything the engine reported except the frames and the draws, which have their own
-            # files. ``point_estimate`` and ``bootstrap`` live here — the numbers the report reads.
+            # files. ``point_estimate`` and ``bootstrap`` live here: the numbers the report reads.
             "raw": {
                 k: self._json_safe(v)
                 for k, v in (raw or {}).items()
@@ -6800,7 +6782,7 @@ class StatmodelsWindow(QMainWindow):
         """
         Serialize the fitted model object itself, however this engine allows.
 
-        statsmodels results pickle. An lme4 or MMRM fit is an R object, so it goes to ``.rds`` —
+        statsmodels results pickle. An lme4 or MMRM fit is an R object, so it goes to ``.rds``:
         readable back in R with ``readRDS``, which is more useful than a Python pickle would be. A
         non-linear fit holds a closure, so its parameters are written instead of the object.
 
@@ -6868,8 +6850,8 @@ class StatmodelsWindow(QMainWindow):
             if meta_path.is_file():
                 saved = json.loads(meta_path.read_text(encoding="utf-8"))
                 fit_meta = dict(saved.get("meta") or {})
-                # The top-level field is the authoritative record of what this folder describes —
-                # it is the one written with the mediation fallback applied — so it wins over the
+                # The top-level field is the authoritative record of what this folder describes (
+                # it is the one written with the mediation fallback applied), so it wins over the
                 # copy inside the engine's own metadata when the two disagree.
                 fit_meta["engine"] = (
                     str(saved.get("engine") or "") or str(fit_meta.get("engine") or "")
@@ -6896,7 +6878,7 @@ class StatmodelsWindow(QMainWindow):
                 self._last_model_df = self._read_saved_frame(model_dir, "dataset")
 
             # A mediation result is a bundle of tables rather than a fitted object, so it restores
-            # from its own files — and completely, draws included, which is what makes reopening it
+            # from its own files, and completely, draws included, which is what makes reopening it
             # cheaper than re-running a bootstrap that took minutes.
             #
             # Which of the two to restore is decided by the engine the *last* save recorded, not by
@@ -6957,7 +6939,7 @@ class StatmodelsWindow(QMainWindow):
 
         A restored statsmodels result can be re-summarized from the object itself, which keeps the
         interactive report (sortable coefficients, the random-effects tables). Everything else falls
-        back to the ``info.txt`` written at save time — the same text, just not navigable.
+        back to the ``info.txt`` written at save time: the same text, just not navigable.
         """
         engine = str(meta.get("engine") or "")
         if restored and engine == ANALYSIS_MIXEDLM and self._last_result is not None:
@@ -7066,7 +7048,7 @@ class MeltVisitsDialog(QDialog):
         lay.addWidget(buttons)
 
     def selected(self) -> tuple[list[str], str]:
-        """``(families to melt, time family)`` — the time family is never melted as a value."""
+        """``(families to melt, time family)``: the time family is never melted as a value."""
         time_family = str(self._time.currentData() or "")
         names = [
             str(self._list.item(i).data(Qt.UserRole))
@@ -7129,9 +7111,7 @@ class MeltFamiliesDialog(QDialog):
         return out
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Config migration
-# ──────────────────────────────────────────────────────────────────────────────
 def _migrate_config(cfg: dict[str, Any]) -> dict[str, Any]:
     """
     Upgrade a saved config to :data:`CONFIG_VERSION`.

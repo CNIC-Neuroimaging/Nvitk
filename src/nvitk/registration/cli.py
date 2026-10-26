@@ -132,7 +132,7 @@ def ants_register_cmd(
     write_composite_transform: bool,
     verbose: bool,
 ) -> None:
-    """Register MOVING→FIXED using ANTsPy (ants.registration)."""
+    """Register MOVING->FIXED using ANTsPy (ants.registration)."""
     _ = ANTSPY_TYPE_OF_TRANSFORM  # surfaced in module docs; CLI accepts any string ANTsPy supports
     res = ants_register(
         fixed_path=fixed_path,
@@ -193,7 +193,7 @@ def fireants_register_cmd(
     device: str,
     verbose: bool,
 ) -> None:
-    """Register MOVING→FIXED using FireANTs (GPU; wraps fireantsRegistration)."""
+    """Register MOVING->FIXED using FireANTs (GPU; wraps fireantsRegistration)."""
     res = fireants_register(
         fixed_path=fixed_path,
         moving_path=moving_path,

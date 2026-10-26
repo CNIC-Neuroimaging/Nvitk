@@ -17,13 +17,13 @@ format (both derive from the same ``print_to_log_file`` helper)::
 This module *mirrors* those logs into TensorBoard event files. Mirroring rather than
 instrumenting the trainers is deliberate:
 
-- the frameworks stay unpatched — nnssl is a vendored upstream clone and the in-tree nnU-Net
+- the frameworks stay unpatched: nnssl is a vendored upstream clone and the in-tree nnU-Net
   build is already carrying enough local changes;
 - it works whether the trainer runs in-process (stage 1) or as a subprocess (stage 2), and
   whether that process is on this host or on a cluster node;
 - it works **after the fact** and **across a shared filesystem**: a run on the cluster can be
   watched live from the workstation by pointing the mirror at the mounted results root;
-- nothing is lost — the per-epoch text log carries every value the frameworks' own loggers
+- nothing is lost: the per-epoch text log carries every value the frameworks' own loggers
   hold (``train_losses``, ``val_losses``, ``lrs``, per-class pseudo dice, epoch duration).
 
 Concurrency
@@ -71,20 +71,18 @@ from nvitk.core.logger import Logger
 
 log = Logger()
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Filesystem conventions
-# ──────────────────────────────────────────────────────────────────────────────
 
 #: Per-epoch text log both frameworks write inside every ``fold_*`` directory.
 TRAINING_LOG_GLOB: str = "training_log_*.txt"
 
-#: Event files written by ``SummaryWriter`` — removed on a full rebuild.
+#: Event files written by ``SummaryWriter``: removed on a full rebuild.
 EVENT_GLOB: str = "events.out.tfevents.*"
 
 #: Mirror bookkeeping, one per event directory (byte offsets + last epoch written).
 STATE_FILE: str = "_nvitk_tb_state.json"
 
-#: Heartbeat lock, one per event *root* — see :class:`MirrorLock`.
+#: Heartbeat lock, one per event *root*; see :class:`MirrorLock`.
 LOCK_FILE: str = "_nvitk_tb_mirror.lock.json"
 
 #: Written by :class:`TensorBoardServer` so a client on another host can find the server.
@@ -101,11 +99,9 @@ DEFAULT_INTERVAL: float = 20.0
 DEFAULT_PORT: int = 6006
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Log parsing
-# ──────────────────────────────────────────────────────────────────────────────
 
-#: ``2026-08-26 17:03:11.123456: <body>`` — the timestamp both frameworks prefix.
+#: ``2026-08-26 17:03:11.123456: <body>``: the timestamp both frameworks prefix.
 _LINE_RE = re.compile(
     r"^(?P<ts>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?):\s?(?P<body>.*)$"
 )
@@ -117,7 +113,7 @@ _VAL_LOSS_RE = re.compile(r"^val_loss\s+(\S+)")
 _PSEUDO_DICE_RE = re.compile(r"^Pseudo dice\s+\[(?P<items>.*)\]")
 _EPOCH_TIME_RE = re.compile(r"^Epoch time:\s*(\S+)\s*s")
 
-#: ``np.float64(0.1234)`` — NumPy >= 2 repr of the elements of the ``Pseudo dice`` list.
+#: ``np.float64(0.1234)``: NumPy >= 2 repr of the elements of the ``Pseudo dice`` list.
 _NP_SCALAR_RE = re.compile(r"^np\.\w+\((?P<value>[^)]*)\)$")
 
 
@@ -138,7 +134,7 @@ def _as_float(token: str) -> float:
 
 
 def _as_timestamp(text: str) -> float | None:
-    """Log timestamp → POSIX seconds, or ``None`` if it does not parse."""
+    """Log timestamp -> POSIX seconds, or ``None`` if it does not parse."""
     try:
         return datetime.fromisoformat(text.replace("T", " ")).timestamp()
     except ValueError:
@@ -150,13 +146,13 @@ class EpochRecord:
     """One completed epoch, as recovered from a training log."""
 
     epoch: int
-    """Epoch index as the trainer counts it — becomes the TensorBoard step."""
+    """Epoch index as the trainer counts it: becomes the TensorBoard step."""
 
     walltime: float | None
     """POSIX timestamp of the epoch's last log line, or ``None`` if unparsed."""
 
     scalars: dict[str, float] = field(default_factory=dict)
-    """Tag → value for the single-valued series (``loss/train``, ``lr``, …)."""
+    """Tag -> value for the single-valued series (``loss/train``, ``lr``, ...)."""
 
     per_class_dice: tuple[float, ...] = ()
     """Pseudo dice per foreground class, in the trainer's label order (nnU-Net only)."""
@@ -166,7 +162,7 @@ def parse_training_log(chunk: bytes) -> tuple[list[EpochRecord], int]:
     """Parse *chunk* into completed epochs and report how many bytes were consumed.
 
     An epoch is only emitted once its ``Epoch time:`` line has been seen, which both trainers
-    write last in ``on_epoch_end`` — so a record is never published half-filled.
+    write last in ``on_epoch_end``, so a record is never published half-filled.
 
     Returns
     -------
@@ -201,7 +197,7 @@ def parse_training_log(chunk: bytes) -> tuple[list[EpochRecord], int]:
             epoch, scalars, per_class, walltime = int(start[1]), {}, (), stamp
             continue
         if epoch is None:
-            continue  # preamble (plans dump, split info, …) before the first epoch
+            continue  # preamble (plans dump, split info, ...) before the first epoch
 
         walltime = stamp or walltime
         if (hit := _LR_RE.match(body)) is not None:
@@ -261,9 +257,7 @@ def discover_run_dirs(root: Path, *, pattern: str = DEFAULT_RUN_PATTERN) -> list
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Event writing
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def summary_writer_class() -> Callable[..., Any]:
@@ -309,7 +303,7 @@ class TensorBoardMirror:
     one continuous curve. Two situations instead force a **rebuild**, in which the event files
     are deleted and written again:
 
-    - a source log shrank (truncated or replaced) — everything is replayed;
+    - a source log shrank (truncated or replaced): everything is replayed;
     - an epoch index went backwards, which means the training was restarted from scratch. Only
       the logs from that restart onwards are replayed: the earlier ones describe a run whose
       checkpoints the framework has already overwritten, and splicing the two together would
@@ -324,8 +318,8 @@ class TensorBoardMirror:
         the UI shows as the run name.
     class_names
         Names for the per-class pseudo dice series, in the trainer's label order. Without
-        them the series are numbered ``class_00``, ``class_01``, … — usable, but on a 36-class
-        vessel model the names are the whole point.
+        them the series are numbered ``class_00``, ``class_01``, ...: usable, but on a 36-class
+        vessel model nobody can read them without the names.
     """
 
     def __init__(
@@ -342,7 +336,7 @@ class TensorBoardMirror:
         self._state: dict[str, Any] = {"consumed": {}, "last_epoch": -1}
         self._loaded = False
 
-    # ---- state ---------------------------------------------------------------
+    # state
 
     @property
     def _state_path(self) -> Path:
@@ -373,7 +367,7 @@ class TensorBoardMirror:
             event.unlink(missing_ok=True)
         self._state = {"consumed": {}, "last_epoch": -1}
 
-    # ---- writing -------------------------------------------------------------
+    # writing
 
     @property
     def writer(self) -> Any:
@@ -414,7 +408,7 @@ class TensorBoardMirror:
                 )
         return ema
 
-    # ---- driving -------------------------------------------------------------
+    # driving
 
     def sync(self) -> int:
         """Mirror everything appended since the last call; returns the epochs written."""
@@ -423,7 +417,7 @@ class TensorBoardMirror:
         if not sources:
             return 0
 
-        # ---- 1. Truncation check -> rebuild --------------------------------
+        # 1. Truncation check -> rebuild
         consumed: dict[str, int] = dict(self._state.get("consumed", {}))
         for path in sources:
             offset = int(consumed.get(path.name, 0))
@@ -433,12 +427,12 @@ class TensorBoardMirror:
                 consumed = {}
                 break
 
-        # ---- 2. Replay the appended bytes of each log ----------------------
+        # 2. Replay the appended bytes of each log
         for attempt in (1, 2):
             written, restart_at = self._sync_once(sources, consumed)
             if restart_at is None or attempt == 2:
                 break
-            # ---- 3. Epoch went backwards -> training restarted from scratch --
+            # 3. Epoch went backwards -> training restarted from scratch
             log.info(
                 "Mirror: %s restarts the epoch count; rebuilding %s from it and dropping the "
                 "%d earlier log(s), which describe a superseded run.",
@@ -463,7 +457,7 @@ class TensorBoardMirror:
             Epochs written to the event file.
         restart_at
             Index into *sources* of the log whose epoch numbering went backwards, or ``None``
-            when the pass was clean. The caller rebuilds from that log — see :meth:`sync`.
+            when the pass was clean. The caller rebuilds from that log; see :meth:`sync`.
         """
         written = 0
         ema = self._state.get("ema")
@@ -496,9 +490,7 @@ class TensorBoardMirror:
             self._writer = None
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Advisory lock
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class MirrorLock:
@@ -507,7 +499,7 @@ class MirrorLock:
     The stage job on a cluster node and an interactive session on the workstation can easily
     end up watching the same shared directory. Both writing would double every curve, so the
     later one degrades to read-only. Advisory by design: a stale heartbeat (owner killed) is
-    simply taken over after *ttl* seconds.
+    taken over after *ttl* seconds.
     """
 
     def __init__(self, path: Path, *, ttl: float = 120.0) -> None:
@@ -573,26 +565,24 @@ class MirrorLock:
             self.owned = False
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Background watcher
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class TensorBoardWatcher:
     """Background thread mirroring every run under one or more framework results roots.
 
     Runs discovered on each pass, so a fold directory created after the watcher started is
-    picked up without a restart — which is exactly what happens when stage 2 begins fold 1.
+    picked up without a restart, which is exactly what happens when stage 2 begins fold 1.
 
     Parameters
     ----------
     sources
-        Label → framework results root. The label becomes the first path component of the
-        TensorBoard run name, e.g. ``stage2/Dataset501_…/PretrainedTrainer__…/fold_0``.
+        Label -> framework results root. The label becomes the first path component of the
+        TensorBoard run name, e.g. ``stage2/Dataset501_.../PretrainedTrainer__.../fold_0``.
     event_root
         The directory a TensorBoard server is pointed at.
     class_names
-        Forwarded to every :class:`TensorBoardMirror` — see there.
+        Forwarded to every :class:`TensorBoardMirror`; see there.
     interval
         Seconds between passes.
 
@@ -621,7 +611,7 @@ class TensorBoardWatcher:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
-    # ---- one pass ------------------------------------------------------------
+    # one pass
 
     def _mirror_for(self, label: str, root: Path, run_dir: Path) -> TensorBoardMirror:
         """The mirror for *run_dir*, created on first sight."""
@@ -644,7 +634,7 @@ class TensorBoardWatcher:
                     log.warning("TensorBoard mirror failed for %s (%s).", run_dir, exc)
         return written
 
-    # ---- thread lifecycle ----------------------------------------------------
+    # thread lifecycle
 
     def _loop(self) -> None:
         """Poll until stopped, mirroring only while this process holds the lock.
@@ -663,7 +653,7 @@ class TensorBoardWatcher:
     def start(self) -> bool:
         """Start the thread; returns whether this process is the one writing events.
 
-        A ``False`` return is not a failure — the thread runs either way, on standby.
+        A ``False`` return is not a failure: the thread runs either way, on standby.
         """
         self.event_root.mkdir(parents=True, exist_ok=True)
         owned = self.lock.acquire()
@@ -696,9 +686,7 @@ class TensorBoardWatcher:
         self.stop()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Server
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def resolve_port(preferred: int = DEFAULT_PORT, *, host: str = "", tries: int = 32) -> int:
@@ -733,7 +721,7 @@ class TensorBoardServer:
         browser is elsewhere; never use it to expose a workstation.
     sidecar
         Where to record the resolved host, port, URL and pid. On a cluster the compute node is
-        only known once the job starts, so this file — written to the shared filesystem — is
+        only known once the job starts, so this file (written to the shared filesystem) is
         how the workstation learns where to tunnel.
     """
 
@@ -840,9 +828,7 @@ def ssh_tunnel_command(sidecar: Mapping[str, Any], *, login_host: str, local_por
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # CLI
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _parse_mirror_specs(specs: Iterable[str]) -> dict[str, Path]:
@@ -886,7 +872,7 @@ def main(
     """Mirror nnU-Net / nnssl training logs into TensorBoard, and serve them.
 
     Works against a live run or a finished one, on this host or on a mounted cluster
-    filesystem — nothing needs to be running for the mirror to catch up.
+    filesystem: nothing needs to be running for the mirror to catch up.
     """
     Logger(level=log_level.upper())
     sources = _parse_mirror_specs(mirrors)

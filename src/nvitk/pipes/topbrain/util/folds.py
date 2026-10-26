@@ -4,20 +4,20 @@ Description
 -----------
 The release holds 50 volumes from **25 patients**: every patient contributes one CTA and one
 MRA. Splitting on the case id would put a patient's CT in training and their MR in validation,
-which leaks the subject's anatomy across the split and inflates every metric — the two scans
+which leaks the subject's anatomy across the split and inflates every metric: the two scans
 show the same vessels, so a model that memorised one has largely seen the other.
 
 :func:`grouped_folds` therefore assigns whole *patients* to folds. Assignment is deterministic
 (seeded) so a re-run, or a second stage reading the same dataset, reproduces the split rather
-than quietly generating a new one.
+than silently generating a new one.
 
 Why the assignment is stratified
 --------------------------------
 With 25 patients and 36 classes, a plain shuffle is not good enough. The side roads (AChA, OA,
 Pcom, 3rd-A2/A3) are anatomically absent or hypoplastic in a large minority of people, so some
 classes are present in only a handful of subjects. A shuffle will regularly produce a fold whose
-**validation split contains no positive example of a class at all** — that class then contributes
-nothing (or a NaN) to the class-average metrics for that fold — or, worse, a fold whose
+**validation split contains no positive example of a class at all**, that class then contributes
+nothing (or a NaN) to the class-average metrics for that fold, or, worse, a fold whose
 *training* split has none, so the model cannot possibly learn it and is then scored on it.
 
 Either way the fold-to-fold variance of the headline metric swamps the few points that separate
@@ -43,7 +43,7 @@ log = Logger()
 
 
 def group_by_patient(cases: Iterable[ReleaseCase]) -> dict[str, list[str]]:
-    """Map patient id → sorted case ids belonging to that patient."""
+    """Map patient id -> sorted case ids belonging to that patient."""
     groups: dict[str, list[str]] = defaultdict(list)
     for case in cases:
         groups[case.patient_id].append(case.case_id)
@@ -53,12 +53,12 @@ def group_by_patient(cases: Iterable[ReleaseCase]) -> dict[str, list[str]]:
 def patient_presence(
     cases: Iterable[ReleaseCase], class_presence: Mapping[str, Iterable[int]]
 ) -> dict[str, set[int]]:
-    """Patient id → the union of foreground classes present in that patient's scans.
+    """Patient id -> the union of foreground classes present in that patient's scans.
 
     Parameters
     ----------
     class_presence
-        Case id → foreground label values present in that case's mask, as stage 0 records it
+        Case id -> foreground label values present in that case's mask, as stage 0 records it
         while converting. Cases missing from the mapping contribute nothing rather than raising:
         a partially converted dataset should still produce a usable (if less well stratified)
         split, and the caller warns about the gap.
@@ -95,14 +95,14 @@ def stratified_patient_folds(
     3. Patients carrying no class that needed spreading (or already placed) fill the emptiest
        folds.
 
-    This is iterative stratification restricted to the labels that actually matter here. It is
-    not optimal — no cheap algorithm is, and with 25 patients some classes simply cannot be
-    spread across 5 folds — but it removes the avoidable empty folds, which is the whole point.
+    This is iterative stratification restricted to the labels that matter here. It is
+    not optimal (no cheap algorithm is, and with 25 patients some classes cannot be
+    spread across 5 folds), but it removes the avoidable empty folds.
 
     Parameters
     ----------
     presence
-        Patient id → foreground classes present in that patient's scans.
+        Patient id -> foreground classes present in that patient's scans.
     seed
         Fixed so the split is reproducible. Only breaks ties and shuffles the input order; it
         does not otherwise steer the assignment.
@@ -121,7 +121,7 @@ def stratified_patient_folds(
     assigned_counts: list[dict[int, int]] = [defaultdict(int) for _ in range(int(num_folds))]
     unassigned = list(patients)
 
-    # ---- 1. Classes, rarest first -------------------------------------------
+    # 1. Classes, rarest first
     carriers: dict[int, list[str]] = defaultdict(list)
     for patient in patients:
         for value in presence[patient]:
@@ -152,7 +152,7 @@ def stratified_patient_folds(
             )
             _place(patient, best)
 
-    # ---- 2. Everyone else fills the emptiest folds --------------------------
+    # 2. Everyone else fills the emptiest folds
     for patient in list(unassigned):
         open_folds = [f for f in range(int(num_folds)) if len(folds[f]) < capacity[f]]
         target = min(open_folds or range(int(num_folds)), key=lambda f: (len(folds[f]), f))
@@ -178,7 +178,7 @@ def grouped_folds(
     seed
         Seed for the patient assignment. Fixed by default so splits are reproducible.
     class_presence
-        Case id → foreground labels present in that case. When given, patients are assigned by
+        Case id -> foreground labels present in that case. When given, patients are assigned by
         :func:`stratified_patient_folds` so the rare classes are spread across folds; without
         it the assignment falls back to a seeded round-robin, which is reproducible but blind
         to which folds end up with no example of a class.
@@ -191,7 +191,7 @@ def grouped_folds(
     Returns
     -------
     list of dict
-        One ``{"train": [case_id, ...], "val": [case_id, ...]}`` per fold, case ids sorted —
+        One ``{"train": [case_id, ...], "val": [case_id, ...]}`` per fold, case ids sorted:
         the exact shape nnU-Net expects in ``splits_final.json``.
 
     Raises
@@ -209,7 +209,7 @@ def grouped_folds(
     splittable = [case for case in cases if case.case_id not in fixed]
     if fixed and not splittable:
         # Legitimate for a silver-standard dataset built entirely from model-predicted masks:
-        # there is nothing honest to hold out, and it is trained with fold 'all'. Emit folds
+        # there is nothing unbiased to hold out, and it is trained with fold 'all'. Emit folds
         # with an empty validation half rather than refusing, so the dataset is still usable.
         log.warning(
             "All %d case(s) are train-only, so no fold has a validation half. This dataset can "
@@ -270,9 +270,7 @@ def grouped_folds(
     return folds
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Per-class × per-fold presence
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -293,12 +291,12 @@ class ClassFoldPresence:
 
     @property
     def empty_train_folds(self) -> tuple[int, ...]:
-        """Folds that would train on no example of this class — it cannot be learned there."""
+        """Folds that would train on no example of this class: it cannot be learned there."""
         return tuple(i for i, n in enumerate(self.train_counts) if n == 0)
 
     @property
     def empty_val_folds(self) -> tuple[int, ...]:
-        """Folds that score no example of this class — it contributes nothing to their metrics."""
+        """Folds that score no example of this class: it contributes nothing to their metrics."""
         return tuple(i for i, n in enumerate(self.val_counts) if n == 0)
 
     def as_dict(self) -> dict[str, Any]:
@@ -323,7 +321,7 @@ def class_presence_table(
 
     This is the table that tells you whether a cross-validation can support the comparison you
     are about to make. A class with two positive cases in the whole cohort will have empty folds
-    no matter how well they are stratified, and its per-class Dice is not evidence of anything —
+    no matter how well they are stratified, and its per-class Dice is not evidence of anything:
     far better to see that in a table before the run than to read a confident-looking mean
     afterwards.
 
@@ -379,7 +377,7 @@ def format_presence_table(table: Sequence[ClassFoldPresence]) -> str:
 def warn_empty_classes(table: Sequence[ClassFoldPresence]) -> list[str]:
     """Log (and return) one warning per class with an empty train or validation half.
 
-    Not an error: with 25 patients some classes genuinely cannot be spread over five folds, and
+    Not an error: with 25 patients some classes cannot be spread over five folds, and
     refusing to build the dataset would be unhelpful. But every one of these is a class whose
     per-fold numbers must not be read as a measurement.
     """

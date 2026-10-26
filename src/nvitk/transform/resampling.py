@@ -36,7 +36,7 @@ def resample_to(
     Resample *source* onto *target*'s voxel grid via affine composition.
 
     The mapping is ``T = inv(target.affine) @ source.affine``; scipy's
-    ``affine_transform`` expects the output→input map so we invert it.
+    ``affine_transform`` expects the output->input map so we invert it.
 
     Parameters
     ----------

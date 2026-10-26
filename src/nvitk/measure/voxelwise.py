@@ -3,20 +3,20 @@ Mass-univariate voxelwise analysis with FSL ``randomise``.
 
 Every other analysis in this toolkit is region-wise: a measurement is averaged inside a parcel or a
 vessel and modelled as one number per subject × region. That answers *which region* and cannot
-answer *where in this region*, and it presumes the parcellation is the right unit — which for an
+answer *where in this region*, and it presumes the parcellation is the right unit, which for an
 effect that straddles a boundary, or sits in part of a territory, it is not.
 
 This module fits the same GLM at every voxel instead. A cohort's spatially normalised images are
 stacked into one 4D volume, a design matrix is built from database measurements, and
 ``randomise`` estimates the null by permutation, giving family-wise-error-corrected p-values with
 TFCE. Nothing here assumes the images and the design come from the same modality: the motivating
-question — *does 4D-flow mean flow in the left MCA predict ASL perfusion, voxel by voxel?* — takes
+question (*does 4D-flow mean flow in the left MCA predict ASL perfusion, voxel by voxel?*) takes
 its images from one pipeline and its design from another.
 
 The ordering contract
 ---------------------
 Row *i* of the design matrix must be volume *i* of the 4D stack. :func:`resolve_cohort_images`
-returns an ordered list and every step downstream is indexed off that one list — the merge, the
+returns an ordered list and every step downstream is indexed off that one list: the merge, the
 design matrix, and the manifest. A transposed or mis-ordered design still runs and still produces a
 plausible-looking map, so alignment is never inferred, only carried.
 
@@ -29,8 +29,8 @@ not the other fails halfway through, and the status has to be able to say which 
 Prepared inputs
 ---------------
 :func:`run_randomise_direct` skips everything above the ``randomise`` call: it takes a 4D stack and
-``design.mat`` / ``design.con`` (and optionally ``design.fts``) that someone already built — in FSL's
-Glm GUI, in another tool, or with ``nvitk-voxelwise design`` and ``merge`` — and checks their
+``design.mat`` / ``design.con`` (and optionally ``design.fts``) that someone already built (in FSL's
+Glm GUI, in another tool, or with ``nvitk-voxelwise design`` and ``merge``), and checks their
 dimensions against each other from the headers before spending hours on permutations.
 
 Running ``randomise_parallel`` locally
@@ -39,15 +39,13 @@ Running ``randomise_parallel`` locally
 FSL designed as a cluster submitter: depending on site configuration it queues them and returns at
 once, and run locally it starts one fragment per core, each holding the whole 4D stack in memory.
 :func:`run_randomise` therefore runs it against a throwaway ``FSLDIR`` overlay whose ``fsl_sub`` is
-``fsl_sub_local.sh`` — a local-only runner that caps concurrency (:data:`PARALLEL_ENV`) and stops the
+``fsl_sub_local.sh``: a local-only runner that caps concurrency (:data:`PARALLEL_ENV`) and stops the
 merge step if any fragment failed. The FSL installation itself is never modified.
 """
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import fnmatch
 import json
 import os
@@ -86,14 +84,14 @@ INSTALL_HINT = (
 )
 
 #: Optional explicit regex override for pulling a session id out of a filename
-#: (``…_BMRI123456_s8_…nii.gz``). Only needed when the default token scan (see
-#: :func:`resolve_cohort_images`) is not enough — e.g. the id is glued onto neighbouring text with
+#: (``..._BMRI123456_s8_...nii.gz``). Only needed when the default token scan (see
+#: :func:`resolve_cohort_images`) is not enough, e.g. the id is glued onto neighbouring text with
 #: no delimiter, or the filename contains a decoy that also happens to be a registered id.
 DEFAULT_ID_PATTERN: str | None = None
 
 #: ``subject_ids`` namespaces searched, by default, to map a filename token onto a ``subject_uid``.
-#: These three carry the same *kind* of code — an acquisition/session id, not a subject id like
-#: ``pesa_id`` — and different cohorts within one dataset are free to use different ones for the
+#: These three carry the same *kind* of code (an acquisition/session id, not a subject id like
+#: ``pesa_id``), and different cohorts within one dataset are free to use different ones for the
 #: same physical session (a 4D-flow export named by ``mr_id``, an ASL export named by ``session``),
 #: which is exactly why all three are searched at once rather than requiring the caller to know
 #: which kind a given directory uses.
@@ -102,10 +100,10 @@ DEFAULT_ID_NAMESPACES: tuple[str, ...] = ("mr_id", "mri_id", "session")
 #: A maximal run of letters-then-digits, e.g. ``BMRI100102`` or ``IA004754``. This is the *shape*
 #: every id in :data:`DEFAULT_ID_NAMESPACES` happens to share regardless of project prefix, so
 #: splitting a filename into these tokens and checking each one against the database recognises a
-#: mixed cohort (``BMRI*``, ``IA*``, …) without the caller enumerating every prefix in use.
+#: mixed cohort (``BMRI*``, ``IA*``, ...) without the caller enumerating every prefix in use.
 _ID_TOKEN_RX = re.compile(r"[A-Za-z]{2,}\d+")
 
-#: What to do when two files resolve to the same subject — the same person scanned twice, or the
+#: What to do when two files resolve to the same subject: the same person scanned twice, or the
 #: same session exported under two different id namespaces. ``error`` is the default because which
 #: session is kept changes the result, and that is the caller's call to make, not a default's.
 DUPLICATE_POLICIES: tuple[str, ...] = ("error", "skip", "first", "last")
@@ -118,9 +116,7 @@ AFFINE_TOL = 1e-3
 CORRP_THRESHOLD = 0.95
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Backend probe
-# ──────────────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class FslBackendStatus:
     """What is available to run a voxelwise analysis."""
@@ -130,7 +126,7 @@ class FslBackendStatus:
     versions: dict[str, str] = field(default_factory=dict)
     missing: tuple[str, ...] = ()
     reason: str = ""
-    #: The installation the binaries belong to — ``$FSLDIR``, or inferred from where they live.
+    #: The installation the binaries belong to: ``$FSLDIR``, or inferred from where they live.
     fsldir: str = ""
 
     def summary(self) -> str:
@@ -166,7 +162,7 @@ def resolve_fsldir() -> Path | None:
     """The FSL installation (see :func:`nvitk.fsl.env.resolve_fsldir` for the order).
 
     ``randomise_parallel`` calls ``$FSLDIR/bin/randomise`` and ``$FSLDIR/bin/fsl_sub`` by absolute
-    path, so a GUI started without sourcing ``fsl.sh`` — FSL on ``PATH`` but ``FSLDIR`` unset — fails
+    path, so a GUI started without sourcing ``fsl.sh`` (FSL on ``PATH`` but ``FSLDIR`` unset) fails
     at its first line; the resolver recovers it from the binaries' location, and also finds nvitk's
     own FSL core when no other installation is configured.
     """
@@ -277,9 +273,7 @@ def _run_checked(argv: Sequence[str], *, what: str) -> subprocess.CompletedProce
     return proc
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Cohort assembly
-# ──────────────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class CohortImage:
     """One subject's normalised volume, and the ids that got it there."""
@@ -289,7 +283,7 @@ class CohortImage:
     path: Path
 
     def label(self) -> str:
-        """``subject (session)`` — what an error message or a manifest row should say."""
+        """``subject (session)``: what an error message or a manifest row should say."""
         return f"{self.subject_uid} ({self.session_id})"
 
 
@@ -366,8 +360,8 @@ def _strip_nifti_suffix(name: str) -> str:
 def _candidate_tokens(stem: str) -> list[str]:
     """Every maximal letters-then-digits run in *stem*, in order of appearance.
 
-    These are the tokens checked against the database when no ``--id-pattern`` is given — the
-    generic shape (``BMRI100102``, ``IA004754``, ``PESA150544``, …) every id in
+    These are the tokens checked against the database when no ``--id-pattern`` is given: the
+    generic shape (``BMRI100102``, ``IA004754``, ``PESA150544``, ...) every id in
     :data:`DEFAULT_ID_NAMESPACES` happens to share, regardless of which project's prefix it uses.
     """
     return _ID_TOKEN_RX.findall(stem)
@@ -382,14 +376,14 @@ def _resolve_session_id(
 ) -> tuple[str, set[str]]:
     """Return ``(session_id, subject_uids)`` for *path*, raising a message naming the file.
 
-    With an explicit ``id_pattern`` (*rx* set), extraction is exactly the id the regex names —
+    With an explicit ``id_pattern`` (*rx* set), extraction is exactly the id the regex names:
     unchanged from before, for the cases where a delimiter-free filename or a decoy token needs a
     caller-supplied rule rather than a guess.
 
     With no pattern, every letters-then-digits token in the filename is checked against *mapping*
     (built once, from *namespaces*) and the token(s) that are registered ids win. This is what lets
-    a mixed directory — some files named by an ``mr_id``, others by a ``session`` from a different
-    project prefix — resolve without the caller enumerating every prefix in use.
+    a mixed directory (some files named by an ``mr_id``, others by a ``session`` from a different
+    project prefix) resolve without the caller enumerating every prefix in use.
     """
     if rx is not None:
         match = rx.search(path.name)
@@ -437,8 +431,8 @@ def _apply_duplicate_policy(
     """Enforce one image per subject, according to *policy*.
 
     A voxelwise design has exactly one row per subject, so two files claiming the same
-    ``subject_uid`` — a repeat scan, or one session exported under both an ``mr_id`` and a
-    ``session`` code — have to be reconciled before the stack is built.
+    ``subject_uid`` (a repeat scan, or one session exported under both an ``mr_id`` and a
+    ``session`` code) have to be reconciled before the stack is built.
 
     ``error`` reports **every** conflict at once rather than the first. With hundreds of files a
     one-at-a-time error costs one full re-run per duplicate, and the fix is a single edit once the
@@ -467,7 +461,7 @@ def _apply_duplicate_policy(
             listing += f"\n  … and {len(duplicates) - len(shown)} more"
 
         # Nearly every subject duplicated the same number of times is not a cohort with repeat
-        # scans — it is one include pattern matching several derivatives of each image (an
+        # scans: it is one include pattern matching several derivatives of each image (an
         # unsmoothed and two smoothed copies, say). Saying "pick a duplicate policy" there would
         # have someone silently analyse an arbitrary smoothing level.
         widespread = len(duplicates) > 0.5 * len(grouped)
@@ -537,20 +531,20 @@ def resolve_cohort_images(
     include
         Glob applied to the file name (``'*_s8_*'`` for 8 mm-smoothed volumes). A bare pattern with
         no NIfTI extension still only matches NIfTI files. Leave it as the default ``'*'`` to
-        include every NIfTI in the directory — narrowing is opt-in, not required.
+        include every NIfTI in the directory: narrowing is opt-in, not required.
     exclude_csv
-        Optional file of id-globs, one per line — subjects to drop before anything is read.
+        Optional file of id-globs, one per line: subjects to drop before anything is read.
     id_pattern
         Optional regex override whose first group is the session id inside the file name. Leave
         unset (the default) to auto-detect: every letters-then-digits token in each filename
-        (``BMRI100102``, ``IA004754``, …) is checked against the database, so a directory mixing
+        (``BMRI100102``, ``IA004754``, ...) is checked against the database, so a directory mixing
         several projects' naming conventions resolves without the caller supplying a pattern per
         prefix. Only needed for an id with no delimiter separating it from surrounding text, or
         where auto-detection would be ambiguous.
     namespaces
         ``subject_ids`` namespaces the token is checked against. Whichever *kind* of code (an
-        ``mr_id``, an ``mri_id``, a ``session`` label — never a subject id like ``pesa_id``) the
-        directory happens to use, it resolves to the same ``subject_uid`` — the standardisation
+        ``mr_id``, an ``mri_id``, a ``session`` label, never a subject id like ``pesa_id``) the
+        directory happens to use, it resolves to the same ``subject_uid``: the standardisation
         every downstream step (in particular ``--cohort``) is written against.
     on_duplicate
         What to do when two files resolve to the same subject: ``error`` (default, listing every
@@ -616,7 +610,7 @@ def resolve_cohort_images(
     excluded: list[str] = []
     for path in candidates:
         # An exclusion glob is checked against the file name too, since with no --id-pattern the
-        # id is not known until after the (possibly expensive-to-read) database lookup below —
+        # id is not known until after the (possibly expensive-to-read) database lookup below:
         # excluding by file name lets a bad file be skipped without ever needing to resolve it.
         if any(fnmatch.fnmatch(path.name, pat) for pat in exclusions):
             excluded.append(path.name)
@@ -666,7 +660,7 @@ def cohort_subjects(repo: Any, pipeline_id: str) -> set[str]:
     Raises
     ------
     ValueError
-        If *pipeline_id* is not registered, listing the ids that are — a plain "not found" would not
+        If *pipeline_id* is not registered, listing the ids that are: a plain "not found" would not
         reveal that the real ids are ``qvtpy`` and ``4dflow_v3`` rather than ``qvtpy_v3``.
     """
     token = str(pipeline_id).strip()
@@ -709,7 +703,7 @@ class CohortOption:
     label: str = ""
 
     def describe(self) -> str:
-        """``4dflow_v3  513 subjects  (qvtpy, latest, v3)`` — one line for a listing or a combo."""
+        """``4dflow_v3  513 subjects  (qvtpy, latest, v3)``: one line for a listing or a combo."""
         text = f"{self.pipeline_id}  ·  {self.n_subjects} subject(s)"
         if self.aliases:
             text += f"  ·  aka {', '.join(self.aliases)}"
@@ -723,7 +717,7 @@ def cohort_id_subjects(repo: Any, cohort_id: str) -> set[str] | None:
 
     The other filter. ``--cohort`` asks *which pipeline produced measurements for this subject*;
     ``--cohort-id`` asks *which named cohort is this subject enrolled in*, out of
-    ``cohort_membership`` — the table :class:`~nvitk.db.repo.DataRepo` already applies by default.
+    ``cohort_membership``: the table :class:`~nvitk.db.repo.DataRepo` already applies by default.
     They can disagree, which is why they are two flags and not one.
 
     ``None`` rather than an empty set when the table is missing: "no membership data" and "nobody is
@@ -758,10 +752,10 @@ def cohort_id_subjects(repo: Any, cohort_id: str) -> set[str] | None:
 def available_cohorts(repo: Any) -> list[CohortOption]:
     """Every value ``--cohort`` can take, most subjects first.
 
-    Counts are what ``--cohort <id>`` would actually select, which is not the same as counting
+    Counts are what ``--cohort <id>`` would select, which is not the same as counting
     ``image_measurements.pipeline_id`` values: the manifest resolves aliases, so ``qvtpy`` is
     ``4dflow_v3``. Pipeline ids that appear in the data but are *not* registered are listed too and
-    marked unselectable — silently omitting them would make a 514-row group look like it never
+    marked unselectable: silently omitting them would make a 514-row group look like it never
     existed, and silently counting them would promise a ``--cohort`` value that raises.
 
     Backs both ``nvitk-voxelwise cohorts`` and the GUI's cohort picker.
@@ -798,9 +792,7 @@ def available_cohorts(repo: Any) -> list[CohortOption]:
     return sorted(options, key=lambda o: (not o.registered, -o.n_subjects, o.pipeline_id))
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Geometry validation
-# ──────────────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class SpaceInfo:
     """The grid every volume in a stack has to share."""
@@ -810,13 +802,13 @@ class SpaceInfo:
     zooms: tuple[float, float, float]
 
     def describe(self) -> str:
-        """``96x114x96 @ 2.0×2.0×2.0 mm`` — enough to see a mismatch at a glance."""
+        """``96x114x96 @ 2.0×2.0×2.0 mm``: enough to see a mismatch at a glance."""
         z = "×".join(f"{v:g}" for v in self.zooms)
         return f"{'x'.join(str(v) for v in self.shape)} @ {z} mm"
 
 
 def _space_of(path: Path) -> SpaceInfo:
-    """Read *path*'s grid from its header alone — no voxel data is loaded."""
+    """Read *path*'s grid from its header alone: no voxel data is loaded."""
     import nibabel as nib
 
     img = nib.load(str(path))
@@ -835,7 +827,7 @@ def validate_common_space(
     """Assert every image (and the mask) sits on one grid; return that grid.
 
     Voxel *i* of subject A and voxel *i* of subject B have to be the same anatomical location or the
-    whole model is meaningless — and nothing downstream would notice, because a stack of
+    whole model is meaningless, and nothing downstream would notice, because a stack of
     mismatched-but-same-shaped volumes merges and permutes perfectly happily. This is the guard.
 
     Raises
@@ -881,9 +873,7 @@ def validate_common_space(
     return reference
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Design and contrasts
-# ──────────────────────────────────────────────────────────────────────────────
 #: Comparison operators ``--prefilter`` accepts, longest first so ``>=`` is not read as ``>``.
 PREFILTER_OPERATORS: tuple[str, ...] = (">=", "<=", "!=", "==", ">", "<", "=")
 
@@ -893,7 +883,7 @@ class PreFilter:
     """One subject-level inclusion rule, e.g. ``flow_mean__LICA >= 15``.
 
     Applied to the design frame *before* the design is validated, so it narrows the cohort rather
-    than the model: the column it tests need not be an EV, which is the point — keeping only
+    than the model: the column it tests need not be an EV. Keeping only
     subjects with a patent left ICA while modelling the right one is a cohort decision, not a
     covariate.
     """
@@ -940,14 +930,14 @@ class PreFilter:
         )
 
     def describe(self) -> str:
-        """``flow_mean__LICA >= 15`` — what a log line or a manifest should say."""
+        """``flow_mean__LICA >= 15``: what a log line or a manifest should say."""
         return f"{self.column} {self.operator} {self.value!r}"
 
     def mask(self, frame: Any) -> Any:
         """Boolean mask over *frame*'s rows: True for the subjects this rule keeps.
 
         A missing value never satisfies a comparison, so a subject with no measurement in the
-        tested column is excluded rather than silently kept — the same rule complete-case handling
+        tested column is excluded rather than silently kept: the same rule complete-case handling
         applies to the EVs.
         """
         import pandas as pd
@@ -1112,7 +1102,7 @@ class VoxelwiseDesign:
         """The design matrix for *frame*, one row per row of *frame*, in that order.
 
         Continuous EVs are centred when ``demean`` is set. A column with two or fewer distinct
-        values is treated as a group indicator and centred too — ``randomise`` needs it demeaned for
+        values is treated as a group indicator and centred too: ``randomise`` needs it demeaned for
         the same reason a continuous EV does, and a 0/1 sex column is the common case.
         """
         numeric = self._numeric(frame)
@@ -1186,7 +1176,7 @@ class VoxelwiseDesign:
                     )
         return "\n".join(problems)
 
-    # -- VEST writers ---------------------------------------------------------
+    # VEST writers
     # Written directly rather than shelling to Text2Vest so design construction stays unit-testable
     # with no FSL present, and so the contrast names travel into the file.
     def write_mat(self, path: str | Path, frame: Any) -> Path:
@@ -1229,9 +1219,9 @@ def parse_contrasts(
     *,
     add_intercept: bool = True,
 ) -> tuple[Contrast, ...]:
-    """Parse ``--contrast`` tokens, defaulting a blank name to ``c1``, ``c2``, ….
+    """Parse ``--contrast`` tokens, defaulting a blank name to ``c1``, ``c2``, ....
 
-    With no tokens at all, emit one positive contrast per EV — the thing almost every caller wants
+    With no tokens at all, emit one positive contrast per EV: the thing almost every caller wants
     from a one-EV design, and harmless to override.
     """
     if not tokens:
@@ -1294,9 +1284,7 @@ def align_design_to_images(
     return kept, ordered
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Execution
-# ──────────────────────────────────────────────────────────────────────────────
 def merge_4d(images: Sequence[CohortImage], out_path: str | Path) -> Path:
     """Concatenate *images* into one 4D volume with ``fslmerge -t``, in list order.
 
@@ -1354,16 +1342,14 @@ def default_mni_mask(reference: str | Path, out_path: str | Path) -> Path:
     return out
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # randomise_parallel, run locally
-# ──────────────────────────────────────────────────────────────────────────────
 #: Caps how many ``randomise_parallel`` fragments run at once. The name is the one FSL's own
 #: ``fsl_sub`` reads, so one setting governs both; ``0`` or unset lets :func:`resolve_parallel_jobs`
 #: choose from the cores and the free memory.
 PARALLEL_ENV = "FSLSUB_PARALLEL"
 
 #: Peak memory of one ``randomise`` process as a multiple of its 4D input held as float32. Measured
-#: with TFCE on the 2 mm MNI grid: 518 MB at 60 volumes and 980 MB at 120 — the volume itself plus
+#: with TFCE on the 2 mm MNI grid: 518 MB at 60 volumes and 980 MB at 120; the volume itself plus
 #: randomise's double-precision copy of the in-mask voxels.
 FRAGMENT_MEMORY_FACTOR = 2.0
 FRAGMENT_MEMORY_OVERHEAD = 64 * 2**20
@@ -1379,7 +1365,7 @@ FSL_SUB_LOCAL = Path(__file__).with_name("fsl_sub_local.sh")
 def available_cores() -> int:
     """CPUs this process may use: SGE's ``NSLOTS`` inside a job, else the affinity mask.
 
-    ``NSLOTS`` first because a cluster node's affinity mask is usually the whole node — 64 cores of
+    ``NSLOTS`` first because a cluster node's affinity mask is usually the whole node: 64 cores of
     which the job was granted four.
     """
     slots = os.environ.get("NSLOTS", "").strip()
@@ -1411,7 +1397,7 @@ def fragment_memory(stack: str | Path) -> int:
 
 
 def _gb(n_bytes: float) -> str:
-    """``4.4 GB`` — memory sizes for a log line."""
+    """``4.4 GB``: memory sizes for a log line."""
     return f"{n_bytes / 2**30:.1f} GB"
 
 
@@ -1424,7 +1410,7 @@ def resolve_parallel_jobs(
 
     An explicit *requested* count wins, then :data:`PARALLEL_ENV`, then the automatic choice:
     the cores available (:func:`available_cores`), lowered until the fragments' estimated memory
-    fits in :data:`MEMORY_HEADROOM` of what is free. Cores alone are what took workstations down —
+    fits in :data:`MEMORY_HEADROOM` of what is free. Cores alone are what took workstations down:
     every fragment holds the whole 4D stack, so 32 cores and a 500-subject stack ask for 140 GB.
     """
     cores = available_cores()
@@ -1534,7 +1520,7 @@ def _previous_outputs(root: Path) -> list[Path]:
     return sorted(stale)
 
 
-#: The permutation-distribution text files randomise writes (``-P``, ``--corrp`` …) and
+#: The permutation-distribution text files randomise writes (``-P``, ``--corrp`` ...) and
 #: randomise_parallel's merge appends to: ``<root>_perm_tstat1.txt``, ``<root>_vox_corrp_tstat1.txt``.
 _DIST_TXT_RX = re.compile(r"(^|_)(perm|p|corrp)_")
 
@@ -1556,7 +1542,7 @@ def _run_randomise_parallel(args: Sequence[str], root: Path, *, n_jobs: int) -> 
     """``randomise_parallel`` with *args*, its fragments run here, *n_jobs* at a time.
 
     The overlay lives only as long as the run. The ``.generate`` file left in the results folder
-    therefore names paths that no longer exist — it is a record of what ran, not a script to re-run.
+    therefore names paths that no longer exist: it is a record of what ran, not a script to re-run.
     """
     fsldir = resolve_fsldir()
     if fsldir is None or not (fsldir / "bin" / "randomise_parallel").is_file():
@@ -1622,8 +1608,8 @@ def run_randomise(
 ) -> Path:
     """Run ``randomise`` on *stack* and return its output root path prefix.
 
-    ``randomise_parallel`` takes the same arguments — it splits the permutations into fragments and
-    merges them — so it is a flag rather than a separate function. Its fragments run on this
+    ``randomise_parallel`` takes the same arguments (it splits the permutations into fragments and
+    merges them), so it is a flag rather than a separate function. Its fragments run on this
     machine, *n_jobs* at a time (see :func:`resolve_parallel_jobs`), never on a queue: on the
     cluster the whole call already runs inside one job.
     """
@@ -1682,9 +1668,7 @@ def run_randomise(
     return root
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Results
-# ──────────────────────────────────────────────────────────────────────────────
 #: What ``randomise`` puts between the output root and ``tstat<N>`` / ``fstat<N>``, and what it
 #: means. ``p_`` is not a name randomise writes (uncorrected maps are ``vox_p_``) and is kept only
 #: so folders described with it still label.
@@ -1704,14 +1688,14 @@ _STAT_INFIXES: dict[str, str] = {
     "p_": "uncorrected 1−p",
 }
 
-#: ``randomise`` output kinds — t-contrast maps (``…tstat``) and F-test maps (``…fstat``).
+#: ``randomise`` output kinds: t-contrast maps (``...tstat``) and F-test maps (``...fstat``).
 STAT_KINDS: dict[str, str] = {
     **{f"{infix}tstat": (f"t-{text}" if not infix else text) for infix, text in _STAT_INFIXES.items()},
     **{f"{infix}fstat": (f"F-{text}" if not infix else f"F-test, {text}")
        for infix, text in _STAT_INFIXES.items()},
 }
 
-#: Kinds whose values are 1−p, so a map value above :data:`CORRP_THRESHOLD` means p < 0.05.
+#: Kinds whose values are 1-p, so a map value above :data:`CORRP_THRESHOLD` means p < 0.05.
 CORRP_KINDS: frozenset[str] = frozenset(
     f"{infix}{stat}"
     for infix in ("tfce_corrp_", "vox_corrp_", "clustere_corrp_", "clusterm_corrp_")
@@ -1742,7 +1726,7 @@ class VoxelwiseResult:
 
     @property
     def contrast_names(self) -> list[str]:
-        """t-contrast names in contrast order, from the manifest (``c1``… if it is absent)."""
+        """t-contrast names in contrast order, from the manifest (``c1``... if it is absent)."""
         names = [str(c.get("name")) for c in self.manifest.get("contrasts", []) if c.get("name")]
         if names:
             return names
@@ -1750,16 +1734,16 @@ class VoxelwiseResult:
 
     @property
     def ftest_names(self) -> list[str]:
-        """F-test names in ``design.fts`` order (``f1``… if the manifest has none); often empty."""
+        """F-test names in ``design.fts`` order (``f1``... if the manifest has none); often empty."""
         names = [str(f.get("name")) for f in self.manifest.get("ftests", []) if f.get("name")]
         if names:
             return names
         return [f"f{i}" for i in self._indices(ftest=True)]
 
     def names_for(self, kind: str) -> list[str]:
-        """The names a *kind*'s maps are addressed by: F-tests for ``…fstat``, else t-contrasts.
+        """The names a *kind*'s maps are addressed by: F-tests for ``...fstat``, else t-contrasts.
 
-        ``randomise`` numbers the two separately — ``tstat1`` and ``fstat1`` are different tests —
+        ``randomise`` numbers the two separately (``tstat1`` and ``fstat1`` are different tests)
         so a picker listing contrasts must follow the selected kind, or it would offer a t-contrast
         name for an F map.
         """
@@ -1819,7 +1803,7 @@ class VoxelwiseResult:
 
 
 def count_significant(path: str | Path, *, threshold: float = CORRP_THRESHOLD) -> int:
-    """Voxels above *threshold* in a 1−p map (0.95 → p < 0.05)."""
+    """Voxels above *threshold* in a 1-p map (0.95 -> p < 0.05)."""
     import nibabel as nib
 
     data = np.asarray(nib.load(str(path)).dataobj)
@@ -1831,7 +1815,7 @@ _MAP_RX = re.compile(r"^(?P<kind>[a-z0-9_]*[tf]stat)(?P<index>\d+)$")
 
 #: A whole map name with the root unknown, for folders with no manifest. The kind is restricted to
 #: names randomise writes and the root is matched lazily, so the split falls at the first point the
-#: rest is a real kind — ``vw_rmca_tfce_corrp_tstat1`` is root ``vw_rmca``, not ``vw`` with a kind
+#: rest is a real kind: ``vw_rmca_tfce_corrp_tstat1`` is root ``vw_rmca``, not ``vw`` with a kind
 #: ``rmca_tfce_corrp_tstat``.
 _STAT_RX = re.compile(
     r"^(?P<root>.+?)_(?P<kind>"
@@ -1912,7 +1896,7 @@ def write_manifest(
 
 
 def load_voxelwise_result(out_dir: str | Path) -> VoxelwiseResult:
-    """Load a finished results folder — no FSL, no re-run, no database.
+    """Load a finished results folder: no FSL, no re-run, no database.
 
     Both viewers depend on this: the napari tool and the Statmodels display each open a folder
     somebody else produced, possibly on the cluster, possibly months earlier.
@@ -1959,12 +1943,10 @@ def load_voxelwise_result(out_dir: str | Path) -> VoxelwiseResult:
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Prepared inputs: a 4D stack and design files built elsewhere
-# ──────────────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class VestMatrix:
-    """One FSL VEST file — ``design.mat``, ``.con`` or ``.fts`` — as declared and as written."""
+    """One FSL VEST file (``design.mat``, ``.con`` or ``.fts``) as declared and as written."""
 
     path: Path
     matrix: np.ndarray
@@ -1977,7 +1959,7 @@ class VestMatrix:
 
     @property
     def shape(self) -> tuple[int, int]:
-        """``(rows, columns)`` of the matrix actually present."""
+        """``(rows, columns)`` of the matrix present."""
         return int(self.matrix.shape[0]), int(self.matrix.shape[1])
 
 
@@ -1985,7 +1967,7 @@ def read_vest(path: str | Path) -> VestMatrix:
     """Read a VEST matrix file without FSL (``Vest2Text`` would need it on the workstation too).
 
     Rows are everything after ``/Matrix``; a file with no ``/Matrix`` line is read as a bare
-    whitespace-separated matrix, which is what ``Text2Vest`` takes as input — ``randomise`` will
+    whitespace-separated matrix, which is what ``Text2Vest`` takes as input: ``randomise`` will
     reject that, but the dimensions are still worth checking first.
     """
     source = Path(path).expanduser().resolve()
@@ -2052,13 +2034,13 @@ class RandomiseInputs:
     space: SpaceInfo
 
     def contrast_names(self) -> list[str]:
-        """t-contrast names from ``/ContrastName<i>``, ``c1``… where the file has none."""
+        """t-contrast names from ``/ContrastName<i>``, ``c1``... where the file has none."""
         n = self.contrasts.shape[0]
         names = list(self.contrasts.names[:n])
         return names + [f"c{i + 1}" for i in range(len(names), n)]
 
     def ftest_names(self) -> list[str]:
-        """F-test names from the ``.fts``, ``f1``… where it has none; empty with no ``.fts``."""
+        """F-test names from the ``.fts``, ``f1``... where it has none; empty with no ``.fts``."""
         if self.ftests is None:
             return []
         n = self.ftests.shape[0]
@@ -2085,11 +2067,11 @@ def validate_randomise_inputs(
     mask: str | Path | None = None,
     tol: float = AFFINE_TOL,
 ) -> RandomiseInputs:
-    """Check a stack and its design files fit together — from headers only, with no FSL.
+    """Check a stack and its design files fit together, from headers only, with no FSL.
 
     ``randomise`` would find most of these, but after loading the whole stack, and on the cluster
     after the upload and the queue. A design with one row too many is the cheap case: the expensive
-    one is a design built for a *different* stack of the same length, which nothing can detect —
+    one is a design built for a *different* stack of the same length, which nothing can detect,
     so the volume count is reported back for a person to recognise.
 
     Raises
@@ -2104,7 +2086,7 @@ def validate_randomise_inputs(
         raise FileNotFoundError(f"4D stack not found: {stack_path}")
     try:
         img = nib.load(str(stack_path))
-    except Exception as exc:  # noqa: BLE001 — nibabel's ImageFileError is not a ValueError
+    except Exception as exc:  # noqa: BLE001 (nibabel's ImageFileError is not a ValueError)
         raise ValueError(f"Cannot read {stack_path.name} as NIfTI: {exc}") from None
     if img.ndim != 4:
         raise ValueError(
@@ -2120,7 +2102,7 @@ def validate_randomise_inputs(
     problems: list[str] = []
 
     def check_header(vest: VestMatrix, rows_tag: str) -> None:
-        """Flag a header that disagrees with the rows actually in the file."""
+        """Flag a header that disagrees with the rows in the file."""
         rows, cols = vest.shape
         if vest.num_waves is not None and vest.num_waves != cols:
             problems.append(f"{vest.path.name}: /NumWaves {vest.num_waves} but rows have {cols} column(s).")
@@ -2161,7 +2143,7 @@ def validate_randomise_inputs(
         mask_path = Path(mask).expanduser().resolve()
         try:
             mask_space = _space_of(mask_path) if mask_path.is_file() else None
-        except Exception as exc:  # noqa: BLE001 — nibabel's ImageFileError is not a ValueError
+        except Exception as exc:  # noqa: BLE001 (nibabel's ImageFileError is not a ValueError)
             problems.append(f"Cannot read mask {mask_path.name} as NIfTI: {exc}")
             mask_space = None
         if not mask_path.is_file():
@@ -2277,7 +2259,7 @@ def run_randomise_direct(
     demean_data: bool = False,
     out_name: str = "randomise",
 ) -> VoxelwiseResult:
-    """``randomise`` on a 4D stack and design files built elsewhere — no database, no cohort.
+    """``randomise`` on a 4D stack and design files built elsewhere: no database, no cohort.
 
     The design files are copied into *out_dir* as ``design.mat`` / ``.con`` / ``.fts`` and run from
     there, so the results folder records exactly what was fitted. The stack is not copied; it can be
@@ -2326,12 +2308,10 @@ def run_randomise_direct(
     return result
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Design frame + one-call entry point
-# ──────────────────────────────────────────────────────────────────────────────
 #: Columns the analysis frame *derives* rather than loads, mapped to what they are derived from.
 #: ``age_c`` is ``age_at_mri`` mean-centred, computed by ``finalize_analysis_frame`` only when its
-#: source is in the frame — so naming it as an EV has to pull the source in, or it silently is not
+#: source is in the frame, so naming it as an EV has to pull the source in, or it silently is not
 #: there and the design fails validation for a reason that reads like a typo.
 DERIVED_COVARIATES: dict[str, str] = {"age_c": "age_at_mri"}
 
@@ -2349,11 +2329,11 @@ def build_design_frame(
     """One row per subject: the named measurement spread by region, plus subject covariates.
 
     ``grain="subject"`` is the only grain that can relate measurements whose parcellations name
-    different kinds of region — a 4D-flow vessel against an ASL voxel grid — which is exactly the
+    different kinds of region (a 4D-flow vessel against an ASL voxel grid), which is exactly the
     cross-modal case this module exists for. Each region becomes its own column
     (``flow_mean__LMCA``), and those column names are what ``--ev`` refers to.
 
-    Covariate names that do not resolve are simply absent from the frame;
+    Covariate names that do not resolve are absent from the frame;
     :meth:`VoxelwiseDesign.validate` then names them against the columns that *are* there, which
     is a better error than a lookup failure here would be.
     """
@@ -2423,7 +2403,7 @@ def run_voxelwise(
     out_name: str = "randomise",
     keep_stack: bool = True,
 ) -> VoxelwiseResult:
-    """Resolve → validate → design → merge → ``randomise``. The whole analysis in one call.
+    """Resolve -> validate -> design -> merge -> ``randomise``. The whole analysis in one call.
 
     The subject set is ``images found ∩ cohort ∩ prefilters ∩ design-frame complete cases``,
     applied in that order with a count logged at each step. A cohort that silently removes half the images is
@@ -2480,7 +2460,7 @@ def run_voxelwise(
                 "Pass --cohort <pipeline_id> (or a ready-made frame) so the design matrix has a "
                 "measurement source. `nvitk-voxelwise cohorts` lists the registered ids."
             )
-        # A prefilter column need not be an EV, but it still has to be *in* the frame — so it is
+        # A prefilter column need not be an EV, but it still has to be *in* the frame, so it is
         # requested alongside them. A name that is already a measurement column is a no-op here.
         rules = parse_prefilters(list(prefilters))
         frame, _meta = build_design_frame(
@@ -2496,7 +2476,7 @@ def run_voxelwise(
         rules = parse_prefilters(list(prefilters))
 
     # Before the design is validated: a prefilter narrows the cohort, and rank or degrees-of-freedom
-    # checks should see the subjects that will actually be fitted.
+    # checks should see the subjects that will be fitted.
     n_before_prefilter = len(frame)
     frame = apply_prefilters(frame, rules)
 

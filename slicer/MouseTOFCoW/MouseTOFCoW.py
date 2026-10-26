@@ -1,8 +1,8 @@
 """3D Slicer ScriptedLoadableModule: Mouse TOF Circle-of-Willis lab workflow.
 
 Mirrors the Napari Lab tool recipe without importing nvitk:
-  Stage 1: Slicer N4ITKBiasFieldCorrection → blood flood from-scratch → label CCs
-  Stage 2: click CCs → assign to Left ICA / Right ICA / Basilar → multilabel expand
+  Stage 1: Slicer N4ITKBiasFieldCorrection -> blood flood from-scratch -> label CCs
+  Stage 2: click CCs -> assign to Left ICA / Right ICA / Basilar -> multilabel expand
 
 Optional pip deps (Slicer already has numpy / scipy + built-in N4ITK CLI):
   scikit-image, scikit-learn
@@ -71,9 +71,9 @@ class MouseTOFCoW(ScriptedLoadableModule):
 #
 
 _TREE_COLORS_RGB = {
-    1: (51, 153, 255),  # Left ICA — blue
-    2: (255, 89, 89),  # Right ICA — red
-    3: (89, 230, 102),  # Basilar — green
+    1: (51, 153, 255),  # Left ICA: blue
+    2: (255, 89, 89),  # Right ICA: red
+    3: (89, 230, 102),  # Basilar: green
 }
 _HIGHLIGHT_RGB = (255, 255, 80)
 
@@ -275,7 +275,7 @@ class MouseTofCowSlicerSession:
         self._handle_pick_ras(ras)
 
     def _raycast_cc_ras(self, threeDView, x: float, y: float):
-        """March from near→far clip through the labelmap; return RAS of first CC hit."""
+        """March from near->far clip through the labelmap; return RAS of first CC hit."""
         renderer = threeDView.renderWindow().GetRenderers().GetFirstRenderer()
         if renderer is None or self.cc_volume_node is None:
             return None
@@ -748,7 +748,7 @@ class MouseTofCowSlicerSession:
 
 
 class MouseTOFCoWLogic(ScriptedLoadableModuleLogic):
-    """MRML ↔ numpy and local Stage-1 / expand (no nvitk)."""
+    """MRML <-> numpy and local Stage-1 / expand (no nvitk)."""
 
     def ensure_deps(self) -> None:
         ensure_optional_deps()

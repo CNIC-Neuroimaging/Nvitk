@@ -71,9 +71,7 @@ setup(globals())
 
 log = Logger()
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Types and defaults
-# ──────────────────────────────────────────────────────────────────────────────
 
 ThrAlgorithm = Literal["lsthr", "lthr", "otsu"]
 _CROP_MIN_COMPONENT_FRAC = 0.005
@@ -103,12 +101,12 @@ _RG_MIN_GROW_ALLOW_VOXELS: int = 2000  # always allow at least this many grown v
 _RG_EXPLORE_NEIGHBOUR_BARRIER_RADIUS: int = 3
 
 # Optional post-RG distal expansion for MCA/ACA/PCA (default OFF).
-# eICAB-inspired: Frangi vesselness → GMM hysteresis tree → watershed markers.
+# eICAB-inspired: Frangi vesselness -> GMM hysteresis tree -> watershed markers.
 _DISTAL_MAX_IMAGE_FRAC_DEFAULT: float = 0.006
 _DISTAL_HYST_LOW_FACTOR_DEFAULT: float = 3.5
 _DISTAL_HYST_HIGH_FACTOR_DEFAULT: float = 0.5
 _DISTAL_THICKEN_ITER_DEFAULT: int = 0
-_DISTAL_LR_AXIS: int = 0  # array axis treated as L↔R (matches ACA / typical RAS)
+_DISTAL_LR_AXIS: int = 0  # array axis treated as L<->R (matches ACA / typical RAS)
 _DISTAL_LR_HALFSPACE_SLACK_DEFAULT: int = 2
 # Drop the lowest vesselness voxels on the tree to keep growth tubular (anti-blob).
 _DISTAL_TREE_VESSELNESS_KEEP_PERCENTILE: float = 55.0
@@ -120,7 +118,7 @@ _DISTAL_ACA_PROTECT_RADIUS: int = 14
 # can reconnect when Frangi CCs are broken at AComm.
 _DISTAL_ACA_CORRIDOR_MAX_DIST_VOX: float = 45.0
 _DISTAL_ACA_CORRIDOR_CD_PERCENTILE: float = 60.0
-# Dilated ICA + basilar: hard walls — distal MCA/ACA/PCA cannot claim these voxels.
+# Dilated ICA + basilar: hard walls; distal MCA/ACA/PCA cannot claim these voxels.
 _DISTAL_ICA_BASILAR_BARRIER_RADIUS: int = 3
 _DISTAL_LR_PAIRS: tuple[tuple[int, int], ...] = (
     (QVTPY_LACA, QVTPY_RACA),
@@ -265,7 +263,7 @@ def rg_intensity_frac_for_label(
     aca_frac: float = _RG_INTENSITY_FRAC_ACA,
     venous_fracs: dict[int, float] | None = None,
 ) -> float:
-    """Per-vessel RG intensity factor (lower → more growth)."""
+    """Per-vessel RG intensity factor (lower -> more growth)."""
     lid = int(label_id)
     venous = venous_fracs if venous_fracs is not None else QVTPY_RG_INTENSITY_FRAC_VENOUS
     if lid in venous:
@@ -748,9 +746,7 @@ def _segment_communicating_rg_only(
         )
 
 
-# ---------------------------------------------------------------------------
 # Build seg_4dflow (per-label local threshold + region growing)
-# ---------------------------------------------------------------------------
 
 
 def _finalize_vessel_largest_cc(
@@ -973,7 +969,7 @@ def expand_distal_mca_aca_pca(
     eICAB-inspired (Python-only, no vasculature binaries):
 
     1. Frangi vesselness on CD (fallback: normalized CD)
-    2. GMM + hysteresis → binary vessel tree
+    2. GMM + hysteresis -> binary vessel tree
     3. Watershed existing MCA/ACA/PCA seeds into that tree
 
     Growth cannot leave the binary tree. Dilated ICA + basilar voxels are hard
@@ -1790,9 +1786,7 @@ def build_seg_4dflow_local(
     )
 
 
-# ---------------------------------------------------------------------------
 # Serialization
-# ---------------------------------------------------------------------------
 
 
 def vessel_stats_to_dict(st: VesselSegStats) -> dict[str, Any]:

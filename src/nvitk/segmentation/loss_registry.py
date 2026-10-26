@@ -7,12 +7,12 @@ A torch-free registry of named losses shared by the topbrain and CViT pipelines,
 flag can be validated, listed and documented without importing torch. A name resolves in three
 ways, in order:
 
-1. a **built-in registry name** — see :data:`SEGMENTATION_LOSSES` and :data:`SSL_LOSSES`;
+1. a **built-in registry name**; see :data:`SEGMENTATION_LOSSES` and :data:`SSL_LOSSES`;
 2. a **dotted path** ``package.module:Callable`` for a user-supplied loss;
-3. nothing — an unknown name is an error listing the valid ones, never a silent fallback.
+3. nothing: an unknown name is an error listing the valid ones, never a silent fallback.
 
 :func:`build_segmentation_loss` and :func:`build_ssl_loss` import torch (and the in-tree
-nnU-Net / nnssl) only when a loss is actually constructed, inside the training worker. The
+nnU-Net / nnssl) only when a loss is constructed, inside the training worker. The
 segmentation losses return the bare objective; the trainer applies deep-supervision wrapping.
 
 The loss implementations beyond nnU-Net's own live in :mod:`nvitk.segmentation.losses`.
@@ -55,9 +55,7 @@ class LossContext:
     num_classes: int = 2
 
 
-# ---------------------------------------------------------------------------
 # Registries
-# ---------------------------------------------------------------------------
 
 #: Supervised segmentation objectives.
 SEGMENTATION_LOSSES: dict[str, LossSpec] = {
@@ -121,9 +119,7 @@ _SSL_LOSS_CLASSES: dict[str, str] = {
 }
 
 
-# ---------------------------------------------------------------------------
 # Name resolution
-# ---------------------------------------------------------------------------
 
 
 def is_dotted_path(name: str) -> bool:
@@ -158,8 +154,8 @@ def resolve_dotted(name: str) -> Callable[..., Any]:
 def validate_loss_name(name: str, *, registry: dict[str, LossSpec]) -> str:
     """Return *name* if it is usable, else raise listing the valid options.
 
-    Dotted paths are accepted without importing them — validation happens on the worker, which
-    is where the user's module is actually on the path.
+    Dotted paths are accepted without importing them: validation happens on the worker, which
+    is where the user's module is on the path.
     """
     if is_dotted_path(name):
         return name
@@ -195,9 +191,7 @@ def parse_loss_config(value: str | Path | None) -> dict[str, Any]:
     return parsed
 
 
-# ---------------------------------------------------------------------------
 # Construction (torch is imported here, not at module scope)
-# ---------------------------------------------------------------------------
 
 
 def build_segmentation_loss(
@@ -213,7 +207,7 @@ def build_segmentation_loss(
     Parameters
     ----------
     ctx
-        Trainer-derived settings — see :class:`LossContext`.
+        Trainer-derived settings; see :class:`LossContext`.
     config
         Overrides for the registry entry's defaults.
 
@@ -331,7 +325,7 @@ def build_segmentation_loss(
 def build_ssl_loss(name: str, config: dict[str, Any] | None = None):
     """Build a self-supervised reconstruction loss for an nnssl trainer.
 
-    Requires the vendored nnssl clone to be importable — call
+    Requires the vendored nnssl clone to be importable: call
     :func:`~nvitk.pipes._engines.env.apply_nnssl_env` first.
     """
     if is_dotted_path(name):

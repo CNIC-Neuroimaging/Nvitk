@@ -1,9 +1,9 @@
 """Where FastSurfer, its checkpoints, FreeSurfer and the FreeSurfer license are.
 
 FastSurfer runs from its source tree with this environment's Python (it is not a
-pip package). nvitk installs the tree into the environment —
-``$PREFIX/share/nvitk/fastsurfer/FastSurfer`` (``recipe/fastsurfer/install_fastsurfer.sh``)
-— but another checkout can be used instead.
+pip package). nvitk installs the tree into the environment:
+``$PREFIX/share/nvitk/fastsurfer/FastSurfer`` (``recipe/fastsurfer/install_fastsurfer.sh``),
+but another checkout can be used instead.
 
 The deep-learning modules (whole-brain asegdkt, CerebNet, HypVINN, corpus callosum)
 need nothing else. The surface pipeline (``recon-surf``) and the longitudinal one also
@@ -106,7 +106,7 @@ def missing_checkpoints(home: Path | None = None) -> list[Path]:
     return [p for files in checkpoint_files(home).values() for p in files if not p.is_file()]
 
 
-# ── FreeSurfer ───────────────────────────────────────────────────────────────
+# FreeSurfer
 
 
 def _is_freesurfer(path: Path | None) -> bool:

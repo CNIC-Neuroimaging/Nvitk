@@ -1,4 +1,4 @@
-"""DICOM RT-STRUCT contours → masks / overlays (optional scikit-image)."""
+"""DICOM RT-STRUCT contours -> masks / overlays (optional scikit-image)."""
 
 from __future__ import annotations
 
@@ -636,7 +636,7 @@ def integrate_rtstruct_processing(
                         # Header only: deciding "is this an RT-Struct?" needs the
                         # SOP class, not the pixels. Reading every file in full
                         # here cost minutes per study over a network share
-                        # (4.7k CT instances: ~5.5 min → seconds).
+                        # (4.7k CT instances: ~5.5 min -> seconds).
                         ds = pydicom.dcmread(
                             filepath,
                             force=True,

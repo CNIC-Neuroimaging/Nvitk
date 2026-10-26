@@ -17,15 +17,15 @@ correction was removed on 2026-10-23.
 
 Outputs (:func:`correct_siphon_centerlines`, in the TOF's space; files with *out_dir*):
 
-- ``corrected_centerlines.nii.gz`` — per-label centerlines (siphon-corrected for
+- ``corrected_centerlines.nii.gz``: per-label centerlines (siphon-corrected for
   ``correction_ids``, :func:`~nvitk.morphology.centerline.compute_centerlines` for the rest);
-- ``removed_bridges.nii.gz`` — the voxels each accepted cut removed;
-- ``vessel_mask_corrected.nii.gz`` — the multilabel mask after the correction;
-- ``seg_ica_repaired.nii.gz`` — the corrected labels only;
-- ``cleared_bridge_region.nii.gz`` — every voxel the correction removed (pretess and cuts);
-- ``siphon_correction.json`` — per label the pretess counts, every cut attempt, the volume change,
-  and |ΔL − ΔR| over the two ICAs;
-- ``qc_siphon_correction.png`` — a 3D QC figure (``save_qc=True``).
+- ``removed_bridges.nii.gz``: the voxels each accepted cut removed;
+- ``vessel_mask_corrected.nii.gz``: the multilabel mask after the correction;
+- ``seg_ica_repaired.nii.gz``: the corrected labels only;
+- ``cleared_bridge_region.nii.gz``: every voxel the correction removed (pretess and cuts);
+- ``siphon_correction.json``: per label the pretess counts, every cut attempt, the volume change,
+  and |ΔL - ΔR| over the two ICAs;
+- ``qc_siphon_correction.png``: a 3D QC figure (``save_qc=True``).
 
 Genus check
 -----------
@@ -66,9 +66,7 @@ with using("cpu"):
     ).astype(np.int32)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Siphon correction (minimum cut)
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def correct_siphon_centerlines(
@@ -123,9 +121,7 @@ def correct_siphon_centerlines(
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Genus check
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -151,7 +147,7 @@ class GenusReport:
 
     @property
     def suspect(self) -> bool:
-        """True when the mask has ≥1 topological loop (``beta1 > 0``) — a likely siphon donut."""
+        """True when the mask has >=1 topological loop (``beta1 > 0``): a likely siphon donut."""
         return self.beta1 > 0
 
     def to_dict(self) -> dict:

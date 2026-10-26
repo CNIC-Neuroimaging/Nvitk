@@ -81,7 +81,7 @@ def _image_measurement_session_id_series(raw: pd.DataFrame) -> pd.Series:
 
 
 def _column_name_is_timeseries_frame_index(name: object) -> bool:
-    """True if a column label is a non-negative integer frame index (0, 1, 2 or 0.0, '3', …)."""
+    """True if a column label is a non-negative integer frame index (0, 1, 2 or 0.0, '3', ...)."""
     if isinstance(name, (int, np.integer)):
         return int(name) >= 0
     if isinstance(name, (float, np.floating)):
@@ -478,7 +478,7 @@ def _coerce_numeric(series: pd.Series) -> pd.Series:
 
 
 def _series_value_payload(series: pd.Series) -> tuple[pd.Series, pd.Series, str]:
-    """Split a column into ``(numeric_values, text_values, value_kind)``, classifying it numeric if ≥70% parses as a number."""
+    """Split a column into ``(numeric_values, text_values, value_kind)``, classifying it numeric if >=70% parses as a number."""
     numeric = _coerce_numeric(series)
     observed = int(series.notna().sum())
     numeric_ratio = float(numeric.notna().sum()) / float(observed) if observed else 0.0
@@ -1432,7 +1432,7 @@ def _parse_dropdown_dictionary(
 
 
 def normalize_session_visit_labels(repo: DataRepo) -> pd.DataFrame:
-    """Set ``sessions.visit_label`` from ``project_id`` (PESA_Brain/local → 4, IA_PET_V5 → 5)."""
+    """Set ``sessions.visit_label`` from ``project_id`` (PESA_Brain/local -> 4, IA_PET_V5 -> 5)."""
     from .xnat_projects import visit_label_for_project
 
     if not repo.catalog.table_exists("sessions"):

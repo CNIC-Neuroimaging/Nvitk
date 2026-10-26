@@ -47,7 +47,7 @@ AXIS_DOMINANCE: float = 3.0
 
 
 def swap_map(label_set: str) -> dict[int, int]:
-    """Label value → its mirrored partner, both directions.
+    """Label value -> its mirrored partner, both directions.
 
     Built from :func:`nvitk.pipes.topbrain.labels.lateral_pairs`, which reads the ``R-``/``L-``
     prefixes off the label map. Unpaired classes are absent, and a mirrored volume keeps them
@@ -134,7 +134,7 @@ def detect_flip_axis(
 def sample_segmentations(loader, identifiers: Sequence[str], *, limit: int = 8) -> list:
     """Load up to *limit* preprocessed segmentations through *loader*.
 
-    The axis is measured on the arrays the dataloader actually serves, not on the raw NIfTIs:
+    The axis is measured on the arrays the dataloader serves, not on the raw NIfTIs:
     preprocessing applies the plan's ``transpose_forward``, so the raw orientation says nothing
     about which axis the trainer will see.
     """
@@ -142,7 +142,7 @@ def sample_segmentations(loader, identifiers: Sequence[str], *, limit: int = 8) 
     for identifier in list(identifiers)[:limit]:
         try:
             _data, segmentation, _properties = loader.load_case(identifier)
-        except Exception:  # noqa: BLE001 - a case that will not load is simply not evidence
+        except Exception:  # noqa: BLE001 - a case that will not load is not evidence
             continue
         sampled.append(segmentation)
     return sampled

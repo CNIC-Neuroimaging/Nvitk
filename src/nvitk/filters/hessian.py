@@ -13,7 +13,7 @@ HESSIAN_SIGMAS_DEFAULT: tuple[float, ...] = (1.0, 3.0, 5.0, 7.0, 9.0)
 
 
 def parse_sigmas(text: str | None, *, default: Sequence[float] = HESSIAN_SIGMAS_DEFAULT) -> tuple[float, ...]:
-    """Parse comma/semicolon-separated sigma scales; empty → *default*."""
+    """Parse comma/semicolon-separated sigma scales; empty -> *default*."""
     if text is None or not str(text).strip():
         return tuple(float(s) for s in default)
     return tuple(float(x) for x in str(text).replace(";", ",").split(",") if x.strip())

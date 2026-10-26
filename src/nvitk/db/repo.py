@@ -41,9 +41,7 @@ from .storage import (
 log = Logger()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dataset root & defaults
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _default_dataset_root() -> Path:
@@ -51,7 +49,7 @@ def _default_dataset_root() -> Path:
 
     ``NVITK_DATASET_ROOT`` wins. Otherwise a source checkout keeps its dataset where it always
     has (``<repo>/dataset/nvitk-dataset``), and an installed package uses the standard user
-    data directory — ``~/.local/share/nvitk/dataset``.
+    data directory: ``~/.local/share/nvitk/dataset``.
 
     The installed case matters: this used to be ``Path(__file__).parents[3]/dataset/...``,
     which in a conda install resolves to a nonexistent directory beside ``site-packages``, and
@@ -171,9 +169,7 @@ def get_repo_from_settings(return_xnat_config: bool = False) -> DataRepo | XnatC
 DEFAULT_COHORT_ID = "PESA-Brain"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Local paths & imread job helpers
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _root_path_for_imread(path: str | Path, *, asset_type: str) -> Path:
@@ -292,9 +288,7 @@ def _dicom_cache_dir_has_files(directory: Path) -> bool:
     return False
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Measurement entity keys & variable-value filters
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _pick_value_column_for_spec(spec: Any) -> str:
@@ -595,9 +589,7 @@ def _apply_variable_value_filters(df: pd.DataFrame, specs: list[tuple[str, Any]]
     return df.loc[_frame_matches_entity_keys(df, allowed)].copy()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # DataRepo
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class DataRepo:
@@ -885,18 +877,18 @@ class DataRepo:
 
     def variable_visits(self, *, domain: str = "clinical") -> dict[str, list[str]]:
         """
-        Visits at which each variable of *domain* actually has values.
+        Visits at which each variable of *domain* has values.
 
         A cohort does not measure everything at every visit: carotid plaque was collected at visits
         3 and 4 while the rest of the clinical panel exists only at 4. Anything that collapses a
         per-visit table to one row per subject therefore has to decide which visit a variable comes
-        from, and this is what makes that choice offerable rather than implicit — see
+        from, and this is what makes that choice offerable rather than implicit; see
         :func:`~nvitk.stats._statmodels_frames.collapse_visits_to_subject`.
 
         Returns
         -------
         dict
-            ``{variable_id: [visit_id, …]}``, visits sorted, numeric-looking ids sorted as numbers
+            ``{variable_id: [visit_id, ...]}``, visits sorted, numeric-looking ids sorted as numbers
             so ``"10"`` follows ``"9"``. Empty when the table or its ``visit_id`` column is absent.
         """
         table = self._DOMAIN_TABLES.get(str(domain))
@@ -1520,7 +1512,7 @@ class DataRepo:
         provenance: dict[str, Any] | None = None,
         build_sqlite_index: bool = False,
     ) -> pd.DataFrame:
-        """Replace every existing row of *table* matching *scope* (column → value) with *df*.
+        """Replace every existing row of *table* matching *scope* (column -> value) with *df*.
 
         For a publisher whose variable set can shrink between runs: an upsert keeps the
         variables it no longer writes, this drops them. Rows outside *scope* are untouched.
@@ -1613,7 +1605,7 @@ class DataRepo:
         ``value_text`` fallback, which upcasts the whole series to ``object`` whenever *any* text
         variable is in the query. The subsequent pivot then leaves numeric variables (e.g.
         ``hematocrit``) as object-dtype floats, and Patsy treats them as categoricals
-        (``Hematocrit[T.36.0]``, …). Coerce columns whose catalog ``value_kind`` is numeric back to
+        (``Hematocrit[T.36.0]``, ...). Coerce columns whose catalog ``value_kind`` is numeric back to
         float64.
         """
         if df.empty:
@@ -1635,7 +1627,7 @@ class DataRepo:
             name = str(column)
             entry = by_id.get(name)
             if entry is None and table_name == "image_measurements":
-                # image wide keys are ``{region}_{variable}`` / similar — match by suffix variable_id
+                # image wide keys are ``{region}_{variable}`` / similar: match by suffix variable_id
                 for vid, ent in by_id.items():
                     if name == vid or name.endswith(f"_{vid}"):
                         entry = ent

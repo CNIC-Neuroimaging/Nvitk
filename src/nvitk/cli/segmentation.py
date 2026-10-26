@@ -1,4 +1,4 @@
-"""``nvitk-seg`` CLI — segmentation tools (ANTsPyNet + blood flood)."""
+"""``nvitk-seg`` CLI: segmentation tools (ANTsPyNet + blood flood)."""
 
 from __future__ import annotations
 
@@ -463,7 +463,7 @@ def cmd_blood_flood(
     connectivity: int,
     save_tree: Path | None,
 ) -> None:
-    """Frangi → hysteresis vessel tree; expand from markers or segment from scratch."""
+    """Frangi -> hysteresis vessel tree; expand from markers or segment from scratch."""
     if submit.lower() != "local":
         raise click.ClickException(
             "blood-flood SGE submit is not wired yet; use --submit local."

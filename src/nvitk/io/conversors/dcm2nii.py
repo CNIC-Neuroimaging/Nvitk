@@ -1,4 +1,4 @@
-"""CLI wrapper around :func:`~nvitk.io.conversors._dicom_conversion.run_dicom2nifti` (DICOM → NIfTI)."""
+"""CLI wrapper around :func:`~nvitk.io.conversors._dicom_conversion.run_dicom2nifti` (DICOM -> NIfTI)."""
 
 from __future__ import annotations
 

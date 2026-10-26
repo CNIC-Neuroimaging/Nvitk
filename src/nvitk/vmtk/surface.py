@@ -98,7 +98,7 @@ def mean_edge_length(surface: Any) -> float:
 
 
 def decimate(surface: Any, *, target_reduction: float = 0.5, boundary_vertex_deletion: bool = False) -> Any:
-    """``vmtksurfacedecimation``: remove *target_reduction* (0–1) of the triangles."""
+    """``vmtksurfacedecimation``: remove *target_reduction* (0-1) of the triangles."""
     return run_script(
         "vmtkSurfaceDecimation",
         Surface=surface,
@@ -118,7 +118,7 @@ def subdivide(surface: Any, *, subdivisions: int = 1, method: str = "butterfly")
 
 def cap(surface: Any, *, method: str = "centerpoint", rings: int = 8) -> tuple[Any, np.ndarray]:
     """``vmtksurfacecapper``: close every open boundary. Returns the capped surface and its
-    per-cell ``CellEntityIds`` (1 = wall, ≥2 = one id per cap)."""
+    per-cell ``CellEntityIds`` (1 = wall, >=2 = one id per cap)."""
     if method not in CAPPING_METHODS:
         raise ValueError(f"method must be one of {CAPPING_METHODS}")
     from ._core import cell_array

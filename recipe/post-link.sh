@@ -1,7 +1,7 @@
 #!/bin/bash
 # Installs every pip-only dependency of nvitk, i.e. everything in pyproject.toml except the
 # conda-native core in recipe.yaml's requirements/run (python, numpy, the R stack + rpy2,
-# freeimage, libstdcxx-ng, and the Qt/GUI stack except PyQt6-WebEngine — see the comment at
+# freeimage, libstdcxx-ng, and the Qt/GUI stack except PyQt6-WebEngine; see the comment at
 # the top of recipe.yaml for why that split exists). Runs once, right after `conda` links
 # nvitk into the target env, and is also run as-is by ../install.sh for development/wheel
 # installs, so the two install routes share one dependency list.
@@ -11,7 +11,7 @@
 # conda passes the caller's environment through to this script, so
 # `NVITK_VARIANT=cpu conda create -n nvitk-cpu nvitk` selects the CPU build there too.
 #
-# Version pins below are copied verbatim from pyproject.toml — do not relax them here even
+# Version pins below are copied verbatim from pyproject.toml: do not relax them here even
 # where a conda package would technically satisfy the constraint.
 set -euo pipefail
 
@@ -181,7 +181,7 @@ rm -rf "$VMTK_TMP"
   | tee -a "$LOG"
 
 # FastSurfer (tree + network checkpoints) into $PREFIX/share/nvitk/fastsurfer. Optional: a failure
-# here (no network, a mirror down) must not fail the whole install — `nvitk-fastsurfer install`
+# here (no network, a mirror down) must not fail the whole install: `nvitk-fastsurfer install`
 # retries it later. NVITK_FASTSURFER=0 skips it.
 if [[ "${NVITK_FASTSURFER:-1}" != "0" ]]; then
   FS_SCRIPT=""

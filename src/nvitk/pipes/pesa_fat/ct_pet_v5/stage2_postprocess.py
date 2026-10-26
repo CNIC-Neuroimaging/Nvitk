@@ -125,7 +125,7 @@ SUV_ERODE: dict[str, int] = {
 # slice no voxel may become PIERNAS, so the legs never spread up the body. 0 disables it.
 FAT_IM_NEIGHBOUR_RADIUS: int = 25
 
-# Output mask file → label name(s) to clear where PET ureter overlaps.
+# Output mask file -> label name(s) to clear where PET ureter overlaps.
 URETER_EXCLUSION_BY_MASK: dict[str, tuple[str, ...]] = {
     "FAT_BATCH": ("GRASA_V_BATCH",),
 }
@@ -140,9 +140,7 @@ setup(globals())
 log = Logger()
 
 
-# ---------------------------------------------------------------------------
 # Constants
-# ---------------------------------------------------------------------------
 
 _BN_ERODE = 5
 _BODY_DILATATION = 5
@@ -162,9 +160,7 @@ _ORGANS_TO_DILATE = {
 }
 
 
-# ---------------------------------------------------------------------------
 # Small helpers
-# ---------------------------------------------------------------------------
 
 
 def _spacing(img: Image) -> tuple[float, float, float]:
@@ -382,9 +378,7 @@ def _erode_after_skeleton(out_labels: Image) -> Image:
     return erode_labels(out_labels, MUSCLES_LABELS, cfg.MUSCLE_ERODE_AFTER_SKELETON)
 
 
-# ---------------------------------------------------------------------------
 # Build each output mask
-# ---------------------------------------------------------------------------
 
 def limit_vertebrae_axial(
     img: np.ndarray,
@@ -625,7 +619,7 @@ def build_fat_mask(
     fat_v = (tissue_types.data == visceral_id).astype(np.uint8)
     fat_s = (tissue_types.data == subcutaneous_id).astype(np.uint8)
 
-    # ---- Body mask --------------------------------------------------------
+    # Body mask
     any_fat = (tissue_types.data > 0).astype(np.uint8)
     body_grown = dilate(
         tissue_types.with_data(any_fat),
@@ -636,10 +630,10 @@ def build_fat_mask(
     fat_v = fat_v * body_filled
     fat_s = fat_s * body_filled
 
-    # ---- Extremities exclusion --------------------------------------------
+    # Extremities exclusion
     fat_s = _remove_extremities(fat_s, body)
 
-    # ---- Organs exclusion -------------------------------------------------
+    # Organs exclusion
     organs_raw = _organs_mask(total, pet)
     organs = _with_dilated_organs(organs_raw, total)
     fat_v_vol, fat_s_vol = fat_v.copy(), fat_s.copy()
@@ -648,7 +642,7 @@ def build_fat_mask(
     fat_v_vol[organs_raw > 0] = 0
     fat_s_vol[organs_raw > 0] = 0
 
-    # ---- Ureter segmentation & exclusion --------------------------------
+    # Ureter segmentation & exclusion
     ureter = None
     if exclude_ureter:
         from nvitk.segmentation.pet.ureter_segmentation import segment_ureter
@@ -682,7 +676,7 @@ def build_fat_mask(
             imsave(str(output_dir / "_URETER.nii.gz"), _resampled_ureter, axes="XYZ")
         ureter = resampled_ureter.data
 
-    # ---- FAT / FAT BATCH (SUV and volume variants) -------------------------
+    # FAT / FAT BATCH (SUV and volume variants)
     vertebrae_l3_l4 = _vertebrae_l3_l4_labels(total)
     fat = erode_labels(_fat_image(fat_v, fat_s, tissue_types), FAT_LABELS, SUV_ERODE)
     fat_batch = _fat_batch_image(
@@ -1009,9 +1003,7 @@ def build_muscles_mask(
     return _erode_after_skeleton(labels) if erode_after_skeleton else labels
 
 
-# ---------------------------------------------------------------------------
 # Per-subject worker
-# ---------------------------------------------------------------------------
 
 
 def _imread(path_parent: Path, stem: str, axes: str = "XYZ") -> Image:
@@ -1105,9 +1097,7 @@ def run_subject(
     return out_dir
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 
 
 @click.command("ctpet-v5-stage2")

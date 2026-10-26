@@ -3,7 +3,7 @@ Publish a derived analysis column back into the dataset as a first-class variabl
 
 Description
 -----------
-A derived column — ``log_pi``, ``cp_group``, ``asl_vs_flow_diff`` — lives only inside one Statmodels
+A derived column (``log_pi``, ``cp_group``, ``asl_vs_flow_diff``) lives only inside one Statmodels
 session. Recomputing it in the next session, or in a notebook, means retyping the definition and
 hoping it matches. Writing it back to the dataset makes it a variable like any other: it appears in
 the covariate lists, it can be loaded as a measurement, and it carries provenance saying which
@@ -32,15 +32,13 @@ built with ``grouping="territory"`` has one row for "Anterior Circulation", aggr
 vessels. There is no single region id to attribute that value to, so the group key is written as the
 ``region_id`` and the grouping that produced it is recorded in ``region_label`` and in the
 provenance. A value derived from a vessel-wise frame round-trips exactly; one derived from a melted
-frame round-trips to the same melted key, which is the honest answer rather than inventing a
+frame round-trips to the same melted key, which is the correct answer rather than inventing a
 component vessel.
 """
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
@@ -107,7 +105,7 @@ def resolve_publish_target(
 
     Resolution walks the derived chain: a column derived from a column derived from ``pi`` is still
     an image measurement. An expression that mixes domains cannot be attributed, so it falls back to
-    the image table when the frame is region-keyed and to clinical otherwise — and says so in
+    the image table when the frame is region-keyed and to clinical otherwise, and says so in
     :attr:`PublishTarget.reason`, because that is exactly the case where the caller should look.
 
     Parameters
@@ -133,7 +131,7 @@ def resolve_publish_target(
         if spec is None:
             return {name}
         seen = seen | {name}
-        # Every single-source kind traces back the same way — transform, bins, binarize and merge
+        # Every single-source kind traces back the same way: transform, bins, binarize and merge
         # all wrap exactly one column. Only an expression can name several.
         if spec.kind != "expression" and spec.source:
             return sources_of(spec.source, seen)
@@ -236,7 +234,7 @@ def build_publish_frame(df: pd.DataFrame, request: PublishRequest) -> pd.DataFra
 
     Image rows keep one value per ``(subject_uid, region)``; clinical and cognitive rows collapse to
     one value per subject, since a subject-level variable repeated across territories is the same
-    number written N times. Rows whose value is missing are dropped — writing NaN would shadow a real
+    number written N times. Rows whose value is missing are dropped: writing NaN would shadow a real
     value on the next read.
 
     Raises
@@ -281,7 +279,7 @@ def build_publish_frame(df: pd.DataFrame, request: PublishRequest) -> pd.DataFra
         out = out.drop_duplicates(subset=["subject_uid", "region_id"], keep="first")
     else:
         # One row per subject: a clinical value repeated across a subject's territories is one fact.
-        # Unless it is not — a value that genuinely varies within a subject is region-level data
+        # Unless it is not: a value that varies within a subject is region-level data
         # heading for a subject-level table, and taking the first row would silently discard the
         # rest. Say so rather than writing a number nobody can reproduce.
         varying = out.groupby("subject_uid")[column].nunique(dropna=True)

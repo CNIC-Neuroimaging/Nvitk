@@ -1,7 +1,7 @@
 """Installing FastSurfer (into this environment) and, on request, FreeSurfer.
 
-FastSurfer's tree and checkpoints are installed by ``install_fastsurfer.sh`` — the
-script the conda package's post-link step and ``install.sh`` run — so this module
+FastSurfer's tree and checkpoints are installed by ``install_fastsurfer.sh`` (the
+script the conda package's post-link step and ``install.sh`` run), so this module
 only finds it and runs it.
 
 FreeSurfer is never installed implicitly: it is a ≈9.5 GB download (≈20 GB unpacked)
@@ -72,11 +72,11 @@ def _stream(argv: list[str], env: dict[str, str] | None, on_line: Callable[[str]
     return int(proc.wait())
 
 
-# ── FreeSurfer (opt-in) ──────────────────────────────────────────────────────
+# FreeSurfer (opt-in)
 
 
 def freesurfer_build() -> str:
-    """The FreeSurfer build for this Linux: ``ubuntu22_amd64``, ``ubuntu20_amd64``, ``centos8_x86_64`` …"""
+    """The FreeSurfer build for this Linux: ``ubuntu22_amd64``, ``ubuntu20_amd64``, ``centos8_x86_64`` ..."""
     info: dict[str, str] = {}
     try:
         for line in Path("/etc/os-release").read_text().splitlines():
@@ -146,8 +146,8 @@ def install_freesurfer(
 
     The archive is downloaded into *dest* (resumed when a partial one is there),
     checked against the server's size, unpacked (it holds a ``freesurfer/`` folder),
-    and removed unless *keep_archive*. The location — and *license_file*, copied in as
-    ``license.txt`` — are remembered in ``external_tools.json``.
+    and removed unless *keep_archive*. The location (and *license_file*, copied in as
+    ``license.txt``) are remembered in ``external_tools.json``.
     """
     say = on_line or (lambda text: print(text, flush=True))
     dest = Path(dest).expanduser() if dest else config.default_freesurfer_dest()

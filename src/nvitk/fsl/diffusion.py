@@ -198,7 +198,7 @@ def xtract(
     native: bool = False,
     gpu: bool | None = None,
 ) -> FslCommand:
-    """Standardised tractography of ~40 tracts. *std_warps* = (standard→diffusion, diffusion→standard);
+    """Standardised tractography of ~40 tracts. *std_warps* = (standard->diffusion, diffusion->standard);
     without it XTRACT expects them in ``<bedpostX>/xfms``."""
     argv = ["xtract", "-bpx", str(bedpostx_dir), "-out", str(out_dir), "-species", species]
     if std_warps is not None:

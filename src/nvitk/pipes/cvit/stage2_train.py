@@ -1,5 +1,5 @@
 """
-CViT stage 2 — CViT plans, preprocessing and per-fold training on the in-tree nnU-Net.
+CViT stage 2: CViT plans, preprocessing and per-fold training on the in-tree nnU-Net.
 
 Description
 -----------
@@ -83,9 +83,7 @@ BUNDLE_ARCH_FIELDS: tuple[str, ...] = (
     "layer_scale_init", "preset",
 )
 
-# ---------------------------------------------------------------------------
 # Run bookkeeping
-# ---------------------------------------------------------------------------
 
 
 def run_name_for(trainer: str, plans_identifier: str, configuration: str) -> str:
@@ -103,7 +101,7 @@ def resolve_run(paths: CViTPaths, dataset: str, run_name: str | None = None) -> 
     Raises
     ------
     FileNotFoundError
-        If no stage-2 run is recorded — later stages need a trained model.
+        If no stage-2 run is recorded: later stages need a trained model.
     """
     base = stage2_dir(paths, dataset)
     if run_name is None:
@@ -125,9 +123,7 @@ def _preprocessed_complete(paths: CViTPaths, dataset: str, data_identifier: str,
     return len(found) >= n_cases
 
 
-# ---------------------------------------------------------------------------
 # Library entry point
-# ---------------------------------------------------------------------------
 
 
 def run_train(
@@ -167,7 +163,7 @@ def run_train(
     ----------
     arch, arch_overrides
         Preset (``CViTS/B/M/L``) and :class:`~nvitk.nn.cvit.CViTConfig` fields (``tokenizer``,
-        ``decoder``, ``skips``, ``skip_drop_prob``, ``skip_schedule``, ``skip_gate`` …).
+        ``decoder``, ``skips``, ``skip_drop_prob``, ``skip_schedule``, ``skip_gate`` ...).
     token_stride
         Power-of-two token stride; per-axis strides follow the baseline pooling schedule.
     from_bundle
@@ -183,7 +179,7 @@ def run_train(
     n_cases = int(json.loads((raw_dir / "dataset.json").read_text())["numTraining"])
     pre_dir = paths.nnunet_preprocessed / dataset
 
-    # ---- 0. Bundle → adopted architecture ----------------------------------------------
+    # 0. Bundle -> adopted architecture
     overrides = dict(arch_overrides or {})
     bundle_info = None
     if from_bundle is not None:
@@ -212,7 +208,7 @@ def run_train(
     env = nnunet_env(paths.nnunet_raw, paths.nnunet_preprocessed, paths.nnunet_results,
                      num_processes=num_processes, extra=settings.to_env())
 
-    # ---- 1. Baseline plan ----------------------------------------------------------------
+    # 1. Baseline plan
     baseline_file = BASELINE_PLANS_FILES.get(baseline_planner)
     if baseline_file is None:
         raise ValueError(f"Unknown baseline planner {baseline_planner!r}; choose from {sorted(BASELINE_PLANS_FILES)}.")
@@ -223,7 +219,7 @@ def run_train(
         raise FileNotFoundError(f"Baseline plans {pre_dir / baseline_file} missing.")
     baseline = json.loads((pre_dir / baseline_file).read_text(encoding="utf-8"))
 
-    # ---- 2. CViT plans ---------------------------------------------------------------------
+    # 2. CViT plans
     # A bundle's stride schedule wins over the baseline's: the linear tokenizer's kernel shape
     # depends on it, and the encoder was pre-trained at that token granularity.
     stem = overrides.pop("stem_strides", None)
@@ -242,7 +238,7 @@ def run_train(
     log.info("stage2: %s | patch %s, token grid %s (%d tokens), batch %d", plans_id,
              conf["patch_size"], list(cvit_cfg.grid_shape), plans["cvit"]["num_tokens"], conf["batch_size"])
 
-    # ---- 3. Preprocess (shared by every variant of this baseline) ----------------------
+    # 3. Preprocess (shared by every variant of this baseline)
     if not skip_preprocessing:
         if _preprocessed_complete(paths, dataset, conf["data_identifier"], n_cases):
             log.info("stage2: preprocessed data %s already complete; reusing it.", conf["data_identifier"])
@@ -269,7 +265,7 @@ def run_train(
         (marker_dir / STAGE2_MARKER).write_text(json.dumps(marker, indent=2) + "\n", encoding="utf-8")
         return marker
 
-    # ---- 4. Train each fold ------------------------------------------------------------
+    # 4. Train each fold
     for fold in folds:
         log.info("stage2: training fold %s (%s)", fold, run_name)
         nnunet_run.train(dataset_id, configuration, fold, env=env, trainer=trainer,
@@ -282,9 +278,7 @@ def run_train(
     return marker
 
 
-# ---------------------------------------------------------------------------
 # SGE
-# ---------------------------------------------------------------------------
 
 
 def _worker_argv(paths: CViTPaths, **o: Any) -> list[str]:
@@ -340,9 +334,7 @@ def submit_sge(*, paths: CViTPaths, container: Path, src_dir: Path | None = None
     )
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 
 
 @click.command("cvit-stage2-train")

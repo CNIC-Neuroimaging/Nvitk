@@ -1,5 +1,5 @@
 """
-Attention-usage probe — how much does a trained CViT actually rely on its transformer?
+Attention-usage probe: how much does a trained CViT rely on its transformer?
 
 Description
 -----------
@@ -24,7 +24,7 @@ Interventions (:func:`intervene`)
 Passive statistics (:func:`attention_stats`)
     Explicit-softmax attention on a random subset of query tokens: mean attention distance in
     **mm** per layer and head, normalised entropy, attention mass on register tokens, and the
-    residual ratio ``‖LS(Attn(LN x))‖ / ‖x‖`` — how much each layer's attention changes its
+    residual ratio ``‖LS(Attn(LN x))‖ / ‖x‖``; how much each layer's attention changes its
     input. Plus learned skip-gate values (:func:`skip_gate_values`).
 
 Units
@@ -50,9 +50,7 @@ MODES: tuple[str, ...] = (
     "full", "attn_off", "attn_local", "attn_uniform", "transformer_off", "tokens_off", "skips_off",
 )
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Interventions
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _token_spacing(net: nn.Module, spacing_mm: Sequence[float]) -> tuple[float, ...]:
@@ -131,9 +129,7 @@ def intervene(
         dec.skip_off_levels = saved["skip_off"]
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Passive statistics
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def skip_gate_values(model: nn.Module) -> dict[int, float]:

@@ -5,9 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-# ---------------------------------------------------------------------------
 # Data model
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -52,9 +50,7 @@ class StageInputBinding:
     layer_name: str | None = None
 
 
-# ---------------------------------------------------------------------------
 # Stage registry helpers
-# ---------------------------------------------------------------------------
 
 DOWNLOAD_STAGE_IDS: frozenset[str] = frozenset({"stage0_d", "download"})
 CONVERT_STAGE_IDS: frozenset[str] = frozenset(
@@ -136,9 +132,7 @@ def _pesa_dixon_stages() -> tuple[PipelineStageSpec, ...]:
     )
 
 
-# ---------------------------------------------------------------------------
 # Per-pipeline stage inputs and descriptions
-# ---------------------------------------------------------------------------
 
 _QVT_DESCRIPTIONS: dict[str, str] = {
     "stage1": "Run eICAB on the TOF angiography volume.",

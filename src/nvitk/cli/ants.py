@@ -52,7 +52,7 @@ def register_cmd(
     write_composite_transform: bool,
     verbose: bool,
 ) -> None:
-    """Register MOVING→FIXED using ANTsPy."""
+    """Register MOVING->FIXED using ANTsPy."""
     res = ants_register(
         fixed_path=fixed_path,
         moving_path=moving_path,

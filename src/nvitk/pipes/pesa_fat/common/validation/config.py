@@ -1,10 +1,10 @@
 """
-Configuración compartida — PESA Fat Analysis (validación manual vs automática).
+Configuración compartida: PESA Fat Analysis (validación manual vs automática).
 
 Los directorios se leen de ``sge.json`` (sección ``pipelines.pesa_fat_validation``); no hay
 rutas de instalación codificadas aquí. Las constantes se resuelven de forma perezosa mediante
 ``__getattr__`` (PEP 562), así que importar este módulo no lee configuración ni crea
-directorios — sólo lo hace al usar una constante concreta.
+directorios: sólo lo hace al usar una constante concreta.
 
 Ejemplo de configuración::
 

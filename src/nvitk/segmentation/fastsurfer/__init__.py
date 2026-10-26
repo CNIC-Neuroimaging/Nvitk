@@ -1,7 +1,7 @@
 """
 FastSurfer integration: whole-brain (aparc.DKTatlas+aseg), cerebellum (CerebNet),
 hypothalamus (HypVINN) and corpus-callosum segmentation, surfaces (recon-surf, with
-FreeSurfer) and longitudinal processing — run from the FastSurfer tree nvitk installs
+FreeSurfer) and longitudinal processing; run from the FastSurfer tree nvitk installs
 into the environment (``nvitk-fastsurfer install``).
 
 Usage::

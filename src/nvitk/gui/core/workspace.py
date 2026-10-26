@@ -1,19 +1,19 @@
 """Every panel a dock, in the main window or in panel windows of its own.
 
-Each nvitk panel (Imaging, Labels, DICOM browser, …) is its own dock, tabbed
+Each nvitk panel (Imaging, Labels, DICOM browser, ...) is its own dock, tabbed
 together on the right by default, and Napari's own docks (layer list, layer
 controls, console, plugins) and the orthogonal views are treated the same way.
 Any of them can be:
 
-* **popped out** into a *panel window* of its own — the title-bar ⧉, a
-  double-click on its title or its **tab**, or the right-click menu — while the
+* **popped out** into a *panel window* of its own (the title-bar ⧉, a
+  double-click on its title or its **tab**, or the right-click menu), while the
   other panels stay where they are; ⧉ again puts it back at the tab it came from;
 * **joined with other panels** in a panel window, on any screen: right-click a
   panel's tab or title bar ▸ *Move to window* ▸ a window (as a tab, or beside the
   panels there), or drag the panel by its title bar and drop it on that window
   (or on another popped-out panel, which makes a window of the two); inside a
   window, panels are tabbed and split by dragging, as in the main window;
-* tabbed in with the nvitk panels — Napari's layer list and layer controls too —
+* tabbed in with the nvitk panels (Napari's layer list and layer controls too)
   or sent back to Napari's left edge;
 * hidden and shown again from the **Panels** menu, which every window carries.
 
@@ -24,7 +24,7 @@ is Qt's own (nvitk's title bars). Napari's docks float with the system's title
 bar, whose drags Qt never sees: for them, use the menu.
 
 The arrangement is remembered: the main window's ``saveState`` as before, plus
-every panel window — its panels, its own ``saveState`` and its geometry.
+every panel window; its panels, its own ``saveState`` and its geometry.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ _DOCK_OPTIONS = (
     | QMainWindow.DockOption.AllowTabbedDocks
 )
 #: Off on purpose: with it, dragging a panel's title bar drags every panel tabbed
-#: with it — the whole control panel pops out instead of the one asked for.
+#: with it; the whole control panel pops out instead of the one asked for.
 _GROUPED = QMainWindow.DockOption.GroupedDragging
 
 TAB_HINT = ("Double-click a tab to pop that panel out into a window of its own; right-click it to "
@@ -107,14 +107,14 @@ _NAPARI_LEFT = ("layer controls", "layer list")
 
 
 class _TitleBarMenu(QObject):
-    """A dock's title bar — nvitk's or Napari's: right-click opens the panel menu, and the
+    """A dock's title bar: nvitk's or Napari's: right-click opens the panel menu, and the
     end of a title-bar drag is checked for a drop on another window."""
 
     def __init__(self, manager: "PanelManager") -> None:
         super().__init__(manager)
         self._manager = manager
 
-    def eventFilter(self, obj: Any, event: Any) -> bool:  # noqa: N802 — Qt naming
+    def eventFilter(self, obj: Any, event: Any) -> bool:  # noqa: N802 (Qt naming)
         if not isinstance(obj, QDockWidget):
             return False
         kind = event.type()
@@ -157,7 +157,7 @@ class _TabBarPopOut(QObject):
             point = event.pos()
         return bar.tabAt(point)
 
-    def eventFilter(self, obj: Any, event: Any) -> bool:  # noqa: N802 — Qt naming
+    def eventFilter(self, obj: Any, event: Any) -> bool:  # noqa: N802 (Qt naming)
         if not isinstance(obj, QTabBar):
             return False
         kind = event.type()
@@ -208,7 +208,7 @@ def make_panel_dock(
 
 
 class PanelWindow(QMainWindow):
-    """A top-level window holding whichever panels are put in it — on any screen."""
+    """A top-level window holding whichever panels are put in it, on any screen."""
 
     def __init__(self, manager: "PanelManager", parent: QWidget | None = None, *, name: str = "") -> None:
         super().__init__(parent, Qt.Window)
@@ -339,7 +339,7 @@ class PanelManager(QObject):
         return f"nvitkPanelWindow{self._window_count}"
 
     def tune_tab_bars(self) -> None:
-        """Full panel names with scroll arrows, rather than "To…", "DI…".
+        """Full panel names with scroll arrows, rather than "To...", "DI...".
 
         Qt creates a window's dock tab bars as docks get tabbed together, with
         eliding on: eleven panels in a sidebar then read as initials. Run again
@@ -376,14 +376,14 @@ class PanelManager(QObject):
             self.watch_dock(dock)
         self._tab_timer.start()
 
-    # -- lookup ---------------------------------------------------------------
+    # lookup
 
     def all_docks(self) -> list[QDockWidget]:
         """Every dock in every window (the panel windows are children of the main one)."""
         return [d for d in self.main.findChildren(QDockWidget) if d.objectName()]
 
     def owner(self, dock: QDockWidget) -> QMainWindow | None:
-        """The window *dock* belongs to — floating docks included."""
+        """The window *dock* belongs to: floating docks included."""
         parent = dock.parentWidget()
         while parent is not None and not isinstance(parent, QMainWindow):
             parent = parent.parentWidget()
@@ -409,7 +409,7 @@ class PanelManager(QObject):
         """In a panel window rather than the main one."""
         return self.window_of(dock) is not None
 
-    # -- moving ---------------------------------------------------------------
+    # moving
 
     def new_window(self, *, show: bool = True, name: str = "", like: QWidget | None = None) -> PanelWindow:
         """A new, empty panel window (placed over *like* when given, else half the screen)."""
@@ -458,7 +458,7 @@ class PanelManager(QObject):
 
         *tab_with*: put it in that dock's tab group. Otherwise, with *arrange*, a
         panel coming into a panel window is split in beside the last one there, and
-        one coming home is tabbed into the group on its home edge — so neither
+        one coming home is tabbed into the group on its home edge, so neither
         lands on top of another or as a sliver.
         """
         source = self.owner(dock)
@@ -509,7 +509,7 @@ class PanelManager(QObject):
             sync_buttons()
 
     def move_to_window(self, dock: QDockWidget, window: PanelWindow | None, *, tab: bool = True) -> PanelWindow:
-        """Put *dock* in panel *window* (``None``: a new one) — as a tab of the panel showing
+        """Put *dock* in panel *window* (``None``: a new one), as a tab of the panel showing
         there, or beside the panels there (*tab* false)."""
         if window is None or window not in self.windows:
             self._remember_tab(dock)
@@ -529,7 +529,7 @@ class PanelManager(QObject):
         self.move_to_window(dock, self.workspace, tab=False)
 
     def move_to_main(self, dock: QDockWidget) -> None:
-        """Bring *dock* back to the main window — at the tab it left, when known."""
+        """Bring *dock* back to the main window, at the tab it left, when known."""
         self._move(dock, self.main)
         self._back_to_tab(dock)
 
@@ -650,11 +650,11 @@ class PanelManager(QObject):
         if current is not None:
             current.raise_()
 
-    # -- dropping a dragged panel on another window ------------------------------
+    # dropping a dragged panel on another window
 
     def drop_target(self, pos: Any, dragged: QDockWidget) -> tuple[QWidget | None, QDockWidget | None]:
         """``(window or floating panel, panel under the pointer)`` at screen *pos*, ignoring
-        *dragged* — where a title-bar drag of *dragged* ended."""
+        *dragged*, where a title-bar drag of *dragged* ended."""
         # Floating panels sit above the windows, the newest windows above the older.
         candidates: list[QWidget] = [d for d in self.all_docks() if d.isFloating() and d is not dragged]
         candidates += [*reversed(self.windows), self.main]
@@ -694,7 +694,7 @@ class PanelManager(QObject):
         target.raise_()
         return True
 
-    # -- the nvitk tab group ---------------------------------------------------
+    # the nvitk tab group
 
     def panel_group_anchor(self) -> QDockWidget | None:
         """A dock of the main window's nvitk tab group (the Imaging panel when it is there)."""
@@ -769,7 +769,7 @@ class PanelManager(QObject):
                    if d.windowTitle() == title and self.owner(d) is window and not d.isFloating()]
         return matches[0] if matches else None
 
-    # -- menus ----------------------------------------------------------------
+    # menus
 
     def _window_label(self, window: PanelWindow) -> str:
         names = [self._title(d) for d in self.docks_in(window)]
@@ -837,7 +837,7 @@ class PanelManager(QObject):
         dock.raise_()
         self._tab_timer.start()
 
-    # -- labels ---------------------------------------------------------------
+    # labels
 
     def set_labels_dock(self, dock: QDockWidget) -> None:
         self._labels_dock = dock
@@ -906,7 +906,7 @@ class PanelManager(QObject):
         button = self.theme_button
         theme.triggered.connect(button.click if button is not None else lambda: toggle_theme(self._viewer))
 
-    # -- persistence ----------------------------------------------------------
+    # persistence
 
     @staticmethod
     def _encode(data: Any) -> str:
@@ -935,7 +935,7 @@ class PanelManager(QObject):
         try:
             # The single-workspace entry of earlier versions is read once, then retired.
             return save_prefs({WINDOWS_PREF_KEY: self.layout_state(), WORKSPACE_PREF_KEY: {"docks": []}})
-        except Exception:  # noqa: BLE001 — never block a close on a preference
+        except Exception:  # noqa: BLE001 (never block a close on a preference)
             return False
 
     def restore(self) -> bool:
@@ -970,7 +970,7 @@ class PanelManager(QObject):
                 geometry = str(entry.get("geometry") or "")
                 if geometry:
                     window.restoreGeometry(QByteArray.fromBase64(geometry.encode("ascii")))
-            except Exception:  # noqa: BLE001 — a layout from another Qt build
+            except Exception:  # noqa: BLE001 (a layout from another Qt build)
                 pass
             window.sync_hint()
             window.sync_title()
@@ -993,7 +993,7 @@ def install_panel_manager(viewer: Any) -> PanelManager | None:
         manager = PanelManager(viewer)
         menu = manager.main.menuBar().addMenu("&Panels")
         manager.attach_menu(menu)
-    except Exception:  # noqa: BLE001 — the GUI still works without it
+    except Exception:  # noqa: BLE001 (the GUI still works without it)
         return None
     viewer._nvitk_panel_manager = manager
     return manager

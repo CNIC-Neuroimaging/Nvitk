@@ -14,19 +14,17 @@ Storage
 Rows land in ``image_measurements`` under the qvtpy pipeline id, as *categorical*
 values (``value_text``, ``value_num`` empty) with **no** ``region_id``: they
 describe the whole subject, not one vessel. That is what lets the Statmodels tool
-offer them as subject-level factors next to the clinical covariates — see
+offer them as subject-level factors next to the clinical covariates; see
 :func:`nvitk.stats._statmodels_frames.subject_image_annotation_entries`.
 
 The vocabularies are closed. A value outside a variable's choices is rejected
 rather than stored, because a level created by a typo does not announce itself in
-a model summary — it silently splits a cell in two.
+a model summary: it silently splits a cell in two.
 """
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -59,9 +57,7 @@ ANATOMY_SOURCE_SHEET = "manual"
 ANATOMY_UPSERT_KEY = ["subject_uid", "pipeline_id", "variable_id", "region_id", "frame_index"]
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Vocabularies
-# ──────────────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class AnatomyConfigVariable:
     """One manually annotated anatomical configuration and its closed vocabulary."""
@@ -171,11 +167,9 @@ def normalize_anatomy_values(values: Mapping[str, Any]) -> dict[str, str]:
     return out
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Catalog registration + publishing
-# ──────────────────────────────────────────────────────────────────────────────
 def _image_spec(var: AnatomyConfigVariable, *, pipeline_id: str) -> DerivedImageMeasurementSpec:
-    """Row metadata for one configuration variable (categorical → ``value_text``)."""
+    """Row metadata for one configuration variable (categorical -> ``value_text``)."""
     return DerivedImageMeasurementSpec(
         variable_id=var.variable_id,
         modality=QVTPY_MODALITY,
@@ -186,7 +180,7 @@ def _image_spec(var: AnatomyConfigVariable, *, pipeline_id: str) -> DerivedImage
         source_column=var.variable_id,
         value_column="value_text",
         value_kind="categorical",
-        # Set by a human who looked at the subject — reviewed by construction.
+        # Set by a human who looked at the subject: reviewed by construction.
         qc_status="OK",
     )
 
@@ -251,7 +245,7 @@ def publish_anatomy_configs(
     Returns
     -------
     dict
-        The ``{variable_id: code}`` actually published (empty when nothing was chosen).
+        The ``{variable_id: code}`` published (empty when nothing was chosen).
     """
     subject = str(subject_uid).strip()
     if not subject:
@@ -279,7 +273,7 @@ def publish_anatomy_configs(
                 "variable_id": variable_id,
             },
             upsert_key_columns=ANATOMY_UPSERT_KEY,
-            # Rebuilt once by the caller after the last variable — each rebuild re-reads the
+            # Rebuilt once by the caller after the last variable: each rebuild re-reads the
             # whole table, so doing it per variable doubles the cost of a two-row write.
             build_sqlite_index=False,
         )

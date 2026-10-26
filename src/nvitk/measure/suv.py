@@ -273,7 +273,7 @@ def suv_image(
     kind
         ``bw``, ``lbm``, ``bsa``, or ``ibw`` (also accepts legacy ``SUVbw``...).
     philips
-        If True (default) and the Philips ``(7053,1000)`` SUV factor is present,
+        If True (default False) and the Philips ``(7053,1000)`` SUV factor is present,
         use that as a direct multiplier. Set to False to always compute from
         half-life/weight.
     revert_scaling

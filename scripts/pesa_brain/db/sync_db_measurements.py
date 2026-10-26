@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Publish qvtpy stage-6 hemodynamics and stage-7 morphometrics into ``image_measurements``.
 
-Stage 6 (``loc_measurements.csv`` / ``vessel_hemodynamics.csv``) → pipeline ``4dflow_v3``.
-Stage 7 (``case_metrics_donut_tree.xlsx``) → pipeline ``tof_morpho_v1``.
+Stage 6 (``loc_measurements.csv`` / ``vessel_hemodynamics.csv``) -> pipeline ``4dflow_v3``.
+Stage 7 (``case_metrics_donut_tree.xlsx``) -> pipeline ``tof_morpho_v1``.
 
 LOC hemodynamics include surviving PCOMMs (``LPCOMM`` / ``RPCOMM``) when present in
 ``loc_measurements.csv``; ACOMM is never measured. This sync script publishes all
-LOC vessel rows without a vessel blacklist — PCOMM counts are logged in the summary.
+LOC vessel rows without a vessel blacklist: PCOMM counts are logged in the summary.
 
 Examples::
 

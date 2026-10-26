@@ -85,8 +85,8 @@ def _hook_label_id_cache(layer: Any) -> None:
         if target is not None:
             try:
                 setattr(target, _IDS_ATTR, None)
-            except Exception:  # noqa: BLE001 — a layer that rejects attributes
-                pass          # simply recomputes, which is only slower.
+            except Exception:  # noqa: BLE001 (a layer that rejects attributes)
+                pass          # recomputes, which is only slower.
 
     try:
         for emitter in emitters:
@@ -106,15 +106,15 @@ def invalidate_label_ids(layer: Any) -> None:
     """
     try:
         setattr(layer, _IDS_ATTR, None)
-    except Exception:  # noqa: BLE001 — a layer that rejects attributes never cached
+    except Exception:  # noqa: BLE001 (a layer that rejects attributes never cached)
         pass
 
 
 def layer_label_ids(layer: Any, *, max_labels: int = 500) -> list[int]:
     """Distinct non-zero label ids in *layer*, cached until its voxels change.
 
-    The uncached form is a full ``np.unique`` over the volume — 75 ms on a
-    151 MB mask — and it was being run again for every layer click, every
+    The uncached form is a full ``np.unique`` over the volume (75 ms on a
+    151 MB mask), and it was being run again for every layer click, every
     visibility toggle and every panel that wanted to know what was in the mask.
     The ids cannot change without the data changing, and the data change clears
     the cache, so the answer is the same one the scan would have given.
@@ -126,7 +126,7 @@ def layer_label_ids(layer: Any, *, max_labels: int = 500) -> list[int]:
     try:
         setattr(layer, _IDS_ATTR, list(ids))
         _hook_label_id_cache(layer)
-    except Exception:  # noqa: BLE001 — caching is an optimisation, not a contract
+    except Exception:  # noqa: BLE001 (caching is an optimisation, not a contract)
         pass
     return ids
 
@@ -288,7 +288,7 @@ def stored_visible_ids(layer: Any | None) -> tuple[int, ...] | None:
 
 def _apply_image_data_visibility(layer: Any, selected_ids: list[int]) -> None:
     """Zero out every voxel in an Image-layer mask whose value isn't in *selected_ids*, updating
-    ``layer.data`` only if the filtered result actually differs from the current display."""
+    ``layer.data`` only if the filtered result differs from the current display."""
     src = ensure_label_source(layer)
     if not selected_ids:
         filtered = np.zeros_like(src)
@@ -368,7 +368,7 @@ def _snapshot_label_colors(layer: Any, all_ids: list[int]) -> dict[int, np.ndarr
 def _apply_label_color_dict(layer: Any, color_dict: dict[int, np.ndarray]) -> None:
     """Push per-label RGBA onto a Labels layer (0.7 DirectLabelColormap or 0.6 ``color``)."""
     cleaned = {int(k): _normalize_rgba(v) for k, v in color_dict.items()}
-    # Napari ≥0.7: ``layer.color`` was removed; use DirectLabelColormap.
+    # Napari >=0.7: ``layer.color`` was removed; use DirectLabelColormap.
     if hasattr(layer, "colormap") and (
         hasattr(layer, "get_color") or not hasattr(layer, "color")
     ):
@@ -479,7 +479,7 @@ def apply_label_colormap(
     Napari's own cyclic label colours.
 
     The new colours go into the same backup :func:`apply_label_visibility` reads,
-    so they survive hiding and re-showing ids — the point of a colormap is lost if
+    so they survive hiding and re-showing ids: the point of a colormap is lost if
     unticking a label resets the set.
     """
     if not supports_per_label_color(layer):
@@ -579,7 +579,7 @@ def label_value_rgba(
     *,
     limits: tuple[float, float] | None = None,
 ) -> tuple[dict[int, np.ndarray], float, float]:
-    """``(label id → RGBA, lo, hi)``: each of *label_ids* coloured by its value in *values*
+    """``(label id -> RGBA, lo, hi)``: each of *label_ids* coloured by its value in *values*
     through *colormap* (a Matplotlib name) from *lo* to *hi* (default: the values' range), grey
     (:data:`NO_VALUE_RGBA`) without a value. Shared by label layers and the surfaces of those
     labels, so both take exactly the same colours."""
@@ -660,7 +660,7 @@ def _reset_to_napari_colormap(layer: Any) -> None:
 
 
 def get_label_color(layer: Any, label_id: int) -> np.ndarray:
-    """Return RGBA (float 0–1) for *label_id*, matching Napari's displayed color."""
+    """Return RGBA (float 0-1) for *label_id*, matching Napari's displayed color."""
     lid = int(label_id)
     meta = _layer_metadata(layer)
     backup = meta.get(_NVITK_COLOR_BACKUP_KEY)

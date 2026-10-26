@@ -1,4 +1,4 @@
-"""qvtpy stage 4: per-vessel local CD threshold + region growing → ``seg_4dflow``.
+"""qvtpy stage 4: per-vessel local CD threshold + region growing -> ``seg_4dflow``.
 
 **Inputs**
 
@@ -67,9 +67,7 @@ EICAB_IN_4DFLOW_NIFTI = "eicab_in_4dflow.nii.gz"
 EICAB_IN_4DFLOW_EICAB_IDS_NIFTI = "eicab_in_4dflow_eicab_ids.nii.gz"
 
 
-# ---------------------------------------------------------------------------
 # Path helpers
-# ---------------------------------------------------------------------------
 
 
 def _default_nvitk_src_dir() -> Path:
@@ -161,9 +159,7 @@ def _segmentation_meta(
     }
 
 
-# ---------------------------------------------------------------------------
 # Stage 4: local CD crop + threshold + largest-CC clean + region growing
-# ---------------------------------------------------------------------------
 
 
 def run_subject(
@@ -382,9 +378,7 @@ def run_subject(
     return out_dir
 
 
-# ---------------------------------------------------------------------------
 # CLI + SGE submission
-# ---------------------------------------------------------------------------
 
 
 def _stage4_cli_options(func):

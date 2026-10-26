@@ -7,7 +7,7 @@ weights into a network the caller has already constructed.
 
 Scope
 -----
-Only **seeding** lives here — used by stage 1 to start self-supervised training from a published
+Only **seeding** lives here: used by stage 1 to start self-supervised training from a published
 checkpoint, and to materialise the bundle's exported segmentation model. Loading weights for
 *fine-tuning* is not done here: the in-tree nnU-Net build handles that itself, through
 ``nnUNetv2_preprocess_like_nnssl`` (which records the checkpoint in the plans) and
@@ -90,7 +90,7 @@ def _sidecar_adaptation_plan(checkpoint_path: Path) -> dict[str, Any] | None:
     """Find nnssl's ``adaptation_plan.json`` next to a checkpoint that lacks the embedded copy.
 
     ``AbstractBaseTrainer.save_checkpoint`` normally embeds the plan, but some nnssl trainers
-    override that method and drop it — ``SparkMAETrainer`` is one, so every SparK checkpoint
+    override that method and drop it: ``SparkMAETrainer`` is one, so every SparK checkpoint
     arrives without it. The trainer still writes ``adaptation_plan.json`` into its run directory
     (``<run>/adaptation_plan.json``, one level above ``fold_all/``), so read that instead of
     falling back to assumed key names.
@@ -140,7 +140,7 @@ def load_encoder_into(
 
     Two callers: seeding self-supervised pre-training from a published checkpoint, so a run
     continues from general features rather than noise; and populating the encoder of the
-    segmentation network stage 1 exports. In both cases the target already exists — only
+    segmentation network stage 1 exports. In both cases the target already exists, only
     encoder and stem are touched, and everything else (decoder, heads, mask tokens) keeps the
     values it was initialised with.
 
@@ -162,13 +162,13 @@ def load_encoder_into(
 
     # No architecture gate here: the target module is whatever the caller built, so a Primus
     # checkpoint seeding a Primus network is as valid as ResEnc-L into ResEnc-L. The key-prefix
-    # match below is what decides whether the two actually correspond.
+    # match below is what decides whether the two correspond.
     remapped: dict[str, Any] = {}
     for key, value in state.items():
         if key.startswith(key_to_encoder) or key.startswith(key_to_stem):
             # Seeding keeps the source names: the target was built from the same adaptation
             # plan, so its encoder lives under the same prefixes. Cross-framework renaming is
-            # not needed here — the in-tree nnU-Net build does its own loading at fine-tuning
+            # not needed here: the in-tree nnU-Net build does its own loading at fine-tuning
             # time, from the checkpoint the plans file points at.
             remapped[key] = value
 

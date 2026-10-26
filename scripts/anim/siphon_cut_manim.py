@@ -12,8 +12,8 @@ numpy and manim, not nvitk.
 Render (manim environment; ``--no-text`` drops every caption, title, legend and badge)::
 
     SC_FAST=1 python scripts/anim/siphon_cut_manim.py -ql --fps 15
-    python scripts/anim/siphon_cut_manim.py -qh --fps 30              # → siphon_mincut.mp4
-    python scripts/anim/siphon_cut_manim.py -qh --fps 30 --no-text    # → siphon_mincut_notext.mp4
+    python scripts/anim/siphon_cut_manim.py -qh --fps 30              # -> siphon_mincut.mp4
+    python scripts/anim/siphon_cut_manim.py -qh --fps 30 --no-text    # -> siphon_mincut_notext.mp4
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ FAST = os.environ.get("SC_FAST", "0") == "1"
 
 config.background_color = "#FFFFFF"
 
-# ---- palette -------------------------------------------------------------------------------
+# palette
 TOF_LO, TOF_MID, TOF_HI = "#DCE2EC", "#88A3C6", "#22456E"   # vessel coloured by TOF brightness
 LOOP = "#EFA43A"
 BRIDGE = "#8E44AD"
@@ -100,7 +100,7 @@ class SiphonMinCut(CaptionScene):
         weight = sel("weight")
         slab, source, sink = sel("slab_frac") > 0, sel("source_frac") > 0, sel("sink_frac") > 0
 
-        # ---- geometry: voxel (crop) units → scene ------------------------------------------
+        # geometry: voxel (crop) units -> scene
         all_pts = np.asarray(data["blk_centres"], float)
         centre = (all_pts.max(0) + all_pts.min(0)) / 2.0
         pitch = OBJECT_HEIGHT / float(np.ptp(all_pts, axis=0).max())  # scene units per 0.5 mm voxel
@@ -126,7 +126,7 @@ class SiphonMinCut(CaptionScene):
         theta0 = float(np.degrees(np.arctan2(normal[1], normal[0])))
         phi0 = float(np.clip(np.degrees(np.arccos(np.clip(normal[2], -1, 1))), 62.0, 84.0))
 
-        # ---- styles --------------------------------------------------------------------------
+        # styles
         def tof_style(occ: np.ndarray):
             t = np.clip(tof_rel / max(np.percentile(tof_rel[occ > 0], 97), 1e-9), 0.0, 1.0)
             col = ramp3(TOF_LO, TOF_MID, TOF_HI, t)
@@ -136,7 +136,7 @@ class SiphonMinCut(CaptionScene):
 
         tof_col, tof_op, tof_sop, size_raw = tof_style(occ_raw)
 
-        # ---- overlays ------------------------------------------------------------------------
+        # overlays
         def small_cubes(points: np.ndarray, color: str) -> VGroup:
             g = VGroup()
             for p in points:
@@ -174,7 +174,7 @@ class SiphonMinCut(CaptionScene):
             beta.remove(beta[1])
             beta.add(new)
 
-        # ---- 0 · title -------------------------------------------------------------------------
+        # 0 · title
         self.set_camera_orientation(phi=phi0 * DEGREES, theta=(theta0 - 18) * DEGREES, zoom=1.0)
         self.add(field.group)
         title = Text("ICA siphon correction", font=FONT, weight=BOLD, color=INK, font_size=34)
@@ -189,7 +189,7 @@ class SiphonMinCut(CaptionScene):
         self.begin_ambient_camera_rotation(rate=0.011)
         self.wait(T(1.2))
 
-        # ---- 1 · the loop ----------------------------------------------------------------------
+        # 1 · the loop
         cap = self.caption("1 · A loop in the mask", [
             ("the siphon's two limbs touch by partial volume on TOF", INK, 20),
             ("the mask closes into a torus: β₁ = 1", CONTACT, 19),
@@ -206,7 +206,7 @@ class SiphonMinCut(CaptionScene):
         self.play(Create(before), run_time=T(1.8))
         self.wait(T(1.4))
 
-        # ---- 2 · pretess -----------------------------------------------------------------------
+        # 2 · pretess
         cap2 = self.caption("2 · Pretess", [
             ("edge- and corner-only contacts: 26-connected, not 6-connected", INK, 20),
             ("the darker voxel of each goes (as FreeSurfer's mri_pretess)", INK_SOFT, 19),
@@ -223,7 +223,7 @@ class SiphonMinCut(CaptionScene):
                          extra=[FadeOut(pre, scale=0.3)])
         self.wait(T(1.0))
 
-        # ---- 3 · bridge and curl ---------------------------------------------------------------
+        # 3 · bridge and curl
         cap3 = self.caption("3 · Bridge and curl", [
             (f"skeleton cycle of {meta['loop_length_mm']} mm, split at its anchors", INK, 20),
             (f"bridge {meta['bridge_mm']} mm  (the short arc, across the contact)", BRIDGE, 19),
@@ -235,7 +235,7 @@ class SiphonMinCut(CaptionScene):
         self.play(FadeOut(ring), FadeIn(arcs), FadeIn(anchor_dots), run_time=T(1.0))
         self.wait(T(2.0))
 
-        # ---- 4 · the contact -------------------------------------------------------------------
+        # 4 · the contact
         cap4 = self.caption("4 · Find the contact", [
             ("score = (I / I_curl) · (r / r_curl) along the loop", INK, 20),
             ("the limbs pinch and darken where they touch", INK_SOFT, 19),
@@ -246,7 +246,7 @@ class SiphonMinCut(CaptionScene):
         self.play(FadeIn(contact_dots, scale=1.8), run_time=T(0.9))
         self.wait(T(2.0))
 
-        # ---- 5 · cost field --------------------------------------------------------------------
+        # 5 · cost field
         cap5 = self.caption("5 · The cost of removing each voxel", [
             ("w = clip(I / I_ref) · (0.25 + core)", INK, 20),
             ("core = 1 on a limb's centreline, 0 at the wall", INK_SOFT, 19),
@@ -262,7 +262,7 @@ class SiphonMinCut(CaptionScene):
         field.transition(self, w_col, w_op, w_sop, run_time=T(1.8), extra=[FadeOut(arcs), FadeOut(anchor_dots)])
         self.wait(T(2.2))
 
-        # ---- 6 · open the ring -----------------------------------------------------------------
+        # 6 · open the ring
         cap6 = self.caption("6 · Open the ring opposite the contact", [
             ("a slab of the loop is taken out of the graph", SLAB, 20),
             ("source and sink sit just beside it:", INK_SOFT, 19),
@@ -285,7 +285,7 @@ class SiphonMinCut(CaptionScene):
         self.play(FadeIn(legend), run_time=T(0.5))
         self.wait(T(2.0))
 
-        # ---- 7 · the minimum cut ---------------------------------------------------------------
+        # 7 · the minimum cut
         ratio = meta["cut_cost_ratio"]
         cap7 = self.caption("7 · Minimum s–t vertex cut", [
             ("max flow on a node-split 26-adjacency graph (SciPy, Dinic)", INK, 20),
@@ -298,7 +298,7 @@ class SiphonMinCut(CaptionScene):
         self.play(FadeIn(cut, scale=2.0), run_time=T(1.2))
         self.wait(T(2.2))
 
-        # ---- 8 · accept ------------------------------------------------------------------------
+        # 8 · accept
         cap8 = self.caption("8 · Accept the cut", [
             (f"β₁ {meta['betti_raw']['beta1']} → {meta['betti_repaired']['beta1']}, still one component",
              GOOD, 20),
@@ -312,7 +312,7 @@ class SiphonMinCut(CaptionScene):
         set_beta(int(meta["betti_repaired"]["beta1"]), GOOD)
         self.wait(T(1.4))
 
-        # ---- 9 · centerline --------------------------------------------------------------------
+        # 9 · centerline
         cap9 = self.caption("9 · Centerline along the curl", [
             (f"before: {meta['cl_before_mm']} mm, across the contact", CL_BEFORE, 20),
             (f"after: {meta['cl_after_mm']} mm, round the siphon", CL_AFTER, 20),
@@ -327,7 +327,7 @@ class SiphonMinCut(CaptionScene):
         self.begin_ambient_camera_rotation(rate=0.011)
         self.wait(T(2.0))
 
-        # ---- end card --------------------------------------------------------------------------
+        # end card
         end = self.caption("Siphon loop opened", [
             (f"pretess {meta['pretess_removed']} voxels + one cut of {meta['cut_mm3']} mm³", INK, 20),
             (f"ICA volume {meta['volume_change_pct']} %  ·  centerline {meta['cl_before_mm']} → "

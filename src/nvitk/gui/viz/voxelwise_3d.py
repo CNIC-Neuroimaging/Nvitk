@@ -7,16 +7,16 @@ find out which clusters are cortical, which are deep, and how they relate to one
 wrong instrument for that.
 
 This puts the whole result in one view: a semi-transparent shell of the brain, with the
-suprathreshold voxels rendered inside it — as solid iso-surfaces (where are the clusters) or as
+suprathreshold voxels rendered inside it, as solid iso-surfaces (where are the clusters) or as
 points coloured by value (how strong is each one). The shell is drawn in **both** modes; without
 it the clusters float in a void with nothing to locate them against.
 
-Any map, not just 1−p
+Any map, not just 1-p
 ---------------------
 ``randomise`` writes several maps per contrast and they are not interchangeable. A ``*_corrp_*``
-map holds 1−p in ``[0, 1]`` and is thresholded from below; a ``tstat`` map holds a *signed*
+map holds 1-p in ``[0, 1]`` and is thresholded from below; a ``tstat`` map holds a *signed*
 statistic and is thresholded on magnitude, two-sided. :func:`suggest_band` picks a defensible
-default per kind from the data itself, and :func:`scene_mask` applies the right comparison — so
+default per kind from the data itself, and :func:`scene_mask` applies the right comparison, so
 switching the map kind does not silently keep a window that means nothing for it.
 
 Space
@@ -60,9 +60,7 @@ SCENE_COLORMAPS: tuple[str, ...] = (
 MAX_POINTS = 30000
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Configuration
-# ──────────────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class SceneSpec:
     """Everything the 3-D scene needs, in one object.
@@ -90,8 +88,8 @@ class SceneSpec:
 def suggest_band(data: np.ndarray, kind: str) -> tuple[float, float]:
     """A defensible default window for *kind*, read from the data rather than assumed.
 
-    For a 1−p map that is the conventional ``0.95 … 1.0``. For a signed statistic there is no
-    conventional cut at all, so this offers the 99th percentile of ``|value|`` up to its maximum —
+    For a 1-p map that is the conventional ``0.95 ... 1.0``. For a signed statistic there is no
+    conventional cut at all, so this offers the 99th percentile of ``|value|`` up to its maximum:
     a starting point that shows something on any map, and which the caller is expected to change.
     """
     from nvitk.stats.voxelwise_map import is_corrp_kind
@@ -117,8 +115,8 @@ def value_range(data: np.ndarray, kind: str) -> tuple[float, float]:
 def scene_mask(data: np.ndarray, kind: str, lo: float, hi: float) -> np.ndarray:
     """Which voxels the scene draws.
 
-    A 1−p map is one-sided and lives in ``[0, 1]``, so the window is on the value itself. A
-    ``tstat`` map is signed, so the window is on ``|value|`` and keeps both tails — a negative
+    A 1-p map is one-sided and lives in ``[0, 1]``, so the window is on the value itself. A
+    ``tstat`` map is signed, so the window is on ``|value|`` and keeps both tails: a negative
     effect is as real as a positive one, and thresholding the raw value would silently drop half
     the result.
     """
@@ -130,13 +128,11 @@ def scene_mask(data: np.ndarray, kind: str, lo: float, hi: float) -> np.ndarray:
     return np.isfinite(data) & (magnitude >= float(lo)) & (magnitude <= float(hi))
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Geometry
-# ──────────────────────────────────────────────────────────────────────────────
 def _mesh_from_mask(mask: np.ndarray, *, step_size: int = 1) -> tuple[np.ndarray, np.ndarray] | None:
     """Marching-cubes *mask* in voxel-index space, or ``None`` when it encloses nothing.
 
-    ``world_space=False`` is deliberate — see the module docstring. A mask with no interior (a
+    ``world_space=False`` is deliberate; see the module docstring. A mask with no interior (a
     single voxel, or an empty band) makes skimage raise, which this turns into ``None``.
     """
     from nvitk.meshlab.marching_cubes import marching_cubes_binary
@@ -166,11 +162,11 @@ def resolve_shell_mask(result: Any, reference_path: Path) -> np.ndarray | None:
     Three sources, in order, because the obvious one is often absent: ``run_voxelwise`` only writes
     ``mask.nii.gz`` into the results folder when it *derived* the mask itself. Pass ``--mask`` and
     the file stays wherever it was, so a folder from a real run frequently has no mask in it at
-    all — which is why the shell silently never appeared.
+    all, which is why the shell silently never appeared.
 
     1. ``mask.nii.gz`` beside the maps.
     2. The path recorded in ``manifest.json``, if it is still readable from here.
-    3. Nilearn's MNI152 brain mask resampled onto the map's own grid — always available, and on an
+    3. Nilearn's MNI152 brain mask resampled onto the map's own grid: always available, and on an
        MNI-normalised result it is what the analysis mask approximates anyway.
     """
     import nibabel as nib
@@ -209,7 +205,7 @@ def resolve_shell_mask(result: Any, reference_path: Path) -> np.ndarray | None:
 def _subsample(coords: np.ndarray, values: np.ndarray, limit: int) -> tuple[np.ndarray, np.ndarray]:
     """Keep the *limit* strongest voxels by magnitude.
 
-    Dropping the weakest is the honest way to thin a point cloud — a random sample would make a
+    Dropping the weakest is the sound way to thin a point cloud: a random sample would make a
     dense cluster look sparse.
     """
     if len(coords) <= limit:
@@ -219,9 +215,7 @@ def _subsample(coords: np.ndarray, values: np.ndarray, limit: int) -> tuple[np.n
     return coords[keep], values[keep]
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Scene
-# ──────────────────────────────────────────────────────────────────────────────
 def clear_voxelwise_layers(viewer: Any) -> None:
     """Remove the shell and every cluster layer this module added, and nothing else."""
     for layer in list(viewer.layers):
@@ -233,7 +227,7 @@ def clear_voxelwise_layers(viewer: Any) -> None:
 def build_scene(viewer: Any, spec: SceneSpec) -> tuple[list[Any], str]:
     """Draw *spec* into *viewer*; return ``(layers, caption)``.
 
-    One call does the whole thing — load, threshold, shell, clusters, 3-D view — so there is no
+    One call does the whole thing (load, threshold, shell, clusters, 3-D view), so there is no
     state to get out of step between a "load" step and a "show" step.
     """
     import nibabel as nib
@@ -256,7 +250,7 @@ def build_scene(viewer: Any, spec: SceneSpec) -> tuple[list[Any], str]:
     clear_voxelwise_layers(viewer)
     added: list[Any] = []
 
-    # The affine has to come from one of *these* maps — the MNI template sits on its own grid.
+    # The affine has to come from one of *these* maps: the MNI template sits on its own grid.
     # Loading the first contrast doubles as the reference; it stays hidden because the volume is
     # not part of the 3-D picture, only its geometry is.
     first_path = result.map_path(kind, names[0])
@@ -270,7 +264,7 @@ def build_scene(viewer: Any, spec: SceneSpec) -> tuple[list[Any], str]:
         raise RuntimeError(f"Could not load {first_path} as a layer.")
     spatial = layer_spatial_kwargs(reference)
 
-    # ---- shell, drawn in every mode -----------------------------------------
+    # shell, drawn in every mode
     if spec.show_shell:
         mask = resolve_shell_mask(result, first_path)
         shell = _mesh_from_mask(mask, step_size=spec.shell_step) if mask is not None else None
@@ -282,7 +276,7 @@ def build_scene(viewer: Any, spec: SceneSpec) -> tuple[list[Any], str]:
                     name=SHELL_LAYER,
                     opacity=float(np.clip(spec.shell_opacity, 0.02, 1.0)),
                     # 'translucent_no_depth' rather than 'translucent': the latter writes to the
-                    # depth buffer, so geometry *inside* the shell is culled — which would hide
+                    # depth buffer, so geometry *inside* the shell is culled, which would hide
                     # exactly what this scene exists to show.
                     blending="translucent_no_depth",
                     colormap="gray",
@@ -293,7 +287,7 @@ def build_scene(viewer: Any, spec: SceneSpec) -> tuple[list[Any], str]:
         else:
             log.warning("No brain mask available; drawing clusters without a shell.")
 
-    # ---- clusters ------------------------------------------------------------
+    # clusters
     total = 0
     for name in names:
         data = np.asarray(nib.load(str(result.map_path(kind, name))).dataobj, dtype=float)
@@ -358,7 +352,7 @@ def build_scene(viewer: Any, spec: SceneSpec) -> tuple[list[Any], str]:
             n_perm=manifest.get("n_perm"), evs=manifest.get("evs", ()),
         )
     else:
-        # map_caption's band wording is written for 1−p; a signed statistic needs its own sentence
+        # map_caption's band wording is written for 1-p; a signed statistic needs its own sentence
         # or the figure would claim a p-value it does not carry.
         caption = (
             f"Colour is the {kind} value, shown where |value| is between {spec.lo:g} and "
@@ -381,7 +375,7 @@ def set_3d_view(viewer: Any) -> int | None:
 
 
 def map_data(out_dir: str | Path, kind: str = "", contrast: str = "") -> tuple[np.ndarray, str, list[str]]:
-    """``(data, kind, contrast_names)`` for one map — what a dialog needs to pick sensible bounds."""
+    """``(data, kind, contrast_names)`` for one map: what a dialog needs to pick sensible bounds."""
     import nibabel as nib
 
     from nvitk.measure.voxelwise import load_voxelwise_result

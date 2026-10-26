@@ -5,7 +5,7 @@ Set-up::
     nvitk-freesurfer info                          # installation, version, license, programs
     nvitk-freesurfer use --home /opt/freesurfer --license ~/license.txt
 
-Volumes (NIfTI or MGZ in, MGZ / NIfTI out by suffix): ``pretess``, ``mc`` (marching cubes →
+Volumes (NIfTI or MGZ in, MGZ / NIfTI out by suffix): ``pretess``, ``mc`` (marching cubes ->
 FreeSurfer surface). Surfaces: ``main-component``, ``euler``, ``smooth``, ``inflate``, ``sphere``
 (``mris_sphere -q``, or ``--spectral`` for FastSurfer's projection). The whole chain on a mask:
 ``fix-topology`` (``mris_fix_topology`` or ``--fixer mris_topo_fixer``; defect segmentation)::

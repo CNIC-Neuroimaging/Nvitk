@@ -1,6 +1,6 @@
 """Per-vessel curved planar reformation: layers in, flattened vessels out.
 
-Wraps the geometry in :mod:`nvitk.transform.cpr` with everything a vessel needs —
+Wraps the geometry in :mod:`nvitk.transform.cpr` with everything a vessel needs:
 finding a centerline when none was supplied, splitting a multilabel mask into the
 vessels the caller asked for, resampling the lumen and wall alongside the image,
 and measuring the calibre at every station.
@@ -35,8 +35,8 @@ setup(globals())
 MIN_CENTERLINE_POINTS = 8
 
 #: Default reach when joining a vessel's centerline pieces to each other. A
-#: segmentation of one artery routinely arrives in several components — a signal
-#: dropout at a bend, a clip artefact, a centerline traced per sub-segment — and
+#: segmentation of one artery routinely arrives in several components (a signal
+#: dropout at a bend, a clip artefact, a centerline traced per sub-segment), and
 #: without joining them only the largest piece is reformatted.
 DEFAULT_JOIN_GAP_VOX = 8
 
@@ -84,7 +84,7 @@ class VesselCpr:
         Falls back to counting lumen samples across each reformation row when no
         area measurement was made. That fallback is quantised to the ray's sample
         step and is measured along one cut direction only, so it reads as a
-        staircase on a vessel whose true calibre varies smoothly — prefer the
+        staircase on a vessel whose true calibre varies smoothly: prefer the
         measured value.
         """
         if self.diameter is not None:
@@ -98,8 +98,8 @@ class VesselCpr:
 def vessel_name(label: int, *, schema_key: str | None = None) -> str:
     """A readable name for *label* under *schema_key*'s label vocabulary.
 
-    The schema registry covers every vocabulary the GUI knows — eICAB, QVTpy,
-    TopBrain's CT/MR/TA36 sets, the TotalSegmentator tasks — so naming follows
+    The schema registry covers every vocabulary the GUI knows (eICAB, QVTpy,
+    TopBrain's CT/MR/TA36 sets, the TotalSegmentator tasks), so naming follows
     whatever mapping the label selector is on instead of assuming one pipeline's.
     Without a schema, or for an id that schema does not name, the answer is the
     plain ``Label <id>``: inventing a name from the wrong vocabulary is worse than
@@ -115,18 +115,18 @@ def vessel_name(label: int, *, schema_key: str | None = None) -> str:
         schema = get_schema(str(schema_key))
         name = str((schema.name_for(int(label)) if schema else "") or "").strip()
         # Unmapped ids come back as sentinels like "QVTPY_UNKNOWN_7" in some
-        # vocabularies — an internal token, not a vessel name.
+        # vocabularies: an internal token, not a vessel name.
         if name and "unknown" not in name.lower():
             return name
-    except Exception:  # noqa: BLE001 — naming is cosmetic, never fatal
+    except Exception:  # noqa: BLE001 (naming is cosmetic, never fatal)
         pass
     return f"Label {int(label)}"
 
 
 def labels_in(mask: Any, *, labels: Sequence[int] | None = None) -> list[int]:
-    """Non-zero label ids in *mask*, or the requested subset that is actually present.
+    """Non-zero label ids in *mask*, or the requested subset that is present.
 
-    A binary mask has one label — ``1`` — so a caller that passes a plain
+    A binary mask has one label (``1``), so a caller that passes a plain
     segmentation gets a single vessel without having to say so.
     """
     present = sorted(
@@ -143,14 +143,14 @@ def derive_wall(lumen_mask: Any, *, label: int, thickness_vox: int = 1) -> Any:
 
     ``dilate(lumen) - lumen``: a band the given number of voxels thick hugging the
     outside of the lumen. It is a stand-in for a real wall segmentation, not a
-    measurement of one — it says where the wall *would* be, at the thickness asked
+    measurement of one: it says where the wall *would* be, at the thickness asked
     for, not where it is.
     """
     lumen = as_backend_array(lumen_mask) == int(label)
     if not bool(to_numpy(lumen.any())):
         return np.zeros(lumen.shape, dtype=np.int32)
     # brute_force is required by CuPy for iterations > 1 and is accepted by SciPy
-    # with the same result — it changes the algorithm, not the output.
+    # with the same result: it changes the algorithm, not the output.
     grown = ndi.binary_dilation(
         lumen, iterations=max(int(thickness_vox), 1), brute_force=True
     )
@@ -160,8 +160,8 @@ def derive_wall(lumen_mask: Any, *, label: int, thickness_vox: int = 1) -> Any:
 class CenterlineUnavailable(RuntimeError):
     """No usable centerline for one label, with the reason spelled out.
 
-    A vessel that cannot be flattened is a normal outcome — the label is a speck,
-    the supplied centerline misses it — and the useful thing to hand back is which
+    A vessel that cannot be flattened is a normal outcome (the label is a speck,
+    the supplied centerline misses it), and the useful thing to hand back is which
     label and why, not a bare ``None`` that leaves the caller guessing.
     """
 
@@ -209,7 +209,7 @@ def _skeleton_points(
             method=method,
             spacing=spacing,
         )
-    except Exception as exc:  # noqa: BLE001 — surfaced verbatim as the reason
+    except Exception as exc:  # noqa: BLE001 (surfaced verbatim as the reason)
         raise CenterlineUnavailable(label, f"skeletonisation failed ({exc})") from exc
     points = found.get(1)
     if points is None:
@@ -247,7 +247,7 @@ def upsample_plan(shape, spacing, *, factor: float) -> tuple[tuple, tuple]:
 def upsample_volume(volume: Any, new_shape, *, order: int) -> Any:
     """Resample *volume* onto *new_shape*.
 
-    ``order=1`` for intensities and ``order=0`` for labels — interpolating label
+    ``order=1`` for intensities and ``order=0`` for labels: interpolating label
     ids invents values that were never in the segmentation.
     """
     arr = as_backend_array(volume)
@@ -272,7 +272,7 @@ def centerline_for_label(
     """The centerline of one vessel, resampled and framed.
 
     Uses a supplied centerline where there is one, and otherwise skeletonises the
-    label and walks the skeleton's longest path — the graph diameter, which for a
+    label and walks the skeleton's longest path: the graph diameter, which for a
     single vessel is the vessel. A supplied centerline that does not land inside
     the label (a different grid, a one-voxel drift) falls back to skeletonising
     rather than losing the vessel.
@@ -287,7 +287,7 @@ def centerline_for_label(
     CenterlineUnavailable
         When no centerline can be traced, carrying the label and the reason.
     """
-    # Skeletonisation is skimage, which is host-only — convert at the boundary.
+    # Skeletonisation is skimage, which is host-only: convert at the boundary.
     with using("cpu"):
         binary = (to_numpy(lumen_mask) == int(label)).astype(np.int32)
         n_vox = int(binary.sum())
@@ -353,7 +353,7 @@ def centerline_for_label(
             smooth=smooth,
             seed_normal=seed_normal,
         )
-    except Exception as exc:  # noqa: BLE001 — surfaced verbatim as the reason
+    except Exception as exc:  # noqa: BLE001 (surfaced verbatim as the reason)
         raise CenterlineUnavailable(label, f"resampling failed ({exc})") from exc
 
 
@@ -444,7 +444,7 @@ def build_vessel_cpr(
         lumen=lumen,
         wall=wall,
         # Both measurements are independent of the cutting angle, and the
-        # inscribed radius is not displayed at all — so neither is recomputed on
+        # inscribed radius is not displayed at all, so neither is recomputed on
         # an angle change, and the distance transform only runs when asked for.
         radius_mm=station_radius_mm(binary, samples) if with_radius else None,
         samples=samples,
@@ -478,7 +478,7 @@ def station_area_diameter_mm(
     one is cut where the mask first falls below half. Cutting at the *first* gap
     means a neighbouring vessel that happens to lie inside the ray is not counted,
     and interpolating the crossing puts the boundary between samples instead of
-    snapping it to one — which is what makes this smooth where both the distance
+    snapping it to one, which is what makes this smooth where both the distance
     transform and a row-count are quantised to the grid. The enclosed area is
     reported as the diameter of the circle of equal area.
     """
@@ -490,7 +490,7 @@ def station_area_diameter_mm(
     dr = float(ray_mm) / int(n_radius)
     inside = (occ >= 0.5).astype(np.int8)
     # cumprod stays 1 only while every sample so far has been inside, so the sum
-    # is the index of the first gap — the lumen boundary along that ray.
+    # is the index of the first gap: the lumen boundary along that ray.
     k = np.cumprod(inside, axis=2).sum(axis=2)
 
     kc = np.clip(k, 1, int(n_radius) - 1)
@@ -500,7 +500,7 @@ def station_area_diameter_mm(
     safe = np.abs(drop) > _AREA_EPS
     frac = np.clip(np.where(safe, (lo - 0.5) / np.where(safe, drop, 1.0), 0.0), 0.0, 1.0)
 
-    # radii[j] is (j + 1) * dr, so the last sample still inside — index k - 1 —
+    # radii[j] is (j + 1) * dr, so the last sample still inside (index k - 1)
     # sits at k * dr, and the crossing is that plus the interpolated fraction of
     # the next step. Anchoring on (k - 1) instead costs a fixed dr of radius,
     # which is a constant underestimate of the calibre at every station.

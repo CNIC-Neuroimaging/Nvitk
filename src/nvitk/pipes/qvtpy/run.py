@@ -5,18 +5,18 @@ a bash script + SSH to the cluster login node.
 
 Stages (select with ``--stages``; default ``stage0_c,stage1``)
 --------------------------------------------------------------
-- ``stage0_d`` — XNAT → DICOM (local only).
-- ``stage0_c`` — DICOM → NIfTI + reorg + optional ``phase2volume`` derivatives.
-- ``stage1`` — eICAB on ``TOF/TOF.nii.gz``.
-- ``stage2`` — eICAB ``TOF_resampled`` → 4D flow rigid FLIRT (NiPype FSL; fixed = Angiography_3D or CD).
-- ``stage3`` — eICAB in 4Dflow space + arterial/venous centerlines (``--eicab-mask``, geometry venous branches).
-- ``stage4`` — Local CD crop per vessel + threshold + optional region growing → ``seg_4dflow``.
-- ``stage4t`` — Same as stage 4 on each ``ComplexDifference_4D`` frame → ``seg_4dflow_4d`` (opt-in).
-- ``stage5`` — QVTplus-style LOC CSV (arterial + venous).
-- ``stage6`` — Per-LOC masked-plane flow / PI / RI from phase volumes.
-- ``stage7`` — TOF eICAB morphometrics (centerline caliber / tortuosity / stenosis).
-- ``stage8_xnat_upload`` — upload ``eicab/`` and ``qvtpy/`` results to XNAT session resources (local or cluster via SSH fetch).
-- ``stage9_autoqc`` — score the published measurements against literature bands and physiological
+- ``stage0_d``: XNAT -> DICOM (local only).
+- ``stage0_c``: DICOM -> NIfTI + reorg + optional ``phase2volume`` derivatives.
+- ``stage1``: eICAB on ``TOF/TOF.nii.gz``.
+- ``stage2``: eICAB ``TOF_resampled`` -> 4D flow rigid FLIRT (NiPype FSL; fixed = Angiography_3D or CD).
+- ``stage3``: eICAB in 4Dflow space + arterial/venous centerlines (``--eicab-mask``, geometry venous branches).
+- ``stage4``: Local CD crop per vessel + threshold + optional region growing -> ``seg_4dflow``.
+- ``stage4t``: Same as stage 4 on each ``ComplexDifference_4D`` frame -> ``seg_4dflow_4d`` (opt-in).
+- ``stage5``: QVTplus-style LOC CSV (arterial + venous).
+- ``stage6``: Per-LOC masked-plane flow / PI / RI from phase volumes.
+- ``stage7``: TOF eICAB morphometrics (centerline caliber / tortuosity / stenosis).
+- ``stage8_xnat_upload``: upload ``eicab/`` and ``qvtpy/`` results to XNAT session resources (local or cluster via SSH fetch).
+- ``stage9_autoqc``: score the published measurements against literature bands and physiological
   consistency, and write the QC metrics back to the dataset. Cohort-level and database-only: it
   reads what stage 6 published rather than the pipeline outputs, so it is safe to re-run at any
   time and needs no subject tree on disk.
@@ -97,9 +97,7 @@ from nvitk.core.click_config import config_dir_click_option
 
 
 log = Logger()
-# ---------------------------------------------------------------------------
 # Shared helpers
-# ---------------------------------------------------------------------------
 
 
 def _iter_subjects(root: Path) -> list[str]:
@@ -177,9 +175,7 @@ def _default_nvitk_src_dir() -> Path:
     return cfg.NVITK_SRC_DIR
 
 
-# ---------------------------------------------------------------------------
 # SGE script emission (per-stage submit_stage)
-# ---------------------------------------------------------------------------
 
 
 def _build_stage0_convert_command(
@@ -864,9 +860,7 @@ def _submit_qvtpy_sge_subjects_remote(
     return exit_code, job_ids
 
 
-# ---------------------------------------------------------------------------
 # Master CLI (local + SGE)
-# ---------------------------------------------------------------------------
 
 
 @click.command("nvitk-qvtpy")
@@ -998,7 +992,7 @@ def _submit_qvtpy_sge_subjects_remote(
     show_default=True,
     help="(sge) Reserve this many job slots below the per-user cap when drip-feeding.",
 )
-# --- stage 0 ---
+# stage 0
 @click.option(
     "--from-source",
     type=click.Choice(["local", "xnat"], case_sensitive=False),
@@ -1049,7 +1043,7 @@ def _submit_qvtpy_sge_subjects_remote(
 )
 @click.option("--report", is_flag=True, default=False)
 @click.option("--report-derived", is_flag=True, default=False)
-# --- stage 1 ---
+# stage 1
 @click.option("--eicab-container", type=click.Path(path_type=Path), default=None)
 @click.option("--vasculature-dir", type=click.Path(path_type=Path), default=None)
 @click.option(
@@ -1123,7 +1117,7 @@ def _submit_qvtpy_sge_subjects_remote(
     help="Stage1: run eICAB's whole-brain (WB) flood fill after the CW mask. Default: on, off for the "
          "--reuse-eicab fallback. Without it stage 3's venous exclusion uses the CW labels.",
 )
-# --- stage 2 ---
+# stage 2
 @click.option(
     "--stage2-reference",
     type=click.Choice(["angio", "cd"]),
@@ -1133,7 +1127,7 @@ def _submit_qvtpy_sge_subjects_remote(
 )
 @click.option("--stage2-dof", type=int, default=6, show_default=True)
 @click.option("--stage2-cost", type=str, default="normmi", show_default=True)
-# --- stage 3 ---
+# stage 3
 @click.option(
     "--eicab-mask",
     type=click.Choice(["cw", "wb"], case_sensitive=False),
@@ -1183,7 +1177,7 @@ def _submit_qvtpy_sge_subjects_remote(
     default=None,
     help="Stage3: TotalSegmentator weights (default: qvtpy config model_root).",
 )
-# --- stage 4 ---
+# stage 4
 @click.option("--crop-padding-bbox", type=int, default=3, show_default=True, help="Stage4: bbox padding (vox).")
 @click.option(
     "--4dflow-thr-algorithm",
@@ -1277,7 +1271,7 @@ def _submit_qvtpy_sge_subjects_remote(
         "(curvature filter; pre-expansion voxels protected)."
     ),
 )
-# --- stage 5 ---
+# stage 5
 @click.option(
     "--loc-arterial-strategy",
     type=click.Choice(["qvtpy", "midpoint"]),
@@ -1295,7 +1289,7 @@ def _submit_qvtpy_sge_subjects_remote(
         "A1/M1/P1 span. Default off: one init LOC per vessel."
     ),
 )
-# --- stage 6 ---
+# stage 6
 @click.option(
     "--measure-resegment/--no-measure-resegment",
     default=False,
@@ -1347,7 +1341,7 @@ def _submit_qvtpy_sge_subjects_remote(
     default=True,
     show_default=True,
 )
-# --- stage 7 (morphometrics) ---
+# stage 7 (morphometrics)
 @click.option(
     "--stage7-n-workers",
     type=click.IntRange(min=1),
@@ -1355,7 +1349,7 @@ def _submit_qvtpy_sge_subjects_remote(
     help="Stage7: vessels measured in parallel per subject, one process per label/component job "
          "(1 = one at a time; default min(4, CPUs/2)). On SGE, N > 1 requests -pe smp N.",
 )
-# --- stage 8 (XNAT upload) ---
+# stage 8 (XNAT upload)
 @click.option(
     "--xnat-upload-require-stages",
     default="stage2,stage3,stage4,stage5,stage6,stage7",
@@ -1555,15 +1549,8 @@ def main(
     run_s9 = STAGE_AUTOQC in stages
 
     use_xnat = from_source.lower() == "xnat"
-    # if use_xnat and run_conv and submit == "sge":
-    #     # SGE stages read DICOMs from the cluster tree, so the download must
-    #     # persist locally regardless of --save-dicoms; auto-insert stage0_d.
-    #     run_dl = True
-    #     if not save_dicoms:
-    #         log.info(
-    #             "--from-source xnat with --submit sge: per-subject XNAT download -> "
-    #             f"cluster upload ({cluster_paths.dicom_root}), then delete local staging."
-    #         )
+    # XNAT + SGE does not insert the download stage (stage0_d) on its own: request it
+    # explicitly when the cluster tree does not hold the DICOMs yet.
 
     log.info(f"qvtpy | stages={','.join(stages)} | submit={submit}")
 
@@ -1997,7 +1984,7 @@ def main(
     if run_s9:
         # Cohort-level: it scores what stage 6 published rather than reading the subject trees, so
         # it runs once after the per-subject loop. It still gets a results source, because a run
-        # whose import has not happened yet has the numbers on disk but not in the dataset — and
+        # whose import has not happened yet has the numbers on disk but not in the dataset, and
         # this is exactly the moment that is true.
         from . import stage9_autoqc
         from .autoqc_sources import ResultsSource

@@ -1,7 +1,7 @@
 """Live spatial / affine properties for the active Napari layer.
 
-Most of what this panel reports is *per-axis* — size, label, anatomical code,
-spacing, extent — so it is laid out as one row per array axis rather than as a
+Most of what this panel reports is *per-axis* (size, label, anatomical code,
+spacing, extent), so it is laid out as one row per array axis rather than as a
 stack of parallel tuples the reader has to line up by eye. The transforms are
 shown as actual matrices, with the rotation block and the translation column
 distinguished, and the raw text report stays one click away via **Copy**.
@@ -207,7 +207,7 @@ class ImagePropertiesPanel(QWidget):
         self._viewer: Any | None = None
         self._fill_dtype_choices()
 
-    # ── dtype conversion ─────────────────────────────────────────────────────
+    # dtype conversion
 
     def set_viewer(self, viewer: Any) -> None:
         """Give the panel the viewer it needs to add a converted layer."""
@@ -224,7 +224,7 @@ class ImagePropertiesPanel(QWidget):
             for spec in dtype_params(None):
                 for label, value in spec.choices:
                     self._dtype_combo.addItem(str(label), str(value))
-        except Exception:  # noqa: BLE001 — an empty picker is better than no panel
+        except Exception:  # noqa: BLE001 (an empty picker is better than no panel)
             pass
         self._dtype_combo.blockSignals(False)
         self._sync_convert_enabled()
@@ -257,10 +257,10 @@ class ImagePropertiesPanel(QWidget):
             pass
         try:
             self._status.setText(convert_dtype(self._viewer, dtype=target))
-        except Exception as exc:  # noqa: BLE001 — report, do not raise into Qt
+        except Exception as exc:  # noqa: BLE001 (report, do not raise into Qt)
             self._status.setText(f"Could not convert: {exc}")
 
-    # ── internals ────────────────────────────────────────────────────────────
+    # internals
 
     def _refresh_last_layer(self) -> None:
         """Re-render spatial properties for whichever layer was last shown."""
@@ -344,7 +344,7 @@ class ImagePropertiesPanel(QWidget):
         source_card.add(source_label)
         self._body_layout.addWidget(source_card)
 
-    # ── public API ───────────────────────────────────────────────────────────
+    # public API
 
     def refresh_from_layer(self, layer: Any | None) -> None:
         """Display *layer*'s spatial properties (spacing, FOV, origin, affine), or a placeholder

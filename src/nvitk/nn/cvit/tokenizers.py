@@ -1,5 +1,5 @@
 """
-CViT tokenizers — turn a volume into a token grid plus multi-scale skip features.
+CViT tokenizers: turn a volume into a token grid plus multi-scale skip features.
 
 Description
 -----------
@@ -21,7 +21,7 @@ Modes
     The volume is cut into non-overlapping token patches; the same weight-shared CNN runs on
     each patch *independently* (zero padding at the patch border, :class:`LayerNormNd` instead
     of InstanceNorm) and its stride schedule ends at one voxel = one token. Intermediate maps
-    are folded back into full-volume skips — exact, because patches do not overlap. No
+    are folded back into full-volume skips: exact, because patches do not overlap. No
     information crosses patches before attention.
 ``linear``  (:class:`LinearPatchTokenizer`)
     The ViT/Primus baseline: one ``Conv(k=s=token_stride)`` projection of raw voxels. When the
@@ -39,9 +39,7 @@ from torch import nn
 from ..blocks import ResStage, conv_nd, make_norm
 from .config import CViTConfig
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Shared conv stem
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class _ConvStem(nn.Module):
@@ -79,13 +77,11 @@ def _check_input(x: torch.Tensor, cfg: CViTConfig) -> None:
         raise ValueError(f"Expected {cfg.input_channels} input channel(s), got {x.shape[1]}.")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Tokenizers
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class HierarchicalConvTokenizer(nn.Module):
-    """Strided residual conv stem over the whole volume → 1^n projection → tokens."""
+    """Strided residual conv stem over the whole volume -> 1^n projection -> tokens."""
 
     mode = "hierarchical"
 
@@ -127,10 +123,10 @@ class IntraPatchConvTokenizer(nn.Module):
     def in_proj_keys(self) -> tuple[str, ...]:
         return ("stem.stages.0.blocks.0.conv1.conv", "stem.stages.0.blocks.0.shortcut.conv")
 
-    # ---- patch <-> volume reshapes -----------------------------------------------------------
+    # patch <-> volume reshapes
     @staticmethod
     def _unfold(x: torch.Tensor, patch: tuple[int, ...]) -> tuple[torch.Tensor, tuple[int, ...]]:
-        """``(B, C, *S)`` → ``(B·N, C, *patch)`` with patches in row-major grid order."""
+        """``(B, C, *S)`` -> ``(B·N, C, *patch)`` with patches in row-major grid order."""
         b, c, *spatial = x.shape
         g = tuple(s // p for s, p in zip(spatial, patch))
         nd = len(patch)
@@ -138,7 +134,7 @@ class IntraPatchConvTokenizer(nn.Module):
         for gi, pi in zip(g, patch):
             shape += [gi, pi]
         x = x.reshape(shape)
-        # (B, C, g0, p0, g1, p1, ...) → (B, g0, g1, ..., C, p0, p1, ...)
+        # (B, C, g0, p0, g1, p1, ...) -> (B, g0, g1, ..., C, p0, p1, ...)
         perm = [0] + [2 + 2 * i for i in range(nd)] + [1] + [3 + 2 * i for i in range(nd)]
         x = x.permute(perm).reshape(b * prod(g), c, *patch)
         return x, g
@@ -149,7 +145,7 @@ class IntraPatchConvTokenizer(nn.Module):
         _, c, *q = x.shape
         nd = len(g)
         x = x.reshape(batch, *g, c, *q)
-        # (B, g0, g1, ..., C, q0, q1, ...) → (B, C, g0, q0, g1, q1, ...)
+        # (B, g0, g1, ..., C, q0, q1, ...) -> (B, C, g0, q0, g1, q1, ...)
         perm = [0, 1 + nd]
         for i in range(nd):
             perm += [1 + i, 2 + nd + i]

@@ -1,6 +1,6 @@
 """Filesystem layout helpers for qvtpy (local workstation vs cluster).
 
-Every root comes from ``sge.json``'s ``pipelines.qvtpy_paths`` section — there are no
+Every root comes from ``sge.json``'s ``pipelines.qvtpy_paths`` section: there are no
 installation paths in this file. A root that is needed but not configured raises
 :class:`~nvitk.core.config_paths.ConfigError` naming the key and the search path, rather than
 silently resolving to somebody else's filesystem.
@@ -37,9 +37,9 @@ def _opt_root(key: str):
 
     Deliberately does not raise. These names are read at import time as Click option defaults
     (``default=cfg.DEFAULT_NIFTI_ROOT``), so raising here would break ``--help`` on a machine
-    with no configuration. ``None`` becomes "no default", and the error — naming the key and
-    the search path — is raised by :func:`layout_local` / :func:`layout_cluster` when the value
-    is actually needed to do work.
+    with no configuration. ``None`` becomes "no default", and the error (naming the key and
+    the search path) is raised by :func:`layout_local` / :func:`layout_cluster` when the value
+    is needed to do work.
     """
     raw = _pipe_paths().get(key)
     if raw is None or not str(raw).strip():
@@ -84,7 +84,7 @@ class QvtpyPaths:
 def _local_path_from_config(key: str, *, fallback: Path | None) -> Path:
     """A local-workstation root: *fallback* (the CLI flag) if given, else ``local_<key>``.
 
-    The CLI flag wins here. Under ``--submit sge`` the opposite holds — see
+    The CLI flag wins here. Under ``--submit sge`` the opposite holds; see
     :func:`_cluster_path_from_config`.
     """
     if fallback is not None:

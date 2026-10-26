@@ -1,7 +1,7 @@
 """Statmodels-facing view of the shared nvitk design system.
 
 The explorer runs as a floating window rather than inside Napari's chrome, so it
-has to carry a palette explicitly — but that palette is now the same one every
+has to carry a palette explicitly, but that palette is now the same one every
 nvitk dock uses. Everything here is re-exported from
 :mod:`nvitk.gui.core.design`; add new tokens or primitives there, not here, so
 the explorer and the docks cannot drift apart.

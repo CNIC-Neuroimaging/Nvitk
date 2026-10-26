@@ -118,9 +118,7 @@ def _load_wb_arterial_labels_for_venous_exclusion(
     return as_backend_array(wb_lab).astype(np.int32), "wb"
 
 
-# ---------------------------------------------------------------------------
 # Path helpers
-# ---------------------------------------------------------------------------
 
 
 def _default_nvitk_src_dir() -> Path:
@@ -146,7 +144,7 @@ def _load_stage2_meta(output_root: Path, subject: str) -> dict[str, Any]:
     return json.loads(p.read_text(encoding="utf-8"))
 
 
-# ---- Centerline mask rasterization -------------------------------------------
+# Centerline mask rasterization
 
 
 def _rasterize_centerlines_mask(
@@ -193,9 +191,7 @@ def _cd_path(nifti_root: Path, subject: str) -> Path:
     raise FileNotFoundError(f"Missing ComplexDifference_3D for {subject}")
 
 
-# ---------------------------------------------------------------------------
 # Stage 3: eICAB warp, CD threshold, arterial + venous centerlines
-# ---------------------------------------------------------------------------
 
 
 def run_subject(
@@ -220,7 +216,7 @@ def run_subject(
     totalseg_model_dir: Path | None = None,
 ) -> Path:
     """Warp eICAB, extract arterial/venous centerlines; return stage-3 output directory."""
-    # ---- Inputs: stage2 registration + eICAB mask resolution -----------------
+    # Inputs: stage2 registration + eICAB mask resolution
     meta = _load_stage2_meta(output_root, subject)
     mat = Path(meta["matrix"])
     fixed = Path(meta["fixed"])
@@ -239,7 +235,7 @@ def run_subject(
         log.info(f"[{subject}] stage3 centerline: skip -> {out_dir}")
         return out_dir
 
-    # ---- Warp eICAB labels into 4D-flow space (nearest neighbour) ----------
+    # Warp eICAB labels into 4D-flow space (nearest neighbour)
     pp_tag = " pp" if eicab_res.postprocessed else ""
     log.step(f"warp eICAB ({eicab_res.used}{pp_tag}) into 4D-flow space")
     warped_labels = out_dir / "eicab_in_4dflow.nii.gz"
@@ -251,7 +247,7 @@ def run_subject(
         interp="nearestneighbour",
     )
 
-    # ---- Global CD vessel mask (sliding threshold + area opening) ------------
+    # Global CD vessel mask (sliding threshold + area opening)
     log.step("CD slding-threshold vessel mask for venous search")
     lab_img = imread(warped_labels)
     labels_arr = as_backend_array(lab_img.data)
@@ -269,7 +265,7 @@ def run_subject(
     )
     vessel_bin = as_backend_array(vessel_bin.astype(np.uint8, copy=False))
 
-    # ---- Arterial labels: clean eICAB, clear venous slab, island filter ------
+    # Arterial labels: clean eICAB, clear venous slab, island filter
     # Per-label islands only (no global arterial CC wipe): a global min-size
     # keyed off total arterial voxels was dropping whole small vessels (PCA/comm).
     # PCOMM uses *pcomm_min_points*; MCA/ACA/PCA side branches use
@@ -319,7 +315,7 @@ def run_subject(
         f"arterial_branch_min_points={int(arterial_branch_min_points)})"
     )
 
-    # ---- Venous: CD ∧ slab [∧ brain] → clean → bifurcate/split skeleton → name/label
+    # Venous: CD ∧ slab [∧ brain] -> clean -> bifurcate/split skeleton -> name/label
     log.step("venous branch detection from CD + slab region")
     brain_region: np.ndarray | None = None
     if venous_brain_mask:
@@ -399,7 +395,7 @@ def run_subject(
         )
     )
 
-    # ---- Outputs: centerlines mask, CD QC NIfTI, centerline_meta.json --------
+    # Outputs: centerlines mask, CD QC NIfTI, centerline_meta.json
     cl_mask = _rasterize_centerlines_mask(
         shape3,
         arterial,
@@ -461,9 +457,7 @@ def run_subject(
     return out_dir
 
 
-# ---------------------------------------------------------------------------
 # CLI + SGE submission
-# ---------------------------------------------------------------------------
 
 
 def _stage3_cli_options(func):

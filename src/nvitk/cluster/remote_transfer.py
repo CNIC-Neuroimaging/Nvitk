@@ -326,7 +326,7 @@ def sync_remote_glob(
     """Mirror files matching *pattern* under *remote_root* into *local_root*.
 
     Only files whose size or mtime differs from the local copy are fetched, so a caller
-    polling on an interval re-downloads the handful of logs that actually grew rather than
+    polling on an interval re-downloads the handful of logs that grew rather than
     the whole tree. Relative paths are preserved, so the local tree has the same shape as the
     remote one and anything that discovers runs by structure keeps working against it.
 

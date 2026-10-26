@@ -1,7 +1,7 @@
 """Running FreeSurfer programs: :class:`FsCommand`.
 
-A wrapper returns an :class:`FsCommand` — the argv, the outputs it will write and whether it is
-long-running — without running anything, like :class:`nvitk.fsl.run.FslCommand`. The CLI calls
+A wrapper returns an :class:`FsCommand` (the argv, the outputs it will write and whether it is
+long-running) without running anything, like :class:`nvitk.fsl.run.FslCommand`. The CLI calls
 :meth:`FsCommand.run`; the GUI runs short commands the same way and long ones as background jobs.
 Commands run in :func:`~nvitk.freesurfer.env.fs_env`. A license refusal becomes a
 :class:`~nvitk.freesurfer.env.FreeSurferLicenseError` that says where to get one and where to put
@@ -29,7 +29,7 @@ class FsCommand:
 
     argv: list[str]
     title: str
-    #: Outputs by role (``surface``, ``volume``, ``defects`` …).
+    #: Outputs by role (``surface``, ``volume``, ``defects`` ...).
     outputs: dict[str, Path] = field(default_factory=dict)
     #: Output roles that are label maps (opened as Labels layers).
     label_outputs: tuple[str, ...] = ()

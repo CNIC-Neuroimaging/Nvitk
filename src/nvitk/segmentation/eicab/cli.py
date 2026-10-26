@@ -1,4 +1,4 @@
-"""``nvitk-eicab`` — Circle-of-Willis / TOF eICAB segmentation (local or SGE)."""
+"""``nvitk-eicab``: Circle-of-Willis / TOF eICAB segmentation (local or SGE)."""
 
 from __future__ import annotations
 

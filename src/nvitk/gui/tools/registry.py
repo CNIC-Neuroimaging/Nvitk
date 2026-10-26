@@ -64,7 +64,7 @@ class GuiToolSpec:
     run_mode: RunMode = "layer"
     cli_command: str = ""
     description: str = ""
-    #: False only for a tool that has nothing to do with the active layer at all — it reads a
+    #: False only for a tool that has nothing to do with the active layer at all: it reads a
     #: directory, a database, or a results folder, and manages its own output (napari layers, a
     #: dialog). Defaults to True because almost every tool here operates on the active layer's
     #: data; the Tools panel's "no layers loaded" gate consults this before running anything.
@@ -72,24 +72,24 @@ class GuiToolSpec:
     #: The operation is meaningful **per label**, so a multi-label selection runs it once on each
     #: label and recombines the results with the original ids, instead of on their binary union.
     #:
-    #: Set this only where per-label and per-union genuinely differ and the per-label reading is the
+    #: Set this only where per-label and per-union differ and the per-label reading is the
     #: one a user means. Connected components qualifies: on a union, two touching labels report one
     #: component and a disjoint smaller label is dropped outright. The mask set-ops (``seg_mask_*``)
-    #: do not — a union is exactly what they are for — and neither does ``label_cc``, which
+    #: do not (a union is exactly what they are for), and neither does ``label_cc``, which
     #: *assigns* new ids and would need a documented offset scheme per label rather than a flag.
     multilabel: bool = False
     #: The result lives on the **reference layer's** grid, not the active layer's: the output layer
     #: takes the reference layer's placement and grid metadata (affine, spacing, axes, ...) and the
-    #: active layer's everything else, so it is drawn — and saved — where the reference is.
+    #: active layer's everything else, so it is drawn (and saved), where the reference is.
     output_on_reference_grid: bool = False
     #: A geometric transform: it moves voxels without changing what they hold. On a label map it
     #: runs on the label ids themselves (only the selected ones when labels are picked), always
-    #: nearest-neighbour, and returns a label map — like its ``nvitk-transform`` counterpart —
+    #: nearest-neighbour, and returns a label map (like its ``nvitk-transform`` counterpart)
     #: instead of transforming the binary union the label target modes reduce the layer to.
     geometric: bool = False
 
 
-#: Ids of tools since folded into another: ``old id → (new id, params the old id fixes)``.
+#: Ids of tools since folded into another: ``old id -> (new id, params the old id fixes)``.
 #: Recorded steps and scripts written against the old id keep running.
 TOOL_ID_ALIASES: dict[str, tuple[str, dict[str, Any]]] = {
     "img_mask_keep_inside": (
@@ -177,7 +177,7 @@ def _sk(name: str) -> tuple[str, ...]:
         from nvitk.filters import skimage_filters as _f
 
         return tuple(getattr(_f, name))
-    except Exception:  # noqa: BLE001 — the registry must import without skimage
+    except Exception:  # noqa: BLE001 (the registry must import without skimage)
         return ("otsu",)
 
 
@@ -249,7 +249,7 @@ def _registration_choices() -> dict[str, tuple[str, ...]]:
         out["flirt_dof"] = tuple(str(d) for d in _flirt.FLIRT_DOF)
         out["flirt_cost"] = tuple(_flirt.FLIRT_COSTS)
         out["flirt_interp"] = tuple(_flirt.FLIRT_INTERPS)
-    except Exception:  # noqa: BLE001 — the registry must import without nipype
+    except Exception:  # noqa: BLE001 (the registry must import without nipype)
         pass
     try:
         from nvitk.registration import ants as _ants
@@ -1593,7 +1593,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "Collapse a 3D or 4D image along one axis (max, mean, median, min, std, sum)."
         ),
     ),
-    # ---- Interpolation -----------------------------------------------------------
+    # Interpolation
     GuiToolSpec(
         "interp_resample_axes",
         "Interpolation",
@@ -1675,7 +1675,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "slices with data."
         ),
     ),
-    # ---- Time (3D+t) ------------------------------------------------------------
+    # Time (3D+t)
     GuiToolSpec(
         "time_extract_frame",
         "Time & frequency",
@@ -1749,7 +1749,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "carry one (e.g. 73 %, 78 %, 83 % reconstructions)."
         ),
     ),
-    # ---- Frequency (k-space) ----------------------------------------------------
+    # Frequency (k-space)
     GuiToolSpec(
         "kspace_fft",
         "Time & frequency",
@@ -2405,7 +2405,7 @@ _PIPELINE_GUI: tuple[GuiToolSpec, ...] = tuple(
 
 _TOOLS = _TOOLS + _PIPELINE_GUI
 
-# ── FastSurfer (nvitk.gui.tools.fastsurfer_tools) ────────────────────────────
+# FastSurfer (nvitk.gui.tools.fastsurfer_tools)
 
 
 def _fastsurfer_default(kind: str) -> str:
@@ -2417,7 +2417,7 @@ def _fastsurfer_default(kind: str) -> str:
             return str(_fs.default_freesurfer_dest())
         path = _fs.freesurfer_home() if kind == "home" else _fs.fs_license()
         return str(path) if path else ""
-    except Exception:  # noqa: BLE001 — the registry must import without FastSurfer
+    except Exception:  # noqa: BLE001 (the registry must import without FastSurfer)
         return ""
 
 
@@ -2557,7 +2557,7 @@ _FASTSURFER_TOOLS: tuple[GuiToolSpec, ...] = (
 _TOOLS = _TOOLS + _FASTSURFER_TOOLS
 
 
-# ── FreeSurfer topology tools (nvitk.gui.tools.freesurfer_tools) ─────────────
+# FreeSurfer topology tools (nvitk.gui.tools.freesurfer_tools)
 # Listed only when FreeSurfer (and each tool's programs) is found; see visible_tool_ids().
 
 
@@ -2566,7 +2566,7 @@ def _fs_license_default() -> str:
         from nvitk.gui.tools.freesurfer_tools import default_license
 
         return default_license()
-    except Exception:  # noqa: BLE001 — the registry must import regardless
+    except Exception:  # noqa: BLE001 (the registry must import regardless)
         return ""
 
 
@@ -2630,7 +2630,7 @@ _TOOLS = _TOOLS + _FREESURFER_TOOLS
 #: Tools shown only when their external software is found (nvitk.gui.tools.freesurfer_tools).
 _GATED_TOOL_IDS = frozenset(t.id for t in _FREESURFER_TOOLS)
 
-# ── FSL (nvitk.gui.tools.fsl_tools) ──────────────────────────────────────────
+# FSL (nvitk.gui.tools.fsl_tools)
 
 
 def _fsl_choices(module: str, name: str, fallback: tuple[str, ...]) -> tuple[str, ...]:
@@ -2640,7 +2640,7 @@ def _fsl_choices(module: str, name: str, fallback: tuple[str, ...]) -> tuple[str
 
         value = getattr(importlib.import_module(f"nvitk.fsl.{module}"), name)
         return tuple(value)
-    except Exception:  # noqa: BLE001 — the registry must import regardless
+    except Exception:  # noqa: BLE001 (the registry must import regardless)
         return fallback
 
 
@@ -2844,7 +2844,7 @@ _FSL_TOOLS: tuple[GuiToolSpec, ...] = (
 
 _TOOLS = _TOOLS + _FSL_TOOLS
 
-# ── ASL perfusion: FSL BASIL (nvitk.gui.tools.fsl_tools) ─────────────────────
+# ASL perfusion: FSL BASIL (nvitk.gui.tools.fsl_tools)
 
 
 def _asl(tool_id: str, label: str, params: tuple[ParamSpec, ...] = (), *, cli: str = "") -> GuiToolSpec:

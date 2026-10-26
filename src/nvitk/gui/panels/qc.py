@@ -1,8 +1,8 @@
 """QC subwindow: pipeline/subject selector and Load into Napari.
 
 Supports two QC setups:
-- **XNAT** — catalog subjects + download pipeline resources (existing path).
-- **Local** — NIfTI root + results root on disk (no XNAT password).
+- **XNAT**: catalog subjects + download pipeline resources (existing path).
+- **Local**: NIfTI root + results root on disk (no XNAT password).
 """
 
 from __future__ import annotations
@@ -265,7 +265,7 @@ class QcPanel(QWidget):
 
         self._subjects = QListWidget()
         self._all_subjects: list[dict[str, Any]] = []
-        self._qc_statuses: dict[str, str] = {}  # subject_uid → revised/partial/pending
+        self._qc_statuses: dict[str, str] = {}  # subject_uid -> revised/partial/pending
 
         self._btn_refresh = QPushButton("Refresh subjects")
         self._btn_load = QPushButton("Load")
@@ -297,7 +297,7 @@ class QcPanel(QWidget):
 
         # Page setup only. Reading the subject list means querying the catalog,
         # which on a real dataset dominated GUI start-up (~6.8s of a 9.6s launch)
-        # for a tab most launches never open — so it waits for showEvent.
+        # for a tab most launches never open, so it waits for showEvent.
         self._subjects_loaded = False
         self._sync_source_page()
 
@@ -371,7 +371,7 @@ class QcPanel(QWidget):
         return page
 
     def _path_row(self, edit: QLineEdit) -> QWidget:
-        """Wrap *edit* with a "…" browse button that fills it from a directory picker."""
+        """Wrap *edit* with a "..." browse button that fills it from a directory picker."""
         row = QWidget()
         h = QHBoxLayout()
         h.setContentsMargins(0, 0, 0, 0)
@@ -420,7 +420,7 @@ class QcPanel(QWidget):
         self._reload_subjects()
 
     def showEvent(self, event: Any) -> None:
-        """Load the subject list the first time the tab is actually looked at."""
+        """Load the subject list the first time the tab is looked at."""
         super().showEvent(event)
         if not self._subjects_loaded:
             self._subjects_loaded = True

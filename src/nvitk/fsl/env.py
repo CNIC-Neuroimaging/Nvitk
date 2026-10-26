@@ -2,9 +2,9 @@
 
 Resolution order (first usable wins):
 
-1. ``$NVITK_FSLDIR`` — an explicit choice for nvitk only;
+1. ``$NVITK_FSLDIR``: an explicit choice for nvitk only;
 2. ``fsldir`` in ``external_tools.json`` (``nvitk-fsl use DIR``);
-3. ``$FSLDIR`` — an installation the shell already sources (``~/fsl``);
+3. ``$FSLDIR``: an installation the shell already sources (``~/fsl``);
 4. nvitk's own FSL core in this environment, ``$PREFIX/share/nvitk/fsl`` (``nvitk-fsl install``);
 5. inferred from where FSL commands are on ``PATH``.
 
@@ -62,7 +62,7 @@ def resolve_fsldir() -> Path | None:
     if _is_fsldir(managed_fsldir()):
         return managed_fsldir()
     # FSL on PATH without FSLDIR (a GUI started without sourcing fsl.sh): the binaries'
-    # location is enough — conda installs put wrappers in $FSLDIR/share/fsl/bin and the
+    # location is enough; conda installs put wrappers in $FSLDIR/share/fsl/bin and the
     # real files in $FSLDIR/bin, and an ancestor holds etc/fslversion either way.
     for name in ("fslmaths", "randomise", "fslmerge", "bet"):
         exe = shutil.which(name)
@@ -98,7 +98,7 @@ def _with_fsl_path(path: str, fsldir: Path) -> str:
     """*path* with FSL's wrapper directory first and its ``bin`` last.
 
     Only the wrappers go in front, as FSL's own ``fsl.sh`` does: ``$FSLDIR/bin`` also holds the
-    FSL environment's python, curl, tar …, which must never shadow the caller's. It is kept at
+    FSL environment's python, curl, tar ..., which must never shadow the caller's. It is kept at
     the end so a command without a wrapper is still found.
     """
     wrappers = fsldir / "share" / "fsl" / "bin"
@@ -159,7 +159,7 @@ def missing_commands(commands: tuple[str, ...] | list[str], fsldir: Path | None 
 
 
 def cuda_command(command: str, fsldir: Path | None = None) -> str | None:
-    """The GPU build of *command* (``eddy`` → ``eddy_cuda…``) when installed, else ``None``."""
+    """The GPU build of *command* (``eddy`` -> ``eddy_cuda...``) when installed, else ``None``."""
     for candidate in CUDA_COMMANDS.get(command, ()):
         if which(candidate, fsldir):
             return candidate

@@ -4,21 +4,21 @@ Cohort-scoped SGE job construction for CViT stages.
 Description
 -----------
 Same model as the topbrain pipeline (one job per stage, ``-hold_jid`` chains, everything run
-inside the nvitk Singularity image). The pipeline-agnostic pieces — source / container
-resolution, the unbound-path guard, the login-node driver — are reused from
+inside the nvitk Singularity image). The pipeline-agnostic pieces (source / container
+resolution, the unbound-path guard, the login-node driver) are reused from
 :mod:`nvitk.pipes.topbrain.util.sge_stage`; only the mount map and the resources are CViT's.
 
 Container mount map
 -------------------
 ::
 
-    /nvitk/src/     ← nvitk source checkout
-    /nvitk/data/    ← data_root        (labelled data, read-only)
-    /nvitk/output/  ← results_root
-    /models/        ← model_root
+    /nvitk/src/     <- nvitk source checkout
+    /nvitk/data/    <- data_root        (labelled data, read-only)
+    /nvitk/output/  <- results_root
+    /models/        <- model_root
     /nnunet/{raw,preprocessed,results}
     /nnssl/{raw,preprocessed,results}
-    /corpus/        ← corpus_root
+    /corpus/        <- corpus_root
 
 **Invariant**: worker commands are built from :func:`container_layout`, never from host paths;
 :func:`build_stage_spec` refuses to submit an argv holding an absolute path nothing mounts.

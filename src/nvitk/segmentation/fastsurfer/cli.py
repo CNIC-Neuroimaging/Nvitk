@@ -59,7 +59,7 @@ def main() -> None:
     segmentation, surfaces and longitudinal processing, run with this environment's install."""
 
 
-# ── shared options ───────────────────────────────────────────────────────────
+# shared options
 
 
 def _subject_options(fn: Any) -> Any:
@@ -140,7 +140,7 @@ def _seg_request(sd: Path, sid: str, t1: Path | None, **kw: Any) -> FastSurferRe
     )
 
 
-# ── segmentation ─────────────────────────────────────────────────────────────
+# segmentation
 
 
 @main.command("seg")
@@ -185,7 +185,7 @@ _module_command("hypothal", "hypothal", "Hypothalamus sub-segmentation (HypVINN)
 _module_command("cc", "cc", "Corpus callosum segmentation and shape analysis on a FastSurfer subject.")
 
 
-# ── surfaces / full / longitudinal ───────────────────────────────────────────
+# surfaces / full / longitudinal
 
 
 @main.command("surf")
@@ -243,7 +243,7 @@ def long_cmd(sd: Path, tid: str, t1s: tuple[Path, ...], tpids: tuple[str, ...], 
         raise click.ClickException(f"long_fastsurfer.sh failed (exit code {code}).")
 
 
-# ── module tools ─────────────────────────────────────────────────────────────
+# module tools
 
 
 def _run_module(argv_env: tuple[list[str], dict[str, str]], what: str) -> None:
@@ -288,7 +288,7 @@ def conform_cmd(image: Path, out: Path, vox_size: str, order: int, seg_input: bo
     _run_module(conform_argv(image, out, vox_size=vox_size, order=order, seg_input=seg_input), "conform")
 
 
-# ── set-up ───────────────────────────────────────────────────────────────────
+# set-up
 
 
 @main.command("info")
@@ -373,8 +373,8 @@ def set_freesurfer_cmd(freesurfer_home: Path) -> None:
 
 
 def _prepare_sge(name: str, values: dict[str, Any]) -> None:
-    """Before a cluster run: the container brings its own FreeSurfer, and the license — which only
-    this machine's configuration may know — is sent along as a bound file."""
+    """Before a cluster run: the container brings its own FreeSurfer, and the license (which only
+    this machine's configuration may know) is sent along as a bound file."""
     if "freesurfer_home" in values:
         values["freesurfer_home"] = None
     needs_license = name in ("surf", "run", "long") or bool(values.get("tal_reg"))

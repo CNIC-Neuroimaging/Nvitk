@@ -91,7 +91,7 @@ def distance_transform(
     """
     Euclidean distance transform of the background (outside foreground).
 
-    When *radius_mm* is set, return a binary tube (distance ≤ *radius_mm*).
+    When *radius_mm* is set, return a binary tube (distance <= *radius_mm*).
     Otherwise return float32 distance (mm if *spacing* is provided).
     """
     m = _as_bool_mask(mask)

@@ -8,9 +8,9 @@ Both T1 workbooks are **long**: one row per ``(subject, session, side, measureme
     ID           side  measurement  region      value    subject      session
 
 so ``measurement`` names the variable, ``region`` (with ``side``) names the region, and ``value``
-is the number. The earlier importer read these sheets as *wide* — one region per column — which
+is the number. The earlier importer read these sheets as *wide* (one region per column), which
 turned the column headers into region ids and kept one arbitrary row per subject. This reads the
-layout it actually has.
+layout it has.
 
 What each measurement becomes
 -----------------------------
@@ -19,7 +19,7 @@ quantities in different units: a cortical thickness in mm and a grey-matter volu
 share a variable id and still be interpretable.
 
 ``Index`` and ``SegId`` are skipped. They are FreeSurfer's internal row number and segmentation
-label id — bookkeeping that happens to be numeric, not measurements of anything.
+label id: bookkeeping that happens to be numeric, not measurements of anything.
 
 Region ids
 ----------
@@ -30,7 +30,7 @@ side and keep their bare name. ``region_label`` preserves the original spelling.
 Note on eTIV
 ------------
 ``eTIV`` arrives here as ``t1_volume_mm3`` at region ``etiv``. ``import_t1_etiv.py`` additionally
-publishes it as a dedicated ``t1_etiv_volume`` scalar — the same number under a name that is easier
+publishes it as a dedicated ``t1_etiv_volume`` scalar: the same number under a name that is easier
 to reach for as a normalization denominator. Running both is intentional; running neither leaves
 you without head-size correction.
 
@@ -48,9 +48,7 @@ Examples::
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import re
 from pathlib import Path
 from typing import Any, Sequence
@@ -84,7 +82,7 @@ T1_PIPELINE_ID = "t1_volumetry_v1"
 #: (WhiteSurfArea) is a surface area like ``SurfArea``, so each pair shares a variable and is told
 #: apart by its region.
 MEASUREMENT_MAP: dict[str, tuple[str, str | None, str]] = {
-    # ---- cortical, per parcel -------------------------------------------------
+    # cortical, per parcel
     "GrayVol": ("t1_gray_volume", "mm3", "Cortical grey-matter volume"),
     "ThickAvg": ("t1_thickness_avg", "mm", "Cortical thickness (mean)"),
     "ThickStd": ("t1_thickness_std", "mm", "Cortical thickness (SD within parcel)"),
@@ -94,18 +92,18 @@ MEASUREMENT_MAP: dict[str, tuple[str, str | None, str]] = {
     "GausCurv": ("t1_gaussian_curvature", "1/mm2", "Integrated rectified Gaussian curvature"),
     "FoldInd": ("t1_folding_index", None, "Folding index"),
     "CurvInd": ("t1_curvature_index", None, "Intrinsic curvature index"),
-    # ---- whole-brain scalars --------------------------------------------------
+    # whole-brain scalars
     "Volume_mm3": ("t1_volume_mm3", "mm3", "Segmented volume"),
     "Thickness_mm": ("t1_thickness_avg", "mm", "Cortical thickness (mean)"),
     "SurfArea_mm2": ("t1_surface_area", "mm2", "Cortical surface area"),
-    # ---- subcortical, per structure -------------------------------------------
+    # subcortical, per structure
     "NVoxels": ("t1_num_voxels", "count", "Segmented voxel count"),
     "normMean": ("t1_intensity_mean", None, "Normalized intensity (mean)"),
     "normStdDev": ("t1_intensity_std", None, "Normalized intensity (SD)"),
     "normMin": ("t1_intensity_min", None, "Normalized intensity (min)"),
     "normMax": ("t1_intensity_max", None, "Normalized intensity (max)"),
     "normRange": ("t1_intensity_range", None, "Normalized intensity (range)"),
-    # Ratios and QC counters (BrainSegVol-to-eTIV, SurfaceHoles, …).
+    # Ratios and QC counters (BrainSegVol-to-eTIV, SurfaceHoles, ...).
     "unitless": ("t1_index_unitless", None, "Dimensionless FreeSurfer index"),
 }
 
@@ -114,16 +112,14 @@ SKIP_MEASUREMENTS: frozenset[str] = frozenset({"Index", "SegId"})
 
 #: The catalog's default key for ``image_measurements`` does **not** include ``session_id``, so two
 #: T1 sessions of the same subject collide and the earlier one is dropped. Four subjects here have a
-#: repeat scan; keying on the session keeps both, which is the point of storing a session at all.
+#: repeat scan; keying on the session keeps both, which is why the session is stored at all.
 UPSERT_KEY: list[str] = [
     "subject_uid", "session_id", "modality", "region_id", "frame_index",
     "variable_id", "pipeline_id", "source_file", "source_sheet", "source_column",
 ]
 
 
-# ---------------------------------------------------------------------------
 # Parsing
-# ---------------------------------------------------------------------------
 def _region_token(side: Any, region: Any) -> str:
     """``('left', 'precuneus') -> 'left_precuneus'``; unsided regions keep their bare name."""
     name = re.sub(r"[^0-9A-Za-z]+", "_", str(region or "").strip()).strip("_").lower()
@@ -145,7 +141,7 @@ def read_t1_long(path: Path, *, sheet: str = "Sheet1") -> pd.DataFrame:
     Raises
     ------
     ValueError
-        When the sheet lacks the long-format columns — importing it as anything else is what
+        When the sheet lacks the long-format columns: importing it as anything else is what
         produced column-header region ids last time, so the shape is checked rather than assumed.
     """
     raw = read_tabular_source(path, sheet_name=sheet)
@@ -203,9 +199,7 @@ def plan(frame: pd.DataFrame, *, only: Sequence[str] | None = None) -> pd.DataFr
     return pd.DataFrame(rows)
 
 
-# ---------------------------------------------------------------------------
 # Publishing
-# ---------------------------------------------------------------------------
 def build_rows(
     frame: pd.DataFrame, *, path: Path, sheet: str, only: Sequence[str] | None = None
 ) -> tuple[pd.DataFrame, list[DerivedVariableRegistration]]:
@@ -291,9 +285,7 @@ def publish(
     log.ok("%s: wrote %d row(s) over %d variable(s).", path.name, len(rows), len(registrations))
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 @click.command("import-t1-regions")
 @click.option(
     "--cortical",

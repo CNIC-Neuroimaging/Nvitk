@@ -13,10 +13,10 @@ from .geometry import cumulative_s
 from .models import SkeletonTree
 
 def mask_to_surface(mask: np.ndarray, spacing, pre_refined_surface_path: Optional[str] = None):
-    """Binary mask → cleaned, smoothed, largest-region triangle surface (VTK marching cubes pipeline).
+    """Binary mask -> cleaned, smoothed, largest-region triangle surface (VTK marching cubes pipeline).
 
-    Pipeline: marching cubes → clean/triangulate → windowed-sinc smoothing →
-    fill holes → keep largest connected region → optional VMTK refinement
+    Pipeline: marching cubes -> clean/triangulate -> windowed-sinc smoothing ->
+    fill holes -> keep largest connected region -> optional VMTK refinement
     (:func:`refine_surface_for_vmtk`). If *pre_refined_surface_path* is given,
     the pre-refinement surface is also saved there for QC.
     """
@@ -113,7 +113,7 @@ AFFINE_KEY = "NVITK_AFFINE"
 
 
 def set_world_transform(affine, spacing) -> None:
-    """Install the case's voxel→RAS *affine* (and the mask *spacing*) for :func:`save_vtp`;
+    """Install the case's voxel->RAS *affine* (and the mask *spacing*) for :func:`save_vtp`;
     ``None`` restores the legacy ``index × spacing`` output."""
     if affine is None:
         _WORLD.update(affine=None, spacing=None)
@@ -125,7 +125,7 @@ def set_world_transform(affine, spacing) -> None:
 
 
 def to_world(points_mm: np.ndarray) -> np.ndarray:
-    """``index × spacing`` millimetres → scanner RAS (identity when no transform is installed)."""
+    """``index × spacing`` millimetres -> scanner RAS (identity when no transform is installed)."""
     pts = np.asarray(points_mm, dtype=float).reshape(-1, 3)
     aff = _WORLD["affine"]
     if aff is None:
@@ -274,7 +274,7 @@ def cross_section_tangents(pts: np.ndarray, half_window_mm: Optional[float] = No
     the point *half_window_mm* upstream to the one *half_window_mm* downstream, by arc length
     (default ``CROSS_SECTION_TANGENT_HALF_WINDOW_MM``). At least the neighbouring point on each side
     is used, and the window is one-sided at the ends, so a window up to one resampling step is
-    cow_morpho's ``pts[i + 1] − pts[i − 1]``. Zero where the chord is degenerate."""
+    cow_morpho's ``pts[i + 1] - pts[i - 1]``. Zero where the chord is degenerate."""
     pts = np.asarray(pts, dtype=float)
     n = len(pts)
     out = np.zeros((n, 3))
@@ -334,7 +334,7 @@ def ray_median_radius(contour_pts: np.ndarray, loops: List[List[int]], origin: n
     e = np.concatenate(ends) - a                   # segment vectors (M, 2)
     theta = 2.0 * np.pi * np.arange(k) / k
     d = np.column_stack([np.cos(theta), np.sin(theta)])  # ray directions (K, 2)
-    # Ray t·d (t > 0) against segment a + s·e (0 ≤ s < 1): t = (a × e) / (d × e), s = (a × d) / (d × e).
+    # Ray t·d (t > 0) against segment a + s·e (0 <= s < 1): t = (a × e) / (d × e), s = (a × d) / (d × e).
     denom = d[:, :1] * e[None, :, 1] - d[:, 1:] * e[None, :, 0]
     with np.errstate(divide="ignore", invalid="ignore"):
         t = (a[None, :, 0] * e[None, :, 1] - a[None, :, 1] * e[None, :, 0]) / denom
@@ -355,7 +355,7 @@ def compute_cross_section_radius(surface, pts: np.ndarray) -> Tuple[np.ndarray, 
     plane (normal from :func:`cross_section_tangents`), per ``CROSS_SECTION_RADIUS_METHOD``:
 
     ``ray_median``
-        :func:`ray_median_radius` — the median in-plane distance to the wall; the area is that
+        :func:`ray_median_radius`: the median in-plane distance to the wall; the area is that
         circle's, ``π r²``.
     ``largest_loop`` (cow_morpho)
         the largest closed loop's area, converted to the equivalent-circle radius. The largest loop

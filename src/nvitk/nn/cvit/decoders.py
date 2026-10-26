@@ -1,5 +1,5 @@
 """
-CViT decoders — token grid (+ conv skips) back to voxel resolution.
+CViT decoders: token grid (+ conv skips) back to voxel resolution.
 
 Description
 -----------
@@ -7,7 +7,7 @@ Description
     nnU-Net-style decoder. Level ``L-1`` (token resolution) fuses the projected transformer
     output ``T`` with the deepest conv feature; every shallower level upsamples with a
     transposed conv and concatenates the matching conv skip. Deep-supervision heads sit on
-    levels ``0 … L-2``, highest resolution first — the order and count nnU-Net's
+    levels ``0 ... L-2``, highest resolution first: the order and count nnU-Net's
     ``DeepSupervisionWrapper`` expects from ``pool_op_kernel_sizes``.
 :class:`PatchDecoder`
     Primus-style transposed-conv stack from the token grid alone (no skips). Used as the
@@ -17,7 +17,7 @@ Skip control
 ------------
 Applied per level ``i`` to the skip ``F_i`` before concatenation::
 
-    F_i ← F_i · skip_scale · gate_i · drop_i
+    F_i <- F_i · skip_scale · gate_i · drop_i
 
 ``skips``
     Hard enable; disabled levels are built without the concat channels.
@@ -30,7 +30,7 @@ Applied per level ``i`` to the skip ``F_i`` before concatenation::
     Training only: per-sample Bernoulli keep with probability ``1 - skip_drop_prob``, rescaled
     by ``1/(1-p)`` (inverted dropout); ``p = 1`` zeroes the skip.
 
-There is deliberately no fixed per-skip multiplier: ``concat → conv → InstanceNorm`` absorbs a
+There is deliberately no fixed per-skip multiplier: ``concat -> conv -> InstanceNorm`` absorbs a
 constant factor, so it would be a control that does nothing.
 
 Probe hooks
@@ -49,9 +49,7 @@ from torch import nn
 from ..blocks import ConvBlock, ConvNormAct, LayerNormNd, conv_nd, conv_transpose_nd
 from .config import CViTConfig
 
-# ──────────────────────────────────────────────────────────────────────────────
 # U-Net decoder
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class UNetDecoder(nn.Module):
@@ -65,8 +63,8 @@ class UNetDecoder(nn.Module):
         self.enabled = tuple(cfg.skips)
         self.deep_supervision = cfg.deep_supervision
 
-        # ---- level L-1: token fusion; levels L-2 … 0: upsample + skip ----------------------
-        # stages[i] is the conv body at level i; ups[i] upsamples level i+1 → level i using
+        # level L-1: token fusion; levels L-2 ... 0: upsample + skip
+        # stages[i] is the conv body at level i; ups[i] upsamples level i+1 -> level i using
         # the stride the tokenizer applied when it went from level i to i+1.
         self.token_proj = ConvNormAct(cfg.embed_dim, ch[-1], nd, kernel_size=1)
         self.stages = nn.ModuleList(
@@ -78,12 +76,12 @@ class UNetDecoder(nn.Module):
             for i in range(n - 1)
         )
 
-        # ---- segmentation heads on levels 0 … L-2 -------------------------------------------
+        # segmentation heads on levels 0 ... L-2
         self.seg_layers = nn.ModuleList(
             conv_nd(nd)(ch[i], cfg.num_classes, 1) for i in range(n - 1)
         )
 
-        # ---- skip control ------------------------------------------------------------------
+        # skip control
         if cfg.skip_gate == "learned":
             logit = log(cfg.skip_gate_init / (1.0 - cfg.skip_gate_init))
             self.gate_logits = nn.Parameter(torch.full((n,), float(logit)))
@@ -91,11 +89,11 @@ class UNetDecoder(nn.Module):
             self.gate_logits = None
         self.skip_drop_prob = float(cfg.skip_drop_prob)
         self.skip_scale = 1.0
-        # ---- probe state ----
+        # probe state
         self.token_scale = 1.0
         self.skip_off_levels: frozenset[int] = frozenset()
 
-    # ---- control API ---------------------------------------------------------------------
+    # control API
     def set_skip_scale(self, scale: float) -> None:
         """Global skip multiplier in ``[0, 1]`` (warm-up schedule)."""
         self.skip_scale = float(min(max(scale, 0.0), 1.0))
@@ -136,7 +134,7 @@ class UNetDecoder(nn.Module):
             raise RuntimeError(f"Skip level {i} is enabled but the tokenizer produced no feature.")
         return torch.cat((x, self._apply_skip(i, f)), dim=1)
 
-    # ---- forward ---------------------------------------------------------------------------
+    # forward
     def forward(
         self, tokens: torch.Tensor, skips: list[torch.Tensor | None]
     ) -> torch.Tensor | list[torch.Tensor]:
@@ -152,13 +150,11 @@ class UNetDecoder(nn.Module):
         return outs if self.deep_supervision else outs[0]
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Patch decoder
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class PatchDecoder(nn.Module):
-    """Transposed-conv stack token grid → voxels, one step per strided stage, no skips.
+    """Transposed-conv stack token grid -> voxels, one step per strided stage, no skips.
 
     Widths halve each step from ``embed_dim`` (floor 16). ``deep_supervision`` is accepted for
     interface parity with :class:`UNetDecoder` but there is only one output.
@@ -177,7 +173,7 @@ class PatchDecoder(nn.Module):
         self.body = nn.Sequential(*layers)
         self.head = conv_nd(nd)(c, out_channels, 1)
         self.deep_supervision = False
-        # ---- probe state (interface parity) ----
+        # probe state (interface parity)
         self.token_scale = 1.0
         self.skip_off_levels: frozenset[int] = frozenset()
 

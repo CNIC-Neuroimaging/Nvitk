@@ -19,17 +19,13 @@ from nvitk.pipes.pesa_fat.dixon_v5.labels import (
 )
 
 
-# ---------------------------------------------------------------------------
 # Pipeline identity (Just naming, nothing important)
-# ---------------------------------------------------------------------------
 
 PIPELINE_NAME = "dixon-v5"
 SGE_JOB_PREFIX = "PESAFat_DIXON"
 
 
-# ---------------------------------------------------------------------------
 # Filesystem fragments
-# ---------------------------------------------------------------------------
 
 STAGE1_DIR = "res_segmentation_dixon"     # <subj>/DIXON_<REGION>/<task>.nii.gz
 STAGE2_DIR = "res_post_processing_dixon"  # <subj>/{HEAD,THORAX,LEGS}[_VOL].nii.gz
@@ -40,9 +36,7 @@ INPUT_PREFIX = "DIXON"
 INPUT_SUFFIXES = ("FAT", "WATER", "FAT_FRACTION", "T2STAR")
 
 
-# ---------------------------------------------------------------------------
 # TotalSegmentator task plan (per Dixon region)
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -149,9 +143,7 @@ REGIONS = {
 REGION_ORDER = ("HEAD", "THORAX", "LEGS")
 
 
-# ---------------------------------------------------------------------------
 # Stage-3 measurement specs
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -211,10 +203,7 @@ def _lr_triplet(
 
 
 MEASURE_SPECS = (
-    # # HEAD: paravertebral (PVM) L, R, LR
-    # *_lr_triplet(
-    #     "DIXON_H_PVM_{side}", "HEAD", "HEAD.nii", HEAD_LABELS, "H_PVM_L", "H_PVM_R",
-    # ),
+    # HEAD paravertebral muscle (H_PVM L/R/LR) is segmented but not measured.
 
     # THORAX: liver (with WF), pancreas, kidneys L/R/LR, paravertebral L/R/LR,
     #         and bone-narrow vertebrae L3/L4.
@@ -279,9 +268,7 @@ WF_REFERENCE_LABELS = (
 )
 
 
-# ---------------------------------------------------------------------------
 # SGE / Singularity defaults
-# ---------------------------------------------------------------------------
 
 SGE_PROJECT     = "GPU"
 SGE_ACCOUNT     = "Prod"

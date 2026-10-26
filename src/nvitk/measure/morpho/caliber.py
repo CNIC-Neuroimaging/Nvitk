@@ -26,8 +26,8 @@ def detection_radius_is_cross_section() -> bool:
 
 
 def enlargement_cross_section_radius(s, r) -> np.ndarray:
-    """The cross-section radius an enlargement test reads: *r* itself, or — with
-    ``ENLARGEMENT_SMOOTH_CROSS_SECTION`` — its running median over ``ENLARGEMENT_CROSS_SECTION_MEDIAN_MM``
+    """The cross-section radius an enlargement test reads: *r* itself, or (with
+    ``ENLARGEMENT_SMOOTH_CROSS_SECTION``) its running median over ``ENLARGEMENT_CROSS_SECTION_MEDIAN_MM``
     of arc length (NaNs ignored; the ends padded with their own value).
 
     A single bad cut (the plane catching a branch opening, or oblique in a bend) spikes the
@@ -88,7 +88,7 @@ def compute_siphon_mask(
     Curvature is measured on the centerline smoothed at ``SIPHON_CURVATURE_SMOOTH_MM`` (anatomical
     scale). ``SIPHON_LEGACY_MASK`` restores cow_morpho's measurement (0.1 mm Menger curvature,
     ``INFLECT_SMOOTH_WIN``-point moving average), whose sampling noise exceeds the 0.10 mm⁻¹
-    threshold almost everywhere — the mask then covers whole vessels and the taper fit collapses
+    threshold almost everywhere: the mask then covers whole vessels and the taper fit collapses
     to a flat median reference.
     """
     if kappa_threshold is None:
@@ -162,8 +162,8 @@ def path_stretches(pts: Optional[np.ndarray], r: np.ndarray) -> Tuple[Optional[n
     """``(stretch id per point, blanking mask)`` for the ``stretch`` taper reference: the path cut
     at the installed junctions it passes through. A stretch shorter than
     ``TAPER_STRETCH_MIN_LENGTH_MM`` joins its upstream neighbour (the first one, its downstream
-    neighbour): two branch points close together would otherwise give a few millimetres — often
-    exactly a narrowing — a reference of their own. ``(None, all-False)`` for the ``envelope``
+    neighbour): two branch points close together would otherwise give a few millimetres (often
+    exactly a narrowing) a reference of their own. ``(None, all-False)`` for the ``envelope``
     method or without points."""
     n = len(r)
     if str(_cfg.TAPER_REFERENCE_METHOD).lower() != "stretch" or pts is None or len(pts) != n:
@@ -193,7 +193,7 @@ def taper_stretch_ids(pts: Optional[np.ndarray], r: np.ndarray) -> np.ndarray:
 
 def _quantile_line(s: np.ndarray, r: np.ndarray, tau: float) -> Tuple[float, float]:
     """``(a, b)`` of the τ-quantile line ``r ≈ a + b·s`` (pinball loss), its slope limited to
-    ``[−TAPER_STRETCH_MAX_DECLINE_PCT_PER_MM % × level, 0]`` (non-increasing when
+    ``[-TAPER_STRETCH_MAX_DECLINE_PCT_PER_MM % × level, 0]`` (non-increasing when
     ``TAPER_FIT_ENFORCE_NONINCREASING``; ``level`` = the τ-quantile radius)."""
     level = float(np.quantile(r, tau))
     cap = _cfg.TAPER_STRETCH_MAX_DECLINE_PCT_PER_MM
@@ -263,7 +263,7 @@ def _stretch_reference(
     out = np.full_like(r, np.nan, dtype=float)
     finite = np.isfinite(s) & np.isfinite(r)
     if len(s) and float(np.nanmax(s) - np.nanmin(s)) < float(_cfg.TAPER_STRETCH_SHORT_VESSEL_MM):
-        # A short vessel (A1, PComm, AChA…) has no taper to fit: its median, as the envelope
+        # A short vessel (A1, PComm, AChA...) has no taper to fit: its median, as the envelope
         # method (whose 10 mm end exclusions leave such a vessel nothing to fit).
         vals = r[valid_mask & finite]
         out[:] = float(np.median(vals)) if vals.size else np.nan
@@ -654,7 +654,7 @@ def detect_stenosis_segments(
 
     max_gap = _cfg.STENOSIS_MAX_INTERNAL_GAP_MM if max_internal_gap_mm is None else float(max_internal_gap_mm)
 
-    # Idea B: iterative re-fit — exclude detected lesion points from the
+    # Idea B: iterative re-fit; exclude detected lesion points from the
     # reference fit, recompute, re-detect.  Repeat until the lesion mask
     # stabilises (convergence) or TAPER_TWO_PASS_MAX_ITERATIONS is reached.
     if _cfg.TAPER_TWO_PASS:
@@ -669,7 +669,7 @@ def detect_stenosis_segments(
             segs_iter = hysteresis_segments_from_min_length(s, core_iter, support_iter, min_segment_mm, max_gap_mm=max_gap)
             new_mask = mask_from_segments(len(r), segs_iter) if segs_iter else np.zeros(len(r), dtype=bool)
             if np.array_equal(new_mask, lesion_mask):
-                break  # converged — reference and lesion map are stable
+                break  # converged: reference and lesion map are stable
             lesion_mask = new_mask
             if not lesion_mask.any():
                 break
@@ -811,7 +811,7 @@ def detect_enlargement_segments(
 
     max_gap = _cfg.ENLARGEMENT_MAX_INTERNAL_GAP_MM if max_internal_gap_mm is None else float(max_internal_gap_mm)
 
-    # Idea B: iterative re-fit — exclude detected lesion points from the
+    # Idea B: iterative re-fit; exclude detected lesion points from the
     # reference fit, recompute, re-detect.  Repeat until the lesion mask
     # stabilises (convergence) or TAPER_TWO_PASS_MAX_ITERATIONS is reached.
     if _cfg.TAPER_TWO_PASS:
@@ -830,7 +830,7 @@ def detect_enlargement_segments(
             )
             new_mask = mask_from_segments(len(r), segs_iter) if segs_iter else np.zeros(len(r), dtype=bool)
             if np.array_equal(new_mask, lesion_mask):
-                break  # converged — reference and lesion map are stable
+                break  # converged: reference and lesion map are stable
             lesion_mask = new_mask
             if not lesion_mask.any():
                 break
@@ -964,9 +964,9 @@ def flag_segments_from_min_length(
     max_gap_mm: float = 0.0,
     min_points: Optional[int] = None,
 ) -> List[Tuple[int, int]]:
-    """Group flagged points into ``(start, end)`` index segments, merging runs separated by ≤*max_gap_mm*.
+    """Group flagged points into ``(start, end)`` index segments, merging runs separated by <=*max_gap_mm*.
 
-    A merged segment survives if it spans ≥*min_segment_mm* of arc length OR
+    A merged segment survives if it spans >=*min_segment_mm* of arc length OR
     (when given) has at least *min_points* points.
     """
     s = np.asarray(s, dtype=float)

@@ -104,7 +104,7 @@ def query_sge_job_states(
     connect_timeout: float | None = 30.0,
 ) -> dict[str, str]:
     """``{job id: state}`` for *user*'s jobs in ``qstat`` (``qw`` queued, ``r`` running,
-    ``Eqw`` in error, ``hqw`` held…); a job missing from it has left the queue.
+    ``Eqw`` in error, ``hqw`` held...); a job missing from it has left the queue.
 
     Raises ``RuntimeError`` when ``qstat`` itself could not be run, so a caller can
     tell "no jobs" from "could not ask".
@@ -130,7 +130,7 @@ def query_sge_job_states(
 
 
 def describe_sge_state(state: str | None) -> str:
-    """A ``qstat`` state code in words (``"qw"`` → ``"queued"``)."""
+    """A ``qstat`` state code in words (``"qw"`` -> ``"queued"``)."""
     code = str(state or "")
     if not code:
         return ""

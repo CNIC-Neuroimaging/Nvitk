@@ -3,20 +3,18 @@ Export the active analysis dataframe.
 
 Description
 -----------
-Writes exactly what the table shows — measurements joined, derived columns computed, filter rules
-applied — so a spreadsheet handed to a collaborator matches the rows the model was fitted on.
+Writes exactly what the table shows (measurements joined, derived columns computed, filter rules
+applied), so a spreadsheet handed to a collaborator matches the rows the model was fitted on.
 
 An ``.xlsx`` export carries a second **provenance** sheet recording how the frame was built: which
 measurements and groupings, which covariates and the visits they came from, every active filter with
 the rows it removed, and every derived column's definition. Without it a spreadsheet is a number
-soup that nobody — including its author six months later — can reconstruct.
+soup that nobody (including its author six months later) can reconstruct.
 """
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence

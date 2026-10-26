@@ -25,7 +25,7 @@ def fnirt(
 ) -> FslCommand:
     """Non-linear registration of *input* to *ref*: warped image, coefficients and displacement field.
 
-    Give the FLIRT *affine* (input → ref) as the starting point; FNIRT does not search.
+    Give the FLIRT *affine* (input -> ref) as the starting point; FNIRT does not search.
     """
     out = base(out_base)
     argv = ["fnirt", f"--in={input}", f"--ref={ref}", f"--iout={nii(f'{out}_warped')}",
@@ -141,7 +141,7 @@ def epi_reg(
     echo_spacing: float | None = None,
     pe_dir: str | None = None,
 ) -> FslCommand:
-    """EPI → T1 boundary-based registration (with optional fieldmap unwarping)."""
+    """EPI -> T1 boundary-based registration (with optional fieldmap unwarping)."""
     out = base(out_base)
     argv = ["epi_reg", f"--epi={epi}", f"--t1={t1}", f"--t1brain={t1_brain}", f"--out={out}"]
     for key, value in (("wmseg", wmseg), ("fmap", fmap), ("fmapmag", fmap_mag), ("fmapmagbrain", fmap_mag_brain)):

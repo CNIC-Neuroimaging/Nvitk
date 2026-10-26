@@ -47,7 +47,7 @@ def _build_binary_mask(label_img: Image, label_ids: tuple[int, ...]) -> np.ndarr
 
 
 def _metric_suffix(metric: str) -> str:
-    """NIfTI filename suffix for *metric* (``"FF"`` → ``"FAT_FRACTION"``, else ``"T2STAR"``)."""
+    """NIfTI filename suffix for *metric* (``"FF"`` -> ``"FAT_FRACTION"``, else ``"T2STAR"``)."""
     metric = str(metric).strip().upper()
     if metric not in _METRICS:
         metric = "FF"
@@ -55,7 +55,7 @@ def _metric_suffix(metric: str) -> str:
 
 
 def _heatmap_metric_range(value_xyz: np.ndarray, mask_xyz: np.ndarray) -> tuple[float, float]:
-    """Colormap limits from masked metric voxels (2–98 percentile)."""
+    """Colormap limits from masked metric voxels (2-98 percentile)."""
     sel = value_xyz[mask_xyz]
     finite = sel[np.isfinite(sel)]
     if finite.size == 0:

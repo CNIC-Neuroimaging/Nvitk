@@ -2,18 +2,18 @@
 
 **Inputs (JSON)**
 
-- ``sge.json`` ``pipelines.topbrain`` — SGE project/account/memory, log and err dirs,
+- ``sge.json`` ``pipelines.topbrain``: SGE project/account/memory, log and err dirs,
   container path (see :mod:`nvitk.cluster.sge_json`).
-- ``sge.json`` ``pipelines.topbrain_paths`` — ``local_*`` / ``cluster_*`` data roots
+- ``sge.json`` ``pipelines.topbrain_paths``: ``local_*`` / ``cluster_*`` data roots
   (see :mod:`nvitk.pipes.topbrain.util.paths`).
 
 **Outputs (constants consumed by stages)**
 
-- ``DEFAULT_*`` / ``LOCAL_DEFAULT_*`` — data roots, forwarded from ``util.paths``.
-- ``SGE_*`` — project, account, memory, log/err dirs and ``CONTAINER_PATH``.
+- ``DEFAULT_*`` / ``LOCAL_DEFAULT_*``: data roots, forwarded from ``util.paths``.
+- ``SGE_*``: project, account, memory, log/err dirs and ``CONTAINER_PATH``.
 - Training and pre-training defaults (trainer names, patch/batch sizes, folds).
 
-Every value is read from ``sge.json`` on first use — there are no installation paths in this
+Every value is read from ``sge.json`` on first use: there are no installation paths in this
 file and nothing is resolved at import time, so ``--config-dir`` is honoured.
 """
 
@@ -27,31 +27,25 @@ from nvitk.cluster import sge_json as _sj
 from nvitk.core import lazy_config
 from nvitk.pipes.topbrain.util import paths as _paths_mod
 
-# ---------------------------------------------------------------------------
 # Pipeline identity
-# ---------------------------------------------------------------------------
 
 PIPELINE_NAME: str = "topbrain"
 SGE_JOB_PREFIX: str = "TOPBRAIN"
 
-# ---------------------------------------------------------------------------
 # Dataset defaults
-# ---------------------------------------------------------------------------
 
 #: Label set used unless ``--label-set`` says otherwise. ``ta36`` is the only modality-agnostic
 #: set and the one the 2026 track scores.
 DEFAULT_LABEL_SET: str = "ta36"
 
 #: Number of cross-validation folds. Grouped by patient id, so each fold holds out 5 of the 25
-#: patients — both their CT and their MR.
+#: patients: both their CT and their MR.
 DEFAULT_NUM_FOLDS: int = 5
 
 #: Seed for the fold assignment. Fixed so a re-run reproduces the same splits.
 DEFAULT_FOLD_SEED: int = 12345
 
-# ---------------------------------------------------------------------------
 # Intensity harmonisation (stage 0)
-# ---------------------------------------------------------------------------
 
 #: CTA window in Hounsfield units. The upper bound is deliberately high enough to keep bone
 #: distinguishable from contrast-filled lumen: the TA36 infraclinoid ICA classes (35/36) run
@@ -74,12 +68,10 @@ DEFAULT_CT_WINDOWS: tuple[tuple[float, float], ...] = (
 #: so a fixed window is meaningless and percentiles are used instead.
 DEFAULT_MR_PERCENTILES: tuple[float, float] = (0.5, 99.5)
 
-# ---------------------------------------------------------------------------
 # Training defaults
-# ---------------------------------------------------------------------------
 
 # Planning is not configured here. Stage 2 delegates it to ``nnUNetv2_preprocess_like_nnssl``,
-# which derives the plans — including their name, which embeds the chosen spacing — from the
+# which derives the plans (including their name, which embeds the chosen spacing) from the
 # pre-trained checkpoint. Stages 3-5 read the resulting identifier back from stage 2's
 # provenance rather than reconstructing it; see
 # :func:`nvitk.pipes.topbrain.stage2_train.resolve_trained_run`.
@@ -99,11 +91,9 @@ DEFAULT_SSL_CONFIG: str = "median"
 #: Self-supervised loss, by registry name (nnssl's ``MAEMSELoss``).
 DEFAULT_SSL_LOSS: str = "mse"
 
-# ---------------------------------------------------------------------------
 # SGE defaults (overridable via sge.json `pipelines.topbrain`)
-# ---------------------------------------------------------------------------
 
-#: Portable fallbacks for scratch locations. Everything else must come from ``sge.json`` — an
+#: Portable fallbacks for scratch locations. Everything else must come from ``sge.json``: an
 #: unset value resolves to ``None`` rather than to somebody else's filesystem.
 _FALLBACK_SGE_ROOT = Path(tempfile.gettempdir()) / "nvitk-sge"
 

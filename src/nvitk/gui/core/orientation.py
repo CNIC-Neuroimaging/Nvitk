@@ -58,7 +58,7 @@ def napari_dim_order_3d(affine: np.ndarray | None, ndim: int = 3) -> tuple[int, 
     Dims order for 3D axial viewing in Napari (matches in-plane layout after Ctrl+T).
 
     ``axial_dim_order`` alone yields ``(S, A, R)``; Napari's default display matches
-    ``(S, R, A)`` for typical RAS NIfTI — the same result as ``dims.transpose()`` once,
+    ``(S, R, A)`` for typical RAS NIfTI: the same result as ``dims.transpose()`` once,
     without calling transpose on load.
     """
     sup = superior_voxel_axis(affine, ndim)
@@ -89,7 +89,7 @@ def dim_order_2d_for_display(affine: np.ndarray | None, ndim: int = 3) -> tuple[
     """``dims.order`` for 2D display, preferring superior-first but keeping it renderable.
 
     Superior-first (:func:`napari_dim_order_3d`) is used whenever Napari can invert
-    the resulting displayed block. When it cannot — a permuting affine — step the
+    the resulting displayed block. When it cannot (a permuting affine), step the
     first slider axis that does leave an invertible pair, so the layer renders
     instead of crashing the canvas.
     """
@@ -204,7 +204,7 @@ def in_plane_affine(affine: np.ndarray) -> np.ndarray:
     3x3 display affine for a 2D image from its 4x4 voxel-to-world affine.
 
     Napari accepts a 4x4 affine on a 2D layer and only fails when it composes the
-    layer's transforms at draw time — on every repaint. Each voxel axis keeps the
+    layer's transforms at draw time, on every repaint. Each voxel axis keeps the
     world axis it runs along most, so the result stays invertible for axial, coronal
     and sagittal slices alike.
     """
@@ -225,7 +225,7 @@ def fit_affine_to_ndim(affine: np.ndarray, ndim: int) -> np.ndarray:
     Homogeneous *affine* resized to a layer of *ndim* axes.
 
     A 3D affine on a 2D layer keeps its in-plane part (:func:`in_plane_affine`);
-    otherwise Napari's own rule applies — layers align on their trailing axes.
+    otherwise Napari's own rule applies: layers align on their trailing axes.
     """
     from napari.utils.transforms import Affine
 
@@ -247,14 +247,14 @@ def install_affine_ndim_guard() -> None:
 
     Napari accepts a 4x4 affine on a 2D layer, then raises ``matmul ... size 3 is
     different from 4`` composing its transforms. The insert that hits it first
-    leaves the layer in the list, so every later repaint raises again — a loop of
+    leaves the layer in the list, so every later repaint raises again: a loop of
     tracebacks. Guarding the coercion covers every path a layer arrives by (nvitk
     readers, tools, plugins) and later ``layer.affine = ...`` assignments.
     """
     try:
         from napari.layers.base import base as napari_base
         from napari.utils.transforms import Affine
-    except Exception:  # noqa: BLE001 — no Napari, nothing to guard
+    except Exception:  # noqa: BLE001 (no Napari, nothing to guard)
         return
     original = napari_base.coerce_affine
     if getattr(original, "_nvitk_ndim_guard", False):
@@ -273,7 +273,7 @@ def install_affine_ndim_guard() -> None:
                 # N x N is a valid linear matrix and (N+1) x (N+1) a homogeneous one.
                 if arr.ndim == 2 and arr.shape[0] == arr.shape[1] and arr.shape[0] not in (ndim, ndim + 1):
                     affine = fit_affine_to_ndim(arr, ndim)
-        except Exception:  # noqa: BLE001 — fall back to Napari's own handling
+        except Exception:  # noqa: BLE001 (fall back to Napari's own handling)
             pass
         return original(affine, ndim=ndim, name=name)
 
@@ -331,7 +331,7 @@ def napari_affine_for_display(
                 if s is not None:
                     aff[i, i] = float(s)
 
-    # Drop spatial↔temporal cross-terms (common 4DFlow bug: X extent mapped onto T slider).
+    # Drop spatial<->temporal cross-terms (common 4DFlow bug: X extent mapped onto T slider).
     aff[0:3, t_ix] = 0.0
     aff[t_ix, 0:3] = 0.0
     aff[t_ix, t_ix] = float(t_scale)
@@ -343,10 +343,10 @@ def napari_affine_for_display(
     return aff
 
 
-# ── 3D+t display: time-leading layers ──────────────────────────────────────────
+# 3D+t display: time-leading layers
 #
 # Napari aligns layers by *trailing* dimension. A 4D volume stored ``XYZT`` puts
-# time last, so a 3D mask of the same grid lands on world dims (Y, Z, T) — the
+# time last, so a 3D mask of the same grid lands on world dims (Y, Z, T): the
 # reason 3D overlays used to inflate the time slider and never line up. Showing
 # 3D+t layers time-first (``TXYZ``, a zero-copy view) makes the spatial axes the
 # trailing three, exactly where every 3D layer sits, and lets the layer keep its
@@ -366,7 +366,7 @@ def world_ordered_columns(affine: np.ndarray | None) -> list[int] | None:
     """The affine's voxel columns sorted by the world axis each runs along most.
 
     Napari slices a layer assuming its data axis *i* runs along world axis *i*.
-    A file stored sagittally or coronally — and every non-axial single slice —
+    A file stored sagittally or coronally (and every non-axial single slice)
     breaks that: the plane on screen is fed by an axis that is not on screen, and
     Napari's slicing inverts a singular matrix on every draw. Reading the axes in
     this order instead keeps every flip and obliquity in the affine and only
@@ -381,7 +381,7 @@ def world_ordered_columns(affine: np.ndarray | None) -> list[int] | None:
         import nibabel as nib
 
         ornt = nib.orientations.io_orientation(aff)
-    except Exception:  # noqa: BLE001 — a degenerate affine: leave the order alone
+    except Exception:  # noqa: BLE001 (a degenerate affine: leave the order alone)
         return None
     if np.isnan(ornt).any():
         return None
@@ -416,7 +416,7 @@ def prepare_world_ordered_for_napari(
 
     * a 3D volume stored in another axis order than world (sagittal, coronal):
       the axes are read in world order (:func:`world_ordered_columns`);
-    * a 2D slice with a real position — a localizer, a surview, one DICOM
+    * a 2D slice with a real position: a localizer, a surview, one DICOM
       image: it becomes a one-voxel-thick 3D layer *at that position*. As a 2D
       layer Napari pins it to the viewer's last two axes in coordinates of its
       own, where it stretches every slider and lands nowhere near the anatomy.
@@ -457,7 +457,7 @@ def time_leading_permutation(axes: str | None, ndim: int) -> tuple[int, ...] | N
     """Array-axis permutation putting the single ``T``/``C`` axis of a 3D+t array first.
 
     ``None`` unless the array is 4D with exactly one time/channel axis and three
-    spatial ones — anything else keeps its historical display path.
+    spatial ones: anything else keeps its historical display path.
     """
     from nvitk.io._common import default_nifti_axes
 
@@ -512,7 +512,7 @@ def prepare_time_leading_for_napari(
     ax = (axes or default_nifti_axes(4)).upper()
     # Spatial axes in world order (identity for an axial acquisition): a coronal
     # or sagittal cine keeps its file order otherwise, and the axial view is then
-    # fed by its slice axis — a singular matrix Napari inverts on every draw.
+    # fed by its slice axis; a singular matrix Napari inverts on every draw.
     if affine is not None and np.asarray(affine).shape == (4, 4):
         columns = world_ordered_columns(_with_slice_normal(affine))
         if columns is not None:
@@ -633,7 +633,7 @@ def reorient_layer_for_view(layer: Any, target: str, viewer: Any = None) -> tupl
     """
     Change Napari display to *target* axis codes (e.g. ``LAS``).
 
-    Sign-only changes (R↔L, A↔P, S↔I) mirror the viewer via affine flips without
+    Sign-only changes (R<->L, A<->P, S<->I) mirror the viewer via affine flips without
     rewriting voxel data. Permutations reorder ``layer.data`` and rebuild a display
     affine so the on-screen layout matches *target*.
 
@@ -689,7 +689,7 @@ def reorient_layer_for_view(layer: Any, target: str, viewer: Any = None) -> tupl
             )
         # Data, axis order and affine change together: the canvas inverts the
         # block of the affine over its displayed axes, and an old affine under the
-        # new order — or the new one under the old order — can be singular. The
+        # new order (or the new one under the old order) can be singular. The
         # layer's redraws wait until all three are in place.
         events = layer.events
         with events.set_data.blocker(), events.affine.blocker(), events.data.blocker():
@@ -699,7 +699,7 @@ def reorient_layer_for_view(layer: Any, target: str, viewer: Any = None) -> tupl
                     ndim = int(viewer.dims.ndim)
                     if ndim == int(new_data.ndim):
                         viewer.dims.order = dim_order_2d_for_display(np.asarray(new_affine, dtype=float), ndim)
-                except Exception:  # noqa: BLE001 — configure_viewer_for_layer sets it again
+                except Exception:  # noqa: BLE001 (configure_viewer_for_layer sets it again)
                     pass
             layer.affine = np.asarray(new_affine, dtype=float)
 
@@ -936,7 +936,7 @@ def _focus_time_leading(viewer: Any, layer: Any, *, superior: int | None = None)
         if superior is not None and 0 <= superior < 3:
             axis = offset + 1 + int(superior)
             viewer.dims.set_current_step(axis, int(viewer.dims.nsteps[axis]) // 2)
-    except Exception:  # noqa: BLE001 — focus is cosmetic
+    except Exception:  # noqa: BLE001 (focus is cosmetic)
         pass
 
 
@@ -951,7 +951,7 @@ def default_ndisplay() -> int:
         from nvitk.gui.core.prefs import load_prefs
 
         value = int(load_prefs().get(NDISPLAY_PREF_KEY, 3))
-    except Exception:  # noqa: BLE001 — a preference must never block a launch
+    except Exception:  # noqa: BLE001 (a preference must never block a launch)
         value = 3
     return 2 if value == 2 else 3
 
@@ -988,8 +988,8 @@ def configure_viewer_for_layer(
             return
 
         if layer_is_time_leading(layer):
-            # A 3D+t volume opens like a 3D one — axial order, the default display
-            # mode — with the time slider on its first frame; the play button on that
+            # A 3D+t volume opens like a 3D one (axial order, the default display
+            # mode) with the time slider on its first frame; the play button on that
             # slider is the cine.
             from nvitk.gui.core.spatial import layer_affine
 

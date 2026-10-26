@@ -4,7 +4,7 @@ Marginal means and pairwise contrasts for R models ``emmeans`` will not take.
 Description
 -----------
 ``emmeans`` is how every R engine here gets its confidence bands and its level-versus-level
-comparisons — and it refuses some of the models this toolkit fits:
+comparisons, and it refuses some of the models this toolkit fits:
 
 .. code-block:: text
 
@@ -25,8 +25,8 @@ So this rebuilds the small part of ``emmeans`` that those quantities need, in R:
 
 including ``emmeans``' equal-weight averaging over factors outside the specification, which is
 what makes a marginal mean marginal. It is checked against ``emmeans`` itself on models
-``emmeans`` *does* accept — means, standard errors, intervals and pairwise contrasts all agree to
-1e-9 — so the fallback is not a second, slightly different answer.
+``emmeans`` *does* accept (means, standard errors, intervals and pairwise contrasts all agree to
+1e-9), so the fallback is not a second, slightly different answer.
 
 Used only when ``emmeans`` declines a model. Where it works it stays in charge, because it also
 handles the models a design matrix does not describe on its own: an ``mmrm`` fit's covariance
@@ -35,9 +35,7 @@ term, an ``lmer`` fit's random effects.
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from typing import Any, Sequence
 
 import pandas as pd
@@ -225,10 +223,10 @@ def linear_pairs(
     With *by*, the comparisons are formed within each of its levels and the level is returned in
     a ``.by`` column, matching what the ``emmeans`` path renames its own by-column to. With
     *reference* as well, each comparison becomes the difference-in-differences against that
-    level — an interaction contrast — and the reference's own rows are dropped, being zero by
+    level (an interaction contrast), and the reference's own rows are dropped, being zero by
     construction.
 
-    Unadjusted: the correction is applied in Python across the comparisons actually kept, so
+    Unadjusted: the correction is applied in Python across the comparisons kept, so
     that every engine's brackets mean the same thing.
     """
     return _call(

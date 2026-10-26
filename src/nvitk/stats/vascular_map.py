@@ -4,13 +4,13 @@ Model estimates drawn on a schematic of the cerebral circulation.
 Description
 -----------
 A forest plot of nineteen vessel coefficients is a list. It answers "which vessel has the largest
-effect" and nothing else — the reader cannot see that the two carotids moved together, that the
+effect" and nothing else: the reader cannot see that the two carotids moved together, that the
 effect is confined to the posterior circulation, or that the venous side is untouched, because a
 forest plot has no notion of which vessel feeds which.
 
 This module draws the same numbers on a top-down schematic of the circle of Willis and the dural
 sinuses, so those patterns are visible at a glance. It is a *view of a fit*, not a new analysis:
-the numbers are whatever the caller passes in — estimated marginal means, model coefficients,
+the numbers are whatever the caller passes in; estimated marginal means, model coefficients,
 conservation residuals, QC scores.
 
 Geometry
@@ -25,7 +25,7 @@ translation table.
 Significance
 ------------
 Two ways to show it, and they answer different questions. Colouring by **estimate** with the
-non-significant vessels greyed asks "where is the effect, and is it credible" — the default,
+non-significant vessels greyed asks "where is the effect, and is it credible": the default,
 because a coloured map that ignores uncertainty invites reading noise as signal. Colouring by
 **p-value** asks only "where is the evidence", and deliberately says nothing about direction or
 size; it is the right view when comparing coverage across models, and the wrong one for reporting
@@ -37,9 +37,7 @@ found non-significant, and the two must not look alike.
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import re
 from typing import Any, Mapping, Sequence
 
@@ -51,7 +49,7 @@ from nvitk.stats import _model_values
 
 log = Logger()
 
-#: Colour for a vessel the model has no estimate for — drawn as an empty outline, never filled.
+#: Colour for a vessel the model has no estimate for: drawn as an empty outline, never filled.
 COLOR_ABSENT: str = "#d9d9d9"
 #: Colour for a vessel whose estimate did not reach *alpha*. Distinct from absent on purpose.
 COLOR_NONSIGNIFICANT: str = "#9e9e9e"
@@ -61,16 +59,14 @@ COLOR_OUTLINE: str = "#b9c4d0"
 DEFAULT_ALPHA: float = 0.05
 
 
-# ---------------------------------------------------------------------------
 # Geometry
-# ---------------------------------------------------------------------------
 #: ``node -> (control points, stroke width, label anchor, label text)``.
 #:
 #: Control points are smoothed into a curve (see :func:`_smooth_path`), so three or four per vessel
-#: are enough. Widths are relative and roughly follow calibre — an ICA is drawn heavier than a
-#: communicating artery — which keeps the schematic legible when many vessels are grey.
+#: are enough. Widths are relative and roughly follow calibre (an ICA is drawn heavier than a
+#: communicating artery), which keeps the schematic legible when many vessels are grey.
 VESSEL_PATHS: dict[str, tuple[tuple[tuple[float, float], ...], float, tuple[float, float], str]] = {
-    # ---- Anterior circulation ------------------------------------------------
+    # Anterior circulation
     # The carotid siphon enters from below, turns up, and bifurcates into ACA and MCA at ~y=0.60.
     "lica": (((0.320, 0.330), (0.332, 0.470), (0.362, 0.600)), 9.0, (0.248, 0.470), "ICA"),
     "rica": (((0.680, 0.330), (0.668, 0.470), (0.638, 0.600)), 9.0, (0.752, 0.470), "ICA"),
@@ -83,7 +79,7 @@ VESSEL_PATHS: dict[str, tuple[tuple[tuple[float, float], ...], float, tuple[floa
     "raca": (((0.638, 0.600), (0.608, 0.700), (0.568, 0.798), (0.536, 0.856)), 7.0,
              (0.628, 0.792), "ACA"),
     "acomm": (((0.464, 0.856), (0.500, 0.874), (0.536, 0.856)), 6.0, (0.582, 0.898), "AComA"),
-    # ---- Posterior circulation -----------------------------------------------
+    # Posterior circulation
     "basi": (((0.500, 0.330), (0.500, 0.400), (0.500, 0.468)), 8.0, (0.586, 0.352), "Basilar"),
     # The vertebrals converge on the basilar from below. Kept tight to the midline so the straight
     # sinus can pass outside them without the two systems crossing.
@@ -92,10 +88,10 @@ VESSEL_PATHS: dict[str, tuple[tuple[tuple[float, float], ...], float, tuple[floa
     "lva": (((0.462, 0.268), (0.480, 0.300), (0.500, 0.330)), 6.5, (0.428, 0.244), "VA"),
     "rva": (((0.538, 0.268), (0.520, 0.300), (0.500, 0.330)), 6.5, (0.572, 0.244), "VA"),
     # Carried past the PComm junction: the posterior cerebral does not end where the communicating
-    # artery joins it, and stopping there drew P1 alone — the shortest vessel on the figure for one
+    # artery joins it, and stopping there drew P1 alone; the shortest vessel on the figure for one
     # of the larger ones.
     # Carried past the PComm junction, posterolaterally around the midbrain. Extending it *up* and
-    # out instead would have it cross the carotid — true of the real anatomy, which passes behind
+    # out instead would have it cross the carotid: true of the real anatomy, which passes behind
     # the ICA, but unreadable in a flat schematic with no depth to show the crossing.
     "lpca": (((0.500, 0.468), (0.456, 0.492), (0.412, 0.500), (0.386, 0.470),
               (0.376, 0.420)), 7.0, (0.430, 0.404), "PCA"),
@@ -103,7 +99,7 @@ VESSEL_PATHS: dict[str, tuple[tuple[tuple[float, float], ...], float, tuple[floa
               (0.624, 0.420)), 7.0, (0.570, 0.404), "PCA"),
     "lpcomm": (((0.362, 0.600), (0.378, 0.552), (0.412, 0.500)), 5.0, (0.240, 0.560), "PComA"),
     "rpcomm": (((0.638, 0.600), (0.622, 0.552), (0.588, 0.500)), 5.0, (0.790, 0.560), "PComA"),
-    # ---- Venous drainage -----------------------------------------------------
+    # Venous drainage
     # Routed outside the vertebral confluence: the previous path crossed both of them on its way
     # to the torcula, which read as an anastomosis that does not exist.
     "strs": (((0.336, 0.300), (0.362, 0.226), (0.416, 0.168), (0.500, 0.140)), 7.0,
@@ -112,8 +108,8 @@ VESSEL_PATHS: dict[str, tuple[tuple[tuple[float, float], ...], float, tuple[floa
             (0.196, 0.062), "Left Transverse Sinus"),
     "rts": (((0.500, 0.140), (0.648, 0.100), (0.812, 0.166), (0.896, 0.330)), 8.0,
             (0.816, 0.076), "Right Transverse Sinus"),
-    # The sagittal sinus is strictly midline, and drawing it that way bisected the circle of Willis
-    # — a line through the middle of the arterial anatomy that belongs to a different system and
+    # The sagittal sinus is strictly midline, and drawing it that way bisected the circle of Willis:
+    # a line through the middle of the arterial anatomy that belongs to a different system and
     # reads as though it connected to it. It is swept laterally instead, following the falx from
     # the vertex back to the torcula the way an oblique view shows it, so it sits *outside* the
     # arterial circle and *between* the straight sinus and the left transverse. That is a
@@ -139,7 +135,7 @@ _CONFLUENCE: tuple[float, float] = (0.500, 0.140)
 
 
 #: Hemisphere-melted keys and the pair of drawn vessels each stands for. A frame grouped by
-#: hemisphere reports ``ICA`` rather than ``LICA``/``RICA``, and that key canonicalizes to nothing —
+#: hemisphere reports ``ICA`` rather than ``LICA``/``RICA``, and that key canonicalizes to nothing,
 #: which left the map able to draw only the three midline vessels. One averaged value belongs on
 #: *both* sides, since that is what it was averaged from.
 BILATERAL_KEYS: dict[str, tuple[str, str]] = {
@@ -177,7 +173,7 @@ def is_perfusion_territory(label: Any) -> bool:
 
 def unmapped_vessel_labels(labels: Sequence[Any]) -> list[str]:
     """
-    Which of *labels* this schematic cannot draw — for telling the user *why* it would be empty.
+    Which of *labels* this schematic cannot draw, for telling the user *why* it would be empty.
 
     Mirrors :func:`nvitk.stats.brain_map.regions_without_geometry`, and exists for the same reason:
     an empty figure is a worse answer than a sentence naming the levels that did not resolve.
@@ -187,14 +183,14 @@ def unmapped_vessel_labels(labels: Sequence[Any]) -> list[str]:
 
 def nodes_for_label(label: Any) -> list[str]:
     """
-    Drawn vessels a grouping level refers to — one, or **two** for a hemisphere-melted key.
+    Drawn vessels a grouping level refers to: one, or **two** for a hemisphere-melted key.
 
     A vessel-wise frame gives ``LICA`` and the answer is one node. A hemisphere-wise frame gives
     ``ICA``: a single number averaged over the two carotids, which belongs on both of them. Painting
-    it on neither — the previous behaviour, because ``ICA`` canonicalizes to nothing — left a
+    it on neither (the previous behaviour, because ``ICA`` canonicalizes to nothing) left a
     hemisphere-grouped model with three drawable vessels out of seventeen.
 
-    Returns ``[]`` for anything that is not a vessel at all — **including an ASL perfusion
+    Returns ``[]`` for anything that is not a vessel at all: **including an ASL perfusion
     territory**. ``left_mca_8`` canonicalizes to ``lmca`` because the two share an anatomical name,
     but a perfusion value belongs on the parenchyma that artery supplies, not on the artery: drawing
     mL/100 g/min along a conduit measured in mL/min states something the data does not say. Those
@@ -223,7 +219,7 @@ def _smooth_path(points: Sequence[tuple[float, float]]) -> Any:
     """
     A smooth :class:`~matplotlib.path.Path` through *points*.
 
-    Quadratic Béziers anchored on the midpoints of successive control points — the standard way to
+    Quadratic Béziers anchored on the midpoints of successive control points: the standard way to
     get a C¹ curve through a polyline without fitting a spline. Two points degrade to a straight
     line, which is what a two-point vessel should be.
     """
@@ -244,9 +240,7 @@ def _smooth_path(points: Sequence[tuple[float, float]]) -> Any:
     return Path(verts, codes)
 
 
-# ---------------------------------------------------------------------------
 # Value extraction
-# ---------------------------------------------------------------------------
 def vascular_values_from_frame(
     frame: pd.DataFrame,
     *,
@@ -257,7 +251,7 @@ def vascular_values_from_frame(
     """
     Map a per-region result table onto canonical vessel nodes.
 
-    Accepts whatever spelling the frame uses — ``LICA``, ``left_ica``, ``Left-ICA`` all resolve —
+    Accepts whatever spelling the frame uses (``LICA``, ``left_ica``, ``Left-ICA`` all resolve)
     through :func:`nodes_for_label`. Rows that are not vessels (a lobe, a cortical parcel, an
     intercept term) are dropped silently: a mixed result table is the normal case, and only its
     vessel rows belong on this figure.
@@ -292,21 +286,21 @@ def vascular_values_from_result(
     Two sources, because they answer different questions and are read differently:
 
     ``coefficient``
-        The fixed effect of each vessel level, read from the parameter table — patsy names them
+        The fixed effect of each vessel level, read from the parameter table: patsy names them
         ``territory[T.LICA]``, so the level is recovered from the term. These are contrasts
         *against the reference level*, which is therefore absent from the map by construction: it
         is the zero everything else is measured from, not a vessel with no effect.
 
     ``mean``
         The observed mean of *outcome* within each vessel, from *data*. Not a model estimate at
-        all — no covariate adjustment, no p-values — but it is what "estimated marginal means"
-        reduces to for a model whose only term is the vessel, and it is the honest fallback when
+        all (no covariate adjustment, no p-values), but it is what "estimated marginal means"
+        reduces to for a model whose only term is the vessel, and it is the safe fallback when
         the fit has no per-vessel parameter to read.
 
     contrast : str
         A level of an interacting factor, as :func:`interaction_contrasts` names it (``sex[T.M]``).
-        The vessel's value becomes its **simple effect at that level** — main effect plus the
-        interaction — which is the profile actually seen in that group. Left empty, the map shows
+        The vessel's value becomes its **simple effect at that level** (main effect plus the
+        interaction), which is the profile seen in that group. Left empty, the map shows
         the main effect, i.e. the profile at the interacting factor's *reference* level; on a model
         with an interaction that is one group's answer presented as if it were everyone's.
 
@@ -340,7 +334,7 @@ def vascular_values_from_result(
 
 
 def _term_parts(name: str) -> list[str]:
-    """Split a patsy/R interaction term into its factors (``a[T.x]:b[T.y]`` → two parts)."""
+    """Split a patsy/R interaction term into its factors (``a[T.x]:b[T.y]`` -> two parts)."""
     return _model_values.term_parts(name)
 
 
@@ -362,8 +356,8 @@ def interaction_contrasts(
 
     A model with ``territory * sex`` estimates a different vessel profile for each sex, and the
     coefficient table holds them as ``territory[T.LICA]:sex[T.M]``. Without naming which side of
-    the interaction to draw, the map would show only the main effect — the profile at the *other*
-    factor's reference level — and quietly present it as the whole story.
+    the interaction to draw, the map would show only the main effect (the profile at the *other*
+    factor's reference level), and silently present it as the whole story.
 
     Empty when the model has no interaction on the vessel term, which is the signal a caller needs
     to hide the selector rather than offer one with nothing in it.
@@ -377,15 +371,13 @@ def group_coefficient_terms(result: Any, *, group_column: str = "territory") -> 
     """
     Per-group terms this fit estimates for *group_column*, e.g. ``["(Intercept)", "age_c"]``.
 
-    Empty when the model has no random structure over that factor — which is the signal a caller
+    Empty when the model has no random structure over that factor, which is the signal a caller
     needs to fall back to the fixed effects instead of offering a menu with nothing in it.
     """
     return _model_values.group_coefficient_terms(result, group_column=group_column)
 
 
-# ---------------------------------------------------------------------------
 # Figure
-# ---------------------------------------------------------------------------
 def plot_vascular_map(
     values: Mapping[str, float],
     *,
@@ -414,25 +406,25 @@ def plot_vascular_map(
         ``{canonical node: p}``. Required for *mode* ``"pvalue"`` and for significance masking.
     mode : {"estimate", "pvalue"}
         What colour encodes. ``"estimate"`` maps the value through a diverging or sequential
-        colormap; ``"pvalue"`` maps −log₁₀(p), which spreads the small p-values that matter instead
+        colormap; ``"pvalue"`` maps -log₁₀(p), which spreads the small p-values that matter instead
         of compressing them all against zero.
     mask_nonsignificant : bool
         In ``"estimate"`` mode, draw vessels with ``p >= alpha`` in grey. Has no effect without
-        *pvalues* — and is skipped with a warning rather than silently colouring everything, since
+        *pvalues*, and is skipped with a warning rather than silently colouring everything, since
         an unmasked map looks identical to one where everything is significant.
     center : float, optional
         Value the diverging colormap centres on. Defaults to 0 when the values straddle it (an
         effect), and to no centring when they do not (a mean).
     vmin, vmax : float, optional
         Pin the colour scale instead of taking it from these values. Needed whenever several
-        figures have to be *compared* — the frames of a cardiac animation above all, where a scale
+        figures have to be *compared*: the frames of a cardiac animation above all, where a scale
         refitted per frame animates the scale rather than the flow, and systole and diastole come
         out looking identical because each saturates its own range.
     annotate : bool
         Print each vessel's value beside it.
     hide : sequence of str
-        Vessels to leave off the figure entirely — not drawn, not labelled, and **not counted in
-        the colour scale**. That last part is the point: hiding the one vessel that dominates the
+        Vessels to leave off the figure entirely, not drawn, not labelled, and **not counted in
+        the colour scale**. Hiding the one vessel that dominates the
         range is how you see the structure among the rest, which a figure that merely blanked it
         would not give you. Distinct from a vessel with no estimate, which is drawn as an outline
         because "not measured" is information.
@@ -471,7 +463,7 @@ def plot_vascular_map(
     if unknown:
         log.info("Vascular map: %s have no drawn geometry and are omitted.", ", ".join(unknown))
 
-    # ---- Colour scale ---------------------------------------------------------
+    # Colour scale
     if mode == "pvalue":
         scalars = {k: -np.log10(max(p, 1e-300)) for k, p in pvalues.items() if k in VESSEL_PATHS}
         colormap = plt.get_cmap(cmap or "viridis")
@@ -500,7 +492,7 @@ def plot_vascular_map(
             colormap = plt.get_cmap(cmap or "viridis")
         bar_label = label or "estimate"
 
-    # ---- Canvas ---------------------------------------------------------------
+    # Canvas
     if ax is None:
         fig, ax = plt.subplots(figsize=(7.6, 8.0))
     else:
@@ -510,7 +502,7 @@ def plot_vascular_map(
     ax.add_patch(PathPatch(outline, facecolor="none", edgecolor=COLOR_OUTLINE, lw=10.0,
                            capstyle="round", joinstyle="round", zorder=1))
 
-    # ---- Vessels --------------------------------------------------------------
+    # Vessels
     ordered = [n for n in VESSEL_PATHS if n in _VENOUS_NODES]
     ordered += [n for n in VESSEL_PATHS if n not in _VENOUS_NODES]
     for depth, node in enumerate(ordered):
@@ -535,7 +527,7 @@ def plot_vascular_map(
         # Stroke twice: a dark casing under the coloured core, so adjacent vessels stay separable
         # when their values are close.
         # The casing is dark under a valued vessel, to separate neighbours whose colours are
-        # close, and light under an absent one — a dark casing shows through the dashes and turns
+        # close, and light under an absent one: a dark casing shows through the dashes and turns
         # "no estimate" into a striped bar that reads as emphasis rather than absence.
         casing = "#2b2b2b" if has_value else "#e2e2e2"
         ax.add_patch(PathPatch(path, facecolor="none", edgecolor=casing,
@@ -562,7 +554,7 @@ def plot_vascular_map(
         ax.annotate("Confluence", xy=(_CONFLUENCE[0], _CONFLUENCE[1] - 0.062), ha="center",
                     va="center", fontsize=7.5, color="#1a1a1a", zorder=90)
 
-    # ---- Frame ----------------------------------------------------------------
+    # Frame
     ax.set_xlim(-0.02, 1.02)
     ax.set_ylim(0.0, 1.05)
     ax.set_aspect("equal")

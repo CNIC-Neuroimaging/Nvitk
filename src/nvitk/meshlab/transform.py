@@ -109,7 +109,7 @@ def align_principal_axes(obj: _S) -> tuple[_S, np.ndarray]:
 
 @dataclass(frozen=True)
 class IcpResult:
-    """ICP outcome: the 4x4 moving→fixed affine and the fit."""
+    """ICP outcome: the 4x4 moving->fixed affine and the fit."""
 
     affine: np.ndarray
     rms: float
@@ -118,7 +118,7 @@ class IcpResult:
 
 
 def _best_fit(src: np.ndarray, dst: np.ndarray, *, scaling: bool) -> np.ndarray:
-    """Least-squares rigid (or similarity) transform src → dst (Umeyama)."""
+    """Least-squares rigid (or similarity) transform src -> dst (Umeyama)."""
     mu_s, mu_d = src.mean(axis=0), dst.mean(axis=0)
     a, b = src - mu_s, dst - mu_d
     cov = b.T @ a / len(src)

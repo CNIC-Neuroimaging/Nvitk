@@ -1,8 +1,8 @@
 """Quick-access orientation switcher for the active Napari layer.
 
 One button in the tools dock that reports the active layer's axis codes and
-applies a new target in a single click — the same display reorientation as
-Transform → *View / reorient orientation* with ``Action = reorient``, without
+applies a new target in a single click: the same display reorientation as
+Transform -> *View / reorient orientation* with ``Action = reorient``, without
 walking through the tool form.
 """
 

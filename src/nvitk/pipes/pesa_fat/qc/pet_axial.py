@@ -307,7 +307,7 @@ def _axial_block(
 
 
 def _flip_lr_2d(arr: np.ndarray) -> np.ndarray:
-    """Flip left–right (patient R/L) for QC slice display."""
+    """Flip left-right (patient R/L) for QC slice display."""
     return np.ascontiguousarray(np.asarray(arr)[::-1, ...])
 
 

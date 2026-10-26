@@ -1,7 +1,7 @@
 """Long external commands that run while the GUI stays usable.
 
 :func:`~nvitk.gui.core.log_panel.run_subprocess_logged` keeps the window painting
-but holds clicks and keys until the command exits — right for a tool that takes
+but holds clicks and keys until the command exits: right for a tool that takes
 seconds, wrong for FastSurfer's surface stage or an FSL ``bedpostx`` that take an
 hour. An :class:`ExternalJob` runs the command in its own process group and returns
 at once:
@@ -9,7 +9,7 @@ at once:
 * its output streams into the log panel, and an activity task counts the time;
 * the *Jobs* window lists every running job with its latest stage and a **Cancel**
   button (the whole process group is stopped: the shell scripts start children);
-* ``on_finished(code)`` runs on the GUI thread when the command exits — that is
+* ``on_finished(code)`` runs on the GUI thread when the command exits: that is
   where results are loaded into the viewer;
 * closing the main window with jobs still running asks first, and stops them.
 
@@ -92,7 +92,7 @@ class ExternalJob(QObject):
         self._relay.line.connect(self._on_line)
         self._relay.finished.connect(self._on_finished)
 
-    # ── lifecycle ────────────────────────────────────────────────────────────
+    # lifecycle
 
     @property
     def running(self) -> bool:
@@ -166,7 +166,7 @@ class ExternalJob(QObject):
         except subprocess.TimeoutExpired:
             _signal_group(self._proc.pid, signal.SIGKILL)
 
-    # ── GUI-thread callbacks ─────────────────────────────────────────────────
+    # GUI-thread callbacks
 
     def _on_line(self, text: str) -> None:
         if not text.strip():
@@ -199,7 +199,7 @@ class ExternalJob(QObject):
         if self.on_finished is not None and not self.cancelled:
             try:
                 self.on_finished(self.returncode)
-            except Exception as exc:  # noqa: BLE001 — a failed load must not kill the GUI
+            except Exception as exc:  # noqa: BLE001 (a failed load must not kill the GUI)
                 gui_log(f"{self.title}: could not load the results: {exc}", error=True)
                 try:
                     from nvitk.gui.tools.runner import notify
@@ -217,7 +217,7 @@ def _signal_group(pid: int, sig: int) -> None:
         pass
 
 
-# ── the Jobs window ──────────────────────────────────────────────────────────
+# the Jobs window
 
 
 class _JobRow(QWidget):
@@ -355,7 +355,7 @@ class _Registry(QObject):
             widget.installEventFilter(self)
             self._guarded.add(id(widget))
 
-    def eventFilter(self, obj: Any, event: Any) -> bool:  # noqa: N802 — Qt naming
+    def eventFilter(self, obj: Any, event: Any) -> bool:  # noqa: N802 (Qt naming)
         if event.type() == QEvent.Type.Close and self.running():
             names = "\n".join(f"  • {j.title}" for j in self.running())
             answer = QMessageBox.question(

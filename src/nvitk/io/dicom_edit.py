@@ -1,4 +1,4 @@
-"""Edit DICOM headers and export a chosen subset of files — anonymized if wanted.
+"""Edit DICOM headers and export a chosen subset of files: anonymized if wanted.
 
 A :class:`DicomEditor` is an ordered list of operations, each scoped to a set of
 files: set a tag, delete a tag, or de-identify (:class:`Anonymize`, a subset of
@@ -7,9 +7,9 @@ written until :func:`export_dicom`; :meth:`DicomEditor.header` shows a file's
 header as it will be written.
 
 De-identification here replaces the patient's name and ID, removes the other
-identifying attributes (addresses, physicians, institution, device serial…), can
+identifying attributes (addresses, physicians, institution, device serial...), can
 shift or blank the dates, drops private tags, and gives every study / series /
-instance a new UID — consistently across files, so the series still fit together.
+instance a new UID: consistently across files, so the series still fit together.
 It does not look inside the pixels: text burned into the image (secondary
 captures, dose screens) stays.
 
@@ -337,7 +337,7 @@ def export_dicom(
     or ``flat``; folder names come from the exported (edited) headers, so an
     anonymized export does not carry the original names. *names*: ``original``,
     ``numbered`` (``IM00001.dcm`` per folder) or ``auto`` (numbered when the files
-    are anonymized — original names often hold UIDs or names — else original).
+    are anonymized (original names often hold UIDs or names) else original).
     Pixel data and transfer syntax are kept as they are.
     """
     import pydicom

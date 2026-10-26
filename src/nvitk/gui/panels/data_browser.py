@@ -394,7 +394,7 @@ class DataBrowserPanel(QWidget):
         self._sync_dicom_to_browser()
 
     def _make_dicom_to_browser_box(self) -> QCheckBox:
-        """"Open DICOM in the DICOM browser first" — one on each source page, one setting."""
+        """"Open DICOM in the DICOM browser first": one on each source page, one setting."""
         box = QCheckBox("Open DICOM in the DICOM browser first")
         box.setToolTip(
             "DICOM scans go to the DICOM browser tab, where their series and files are listed — "
@@ -590,7 +590,7 @@ class DataBrowserPanel(QWidget):
         return page
 
     def _path_row(self, edit: QLineEdit) -> QWidget:
-        """Wrap *edit* with a "…" browse button that fills it from a directory picker."""
+        """Wrap *edit* with a "..." browse button that fills it from a directory picker."""
         row = QWidget()
         h = QHBoxLayout()
         h.setContentsMargins(0, 0, 0, 0)

@@ -13,8 +13,8 @@ and manim, not nvitk.
 Render (manim environment; ``--no-text`` drops every caption, title, legend and inset)::
 
     EP_FAST=1 python scripts/anim/eicab_pp_manim.py -ql --fps 15
-    python scripts/anim/eicab_pp_manim.py -qh --fps 30              # → eicab_postprocess.mp4
-    python scripts/anim/eicab_pp_manim.py -qh --fps 30 --no-text    # → eicab_postprocess_notext.mp4
+    python scripts/anim/eicab_pp_manim.py -qh --fps 30              # -> eicab_postprocess.mp4
+    python scripts/anim/eicab_pp_manim.py -qh --fps 30 --no-text    # -> eicab_postprocess_notext.mp4
 """
 
 from __future__ import annotations
@@ -114,7 +114,7 @@ class EicabPostProcess(CaptionScene):
         occ = {k: sel(f"occ_{k}").astype(float) for k in lab}
         arrival = sel("arrival").astype(float)
 
-        # ---- geometry: world mm (RAS) → scene --------------------------------------------------
+        # geometry: world mm (RAS) -> scene
         final_w = world_all[np.asarray(data["occ_final"]) > 0]
         centre = (final_w.max(0) + final_w.min(0)) / 2.0
         scale = OBJECT_WIDTH / float(np.ptp(final_w[:, :2], axis=0).max())
@@ -143,7 +143,7 @@ class EicabPostProcess(CaptionScene):
             sop = np.where(oc > 0, 0.9, 0.0)
             return col, op, sop, _occ_size(oc)
 
-        # ---- legend (labels present at the end) ------------------------------------------------
+        # legend (labels present at the end)
         present = sorted({int(v) for v in np.unique(np.asarray(data["label_final"])) if v > 0}
                          | {int(v) for v in np.unique(np.asarray(data["label_raw"])) if v > 0})
 
@@ -171,7 +171,7 @@ class EicabPostProcess(CaptionScene):
             self.remove(img)
             return img
 
-        # ---- 0 · title ---------------------------------------------------------------------------
+        # 0 · title
         self.set_camera_orientation(phi=62 * DEGREES, theta=96 * DEGREES, zoom=1.45, frame_center=view(1.45))
         self.add(field.group)
         title = Text("eICAB post-process", font=FONT, weight=BOLD, color=INK, font_size=34)
@@ -186,7 +186,7 @@ class EicabPostProcess(CaptionScene):
         self.begin_ambient_camera_rotation(rate=ROTATION)
         self.wait(T(1.0))
 
-        # ---- 1 · eICAB's labels ------------------------------------------------------------------
+        # 1 · eICAB's labels
         v = meta["volume_mm3"]
         cap = self.caption("eICAB's Circle-of-Willis labels", [
             (f"{meta['n_raw_labels']} vessels labelled by eICAB's network, inside its CoW box", INK, 20),
@@ -198,7 +198,7 @@ class EicabPostProcess(CaptionScene):
         self.play(FadeIn(legend), run_time=T(0.6))
         self.wait(T(2.4))
 
-        # ---- 2 · drop the anterior choroidals ----------------------------------------------------
+        # 2 · drop the anterior choroidals
         cap1 = self.caption("1 · Drop the anterior choroidals", [
             (f"LAChA / RAChA: {meta['acha_mm3']} mm³", INK, 20),
             ("small, and eICAB's least reliable labels", INK_SOFT, 18),
@@ -211,7 +211,7 @@ class EicabPostProcess(CaptionScene):
         field.transition(self, na_col, na_op, na_sop, na_size, run_time=T(1.0))
         self.wait(T(1.2))
 
-        # ---- 3 · local re-segmentation -----------------------------------------------------------
+        # 3 · local re-segmentation
         drop = (1.0 - v["reseg"] / max(v["noacha"], 1e-9)) * 100.0
         cap2 = self.caption("2 · Local re-segmentation at half maximum", [
             ("T = bg + ½(core − bg), per vessel, from its own intensities", INK, 20),
@@ -226,7 +226,7 @@ class EicabPostProcess(CaptionScene):
         self.wait(T(2.4))
         self.play(FadeOut(img), run_time=T(0.5))
 
-        # ---- 4 · trunks to the floor -------------------------------------------------------------
+        # 4 · trunks to the floor
         e = meta["extension"]
 
         def ext_text(lid: str, label: str) -> str:
@@ -262,7 +262,7 @@ class EicabPostProcess(CaptionScene):
         self.wait(T(1.6))
         self.play(FadeOut(img), FadeOut(lines), run_time=T(0.5))
 
-        # ---- 5 · vertebral split -----------------------------------------------------------------
+        # 5 · vertebral split
         va = meta["va_split"]
         if va.get("applied"):
             cap4 = self.caption("4 · Split the vertebrals off the basilar", [
@@ -279,7 +279,7 @@ class EicabPostProcess(CaptionScene):
         else:
             prev_cap = cap3
 
-        # ---- 6 · distal growth -------------------------------------------------------------------
+        # 6 · distal growth
         dg = meta["distal"]
         added = sum(float(x) for x in dg.values())
         cap5 = self.caption("5 · Distal growth along the Frangi tree", [
@@ -328,7 +328,7 @@ class EicabPostProcess(CaptionScene):
             prev_cap = cap5
         self.wait(T(1.0))
 
-        # ---- 7 · siphon correction ---------------------------------------------------------------
+        # 7 · siphon correction
         sip = meta.get("siphon") or {}
         cut_entries = {k: x for k, x in sip.items() if (x.get("loops_cut") or 0) > 0}
         removed = np.asarray(data["siphon_removed"], float)
@@ -364,7 +364,7 @@ class EicabPostProcess(CaptionScene):
             fi_col, fi_op, fi_sop, fi_size = style("final")
             field.transition(self, fi_col, fi_op, fi_sop, fi_size, run_time=T(0.8))
 
-        # ---- end card ----------------------------------------------------------------------------
+        # end card
         end = self.caption("Post-processed eICAB mask", [
             (f"volume {v['raw']:.0f} → {v['final']:.0f} mm³: thinner lumen, full trunks, distal trees", INK, 20),
             ("writes *_pp, centerlines_mask_pp and eicab_postprocess.json", INK_SOFT, 18),

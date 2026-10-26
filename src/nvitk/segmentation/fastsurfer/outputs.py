@@ -129,7 +129,7 @@ class SubjectOutputs:
         return None
 
 
-# ── lookup tables ────────────────────────────────────────────────────────────
+# lookup tables
 
 _LUT_FILES = {
     "freesurfer": "FastSurferCNN/config/FreeSurferColorLUT.txt",
@@ -173,13 +173,13 @@ def lut_for(name: str | None, home: Path | None = None) -> dict[int, tuple[str, 
     return read_lut(home / rel)
 
 
-# ── stats ────────────────────────────────────────────────────────────────────
+# stats
 
 
 def read_stats(path: str | Path) -> tuple[list[str], list[dict[str, Any]], dict[str, str]]:
     """``(columns, rows, measures)`` from a FreeSurfer-format ``.stats`` file.
 
-    *measures* are the ``# Measure`` header lines (``{name: "value unit"}``) — eTIV,
+    *measures* are the ``# Measure`` header lines (``{name: "value unit"}``): eTIV,
     brain volume and similar whole-brain numbers.
     """
     columns: list[str] = []
@@ -235,7 +235,7 @@ def cc_measures(subject_dir: str | Path) -> dict[str, Any]:
     return {k: v for k, v in data.items() if isinstance(v, (int, float, str))} if isinstance(data, dict) else {}
 
 
-# ── surfaces ─────────────────────────────────────────────────────────────────
+# surfaces
 
 
 def read_surface(path: str | Path) -> tuple[np.ndarray, np.ndarray]:
@@ -260,13 +260,13 @@ def read_annot_values(path: str | Path) -> tuple[np.ndarray, list[str]]:
 
 
 def read_morph(path: str | Path) -> np.ndarray:
-    """A per-vertex FreeSurfer curv-format file (``?h.thickness`` …)."""
+    """A per-vertex FreeSurfer curv-format file (``?h.thickness`` ...)."""
     import nibabel as nib
 
     return np.asarray(nib.freesurfer.read_morph_data(str(path)))
 
 
-# ── import manifest (see nvitk.gui.tools.external_io) ─────────────────────────
+# import manifest (see nvitk.gui.tools.external_io)
 
 
 def subject_manifest(
@@ -278,7 +278,7 @@ def subject_manifest(
     base: str | Path | None = None,
 ) -> dict[str, Any]:
     """What to open from a FastSurfer subject: its volumes (*keys*, else all on disk), surfaces
-    (pial coloured by thickness), ``.stats`` tables and corpus-callosum shape — as an import
+    (pial coloured by thickness), ``.stats`` tables and corpus-callosum shape, as an import
     manifest with paths relative to *base* (default: the subject folder). Built without Qt:
     the SGE worker sends it back with the files it lists."""
     from nvitk.gui.tools.external_io import manifest_layer

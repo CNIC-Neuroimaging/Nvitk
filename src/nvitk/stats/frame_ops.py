@@ -1,5 +1,5 @@
 """
-Analysis-frame operations — declarative row filters and derived columns.
+Analysis-frame operations: declarative row filters and derived columns.
 
 Description
 -----------
@@ -10,10 +10,10 @@ Pure-pandas building blocks shared by the Statmodels GUI and by notebooks. Two f
     against a threshold, keep a numeric range, or drop Tukey-fence outliers). Rules compose: they are
     applied in order against the *same* frame, and each one reports how many rows it removed. A rule
     whose column is absent from the frame is **skipped and reported**, never treated as "drop
-    everything" — that is what lets a saved filter set survive a reload that changes the column set.
+    everything": that is what lets a saved filter set survive a reload that changes the column set.
 
 ``DerivedColumn`` / :func:`apply_derived_columns`
-    Named columns computed from existing ones, either by a canned transform (``log``, ``zscore``, …)
+    Named columns computed from existing ones, either by a canned transform (``log``, ``zscore``, ...)
     or by a free-form expression over the frame. They are materialized as real columns so they work
     everywhere a measurement does: as a formula LHS/RHS, as a plot axis, and as a filter target.
 
@@ -28,9 +28,7 @@ parameters with no error; ``NaN`` is dropped and counted in the fit metadata ins
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import re
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
@@ -54,9 +52,7 @@ DEFAULT_IQR_K = 1.5
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Row filters
-# ──────────────────────────────────────────────────────────────────────────────
 #: Relative tolerance for ``==`` / ``!=`` on a float column. Typing "3.8" must match a stored
 #: 3.7999999999999998, and no measurement in this toolkit is meaningful to nine significant digits.
 EQUALITY_RTOL = 1e-9
@@ -67,7 +63,7 @@ def comparable_text(series: pd.Series) -> pd.Series:
     *series* as text for a string comparison, without the spurious ``.0`` on whole numbers.
 
     ``astype(str)`` renders a float column's ``0`` as ``"0.0"`` and a visit id read as a number as
-    ``"4.0"``, so ``contains 4`` and ``equals 0`` — typed the way anybody types them — matched
+    ``"4.0"``, so ``contains 4`` and ``equals 0`` (typed the way anybody types them) matched
     nothing. Integral values are rendered as integers here; everything else keeps its own repr.
     """
     text = series.astype(str)
@@ -105,13 +101,13 @@ def apply_row_filter(df: pd.DataFrame, column: str, op: str, value: str) -> pd.D
     Filter *df* to rows where *column* satisfies *op* against *value*.
 
     ``>`` / ``>=`` / ``<`` / ``<=`` are always numeric. ``==`` / ``!=`` / ``equals`` compare as
-    numbers when the column and the typed value both are, and as text otherwise — comparing them as
+    numbers when the column and the typed value both are, and as text otherwise: comparing them as
     text throughout is what made ``!= 0`` keep every zero, since ``str(0.0)`` is ``"0.0"`` and that
     is not the string ``"0"``. ``contains`` is a substring test by nature and stays textual, over
     the rendering :func:`comparable_text` produces.
 
     A missing value fails every comparison except ``!=``, where it passes: a row with no value is
-    genuinely not equal to the thing being excluded, and dropping it would quietly discard rows the
+    not equal to the thing being excluded, and dropping it would silently discard rows the
     filter was never about.
 
     Returns *df* unchanged if *column* is missing or blank.
@@ -170,7 +166,7 @@ def apply_iqr_filter(
     With *by* set, the fences are computed within each level of that column. That is the meaningful
     scope for image measurements, whose magnitude depends on the region: a global fence is driven by
     the spread *between* regions rather than within them, so it misses real outliers inside each
-    region and — when one region sits far from the rest — can discard that region wholesale. Rows
+    region and (when one region sits far from the rest) can discard that region wholesale. Rows
     with a missing value are kept; dropping them is the fit's job, not the filter's.
     """
     if df.empty or column not in df.columns:
@@ -217,13 +213,13 @@ def _apply_range_rule(
     Keep rows whose numeric *column* value lies in ``[low, high]`` (either bound may be open).
 
     With *outside*, the band is what gets dropped instead: rows below *low* **or** above *high*
-    survive. That is the tails-only question — "show me the subjects this measurement is extreme
-    in" — which is otherwise two mutually exclusive rules that no sequence of ANDed filters can
+    survive. That is the tails-only question ("show me the subjects this measurement is extreme
+    in"), which is otherwise two mutually exclusive rules that no sequence of ANDed filters can
     express, since each rule sees the previous one's output.
 
     ``keep_na`` decides what a missing value means. By default it fails, which is right for a
     measurement: a row with no value cannot be shown to be inside the range. It is wrong for a
-    metric that is only *defined* on some rows — a junction residual exists on the parent vessel
+    metric that is only *defined* on some rows: a junction residual exists on the parent vessel
     and nowhere else, so failing the NaNs would drop every vessel that was never checked. The IQR
     rule already keeps NaN for the same reason. It applies to both directions: a missing value is
     no more outside the band than it is inside it.
@@ -271,21 +267,21 @@ class FilterRule:
 
     column: str
     kind: str
-    # ---- kind="compare" --------------------------------------------------------
+    # kind="compare"
     op: str = "=="
     value: str = ""
-    # ---- kind="values" ---------------------------------------------------------
+    # kind="values"
     values: tuple[str, ...] = ()
     exclude: bool = False
-    # ---- kind="range" ----------------------------------------------------------
+    # kind="range"
     low: float | None = None
     high: float | None = None
-    #: Keep the tails instead of the band — rows below *low* or above *high*.
+    #: Keep the tails instead of the band: rows below *low* or above *high*.
     outside: bool = False
     #: Treat a missing value as passing rather than failing. For a metric defined on
     #: only some rows, failing the NaNs would drop everything that was never checked.
     keep_na: bool = False
-    # ---- kind="iqr" ------------------------------------------------------------
+    # kind="iqr"
     k: float = DEFAULT_IQR_K
     by: str | None = None
     enabled: bool = True
@@ -373,7 +369,7 @@ def apply_filter_rules(
     (filtered, report)
         *report* has one entry per rule: ``{"rule", "n_before", "n_after", "removed", "skipped",
         "reason"}``. A rule referencing a column that is not in the frame is skipped with
-        ``reason="column not in frame"`` and removes nothing — a saved filter set must not silently
+        ``reason="column not in frame"`` and removes nothing: a saved filter set must not silently
         empty a frame whose columns changed.
     """
     out = df
@@ -425,9 +421,7 @@ def filtered_columns(rules: Sequence[FilterRule]) -> set[str]:
     return {r.column for r in rules if r.enabled and r.column}
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Column types
-# ──────────────────────────────────────────────────────────────────────────────
 #: ``key -> (menu label, one-line effect)``. A column's dtype is not cosmetic: patsy and R decide
 #: whether a term is a slope or a set of contrasts from it, so ``visit`` stored as 1/2/3 enters a
 #: model as a *linear trend in visit number* unless it is made a factor.
@@ -449,7 +443,7 @@ def cast_column(series: pd.Series, kind: str) -> pd.Series:
     Recast one column to *kind*, one of :data:`COLUMN_TYPES`.
 
     Casting never raises on bad cells: a value that will not convert becomes missing, because the
-    alternative — failing the whole frame because one row holds ``"n/a"`` — is worse than losing
+    alternative (failing the whole frame because one row holds ``"n/a"``) is worse than losing
     that row from the model. The count of newly-missing cells is the caller's to report.
 
     ``factor`` goes through ``str`` before ``category`` so that a numerically-coded factor (visit
@@ -489,8 +483,8 @@ def _as_factor_preserving_order(series: "pd.Series") -> "pd.Categorical":
     Coerce *series* to a pandas Categorical **without disturbing an existing level order**.
 
     ``pd.Categorical(series.astype(str))`` re-derives the categories by sorting, so a column whose
-    reference level was deliberately set — the first category is what patsy and R contrast against
-    — silently reverts to alphabetical. That is invisible in the frame and only shows up as the
+    reference level was deliberately set (the first category is what patsy and R contrast against
+) silently reverts to alphabetical. That is invisible in the frame and only shows up as the
     wrong baseline in the coefficient table.
 
     Categories are stringified because R wants character levels, keeping their order; the rare
@@ -515,14 +509,14 @@ def factors_for_r(df: pd.DataFrame, *, columns: Sequence[str] = ()) -> pd.DataFr
     Two corrections, both invisible in the frame itself and visible only in the coefficient table:
 
     **Ordered categoricals are flattened.** R applies ``contr.poly`` to an ordered factor, so a
-    binned column crosses over and comes back as ``gr_plaque.L`` / ``.Q`` / ``.C`` — orthogonal
+    binned column crosses over and comes back as ``gr_plaque.L`` / ``.Q`` / ``.C``: orthogonal
     polynomial *trend* contrasts, named after nothing that appears in the data, instead of one
     contrast per level against the reference. :func:`cut_into_bins` marks its result ordered so that
     patsy takes the lowest bin as the baseline and plots keep the bins in sequence; neither of those
     needs the ordering to survive into R, where its only effect is to change the contrast scheme out
     from under the panel's reference-level control.
 
-    **Named *columns* are coerced to factors**, level order preserved — ``mmrm`` rejects a character
+    **Named *columns* are coerced to factors**, level order preserved: ``mmrm`` rejects a character
     repeated or subject variable outright, and lme4 would read a numeric subject id as a covariate.
 
     Level order is what carries the reference: both patsy and R contrast against a factor's *first*
@@ -533,7 +527,7 @@ def factors_for_r(df: pd.DataFrame, *, columns: Sequence[str] = ()) -> pd.DataFr
         series = out[column]
         if isinstance(series.dtype, pd.CategoricalDtype) and series.dtype.ordered:
             # astype(str) renders missing values as "nan", which is not among the categories and so
-            # lands back as NaN — the levels are exactly the ones that were declared.
+            # lands back as NaN: the levels are exactly the ones that were declared.
             out[column] = pd.Categorical(
                 series.astype(str), categories=[str(c) for c in series.cat.categories]
             )
@@ -554,16 +548,16 @@ def merge_levels(
 
     The categorical counterpart of :func:`cut_into_bins`. A six-level APOE genotype spends five
     degrees of freedom on contrasts nobody asked for and puts four subjects in ``E2/E2``; folding it
-    to ``E4_carrier`` / ``E2_carrier`` / ``E3E3`` asks the question actually being posed, with
+    to ``E4_carrier`` / ``E2_carrier`` / ``E3E3`` asks the question being posed, with
     groups large enough to estimate.
 
     Parameters
     ----------
     mapping : sequence of (level, group)
-        Source level → new group name. A level may appear once; the caller's validation catches
+        Source level -> new group name. A level may appear once; the caller's validation catches
         duplicates before this is reached.
     unmapped : str
-        ``"keep"`` leaves an unlisted level under its own name — the safe default, since a level
+        ``"keep"`` leaves an unlisted level under its own name; the safe default, since a level
         that appears after the definition was written is then visible rather than silently pooled.
         ``"drop"`` makes it missing. Any other string becomes a catch-all group of that name.
 
@@ -596,7 +590,7 @@ def merge_levels(
 
     recoded = text.map(recode).astype("string")
 
-    # Order: the groups in the order they were named, then anything kept, then a catch-all last —
+    # Order: the groups in the order they were named, then anything kept, then a catch-all last,
     # so the definition's first group is the reference and stray levels never displace it.
     ordered: list[str] = []
     for _level, group in mapping:
@@ -613,12 +607,12 @@ def set_reference_level(series: pd.Series, level: str) -> pd.Series:
     Make *level* the first category of *series*, so models contrast every other level against it.
 
     Both patsy and R take a factor's **first** level as the treatment reference, so reordering the
-    categories is all it takes — no formula surgery, no ``C(x, Treatment(...))`` that would have to
+    categories is all it takes: no formula surgery, no ``C(x, Treatment(...))`` that would have to
     be written differently for statsmodels and for lme4. Reordering is also lossless: no value
     changes, only the order the levels are declared in.
 
     A non-categorical series is converted first, because "reference level" has no meaning for a
-    float. A *level* not present is refused rather than silently ignored — a reference that does not
+    float. A *level* not present is refused rather than silently ignored: a reference that does not
     exist would leave the model contrasting against whatever happened to sort first.
     """
     text = series.astype("string")
@@ -660,7 +654,7 @@ def apply_column_types(
     """
     Apply a ``{column: kind}`` map to *df*.
 
-    Returns the frame and a list of human-readable notes — one per cast that lost values, so the
+    Returns the frame and a list of human-readable notes: one per cast that lost values, so the
     UI can say "12 cells became missing" instead of leaving the user to notice a shrunken model.
     """
     if not types:
@@ -693,7 +687,7 @@ def ensure_unique_columns(df: pd.DataFrame, *, context: str = "frame") -> pd.Dat
     Return *df* with string column names and no duplicates, on a fresh index.
 
     pandas tolerates two columns of the same name; polars and R both reject it outright, so a frame
-    that is merely awkward in pandas becomes a hard failure the moment it crosses into either — with
+    that is merely awkward in pandas becomes a hard failure the moment it crosses into either, with
     a message ("Polars dataframes require unique string names for columns") that says nothing about
     which column is at fault.
 
@@ -720,9 +714,7 @@ def ensure_unique_columns(df: pd.DataFrame, *, context: str = "frame") -> pd.Dat
     return out
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Derived columns
-# ──────────────────────────────────────────────────────────────────────────────
 def _zscore(series: pd.Series) -> pd.Series:
     """Standardize to zero mean / unit SD, ignoring NaN; constant input yields NaN."""
     num = pd.to_numeric(series, errors="coerce")
@@ -738,7 +730,7 @@ def _numeric(series: pd.Series) -> pd.Series:
 
 
 def _center(series: pd.Series) -> pd.Series:
-    """Subtract the mean, ignoring NaN — the ``age_at_mri`` → ``age_c`` transform.
+    """Subtract the mean, ignoring NaN: the ``age_at_mri`` -> ``age_c`` transform.
 
     Centering leaves a regression's slope untouched and moves its intercept to the
     sample mean, which is what makes an intercept (and any lower-order term under
@@ -770,8 +762,8 @@ TRANSFORM_LABELS: dict[str, str] = {
     "rank": "rank",
 }
 
-# Names an expression may reference beyond the frame's own columns. Everything else — including
-# builtins — is unavailable; see :func:`evaluate_expression`.
+# Names an expression may reference beyond the frame's own columns. Everything else (including
+# builtins) is unavailable; see :func:`evaluate_expression`.
 _SAFE_NAMESPACE: dict[str, Any] = {
     "log": np.log,
     "log1p": np.log1p,
@@ -799,17 +791,15 @@ def default_derived_name(source: str, transform: str) -> str:
     """Conventional name for a canned transform, e.g. ``("pi", "log") -> "log_pi"``.
 
     Centering is the exception: a centred covariate is conventionally suffixed, so
-    ``("age", "center")`` gives ``age_c`` — the name the analysis frames already
-    use — rather than ``center_age``.
+    ``("age", "center")`` gives ``age_c`` (the name the analysis frames already
+    use), rather than ``center_age``.
     """
     if transform == "center":
         return f"{source}_c"
     return f"{transform}_{source}"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Binned categorical columns
-# ──────────────────────────────────────────────────────────────────────────────
 def parse_cut_points(text: str) -> tuple[float, ...]:
     """
     Parse a comma/space separated list of interior cut points, e.g. ``"0, 25, 100"``.
@@ -817,7 +807,7 @@ def parse_cut_points(text: str) -> tuple[float, ...]:
     Raises
     ------
     ValueError
-        If a token is not a number, or the points are not strictly increasing — overlapping or
+        If a token is not a number, or the points are not strictly increasing: overlapping or
         repeated edges would make the bin a value falls into ambiguous.
     """
     tokens = [t for t in re.split(r"[,;\s]+", str(text or "").strip()) if t]
@@ -835,18 +825,18 @@ def parse_cut_points(text: str) -> tuple[float, ...]:
 
 
 def default_bin_labels(n_bins: int, prefix: str) -> tuple[str, ...]:
-    """``("cp0", "cp1", …)`` for *n_bins* bins — the ``tacsctot_group`` convention."""
+    """``("cp0", "cp1", ...)`` for *n_bins* bins: the ``tacsctot_group`` convention."""
     return tuple(f"{prefix}{i}" for i in range(int(n_bins)))
 
 
 def default_bin_name(source: str) -> str:
-    """Conventional name for a binned column, mirroring ``tacsctot`` → ``tacsctot_group``."""
+    """Conventional name for a binned column, mirroring ``tacsctot`` -> ``tacsctot_group``."""
     return f"{source}_group"
 
 
 def bin_interval_labels(cut_points: Sequence[float], *, right: bool = True) -> list[str]:
     """
-    Human-readable interval for each bin, e.g. ``["≤ 0", "(0, 25]", "(25, 100]", "> 100"]``.
+    Human-readable interval for each bin, e.g. ``["<= 0", "(0, 25]", "(25, 100]", "> 100"]``.
 
     The bins are always bracketed by ±∞, so every finite value lands in exactly one of them and
     nothing is silently dropped for being off the end of the scale.
@@ -882,8 +872,8 @@ def suggest_cut_points(
     --------------
     Quantiles of a zero-inflated column are mostly zero. A plaque volume where 45% of subjects have
     none puts the 33rd *and* 67th percentile at 0, so "tertiles" collapses to a single cut point and
-    silently produces two groups instead of three — the tertiles are of the whole cohort, not of the
-    subjects who actually have plaque. *exclude_at_or_below* takes the quantiles over the values
+    silently produces two groups instead of three: the tertiles are of the whole cohort, not of the
+    subjects who have plaque. *exclude_at_or_below* takes the quantiles over the values
     above a threshold instead, which is nearly always the intended question, and
     *keep_excluded_group* then keeps the threshold itself as the first cut point so the excluded
     rows form their own reference group rather than being merged into the lowest tertile.
@@ -902,7 +892,7 @@ def suggest_cut_points(
     Raises
     ------
     ValueError
-        If the column is empty, or is too concentrated to yield *n_bins* distinct groups — the
+        If the column is empty, or is too concentrated to yield *n_bins* distinct groups: the
         message names the exclusion option, since that is usually the fix.
     """
     values = pd.to_numeric(series, errors="coerce").dropna()
@@ -973,7 +963,7 @@ def binarize_series(
     Returns
     -------
     pandas.Series
-        Float 0.0 / 1.0, with missing input left missing — not an integer dtype, so a row with no
+        Float 0.0 / 1.0, with missing input left missing, not an integer dtype, so a row with no
         value is dropped by a fit rather than silently counted as a zero.
     """
     values = pd.to_numeric(series, errors="coerce")
@@ -1013,8 +1003,8 @@ def cut_into_bins(
     """
     Bin a continuous *series* into an **ordered** categorical.
 
-    The bins are ``(-inf, c0]``, ``(c0, c1]``, …, ``(cn, +inf)`` when *right* is true, so a value
-    equal to a cut point falls in the lower bin — which is what makes "exactly 0" its own group when
+    The bins are ``(-inf, c0]``, ``(c0, c1]``, ..., ``(cn, +inf)`` when *right* is true, so a value
+    equal to a cut point falls in the lower bin, which is what makes "exactly 0" its own group when
     ``0`` is the first cut point.
 
     Ordered rather than plain categorical: patsy then treats the first label as the reference level
@@ -1027,7 +1017,7 @@ def cut_into_bins(
 
 
 def bin_counts(series: pd.Series, spec: "DerivedColumn") -> pd.Series:
-    """Rows falling in each bin of *spec*, in bin order — the preview that makes cut points checkable."""
+    """Rows falling in each bin of *spec*, in bin order: the preview that makes cut points checkable."""
     binned = cut_into_bins(series, spec.cut_points, spec.bin_labels(), right=spec.right)
     return binned.value_counts().reindex(spec.bin_labels()).fillna(0).astype(int)
 
@@ -1038,7 +1028,7 @@ def evaluate_expression(df: pd.DataFrame, expression: str) -> pd.Series:
 
     The expression is compiled and evaluated with ``__builtins__`` stripped and a namespace holding
     only the frame's columns plus :data:`_SAFE_NAMESPACE`. That blocks the obvious mistakes
-    (``__import__``, ``open``) but is **not** a sandbox — an expression is code the user typed, and
+    (``__import__``, ``open``) but is **not** a sandbox: an expression is code the user typed, and
     should be treated with the same trust as the rest of the session. Expressions restored from a
     config file that the user did not author must be confirmed before evaluation.
 
@@ -1080,18 +1070,18 @@ class DerivedColumn:
     Parameters
     ----------
     name : str
-        Output column name. Must be a valid identifier — see :data:`IDENTIFIER_RE`.
+        Output column name. Must be a valid identifier; see :data:`IDENTIFIER_RE`.
     kind : {"transform", "expression", "bins", "binarize", "merge", "visits"}
         ``transform`` applies :data:`TRANSFORMS`\\ ``[transform]`` to *source*;
         ``expression`` evaluates *expression* via :func:`evaluate_expression`;
         ``bins`` cuts *source* into an ordered categorical at *cut_points*, the
-        ``tacsctot`` → ``tacsctot_group`` pattern;
+        ``tacsctot`` -> ``tacsctot_group`` pattern;
         ``binarize`` collapses *source* to numeric 0/1 either side of *threshold*, the
-        ``plaque_vol`` → ``has_plaque`` pattern;
+        ``plaque_vol`` -> ``has_plaque`` pattern;
         ``merge`` pools levels of a categorical *source* into fewer groups via *mapping*, the
-        ``apoe`` → ``E4_carrier`` / ``E2_carrier`` / ``E3E3`` pattern;
-        ``visits`` summarises a visit family (``plaque_v1`` … ``plaque_v4``) per subject — change,
-        AUC, slope… — via :func:`nvitk.stats.visit_series.visit_series_values`.
+        ``apoe`` -> ``E4_carrier`` / ``E2_carrier`` / ``E3E3`` pattern;
+        ``visits`` summarises a visit family (``plaque_v1`` ... ``plaque_v4``) per subject (change,
+        AUC, slope...) via :func:`nvitk.stats.visit_series.visit_series_values`.
     mapping : tuple of (level, group)
         For ``kind="merge"``: which source level goes into which new group. Stored as pairs rather
         than a dict so the definition round-trips through JSON with a stable order.
@@ -1100,7 +1090,7 @@ class DerivedColumn:
         ``"drop"`` makes it missing, or any other string is used as a catch-all group label.
     cut_points : tuple of float
         Interior cut points for ``kind="bins"``. The bins are bracketed by ±∞, so ``(0, 25, 100)``
-        gives four groups: ``≤ 0``, ``(0, 25]``, ``(25, 100]``, ``> 100``.
+        gives four groups: ``<= 0``, ``(0, 25]``, ``(25, 100]``, ``> 100``.
     labels : tuple of str
         Explicit bin labels. When empty, ``label_prefix`` + index is used.
     threshold : float
@@ -1114,19 +1104,19 @@ class DerivedColumn:
     source: str = ""
     transform: str = ""
     expression: str = ""
-    # ---- kind="bins" -----------------------------------------------------------
+    # kind="bins"
     cut_points: tuple[float, ...] = ()
     labels: tuple[str, ...] = ()
     label_prefix: str = "g"
     right: bool = True
-    # ---- kind="binarize" -------------------------------------------------------
+    # kind="binarize"
     threshold: float = 0.0
     binarize_op: str = "gt"
-    # ---- kind="merge" ----------------------------------------------------------
+    # kind="merge"
     mapping: tuple[tuple[str, str], ...] = ()
     unmapped: str = "keep"
-    # ---- kind="visits" ---------------------------------------------------------
-    #: Visit family (``<family>_v1``, ``<family>_v2``, …) the summary is computed over.
+    # kind="visits"
+    #: Visit family (``<family>_v1``, ``<family>_v2``, ...) the summary is computed over.
     family: str = ""
     #: Operation from :data:`nvitk.stats.visit_series.VISIT_OPERATIONS`.
     visit_op: str = "delta"
@@ -1145,7 +1135,7 @@ class DerivedColumn:
         return len(self.cut_points) + 1
 
     def bin_labels(self) -> tuple[str, ...]:
-        """Labels for each bin — the explicit ones when given, else ``prefix0``, ``prefix1``, …"""
+        """Labels for each bin: the explicit ones when given, else ``prefix0``, ``prefix1``, ..."""
         if self.labels:
             return tuple(self.labels)
         return default_bin_labels(self.n_bins(), self.label_prefix or "g")

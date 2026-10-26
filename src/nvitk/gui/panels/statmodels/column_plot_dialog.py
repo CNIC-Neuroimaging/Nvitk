@@ -5,7 +5,7 @@ Description
 -----------
 Before fitting anything you want to know what a column looks like: is it bimodal because two
 territories are pooled, is the tail a real effect or three bad segmentations, does the binning make
-sense. That is a different question from the model plot, so it gets its own non-modal window — you
+sense. That is a different question from the model plot, so it gets its own non-modal window: you
 can leave it open beside the main one and keep changing the plot type or the split.
 
 Interactive throughout: hovering a point names the subject and its territory, which is what turns
@@ -14,9 +14,7 @@ Interactive throughout: hovering a point names the subject and its territory, wh
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -55,12 +53,12 @@ from .theme import muted_label_style
 
 log = Logger()
 
-#: Columns offered as a split, in preference order — the ones a distribution usually needs.
+#: Columns offered as a split, in preference order: the ones a distribution usually needs.
 _PREFERRED_SPLITS: tuple[str, ...] = ("territory", "group_key", "sex", "tacsctot_group")
 
 #: Most levels a column may have and still be offered, per grouping mode. Overlaid violins become
-#: slivers well before panels do, so the caps differ — and both must clear a full qvtpy vessel set
-#: (13–17 levels), which an earlier cap of 12 did not, leaving the picker empty on real data.
+#: slivers well before panels do, so the caps differ, and both must clear a full qvtpy vessel set
+#: (13-17 levels), which an earlier cap of 12 did not, leaving the picker empty on real data.
 _MAX_SPLIT_LEVELS: int = 24
 _MAX_PANEL_LEVELS: int = 60
 
@@ -69,8 +67,8 @@ class LevelOrderDialog(QDialog):
     """
     Reorder the levels a distribution is split or panelled by.
 
-    The default order is a natural sort, which is right for ``g0 … g3`` and wrong for anything
-    whose meaning is not alphabetical — a severity scale, a vessel sequence following the
+    The default order is a natural sort, which is right for ``g0 ... g3`` and wrong for anything
+    whose meaning is not alphabetical: a severity scale, a vessel sequence following the
     circulation, a control group that belongs first. Presets cover the orders worth computing;
     the arrows cover the rest.
     """
@@ -218,7 +216,7 @@ class ColumnPlotDialog(FigureHostMixin, QDialog):
         self._column = column
         self._excluded = excluded_mask
         self._directory = default_directory
-        # ``{column: [level, …]}``. Kept per column so switching the split and coming back does
+        # ``{column: [level, ...]}``. Kept per column so switching the split and coming back does
         # not lose the order that was chosen for it.
         self._orders: dict[str, list[str]] = {}
 
@@ -227,7 +225,7 @@ class ColumnPlotDialog(FigureHostMixin, QDialog):
         lay.setSpacing(6)
 
         # Flow, not horizontal: a QHBoxLayout's minimum width is the sum of its children, which
-        # Qt then enforces as the *dialog's* — so the Order and Legend controls pushed the row
+        # Qt then enforces as the *dialog's*, so the Order and Legend controls pushed the row
         # past the window and clipped the end of it. Wrapping keeps the minimum at the widest
         # single control. Same remedy as the plot pane's own options row.
         controls_row = FlowRow()
@@ -341,9 +339,9 @@ class ColumnPlotDialog(FigureHostMixin, QDialog):
         self._on_mode_changed()
 
 
-    # ---- columns --------------------------------------------------------------
+    # columns
     def _plottable_columns(self) -> list[str]:
-        """Every column worth a distribution — numeric first, then the categoricals."""
+        """Every column worth a distribution: numeric first, then the categoricals."""
         numeric = [c for c in self._frame.columns if pd.api.types.is_numeric_dtype(self._frame[c])]
         other = [c for c in self._frame.columns if c not in numeric]
         return [str(c) for c in (*numeric, *other)]
@@ -352,7 +350,7 @@ class ColumnPlotDialog(FigureHostMixin, QDialog):
         """
         Columns usable as a grouping: discrete, and few enough levels to stay readable.
 
-        How many distinct values there are, not what dtype holds them — a factor is a factor
+        How many distinct values there are, not what dtype holds them: a factor is a factor
         whether it is spelled ``"M"``/``"F"`` or ``0``/``1``, and requiring a Categorical kept
         every numerically coded one out of this picker. ``subject_uid`` is excluded by the level
         cap, which is what excludes a continuous measurement too.
@@ -363,7 +361,7 @@ class ColumnPlotDialog(FigureHostMixin, QDialog):
         """
         Repopulate the grouping pickers for the current mode, keeping the selection where possible.
 
-        Panels tolerate far more levels than overlaid violins, so the list genuinely differs between
+        Panels tolerate far more levels than overlaid violins, so the list differs between
         modes rather than being one compromise cap.
         """
         mode = str(self._facet_mode.currentData() or "")
@@ -400,16 +398,16 @@ class ColumnPlotDialog(FigureHostMixin, QDialog):
             if c in self._frame.columns
         ]
 
-    # ---- drawing --------------------------------------------------------------
+    # drawing
     def _on_mode_changed(self, *_args: Any) -> None:
-        """Show only the controls the chosen grouping actually uses, then redraw."""
+        """Show only the controls the chosen grouping uses, then redraw."""
         self._sync_split_choices()
         mode = str(self._facet_mode.currentData() or "")
         self._split.setVisible(mode != "")
         self._sub_split.setVisible(mode in {"panels", "anatomical"})
         self._redraw()
 
-    # ---- level order ----------------------------------------------------------
+    # level order
     def _is_categorical(self, column: str) -> bool:
         """Whether *column* is drawn as counts of its own levels rather than as a distribution."""
         if not column or column not in self._frame.columns:
@@ -423,7 +421,7 @@ class ColumnPlotDialog(FigureHostMixin, QDialog):
         """
         The column whose levels the Order button acts on.
 
-        The split when there is one — its levels are the axis groups, or the panels. With no
+        The split when there is one: its levels are the axis groups, or the panels. With no
         split, a categorical column is still drawn as counts of its own levels, and those are the
         axis groups; ordering them is the same request.
         """
@@ -443,7 +441,7 @@ class ColumnPlotDialog(FigureHostMixin, QDialog):
         if not column or column not in self._frame.columns:
             return []
         # Through ``base_levels``, so a binned column opens on the order it was cut in rather
-        # than on the order its rows happen to arrive in — which is also what the axis draws.
+        # than on the order its rows happen to arrive in, which is also what the axis draws.
         seen = base_levels(self._frame[column])
         # Panels sort naturally; a split keeps first-appearance order. Show whichever the plot
         # will use, so the editor opens on what is on screen rather than on a third order.
@@ -483,7 +481,7 @@ class ColumnPlotDialog(FigureHostMixin, QDialog):
         self._redraw()
 
     def _present_levels_default(self, column: str) -> list[str]:
-        """*column*'s levels with no override applied — what "no order" looks like."""
+        """*column*'s levels with no override applied: what "no order" looks like."""
         saved = self._orders.pop(column, None)
         try:
             return self._present_levels(column)
@@ -491,7 +489,7 @@ class ColumnPlotDialog(FigureHostMixin, QDialog):
             if saved is not None:
                 self._orders[column] = saved
 
-    # ---- legend ---------------------------------------------------------------
+    # legend
     def _apply_legend_visibility(self, *_args: Any) -> None:
         """Show or hide the legend on whichever backend is live, without redrawing the data."""
         visible = self._show_legend.isChecked()
@@ -522,7 +520,7 @@ class ColumnPlotDialog(FigureHostMixin, QDialog):
             return ""
         # The mask always goes in; ``show_excluded`` is what decides whether those rows are drawn
         # greyed and counted apart, or not drawn and not counted. Withholding the mask instead
-        # would count rows the figure is not showing — the two have to be told the same thing.
+        # would count rows the figure is not showing: the two have to be told the same thing.
         shown = self._show_excluded.isChecked()
         try:
             overall = displayed_counts(
@@ -564,12 +562,12 @@ class ColumnPlotDialog(FigureHostMixin, QDialog):
         interactive = self._interactive.isChecked()
         panelled = mode in {"panels", "anatomical"} and bool(split)
         # The Order button acts on the split column, which is the panel axis when panelled and
-        # the x axis otherwise — so the same saved order feeds whichever parameter applies.
+        # the x axis otherwise, so the same saved order feeds whichever parameter applies.
         chosen_order = self._orders.get(split) if split else None
         panel_order = chosen_order if panelled else None
         level_order = None if panelled else chosen_order
         sub_order = self._orders.get(sub) if sub else None
-        # With no split, a categorical column is drawn as counts of its own levels — so the order
+        # With no split, a categorical column is drawn as counts of its own levels, so the order
         # saved against *it* is the one the axis needs. Without this the Order button was enabled,
         # the editor saved, and the bars did not move.
         if not split:
@@ -641,7 +639,7 @@ class ColumnPlotDialog(FigureHostMixin, QDialog):
         )
 
     def _set_status(self, column: str, split: str, sub: str, hint: str) -> None:
-        """Put the counts first and the backend hint after — the N is what gets read."""
+        """Put the counts first and the backend hint after: the N is what gets read."""
         counts = self._counts_line(column, split, sub)
         self._status.setText(f"{counts}\n{hint}" if counts else hint)
 

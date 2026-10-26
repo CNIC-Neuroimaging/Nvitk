@@ -145,7 +145,7 @@ def inspect_xnat_pipeline_resource(
 
 
 def _find_xnat_files_root(dest: Path, resource_label: str) -> Path | None:
-    """Locate the ``…/resources/<label>/files`` directory from an xnatpy ZIP unpack."""
+    """Locate the ``.../resources/<label>/files`` directory from an xnatpy ZIP unpack."""
     label = str(resource_label).strip().lower()
     if not dest.is_dir():
         return None
@@ -154,7 +154,7 @@ def _find_xnat_files_root(dest: Path, resource_label: str) -> Path | None:
         if not files_dir.is_dir():
             continue
         parent = files_dir.parent
-        # Expect …/resources/<resource_label>/files
+        # Expect .../resources/<resource_label>/files
         if parent.parent.name.lower() != "resources":
             continue
         candidates.append(files_dir)

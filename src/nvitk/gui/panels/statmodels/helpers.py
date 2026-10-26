@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import ast
 import os
 import re
@@ -27,15 +25,13 @@ from nvitk.core.logger import Logger
 from nvitk.db.repo import DataRepo, get_repo_from_settings
 from nvitk.stats import formula_columns
 
-# Bare Python identifiers — the only formula left-hand sides that can be resolved to a real column.
+# Bare Python identifiers: the only formula left-hand sides that can be resolved to a real column.
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 log = Logger()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dataset repo
-# ──────────────────────────────────────────────────────────────────────────────
 def open_repo() -> DataRepo:
     """Open the configured dataset repo, unwrapping the ``(repo, ...)`` tuple form if returned."""
     got = get_repo_from_settings()
@@ -48,8 +44,8 @@ def statmodels_root(repo: DataRepo | None = None) -> Path:
     """Ensure and return the directory holding saved model configurations and exports.
 
     Read from ``settings.json`` ``db.statmodels_root``. Saved models are a researcher's own
-    working output rather than dataset content — they are written far more often than the
-    dataset changes, and are usefully kept on a backed-up share — so they get their own
+    working output rather than dataset content (they are written far more often than the
+    dataset changes, and are usefully kept on a backed-up share), so they get their own
     location instead of living inside the dataset tree.
 
     Falls back to ``<dataset>/nvitk-statmodels`` when the key is unset, which is where models
@@ -68,14 +64,12 @@ def statmodels_root(repo: DataRepo | None = None) -> Path:
     return root
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Grouping columns
-# ──────────────────────────────────────────────────────────────────────────────
 #: How few distinct values a *float* column needs before it counts as a factor. Dtype alone
 #: cannot tell a numeric-coded factor from a measurement: one missing value upcasts an integer
 #: ``sex`` to float64, and excluding floats outright is what kept ``sex`` out of every hue and
-#: split picker. A factor coded numerically — sex, a binarized flag, a visit number, a bin index —
-#: never has more levels than this; a continuous measurement essentially always does, even in a
+#: split picker. A factor coded numerically (sex, a binarized flag, a visit number, a bin index)
+#: never has more levels than this; a continuous measurement always does, even in a
 #: small frame, where a bare level cap would let it through.
 MAX_FLOAT_GROUP_LEVELS: int = 12
 
@@ -84,7 +78,7 @@ def groupable_levels(series: pd.Series, *, cap: int) -> list[str]:
     """
     The levels of *series* if it can be grouped by, in natural order; ``[]`` if it cannot.
 
-    "Can be grouped by" is about how many distinct values there are, not about dtype — at least
+    "Can be grouped by" is about how many distinct values there are, not about dtype, at least
     two to compare, and few enough to draw or lay out.
     """
     from nvitk.stats.region_groups import natural_level_key
@@ -100,7 +94,7 @@ def groupable_levels(series: pd.Series, *, cap: int) -> list[str]:
         # Two ways a float says it is a measurement rather than a factor: too many distinct
         # values, or values that never repeat. The second matters on a frame filtered down to a
         # handful of rows, where a measurement has few enough levels to clear the cap on count
-        # alone — and a factor's levels repeat at any size.
+        # alone, and a factor's levels repeat at any size.
         limit = min(limit, MAX_FLOAT_GROUP_LEVELS)
         if len(levels) >= len(values):
             return []
@@ -110,7 +104,7 @@ def groupable_levels(series: pd.Series, *, cap: int) -> list[str]:
 
 
 def is_groupable(series: pd.Series, *, cap: int) -> bool:
-    """Whether *series* can be used as a grouping — see :func:`groupable_levels`."""
+    """Whether *series* can be used as a grouping; see :func:`groupable_levels`."""
     return bool(groupable_levels(series, cap=cap))
 
 
@@ -127,12 +121,12 @@ def grouping_columns(
     Parameters
     ----------
     cap : int
-        Most levels a column may have and still be offered. Readability differs by use — overlaid
-        violins turn to slivers well before panels do — so the caller sets it.
+        Most levels a column may have and still be offered. Readability differs by use (overlaid
+        violins turn to slivers well before panels do), so the caller sets it.
     exclude : sequence of str
         Columns to leave out regardless, e.g. the one being summarized.
     extra : sequence of str
-        Columns to offer even when they blow the cap — a model's own grouping factor belongs in
+        Columns to offer even when they blow the cap; a model's own grouping factor belongs in
         the picker whether or not it has 510 levels.
     """
     if frame is None or frame.empty:
@@ -153,9 +147,7 @@ def grouping_columns(
     return out
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Formula helpers
-# ──────────────────────────────────────────────────────────────────────────────
 def parse_vc_formula(text: str) -> dict[str, str] | None:
     """Parse the variance-components formula field (a Python dict literal, e.g.
     ``{"patient": "0 + C(subject_uid)"}``) into a ``{group: formula}`` dict, or ``None`` if blank;
@@ -188,12 +180,12 @@ def resolve_outcome_column(
 
     Three cases, in order:
 
-    1. The LHS is a bare identifier that already exists — use it as-is.
-    2. The LHS is *not* a bare identifier (``log(pi)``, ``np.log(pi)``) — leave it to patsy and take
+    1. The LHS is a bare identifier that already exists: use it as-is.
+    2. The LHS is *not* a bare identifier (``log(pi)``, ``np.log(pi)``): leave it to patsy and take
        the plotting outcome from the first formula token that is a column. Prefer a derived column
        for this: a real ``log_pi`` works as a plot axis and a filter target, a formula-level
        transform does not.
-    3. The LHS is a bare identifier that is missing — rename the measurement column onto it, but
+    3. The LHS is a bare identifier that is missing: rename the measurement column onto it, but
        only when exactly one measurement is loaded. With several, "the measurement" is ambiguous and
        a guess would silently model the wrong variable.
 
@@ -210,17 +202,17 @@ def resolve_outcome_column(
     """
     lhs = formula_lhs(formula)
 
-    # ---- 1. Bare identifier already present ------------------------------------
+    # 1. Bare identifier already present
     if lhs and IDENTIFIER_RE.match(lhs) and lhs in df.columns:
         return df, lhs
 
-    # ---- 2. Transformed LHS: patsy evaluates it, we only need a y for the plot --
+    # 2. Transformed LHS: patsy evaluates it, we only need a y for the plot
     if lhs and not IDENTIFIER_RE.match(lhs):
         for token in formula_columns(df.columns, lhs):
             return df, token
         return df, None
 
-    # ---- 3. Bare identifier missing from the frame -----------------------------
+    # 3. Bare identifier missing from the frame
     if lhs:
         present = [c for c in measurement_columns if c in df.columns]
         if len(present) == 1:
@@ -237,9 +229,7 @@ def resolve_outcome_column(
     return df, None
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Fit reporting
-# ──────────────────────────────────────────────────────────────────────────────
 def dropped_rows_note(meta: dict[str, Any]) -> str:
     """Human-readable note about rows dropped for missing values during a fit, or ``""`` if none were."""
     dropped = int(meta.get("n_rows_dropped") or 0)
@@ -254,15 +244,13 @@ def dropped_rows_note(meta: dict[str, Any]) -> str:
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Checkable list widgets
-# ──────────────────────────────────────────────────────────────────────────────
 #: Item role holding a row's searchable text, since the row is a widget and carries no item text.
 SEARCH_ROLE = Qt.UserRole + 1
 
 
-#: Visit-picker value meaning "load this variable at every visit" — one ``<variable>_v<visit>``
-#: column each, for longitudinal derivatives (change, AUC, slope…) instead of a single collapsed value.
+#: Visit-picker value meaning "load this variable at every visit": one ``<variable>_v<visit>``
+#: column each, for longitudinal derivatives (change, AUC, slope...) instead of a single collapsed value.
 VISIT_ALL = "__all__"
 
 
@@ -270,8 +258,8 @@ class CovariateRow(QWidget):
     """
     One covariate: a checkbox, and which visit its values should come from.
 
-    A cohort does not measure everything at every visit — carotid plaque exists at visits 3 and 4
-    while the rest of the clinical panel exists only at 4 — and collapsing to one row per subject
+    A cohort does not measure everything at every visit (carotid plaque exists at visits 3 and 4
+    while the rest of the clinical panel exists only at 4), and collapsing to one row per subject
     has to pick one. Leaving that to a "latest wins" policy makes the answer depend on which visits
     happen to be loaded, so a variable with a choice to make offers it here, right beside the
     checkbox that includes it. A variable recorded at a single visit shows that visit as plain text:
@@ -306,7 +294,7 @@ class CovariateRow(QWidget):
                 "feeds the model; 'latest' follows the collapse policy, as before."
             )
             # "latest" first so the stored default keeps the behaviour a config saved before this
-            # picker existed described — an explicit visit is opt-in.
+            # picker existed described: an explicit visit is opt-in.
             self.combo.addItem("latest", "")
             self.combo.addItem("all visits", VISIT_ALL)
             self.combo.setItemData(
@@ -378,7 +366,7 @@ def populate_checklist(
     Parameters
     ----------
     visits : mapping, optional
-        ``{variable_id: [visit_id, …]}`` from
+        ``{variable_id: [visit_id, ...]}`` from
         :meth:`~nvitk.db.repo.DataRepo.variable_visits`. A variable listed with more than one visit
         gets a picker; one with a single visit gets a label; one that is absent gets neither.
     """
@@ -424,7 +412,7 @@ def checked_variable_visits(widget: QListWidget) -> dict[str, str]:
     ``{variable_id: visit_id}`` for every checked row that pinned a visit.
 
     Rows left on "latest", rows with a single visit and unchecked rows are all absent, so the result
-    is exactly the set of deliberate choices — which is what
+    is exactly the set of deliberate choices, which is what
     :func:`~nvitk.stats._statmodels_frames.collapse_visits_to_subject` expects as its overrides.
     """
     out: dict[str, str] = {}
@@ -443,7 +431,7 @@ def set_variable_visits(widget: QListWidget, visits: Mapping[str, str]) -> None:
 
 
 def variable_visit_labels(widget: QListWidget) -> dict[str, list[str]]:
-    """``{variable_id: [visit, …]}`` as currently offered — the inverse of *populate_checklist*."""
+    """``{variable_id: [visit, ...]}`` as currently offered: the inverse of *populate_checklist*."""
     return {row.variable_id: list(row._visits) for _item, row in _rows(widget)}
 
 

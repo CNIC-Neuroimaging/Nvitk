@@ -1,4 +1,4 @@
-"""``nvitk-gui`` entry point — Napari workbench for nvitk tools."""
+"""``nvitk-gui`` entry point: Napari workbench for nvitk tools."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def main(backend: str) -> None:
 
     # Qt refuses to load its web engine once a QApplication exists unless a shared GL context was
     # requested first, and napari builds one as it starts. The Statmodels window's interactive
-    # plots are hosted in a web view, so the flag has to be set here — before napari runs — or they
+    # plots are hosted in a web view, so the flag has to be set here (before napari runs), or they
     # silently fall back to a "web engine unavailable" message.
     from nvitk.gui.panels.statmodels.plotly_view import prepare_webengine
 

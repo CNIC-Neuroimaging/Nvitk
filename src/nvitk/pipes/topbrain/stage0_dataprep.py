@@ -5,11 +5,11 @@ same modality-aware intensity harmonisation to both so a model never sees the tw
 scales.
 
 ``--target train`` *(default)*
-    **Labelled training data** → an nnU-Net raw dataset. The challenge's 50 cases, optionally
+    **Labelled training data** -> an nnU-Net raw dataset. The challenge's 50 cases, optionally
     plus your own annotated cohorts (``--extra-train``). Writes ``imagesTr/``, ``labelsTr/``,
     ``dataset.json`` and patient-grouped ``splits_final.json``.
 ``--target corpus``
-    **Unlabeled pre-training corpus** → an nnssl collection. Used only by stage 1's
+    **Unlabeled pre-training corpus** -> an nnssl collection. Used only by stage 1's
     ``--source scratch`` route, and deliberately *not* the training data: pre-training on the
     same volumes you fine-tune on buys little and muddies the evaluation.
 ``--target both``
@@ -18,9 +18,9 @@ scales.
 Why images are rewritten rather than referenced
 -----------------------------------------------
 nnU-Net chooses an intensity-normalisation scheme **per channel**, not per case, and nnssl emits
-a single scheme for a whole collection while recording only spacings in its fingerprint — it has
+a single scheme for a whole collection while recording only spacings in its fingerprint: it has
 no CT normalisation and no way to compute one. CTA is calibrated (Hounsfield units, air at
-−1000) and TOF-MRA is not (arbitrary units, hard floor at 0), so neither framework can normalise
+-1000) and TOF-MRA is not (arbitrary units, hard floor at 0), so neither framework can normalise
 a mixed set correctly. Mapping both onto a shared ``[0, 1]`` range here is what makes one
 modality-agnostic model legitimate.
 
@@ -28,8 +28,8 @@ Optional context channel
 ------------------------
 ``--ct-context-window`` adds a **second input channel** carrying a wide intensity window
 alongside the narrow vessel window of channel 0. The default CTA window (300-600 HU) is chosen
-so contrast-filled lumen stays separable from bone, but it clips away everything below 300 HU —
-parenchyma, CSF, air — and with it the anatomical context that distinguishes classes defined by
+so contrast-filled lumen stays separable from bone, but it clips away everything below 300 HU (
+parenchyma, CSF, air), and with it the anatomical context that distinguishes classes defined by
 *where* they run rather than by how they look (R-M2 vs R-M3, the carotid canal, the A2/A3
 boundary). A second channel restores that without giving up the first.
 
@@ -44,7 +44,7 @@ Geometry
 --------
 Spacing, affine and orientation (LPS, frequently oblique on MR) pass through untouched:
 harmonisation is a voxelwise intensity map. Every label is checked against its image for shape
-and affine agreement before either is written — a mismatch means the pair is not co-registered
+and affine agreement before either is written: a mismatch means the pair is not co-registered
 and training on it would be silently wrong.
 """
 
@@ -110,7 +110,7 @@ AFFINE_ATOL: float = 1e-4
 DEFAULT_CT_CONTEXT_WINDOW: tuple[float, float] = (-50.0, 1100.0)
 DEFAULT_MR_CONTEXT_PERCENTILES: tuple[float, float] = (0.0, 100.0)
 
-#: ``name=/images:/labels[:modality]`` — an extra annotated cohort.
+#: ``name=/images:/labels[:modality]``: an extra annotated cohort.
 _EXTRA_RE = re.compile(r"^(?P<name>[^=]+)=(?P<images>[^:]+):(?P<labels>[^:]+)(?::(?P<modality>\w+))?$")
 
 
@@ -129,7 +129,7 @@ class ExtraCohort:
 
     Set for pseudo-labelled cohorts (stage 6): their masks are a previous model's output, so a
     fold that validated on them would be measuring agreement with that model rather than
-    accuracy, and the cross-validation would quietly stop meaning what it says.
+    accuracy, and the cross-validation would silently stop meaning what it says.
     """
 
     layout: cohorts.CohortLayout | None = None
@@ -152,8 +152,8 @@ class ExtraCohort:
             for case in self.layout.iter_cases(
                 self.root or self.images_dir, only_modality=self.modality
             ):
-                # The release already namespaces its own files (topaneu_…); prefixing again
-                # would produce topaneu_topaneu_… and make splits_final.json unreadable.
+                # The release already namespaces its own files (topaneu_...); prefixing again
+                # would produce topaneu_topaneu_... and make splits_final.json unreadable.
                 case_id = (
                     case.case_id if case.case_id.startswith(f"{self.name}_")
                     else f"{self.name}_{case.case_id}"
@@ -203,8 +203,8 @@ _TARGET_ALIASES: dict[str, tuple[str, ...]] = {
 def parse_targets(spec: str) -> set[str]:
     """Parse ``--target`` into the set of datasets to build.
 
-    Accepts a comma list of :data:`DATAPREP_TARGETS` — ``train,binary`` is the combination that
-    matters once the corpus already exists — plus the ``both`` and ``all`` shorthands. Naming
+    Accepts a comma list of :data:`DATAPREP_TARGETS` (``train,binary`` is the combination that
+    matters once the corpus already exists), plus the ``both`` and ``all`` shorthands. Naming
     every combination would need a word per subset; a list does not.
 
     Raises
@@ -333,7 +333,7 @@ def _convert_case(
     """Harmonise and write one labelled case; returns a provenance record.
 
     Writes ``<case>_0000.nii.gz`` always, and ``<case>_0001.nii.gz`` when a context window is
-    configured — see the module docstring on why the narrow vessel window alone is a lossy
+    configured; see the module docstring on why the narrow vessel window alone is a lossy
     representation of a CTA.
 
     Raises
@@ -369,25 +369,25 @@ def _convert_case(
 
     image, label = imread(case.image_path), imread(case.label_path)
 
-    # ---- 1. Geometry agreement: the pair must describe the same voxel grid ----
+    # 1. Geometry agreement: the pair must describe the same voxel grid
     if tuple(image.shape) != tuple(label.shape):
         raise ValueError(
             f"[{case.case_id}] image shape {tuple(image.shape)} != label {tuple(label.shape)}."
         )
-    # Affines are host metadata, never backend arrays, so plain NumPy comparison is right here
-    # — and no backend ``np`` call follows, so nothing can mix.
+    # Affines are host metadata, never backend arrays, so plain NumPy comparison is right here,
+    # and no backend ``np`` call follows, so nothing can mix.
     if not bool((abs(to_numpy(image.affine) - to_numpy(label.affine)) <= AFFINE_ATOL).all()):
         raise ValueError(
             f"[{case.case_id}] image and label affines differ by more than {AFFINE_ATOL} mm; "
             f"the pair is not on a common grid."
         )
 
-    # ---- 2. Label values must belong to the declared label set ----------------
+    # 2. Label values must belong to the declared label set
     # For the binary set the source mask is a full TA36/v1 map that is about to be collapsed,
     # so it is checked against the widest set rather than against {0, 1}.
     # ``values`` stays on the active backend: ``np`` is CuPy under ``--backend gpu``, so pulling
     # it to the host first and then calling ``np.round`` on it would mix a NumPy array into a
-    # CuPy ufunc. Convert once, afterwards, for the Python-level iteration that genuinely needs
+    # CuPy ufunc. Convert once, afterwards, for the Python-level iteration that needs
     # host scalars.
     values = np.unique(label.data)
     if not bool((values == np.round(values)).all()):
@@ -402,7 +402,7 @@ def _convert_case(
             f"(0..{lbl.max_label(label_set)}). Mixing label sets is the usual cause."
         )
 
-    # ---- 3. Harmonise intensities, keep geometry -----------------------------
+    # 3. Harmonise intensities, keep geometry
     harmonised = harmonize_modality(
         image, case.modality, ct_window=ct_window, mr_percentiles=mr_percentiles
     )
@@ -415,7 +415,7 @@ def _convert_case(
     else:
         imsave(out_label, label.astype(np.uint8))
 
-    # ---- 3b. Optional context channel, from the same read ---------------------
+    # 3b. Optional context channel, from the same read
     if context_enabled:
         context = harmonize_modality(
             image, case.modality,
@@ -467,7 +467,7 @@ def _write_presence_sidecars(
     for stage 3 to mark which classes its per-fold numbers cannot support.
 
     ``case_classes.json`` is the raw per-case form, and is what stage 2's rare-class-aware
-    sampler reads to work out which volumes are worth drawing more often — see
+    sampler reads to work out which volumes are worth drawing more often; see
     :mod:`nvitk.pipes.topbrain.util.sampling`.
     """
     import csv as _csv
@@ -588,7 +588,7 @@ def build_training_dataset(
         encoding="utf-8",
     )
 
-    # ---- Folds, stratified on which classes each patient actually carries ----
+    # Folds, stratified on which classes each patient carries
     # Built from the conversion records rather than re-read from disk: every case has just been
     # inspected, and the side-road classes this stratifies on are exactly the ones a blind
     # shuffle strands in a fold with no positive example.
@@ -617,7 +617,7 @@ def build_training_dataset(
         json.dumps(splits, indent=2) + "\n", encoding="utf-8"
     )
 
-    # ---- Per-class × per-fold presence: what this cross-validation can measure ----
+    # Per-class × per-fold presence: what this cross-validation can measure
     presence_table = fold_util.class_presence_table(
         cases, splits, class_presence, label_map=lbl.label_map(label_set)
     )
@@ -766,7 +766,7 @@ def run_dataprep(
 
     # Either context flag turns the second channel on for *both* modalities: nnU-Net counts
     # channels per case against dataset.json, so a CT-only second channel makes the MR cases
-    # invalid rather than simply unaugmented.
+    # invalid rather than unaugmented.
     if ct_context_window is not None or mr_context_percentiles is not None:
         ct_context_window = tuple(ct_context_window or DEFAULT_CT_CONTEXT_WINDOW)
         mr_context_percentiles = tuple(
@@ -774,7 +774,7 @@ def run_dataprep(
         )
 
     # A modality-restricted label set carries its own filter, and it outranks --modality. The
-    # default is 'both', so trusting the flag would let `--label-set ta36_ct` quietly build a
+    # default is 'both', so trusting the flag would let `--label-set ta36_ct` silently build a
     # mixed dataset under a CT-only name -- the masks live in the shared TA36 directory, so
     # nothing downstream would notice until the model was scored on the wrong cohort.
     declared = lbl.LABEL_SET_MODALITIES.get(label_set, ("ct", "mr"))
@@ -837,7 +837,7 @@ def run_dataprep(
         )
         provenance["train"] = train_meta
 
-    # ---- The derived binary dataset, from silver cohorts only -----------------
+    # The derived binary dataset, from silver cohorts only
     # Kept free of the annotated cases on purpose: the binary model seeds the multi-class one,
     # so anything it trained on has effectively been seen by every fold of the multi-class
     # cross-validation.
@@ -890,9 +890,7 @@ def run_dataprep(
     return provenance
 
 
-# ---------------------------------------------------------------------------
 # CLI + SGE submission
-# ---------------------------------------------------------------------------
 
 
 def _worker_argv(**options) -> list[str]:

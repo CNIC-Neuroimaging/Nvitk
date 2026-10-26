@@ -6,7 +6,7 @@ array backend.
 The option is **eager**: Click resolves it before any other parameter, so
 :func:`~nvitk.core.config_paths.set_config_dir` runs before the command body reads a setting.
 That is enough for every lazily-read value. A module that reads configuration at *import* time
-is resolved before Click runs at all and cannot be redirected by a flag — for those,
+is resolved before Click runs at all and cannot be redirected by a flag, for those,
 ``NVITK_CONFIG_DIR`` in the environment is the mechanism, since it is set before the process
 starts.
 """

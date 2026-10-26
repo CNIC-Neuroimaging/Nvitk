@@ -13,8 +13,8 @@ needs nothing but numpy and manim.
 Text-free renders
 -----------------
 :func:`no_text` (``--no-text`` on a scene script, see :func:`run_scene`, or ``ANIM_NO_TEXT=1`` with
-the plain ``manim`` command) keeps every on-screen text element — captions, title cards, legends,
-badges, insets — but fully transparent. The timing does not change, so the commented and the
+the plain ``manim`` command) keeps every on-screen text element (captions, title cards, legends,
+badges, insets), but fully transparent. The timing does not change, so the commented and the
 text-free versions stay frame for frame in step.
 """
 
@@ -63,19 +63,19 @@ STROKE_W = 0.5
 
 
 def rgb(color: str) -> np.ndarray:
-    """``#RRGGBB`` → float RGB in [0, 1]."""
+    """``#RRGGBB`` -> float RGB in [0, 1]."""
     c = color.lstrip("#")
     return np.array([int(c[i : i + 2], 16) for i in (0, 2, 4)], dtype=float) / 255.0
 
 
 def hex_of(values: np.ndarray) -> str:
-    """Float RGB in [0, 1] → ``#RRGGBB``."""
+    """Float RGB in [0, 1] -> ``#RRGGBB``."""
     r, g, b = (np.clip(values, 0.0, 1.0) * 255.0).astype(int)
     return f"#{r:02X}{g:02X}{b:02X}"
 
 
 def smoothstep(f: np.ndarray) -> np.ndarray:
-    """Cubic ease, 0 → 1."""
+    """Cubic ease, 0 -> 1."""
     return f * f * (3.0 - 2.0 * f)
 
 

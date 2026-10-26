@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Import the longitudinal PESA clinical block — every visit — into ``clinical_measurements``.
+"""Import the longitudinal PESA clinical block (every visit) into ``clinical_measurements``.
 
 Description
 -----------
-Same export as ``import_plaque_v4.py`` (one row per ``seqn`` × ``visit``, v1–v4), but this reads
+Same export as ``import_plaque_v4.py`` (one row per ``seqn`` × ``visit``, v1-v4), but this reads
 every visit rather than visit 4 only: labs, demographics, anthropometry and blood pressure,
 reproductive history, the CT calcium score, the psychosocial, sleep and physical-activity
 questionnaires, accelerometry, the cardiovascular risk-factor flags and the 3D-ultrasound plaque
@@ -12,18 +12,18 @@ volumes. ``seqn`` is resolved to ``subject_uid`` through the ``subject_ids`` reg
 
 Variable ids
 ------------
-Each column keeps its own name, lowercased (``lbxglu``, ``psqde010``, …) — which is how the
+Each column keeps its own name, lowercased (``lbxglu``, ``psqde010``, ...), which is how the
 dataset already files ``bpxdim``, ``lbdldl`` or ``psqeduca``. The exceptions are columns the
 dataset already holds under another id, reused so the new visits line up with the old ones: the
-risk-factor flags (``hipertension`` → ``hypertension``, …) and the plaque volumes
-(``e3dburdenc`` → ``total_plaque_vol``, …).
+risk-factor flags (``hipertension`` -> ``hypertension``, ...) and the plaque volumes
+(``e3dburdenc`` -> ``total_plaque_vol``, ...).
 
 Overwrite
 ---------
 A value is written at ``(subject_uid, visit_id, variable_id)``, and any row already at that key is
 removed first, whichever file it came from. Upserting alone would not do it: the table keys on the
 source file/sheet/column too, so a value imported from another workbook would survive next to the
-new one — and the wide pivot keeps the first row it meets, so it would keep returning the old
+new one, and the wide pivot keeps the first row it meets, so it would keep returning the old
 value. An empty cell never removes anything: what the workbook leaves blank keeps what the dataset
 had.
 
@@ -34,8 +34,8 @@ Values
   and excluded. Dropping them would bias the low end of Lp(a), where they are ~2 % of the values.
 * The export stores part of its numbers as float32, which read back as ``0.029999999329447746``.
   Each value that is exactly a float32 is rounded to the shortest decimal float32 prints
-  (``0.03``) — the value that was entered; float64 values are left as read.
-* Date columns (``lbxdt``, ``deqbirth``, …) are stored as ISO ``YYYY-MM-DD`` text with
+  (``0.03``): the value that was entered; float64 values are left as read.
+* Date columns (``lbxdt``, ``deqbirth``, ...) are stored as ISO ``YYYY-MM-DD`` text with
   ``value_kind = "date"``. The four exam dates also stamp ``measured_at`` on the block they date
   (see :data:`MEASURED_AT_BLOCKS`); every other block has no date column and stays undated.
 
@@ -79,7 +79,7 @@ REPLACE_KEY = ["subject_uid", "visit_id", "variable_id"]
 
 #: Source columns to import, in workbook order. ``seqn`` and ``visit`` are the row keys.
 COLUMNS: tuple[str, ...] = (
-    # Labs — lbxdt is the sample extraction date
+    # Labs: lbxdt is the sample extraction date
     "lbxdt", "lbdbano", "lbdeono", "lbdgfr", "lbxwbcsi", "lbdlymno", "lbdmono", "lbdneno",
     "lbxcystc", "lbxesr1", "lbxfb", "lbxfer", "lbxgh", "lbxglu", "lbxhct", "lbxhdd", "lbdldl",
     "lbxtc", "lbxtr", "lbxhgb", "lbxin", "lbxinr", "lbxlppa", "lbxmchsi", "lbxmcvsi", "lbxoxldl",
@@ -206,9 +206,7 @@ LABELS: dict[str, str] = {
 _BOUNDED_NUMBER = re.compile(r"^\s*([<>]=?)?\s*(\d+(?:[.,]\d+)?)\s*$")
 
 
-# ---------------------------------------------------------------------------
-# SEQN → subject_uid
-# ---------------------------------------------------------------------------
+# SEQN -> subject_uid
 def _normalize_seqn(value: Any) -> str:
     """Normalize Excel SEQN values such as 28, 28.0, or ' 28 ' to '28'."""
     if value is None:
@@ -269,9 +267,7 @@ def seqn_to_subject(repo: Any) -> dict[str, str]:
     return mapping
 
 
-# ---------------------------------------------------------------------------
 # Value parsing
-# ---------------------------------------------------------------------------
 def _parse_sheet(value: str) -> str | int:
     return int(value) if value.strip().isdigit() else value
 
@@ -326,7 +322,7 @@ def drop_float32_noise(values: pd.Series) -> pd.Series:
     Decided per value, because the export mixes both within a column (``0.0299999993`` next to
     ``0.05``). Only a value that is exactly a float32 is touched, and it is replaced by the shortest
     decimal that rounds to the same float32. A decimal typed into float64 is never exactly a
-    float32 unless it is dyadic (an integer, ``0.5``), and those print unchanged — so float64
+    float32 unless it is dyadic (an integer, ``0.5``), and those print unchanged, so float64
     values pass through as read.
     """
     present = values.dropna()
@@ -351,9 +347,7 @@ def _block_date(column: str) -> str | None:
     return None
 
 
-# ---------------------------------------------------------------------------
 # Extraction
-# ---------------------------------------------------------------------------
 def extract_longitudinal(
     path: Path,
     mapping: dict[str, str],
@@ -451,9 +445,7 @@ def extract_longitudinal(
     return pd.concat(frames, ignore_index=True)
 
 
-# ---------------------------------------------------------------------------
 # Publishing
-# ---------------------------------------------------------------------------
 def build_rows(
     frame: pd.DataFrame,
     *,
@@ -482,7 +474,7 @@ def build_rows(
         )
         # The spec carries one measured_at for the whole batch, and numeric kinds get an empty
         # value_text; both vary per row here (exam dates, censoring marks), so they are assigned
-        # after the build. Positions line up — the builder resets the index and keeps row order.
+        # after the build. Positions line up: the builder resets the index and keeps row order.
         rows["measured_at"] = sub["measured_at"].astype("datetime64[ns]")
         if kind != "date":
             rows["value_text"] = sub["value_text"].astype("string")
@@ -521,7 +513,7 @@ def publish_replacing(
     provenance: dict[str, Any],
 ) -> pd.Series:
     """
-    Replace whatever the table holds at the keys *rows* writes, then add *rows* — in one write.
+    Replace whatever the table holds at the keys *rows* writes, then add *rows*, in one write.
 
     Returns the number of replaced rows per variable. Reads Parquet rather than SQLite, which may
     lag a previous write that skipped the index rebuild.
@@ -540,7 +532,7 @@ def publish_replacing(
         build_sqlite_index=False,
     )
     repo.register_variables([entry.to_catalog_entry() for entry in registrations])
-    # Once, after the catalog entries exist — the index is derived from Parquet and the catalog.
+    # Once, after the catalog entries exist: the index is derived from Parquet and the catalog.
     repo.build_sqlite_index(tables=[TABLE])
     return replaced
 
@@ -565,9 +557,7 @@ def summarize(frame: pd.DataFrame, rows: pd.DataFrame, replaced: pd.Series) -> p
     return out
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 @click.command("import-clinical-longitudinal")
 @click.option(
     "--source",

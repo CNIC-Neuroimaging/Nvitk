@@ -10,17 +10,17 @@ spectrum.
 *half maximum*, the threshold between the vessel's own centreline intensity and the background
 just around it:
 
-    T(x) = bg(x) + α · (core(x) − bg(x))        (α = 0.5: half maximum)
+    T(x) = bg(x) + α · (core(x) - bg(x))        (α = 0.5: half maximum)
 
 - ``core`` is the image on the label's skeleton (lightly denoised);
-- ``bg`` is the image in a ring around the label (1–3 mm out, unlabelled voxels only).
+- ``bg`` is the image in a ring around the label (1-3 mm out, unlabelled voxels only).
 - Both are spread along the vessel by normalised convolution (Gaussian σ ≈ 2 mm), so ``T``
   follows the inflow decay along a long vessel.
 - The new lumen is the voxels above ``T`` in the label's neighbourhood that connect to its
   skeleton. The other labels are barriers: their original voxels are never taken.
 - A thick mask shrinks to the half-maximum boundary; a thin one may grow by up to ``margin_mm``
   or half its radius, whichever is smaller.
-- A vessel too faint for a half maximum (contrast ``(core − bg) / bg`` below ``min_contrast``)
+- A vessel too faint for a half maximum (contrast ``(core - bg) / bg`` below ``min_contrast``)
   keeps its mask.
 - The threshold is applied to the image lightly denoised (σ = ``DENOISE_MM``), and each new mask
   goes through :func:`nvitk.morphology.siphon_cut.pretess`. Voxel noise at a half-maximum
@@ -87,16 +87,14 @@ setup(globals())
 
 log = Logger()
 
-# ---------------------------------------------------------------------------
 # Defaults (see the module docstring)
-# ---------------------------------------------------------------------------
 
 ALPHA = 0.5
 MARGIN_MM = 1.0
 SIGMA_MM = 2.0
 RING_MM = (1.0, 3.0)
 MIN_KEEP_FRACTION = 0.25
-#: (core − background) / background below which a vessel keeps its mask: too faint for a half maximum.
+#: (core - background) / background below which a vessel keeps its mask: too faint for a half maximum.
 MIN_CONTRAST = 0.5
 #: Gaussian σ (mm) of the light denoising the threshold is applied to.
 DENOISE_MM = 0.3
@@ -117,7 +115,7 @@ UP_SLACK_MM = 5.0
 #: taken (farther than twice the trunk radius, at least 3 mm): a second vertebral, not a detour.
 BRANCH_MIN_MM = 4.0
 #: ... and if that part of it follows a vessel: mean step cost at most this (1 on a strong tube,
-#: 5 off any). Second vertebrals measure 1.0–2.3 on PESA; the total cost is no guide, as the second
+#: 5 off any). Second vertebrals measure 1.0-2.3 on PESA; the total cost is no guide, as the second
 #: vertebral often reaches the floor two or three times farther than the first.
 BRANCH_MAX_COST = 2.5
 
@@ -125,9 +123,7 @@ BRANCH_MAX_COST = 2.5
 Spacing = tuple[float, float, float]
 
 
-# ---------------------------------------------------------------------------
 # Small helpers
-# ---------------------------------------------------------------------------
 
 
 def spacing_of(affine: Any = None, spacing: Sequence[float] | None = None) -> Spacing:
@@ -196,7 +192,7 @@ def _linear_field(shape: Sequence[int], offset: Sequence[float], direction: Sequ
     """``Σ_ax (index_ax + offset_ax) · direction_ax`` for every voxel of *shape* (backend float64).
 
     With *offset* a crop's origin and *direction* the world superior row of the affine, it is each
-    voxel's height in mm; with *offset* = −point and *direction* a unit normal (in mm per index
+    voxel's height in mm; with *offset* = -point and *direction* a unit normal (in mm per index
     step), its signed distance to a plane.
     """
     field_ = np.zeros(tuple(int(n) for n in shape), dtype=np.float64)
@@ -252,7 +248,7 @@ def local_threshold(
     alpha: float = ALPHA,
     sigma_mm: float = SIGMA_MM,
 ) -> tuple[Any, dict[str, float]]:
-    """``T = bg + α (core − bg)``: *core* spread from the *centre* voxels, *bg* from the *ring*
+    """``T = bg + α (core - bg)``: *core* spread from the *centre* voxels, *bg* from the *ring*
     voxels, both by normalised convolution with a σ = *sigma_mm* Gaussian. Where a field has no
     support it falls back to its median."""
     sig = _sigma_vox(sigma_mm, sp, 0.5)
@@ -267,9 +263,7 @@ def local_threshold(
     return bg + float(alpha) * (core - bg), {"core_median": core_med, "background_median": bg_med}
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Local re-segmentation
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def resegment_local(
@@ -360,9 +354,7 @@ def resegment_local(
     return out, info
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Frangi vesselness
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _sym3_eigvals(a11, a22, a33, a12, a13, a23):
@@ -402,7 +394,7 @@ def frangi_vesselness(
     # large arteries are more than 0.5 % of the voxels, and clipping them flat leaves their core
     # with no Hessian response.
     lo, hi = float(np.percentile(vol, 1.0)), float(np.percentile(vol, 99.9))
-    img = -np.clip((vol - lo) / max(hi - lo, 1e-8), 0.0, 1.0).astype(np.float32)  # bright → dark ridges
+    img = -np.clip((vol - lo) / max(hi - lo, 1e-8), 0.0, 1.0).astype(np.float32)  # bright -> dark ridges
     del vol
     out = np.zeros(img.shape, dtype=np.float32)
     orders = [tuple(int(i == d) for i in range(3)) for d in range(3)]
@@ -443,9 +435,7 @@ def frangi_vesselness(
     return out / m if m > 0 else out
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Trunk extension
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -589,7 +579,7 @@ def _path_length_mm(path: Any, sp: Spacing) -> float:
 
 
 def _branch_part(path: Any, others: list[Any], sp: Spacing, min_sep_mm: float, cost: Any) -> tuple[float, float]:
-    """Host: the part of *path* farther than *min_sep_mm* from every path in *others* — its length
+    """Host: the part of *path* farther than *min_sep_mm* from every path in *others*; its length
     (mm) and the mean step *cost* on it (``inf`` when there is none)."""
     with using("cpu"):
         sp_h = to_numpy(sp)
@@ -619,9 +609,9 @@ def _paths_to_floor(
     min_sep_mm: float = 3.0,
 ) -> tuple[list[Any], dict[str, Any]]:
     """Minimum-cost paths through *allowed* from *seeds* to the separate pieces of the floor: the
-    cheapest one, and with *max_paths* > 1 the next pieces (by cost) whose own part — where the path
-    runs farther than *min_sep_mm* from those already taken — is at least :data:`BRANCH_MIN_MM`
-    long and follows a vessel (mean step cost ≤ :data:`BRANCH_MAX_COST`): a second branch, not a
+    cheapest one, and with *max_paths* > 1 the next pieces (by cost) whose own part (where the path
+    runs farther than *min_sep_mm* from those already taken) is at least :data:`BRANCH_MIN_MM`
+    long and follows a vessel (mean step cost <= :data:`BRANCH_MAX_COST`): a second branch, not a
     detour to a neighbouring piece. *floors* are tried in order until one is reached (vessel
     cross-sections at the floor, then any allowed voxel there). Each path is a host ``(N, 3)``
     voxel array, seed end first (scikit-image ``MCP_Geometric``: host only)."""
@@ -757,7 +747,7 @@ def extend_trunks(
 
     With *to_floor* (default) a trunk goes on to the edge of the image in *direction*: the
     minimum-cost path through the Frangi tree from its end to the image's last slices, cheaper
-    along bright tubes (cost 1–5 per mm by vesselness). Frangi fades at the volume's edge, so the
+    along bright tubes (cost 1-5 per mm by vesselness). Frangi fades at the volume's edge, so the
     last 3 mm accept any voxel above the trunk's gate. *floor_branches* (``{label: n}``, default 1)
     lets a trunk follow *n* pieces down, e.g. the basilar into both vertebrals. A trunk with no path
     to the floor falls back to following the tree as one tube; there *split_ratio* (per label
@@ -784,7 +774,7 @@ def extend_trunks(
             ext.stop = "label absent"
             info["labels"][str(lid)] = ext.to_dict()
             continue
-        # ---- 1. Open end and crop (host geometry on the label's voxel list) ----------------
+        # 1. Open end and crop (host geometry on the label's voxel list)
         coords = to_numpy(np.argwhere(own))
         end, band = _end_band(coords, sup, sign, seed_band_mm)
         lo, hi = _extension_box(band, sup, sign, sp, out.shape, max_extension_mm)
@@ -794,7 +784,7 @@ def extend_trunks(
         img = inten[box]
         lab = out[box]
         own_c = lab == lid
-        # ---- 2. Heights, seeds and the trunk's own gate (backend) --------------------------
+        # 2. Heights, seeds and the trunk's own gate (backend)
         h = _linear_field(img.shape, [int(v) for v in lo], [sign * float(v) for v in sup])
         # Up to UP_SLACK_MM above the lowest voxel: the vessel may leave the label sideways.
         beyond = h > end - UP_SLACK_MM
@@ -809,7 +799,7 @@ def extend_trunks(
         core = float(np.median(img[sk])) if bool(sk.any()) else float(np.median(img[seeds]))
         bg = float(np.median(img[ring])) if bool(ring.any()) else float(np.median(img))
         gate = bg + 0.5 * alpha * (core - bg)
-        # ---- 3. Frangi tree beyond the end -------------------------------------------------
+        # 3. Frangi tree beyond the end
         vess = frangi_vesselness(img, sp, frangi_sigmas_mm)
         region = beyond & (lab == 0)
         tree, _tmeta = hysteresis_vessel_tree(vess, region)
@@ -820,7 +810,7 @@ def extend_trunks(
         tree = (as_backend_array(tree).astype(bool) & (img > gate) | lumen) & region
         ext.info.update(core=round(core, 1), background=round(bg, 1), gate=round(gate, 1),
                         tree_voxels=int(tree.sum()))
-        # ---- 4. Route: minimum-cost paths to the floor, else the tube follower -------------
+        # 4. Route: minimum-cost paths to the floor, else the tube follower
         paths: list[Any] = []
         if to_floor:
             inside = img > 0
@@ -865,7 +855,7 @@ def extend_trunks(
             line = as_backend_array(_polyline_mask(pts, img.shape))
             # No cap beyond the last centroid: cut the hood with the plane through it.
             ahead = _linear_field(img.shape, [-float(v) for v in pts[-1]], [float(v) for v in tang]) > 0.5
-        # ---- 5. Lumen around the route at the local half maximum (~2 trunk radii) ----------
+        # 5. Lumen around the route at the local half maximum (~2 trunk radii)
         d_line = ndi.distance_transform_edt(~line, sampling=sp)
         r_trunk = float(np.median(ndi.distance_transform_edt(own_c, sampling=sp)[sk])) if bool(sk.any()) else 2.0
         r_lim = max(2.0 * r_trunk, r_trunk + 1.0)
@@ -886,9 +876,7 @@ def extend_trunks(
     return out, info
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Distal growth
-# ──────────────────────────────────────────────────────────────────────────────
 
 #: Distal growth defaults (:func:`grow_distal`).
 DISTAL_SIGMAS_MM = (0.5, 1.0, 1.5, 2.0)
@@ -958,7 +946,7 @@ def head_midplane(
 
 def head_midplane_from_image(intensity: Any, sp: Spacing, *, lr_axis: int = 0) -> tuple[Any, Any] | None:
     """``(point, normal)`` of the head's mid-sagittal plane from the image: for every row across
-    the left–right index axis *lr_axis*, the midpoint between the head's two edges (the head mask
+    the left-right index axis *lr_axis*, the midpoint between the head's two edges (the head mask
     is the image above 10 % of its 99th percentile, closed, largest component), then a
     least-squares plane through those midpoints. The normal (mm, unit) points to +*lr_axis*. The
     head mask runs on the backend; the plane fit on the host (host vectors returned)."""
@@ -989,12 +977,12 @@ def head_midplane_from_image(intensity: Any, sp: Spacing, *, lr_axis: int = 0) -
             keep = np.abs(res) <= 3.0 * max(float(np.std(res)), 1e-6)
             coef, *_ = np.linalg.lstsq(A[keep], mid[keep], rcond=None)
         other = [ax for ax in range(3) if ax != lr_axis]
-        # Plane lr = c0 + c1 a + c2 b  →  normal ∝ (1, −c1, −c2) in index units, then to mm.
+        # Plane lr = c0 + c1 a + c2 b  ->  normal ∝ (1, -c1, -c2) in index units, then to mm.
         n_idx = np.zeros(3)
         n_idx[lr_axis] = 1.0
         n_idx[other[0]] = -coef[1]
         n_idx[other[1]] = -coef[2]
-        normal = n_idx / to_numpy(sp)  # gradient in mm of (lr − plane(a, b)) per index step / spacing
+        normal = n_idx / to_numpy(sp)  # gradient in mm of (lr - plane(a, b)) per index step / spacing
         normal = normal / np.linalg.norm(normal)
         p0 = np.zeros(3)
         ca, cb = float(np.mean(a_idx)), float(np.mean(b_idx))
@@ -1023,7 +1011,7 @@ def grow_distal(
 
     The tree is a GMM hysteresis tree of the Frangi vesselness (σ *frangi_sigmas_mm*) on a crop
     around the labels, gated at 0.15 of the way from the background to the labels' centreline
-    intensity. Every label grows into unlabelled tree voxels by geodesic distance, weighted 1–5
+    intensity. Every label grows into unlabelled tree voxels by geodesic distance, weighted 1-5
     per mm by vesselness so the fronts keep to vessel centres. Each voxel goes to the label that
     reaches it first (the fronts advance together, step for step), up to *max_mm*. Labels not in
     *ids* are barriers.
@@ -1053,7 +1041,7 @@ def grow_distal(
     if not ids:
         return out, info
     t0 = time.time()
-    # ---- 1. Crop, centreline intensity and gate --------------------------------------------
+    # 1. Crop, centreline intensity and gate
     box = _bbox(_isin(out, ids), _vox(max_mm + 5.0, sp))
     img = inten[box]
     lab = out[box]  # a view: the lumen written below lands in *out*
@@ -1068,7 +1056,7 @@ def grow_distal(
     bg_mask = inside & (lab == 0)
     bg = float(np.median(img[bg_mask])) if bool(bg_mask.any()) else 0.0
     gate = bg + 0.15 * (core - bg)
-    # ---- 2. Frangi tree, other labels as barriers -------------------------------------------
+    # 2. Frangi tree, other labels as barriers
     vess = frangi_vesselness(img, sp, frangi_sigmas_mm)
     comm_ids = [int(c) for _l, _r, c in hemisphere_pairs if c is not None]
     others = (lab != 0) & ~mine & ~_isin(lab, comm_ids)  # a pair's communicating label does not block it
@@ -1083,7 +1071,7 @@ def grow_distal(
     step_cost = (1.0 + 4.0 * (1.0 - np.clip(vess / max(v_ref, 1e-9), 0.0, 1.0))).astype(np.float64)
     del vess
     info.update(core=round(core, 1), background=round(bg, 1), gate=round(gate, 1), tree_voxels=int(tree.sum()))
-    # ---- 3. Hemisphere guard: past the midline plane (+ slack), a paired label may not grow --
+    # 3. Hemisphere guard: past the midline plane (+ slack), a paired label may not grow
     forbid: dict[int, Any] = {}
     extra: dict[int, Any] = {}
     origin = [int(b.start) for b in box]
@@ -1113,9 +1101,9 @@ def grow_distal(
                                           "point_vox": [round(float(v) + o, 1) for v, o in zip(p0, origin)],
                                           "normal": [round(float(v), 3) for v in nn],
                                           "slack_mm": float(midline_slack_mm)})
-    # ---- 4. Competition (~1 per mm on a centreline, so 2 × max_mm) --------------------------
+    # 4. Competition (~1 per mm on a centreline, so 2 × max_mm)
     owner, best = _compete(tree, lab, ids, step_cost, sp, 2.0 * max_mm, forbid, extra)
-    # ---- 5. The lumen of what each label gained, at its local half maximum -------------------
+    # 5. The lumen of what each label gained, at its local half maximum
     for lid in ids:
         own = lab == lid
         grown = owner == lid

@@ -12,16 +12,14 @@ and the conservation residual fails on its **magnitude** in either direction.
 Each preset here turns one of those into the rules that express it, so applying a literature-band
 check is a menu click rather than three fields typed correctly.
 
-Presets are **soft by construction**. They drop rows from the analysis frame — and therefore from the
-fit — which is a stronger action than the plot's grey-out. Reach for the grey-out when you want to
+Presets are **soft by construction**. They drop rows from the analysis frame (and therefore from the
+fit), which is a stronger action than the plot's grey-out. Reach for the grey-out when you want to
 *see* what fails, and for these when you have decided the failures should not inform the model.
 """
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -52,7 +50,7 @@ class QcFilterPreset:
 
 
 def _plausibility_rules(threshold: float | None) -> list[FilterRule]:
-    """Keep rows the subject-aware flow decision retained — see :func:`flow_qc_keep`."""
+    """Keep rows the subject-aware flow decision retained; see :func:`flow_qc_keep`."""
     return [FilterRule(column=KEEP_COLUMN, kind="compare", op=">=", value="0.5")]
 
 
@@ -61,7 +59,7 @@ def _hypoplastic_rules(_threshold: float | None) -> list[FilterRule]:
     Drop vessels flagged as plausibly hypoplastic.
 
     ``keep_na``: a vessel with no measured caliber was never assessed, and dropping every one of
-    them would empty a frame that simply has no area measurement loaded.
+    them would empty a frame that has no area measurement loaded.
     """
     return [FilterRule(
         column="qc_hypoplastic", kind="range", low=-0.5, high=0.5, keep_na=True,
@@ -72,7 +70,7 @@ def _conservation_rules(threshold: float | None) -> list[FilterRule]:
     """
     Keep rows whose junction residual is small in magnitude.
 
-    A residual fails in *either* direction, so this is a symmetric range rather than a comparison —
+    A residual fails in *either* direction, so this is a symmetric range rather than a comparison:
     ``> -0.10`` would keep every subject whose outflow exceeds inflow by any amount at all.
     """
     limit = abs(0.10 if threshold is None else threshold)
@@ -93,12 +91,12 @@ def _segment_cv_rules(threshold: float | None) -> list[FilterRule]:
 
 
 def _score_rules(threshold: float | None) -> list[FilterRule]:
-    """Keep rows the subject-aware flow decision retained — see :func:`flow_qc_keep`."""
+    """Keep rows the subject-aware flow decision retained; see :func:`flow_qc_keep`."""
     return [FilterRule(column=KEEP_COLUMN, kind="compare", op=">=", value="0.5")]
 
 
 def _flag_rules(_threshold: float | None) -> list[FilterRule]:
-    """Keep rows the subject-aware flow decision retained — see :func:`flow_qc_keep`."""
+    """Keep rows the subject-aware flow decision retained; see :func:`flow_qc_keep`."""
     return [FilterRule(column=KEEP_COLUMN, kind="compare", op=">=", value="0.5")]
 
 
@@ -187,16 +185,13 @@ SUBJECT_AWARE_KEYS: dict[str, str] = {
 }
 
 
-
-# ---------------------------------------------------------------------------
 # Flow QC as a subject-aware decision
-# ---------------------------------------------------------------------------
 #: Vessels whose measurement carries the subject's whole cerebral inflow. If one of these is
 #: implausible, every other flow in that subject is suspect too: the conservation checks, the
 #: anterior/posterior split and any total all read through them.
 CRITICAL_NODES: frozenset[str] = frozenset({"lica", "rica", "basi"})
 
-#: Vessels the flow bands deliberately do not cover — the communicating arteries, where near-zero
+#: Vessels the flow bands deliberately do not cover: the communicating arteries, where near-zero
 #: or reversed flow is a normal circle of Willis, and the venous sinuses, which have no arterial
 #: band at all. They are never removed by a flow filter, and never trigger the subject cascade.
 EXEMPT_NODES: frozenset[str] = frozenset({
@@ -221,7 +216,7 @@ def flow_qc_keep(
     A plain column threshold gets two things wrong on this data:
 
     1. **Exempt vessels are dropped for having no score.** A PComm or a sagittal sinus has no
-       arterial band, so its metric is missing — and a ``>=`` comparison fails a missing value.
+       arterial band, so its metric is missing, and a ``>=`` comparison fails a missing value.
        They would vanish from the frame for the crime of not being scoreable.
     2. **A failing carotid only removes itself.** If a subject's ICA is measured at 31 mL/min when
        a healthy one is ~257, that subject's remaining flows are not trustworthy either: the
@@ -254,7 +249,7 @@ def flow_qc_keep(
     nodes = frame[region_column].map(canonical_node)
     exempt = nodes.isin(EXEMPT_NODES) | nodes.isna()
     values = pd.to_numeric(frame[metric], errors="coerce")
-    # A missing score is "not checked", never "failed" — that is what protects the exempt vessels
+    # A missing score is "not checked", never "failed": that is what protects the exempt vessels
     # and anything the band table does not recognise.
     failing = (values < float(threshold)).fillna(False) & ~exempt
 
@@ -283,7 +278,7 @@ def available_presets(
     The second element is ``"ready"`` when the metric column is in the frame and ``"unavailable"``
     otherwise. The metrics are **read from the dataset**, never derived here: scoring on the fly
     would give one session's filter a different answer from the published one, and from every other
-    session — the QC has to mean the same thing everywhere it is read. Run the qvtpy stage 9 to
+    session; the QC has to mean the same thing everywhere it is read. Run the qvtpy stage 9 to
     publish them.
 
     Returned rather than filtered so the menu can grey an entry out with a reason; silently omitting
@@ -316,7 +311,7 @@ def preset_rules(
     KeyError
         Unknown preset.
     ValueError
-        The frame lacks a column the preset needs — with the reason, since "run stage 9" is the
+        The frame lacks a column the preset needs, with the reason, since "run stage 9" is the
         actionable answer and an empty filter would silently do nothing.
     """
     preset = QC_FILTER_BY_KEY[key]

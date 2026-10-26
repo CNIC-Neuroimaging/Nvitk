@@ -4,11 +4,11 @@ Topology JSONs express where a vessel's proximal ("init") end sits with a
 ``no_upstream_start`` rule such as ``"inferior"`` or ``"caudal"``. Turning that
 word into an array axis + sign needs two pieces of information:
 
-1. **The image affine** — which array axis runs L/R, A/P and S/I, and in which
+1. **The image affine**: which array axis runs L/R, A/P and S/I, and in which
    direction the index grows. Historically this was hardcoded to
-   ``axis0 = L→R, axis1 = A/P, axis2 = S/I`` (an implicit LAS assumption), which
+   ``axis0 = L->R, axis1 = A/P, axis2 = S/I`` (an implicit LAS assumption), which
    is right for RAS-coded human TOF and wrong for anything else.
-2. **The species** — a mouse is a quadruped, so its rostro-caudal axis lies along
+2. **The species**: a mouse is a quadruped, so its rostro-caudal axis lies along
    scanner A/P, not S/I. ``caudal`` and ``inferior`` are the same direction in a
    human and orthogonal directions in a mouse.
 
@@ -24,7 +24,7 @@ range-normalised before summing so neither axis dominates.
 
 This module deliberately depends only on ``numpy`` + ``nibabel`` (already a hard
 dependency of :mod:`nvitk.measure.morpho.io_utils`) so that
-:mod:`nvitk.measure.morpho` stays importable without the rest of nvitk — the
+:mod:`nvitk.measure.morpho` stays importable without the rest of nvitk: the
 Slicer ``MouseTOFMorphometrics`` module relies on that.
 
 .. note::
@@ -141,7 +141,7 @@ class AnatomicalAxes:
     si_axis: int = 2
     si_sign: int = 1
 
-    # -- rule resolution ----------------------------------------------------
+    # rule resolution
     def _plane(self, plane: str) -> tuple[int, int]:
         if plane == "lr":
             return self.lr_axis, self.lr_sign
@@ -158,7 +158,7 @@ class AnatomicalAxes:
         return token if token in _SCANNER_RULES else None
 
     def direction(self, rule: Optional[str]) -> Optional[tuple[int, int]]:
-        """``(array_axis, sign)`` for *rule*; ``sign == +1`` ⇒ larger index is more *rule*."""
+        """``(array_axis, sign)`` for *rule*; ``sign == +1`` => larger index is more *rule*."""
         canonical = self.canonical_rule(rule)
         if canonical is None:
             return None
@@ -169,7 +169,7 @@ class AnatomicalAxes:
         return int(axis), int(want * axis_sign)
 
     def score(self, pt_mm, rule: Optional[str]) -> float:
-        """Ranking score for a point under *rule* — **lower means more extreme** toward it.
+        """Ranking score for a point under *rule*: **lower means more extreme** toward it.
 
         Single rules read one coordinate. Combined rules (``"caudal+ventral"``)
         sum their components; use :meth:`score_many` when several points are
@@ -206,9 +206,9 @@ class AnatomicalAxes:
             total += (vals - float(np.nanmin(vals))) / span if span > 0 else 0.0
         return total
 
-    # -- provenance ---------------------------------------------------------
+    # provenance
     def describe_rule(self, rule: Optional[str]) -> str:
-        """Human-readable resolution of *rule*, e.g. ``"caudal→axis1(+)"``."""
+        """Human-readable resolution of *rule*, e.g. ``"caudal->axis1(+)"``."""
         parts = []
         for part in str(rule or "").split("+"):
             token = part.strip()
@@ -243,11 +243,11 @@ def resolve_anatomical_axes(
     Parameters
     ----------
     affine
-        4x4 voxel-to-world affine (nibabel convention, IJK→RAS). ``None`` or an
+        4x4 voxel-to-world affine (nibabel convention, IJK->RAS). ``None`` or an
         unparseable affine falls back to ``RAS``.
     species
         ``"human"`` (default), ``"mouse"``, or ``"auto"``/``None`` for human.
-        Selects the animal-frame → scanner mapping for ``rostral``/``caudal``/
+        Selects the animal-frame -> scanner mapping for ``rostral``/``caudal``/
         ``dorsal``/``ventral``.
     axes_override
         Axis codes such as ``"LSA"`` that replace the header-derived ones, for
@@ -287,7 +287,7 @@ class MorphoContext:
     #: The run's :class:`~nvitk.measure.morphometrics_config.MorphometricsConfig` (re-applied in
     #: each spawned worker; ``None`` keeps whatever is installed).
     config: Optional[Any] = None
-    #: NIfTI voxel → RAS-mm affine of the input mask (VTPs are written in that frame).
+    #: NIfTI voxel -> RAS-mm affine of the input mask (VTPs are written in that frame).
     affine: Optional[tuple] = None
 
     def scaled(self, value_mm: float) -> float:
