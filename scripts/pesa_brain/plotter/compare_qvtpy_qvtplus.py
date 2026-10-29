@@ -128,9 +128,12 @@ def _merge_pipelines(
     old = df_old[["subject_uid", "region_id", "value_num"]].rename(
         columns={"value_num": "v2"}
     )
+    from nvitk.pipes.qvtpy.labels import qvtpy_legacy_vessel_name
+
     new = df_new[["subject_uid", "region_id", "value_num"]].rename(
         columns={"value_num": "v3"}
     )
+    new["region_id"] = new["region_id"].map(qvtpy_legacy_vessel_name)  # LMCA_M1 -> LMCA
     merged = old.merge(new, on=["subject_uid", "region_id"], how="inner")
     return merged
 

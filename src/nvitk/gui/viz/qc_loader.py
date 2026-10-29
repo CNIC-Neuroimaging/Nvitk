@@ -188,13 +188,49 @@ def find_cd_path(search_roots: list[Path]) -> Path | None:
     return None
 
 
+_FRAME_DIR: list[Path] = []
+
+
+def _scanner_frame_copy(path: Path, eicab_dir: Path) -> Path:
+    """*path* (one of eICAB's own files, in its de-rotated frame) as a temporary copy carrying the
+    scanner-frame affine, when stage 1's post-process report recorded the correction it applied to
+    its masks (``scanner_frame.correction``); else *path*. The copies share one temporary
+    directory, removed when the GUI exits."""
+    import atexit
+    import json
+    import shutil
+
+    import nibabel as nib
+
+    from nvitk.pipes.qvtpy.util.eicab.eicab_postprocess import PP_REPORT_JSON
+
+    try:
+        rep = json.loads((Path(eicab_dir) / PP_REPORT_JSON).read_text(encoding="utf-8"))
+        correction = (rep.get("scanner_frame") or {}).get("correction")
+        if not correction:
+            return path
+        if not _FRAME_DIR:
+            _FRAME_DIR.append(Path(tempfile.mkdtemp(prefix="nvitk_eicab_frame_")))
+            atexit.register(shutil.rmtree, str(_FRAME_DIR[0]), True)
+        img = nib.load(str(path))
+        out = _FRAME_DIR[0] / f"{Path(eicab_dir).parent.name}_{path.name.replace('.nii.gz', '.nii')}"
+        nib.Nifti1Image(np.asanyarray(img.dataobj), np.asarray(correction, dtype=float) @ img.affine,
+                        img.header).to_filename(str(out))
+        return out
+    except Exception as exc:  # noqa: BLE001 (the file still opens, in eICAB's frame)
+        log.warning(f"eICAB QC: {path.name} kept in eICAB's frame ({exc})")
+        return path
+
+
 def load_eicab_qc_layers(
     viewer: Any,
     resource_root: Path,
     *,
     tof_search_roots: list[Path] | None = None,
 ) -> dict[str, Any]:
-    """Load TOF + eICAB resampled / CW / WB outputs."""
+    """Load TOF + eICAB outputs: ``TOF_resampled`` and eICAB's own CW / WB masks (hidden), and the
+    post-process's ``CW_pp`` and ``WB_pp`` masks. When the post-process wrote its masks in the
+    TOF's scanner frame, eICAB's own files are shown in that frame too."""
     eicab_dir = resolve_eicab_tree(resource_root)
     roots = [eicab_dir, *(tof_search_roots or [])]
     loaded: dict[str, Any] = {"eicab_dir": eicab_dir}
@@ -210,22 +246,21 @@ def load_eicab_qc_layers(
     resampled = _find_first(eicab_dir, ("**/TOF_resampled.nii.gz", "**/TOF_resampled.nii"))
     if resampled is not None:
         loaded["tof_resampled"] = _open_nifti(
-            viewer, resampled, name="TOF_resampled", visible=True
+            viewer, _scanner_frame_copy(resampled, resampled.parent), name="TOF_resampled", visible=tof is None
         )
 
-    cw = _find_first(
-        eicab_dir,
-        ("**/*_eICAB_CW_pp.nii.gz", "**/*_eICAB_CW.nii.gz", "**/*eICAB_CW*.nii.gz"),
-    )
-    if cw is not None:
-        loaded["eicab_cw"] = _open_nifti(viewer, cw, name="eICAB_CW", visible=True)
-
-    wb = _find_first(
-        eicab_dir,
-        ("**/*_eICAB_WB_pp.nii.gz", "**/*_eICAB_WB.nii.gz", "**/*eICAB_WB*.nii.gz"),
-    )
-    if wb is not None:
-        loaded["eicab_wb"] = _open_nifti(viewer, wb, name="eICAB_WB", visible=True)
+    pp_cw = _find_first(eicab_dir, ("**/*_eICAB_CW_pp.nii.gz", "**/*_eICAB_CW_pp.nii"))
+    pp_wb = _find_first(eicab_dir, ("**/*_eICAB_WB_pp.nii.gz", "**/*_eICAB_WB_pp.nii"))
+    for key, pattern in (("eicab_cw", ("**/*_eICAB_CW.nii.gz", "**/*_eICAB_CW.nii")),
+                         ("eicab_wb", ("**/*_eICAB_WB.nii.gz", "**/*_eICAB_WB.nii"))):
+        raw = _find_first(eicab_dir, pattern)
+        if raw is not None:
+            loaded[key] = _open_nifti(viewer, _scanner_frame_copy(raw, raw.parent), name=f"eICAB_{key[-2:].upper()}",
+                                      visible=pp_cw is None and pp_wb is None and key == "eicab_cw")
+    if pp_cw is not None:
+        loaded["eicab_cw_pp"] = _open_nifti(viewer, pp_cw, name="eICAB_CW_pp", visible=pp_wb is None)
+    if pp_wb is not None:
+        loaded["eicab_wb_pp"] = _open_nifti(viewer, pp_wb, name="eICAB_WB_pp", visible=True)
 
     return loaded
 

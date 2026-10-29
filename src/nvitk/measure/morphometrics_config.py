@@ -298,22 +298,55 @@ _EICAB_CW: dict[str, Any] = {
     # absent vessel has no flow signal: aplasia, severe hypoplasia or occlusion. The confidence is
     # high when a topological neighbour (flow_from / flow_to) is present, low when none is: a
     # whole region missing suggests a field-of-view or segmentation dropout instead.
-    "HYPOPLASIA_MAIN_VESSELS": ("LICA", "RICA", "BASILAR", "LMCA", "RMCA", "LACA", "RACA",
+    # The proximal segments only for the split arteries: an A2 / M2 (the distal growth of stage 1's
+    # WB_pp mask) is absent from a CW_pp mask by construction.
+    "HYPOPLASIA_MAIN_VESSELS": ("LICA", "RICA", "BASILAR", "LMCA_M1", "RMCA_M1", "LACA_A1", "RACA_A1",
                                 "LPCA_P1", "RPCA_P1", "LPCA_P2", "RPCA_P2"),
+
+    # Stenosis / enlargement detection (LESION_DETECTION_METHODS). "robust_reference": one robust,
+    # non-increasing healthy reference per junction-to-junction stretch and one signed deviation
+    # profile, so a point is a stenosis or an enlargement, never both
+    # (nvitk.measure.morpho.robust_reference). "taper": cow_morpho's separate q85 stenosis /
+    # enlargement taper fits (caliber.detect_*_segments), as before 2026-10-28.
+    "LESION_DETECTION_METHOD": "robust_reference",
+    # robust_reference: the radius tested ("cross_section": ray_median CS, MIS where missing;
+    # "detection": the inscribed radius), smoothed by a running median over this many mm.
+    "ROBUST_RADIUS_SOURCE": "cross_section",
+    "ROBUST_RADIUS_MEDIAN_MM": 1.0,
+    # Robust LOWESS of log r per stretch: tricube window (mm), bisquare reweighting passes, floor of
+    # the robust residual scale (log units ~ fraction), and the non-increasing projection.
+    "ROBUST_REFERENCE_BANDWIDTH_MM": 20.0,
+    "ROBUST_REFERENCE_ITERATIONS": 4,
+    "ROBUST_MIN_SIGMA": 0.03,
+    "ROBUST_REFERENCE_MONOTONE": True,
+    "ROBUST_MAX_RISE_PER_MM": 0.01,
+    # Core threshold = max(the kind's threshold, this × the path's robust spread of r/ref − 1); the
+    # run extends over this fraction of it; above this spread a path is flagged noisy_path.
+    "ROBUST_SIGMA_FACTOR": 3.0,
+    "ROBUST_SUPPORT_FRACTION": 0.5,
+    "ROBUST_NOISY_SIGMA": 0.10,
+    # No lesion core where the reference radius is under this (mm): ~3 voxels across at 0.5 mm.
+    "ROBUST_MIN_REFERENCE_RADIUS_MM": 0.75,
 
     # Lesion severity / confidence (lesions table)
     # Healthy reference radius of the lesion table's diameter / area % (LESION_REFERENCE_METHODS).
-    # "interpolated": the median radius of a proximal window (LESION_PROXIMAL_REFERENCE_WINDOW_MM
-    # upstream of the lesion) and of a distal one (the same distances downstream), interpolated in
-    # arc length to the lesion's narrowest (widest) point, so the vessel's natural taper between
-    # them is not counted as stenosis. Windows keep to healthy points of the lesion's own
-    # junction-to-junction stretch (no other lesions, no bifurcation blanking zone, no junction
-    # crossed); a distal median above the proximal one is capped at it; one window only -> that one.
+    # "interpolated": the median radius of a proximal window (upstream of the lesion) and of a
+    # distal one (downstream; LESION_REFERENCE_GAP_MM / _WINDOW_LENGTH_MM / _SEARCH_MM below),
+    # interpolated in arc length to the lesion's narrowest (widest) point, so the vessel's natural
+    # taper between them is not counted as stenosis. Windows keep to healthy points (no other
+    # lesions, no bifurcation blanking zone) of the lesion's own junction-to-junction stretch, and
+    # cross the junction only when the stretch has no room (reference_crosses_junction); a distal
+    # median above the proximal one is capped at it; one window only -> that one. With the
+    # robust_reference detection the robust reference replaces both (the windows only check it).
     # "proximal": the upstream window alone (downstream when there is no room), as before 2026-10-21.
     "LESION_REFERENCE_METHOD": "interpolated",
-    # Window distances from the lesion (mm): upstream for the proximal window, mirrored downstream
-    # for the distal one.
-    "LESION_PROXIMAL_REFERENCE_WINDOW_MM": (2.0, 10.0),
+    # Reference windows (2026-10-28): each takes the nearest LESION_REFERENCE_WINDOW_LENGTH_MM of
+    # healthy points from LESION_REFERENCE_GAP_MM to LESION_REFERENCE_SEARCH_MM away from the lesion
+    # (upstream for the proximal window, downstream for the distal one). It stays in the lesion's
+    # stretch when that has room, else it crosses the junction (reference_crosses_junction).
+    "LESION_REFERENCE_GAP_MM": 2.0,
+    "LESION_REFERENCE_WINDOW_LENGTH_MM": 10.0,
+    "LESION_REFERENCE_SEARCH_MM": 30.0,
     # No reference window reaches into the first / last this many mm of the path: the tips hold
     # VMTK's seed point on the wall and the end taper.
     "LESION_REFERENCE_EXCLUDE_END_MM": 3.0,
@@ -325,6 +358,9 @@ _EICAB_CW: dict[str, Any] = {
     # Cross-section / inscribed radius ratio inside the lesion vs that path's median ratio.
     "LESION_RADIUS_DISAGREEMENT_FRACTION": 0.20,
 }
+
+#: Stenosis / enlargement detection methods (``LESION_DETECTION_METHOD``).
+LESION_DETECTION_METHODS: tuple[str, ...] = ("robust_reference", "taper")
 
 #: Named profiles. Values are plain dicts (configs travel pickled to spawned workers); copy them
 #: through :class:`MorphometricsConfig` / :meth:`MorphometricsConfig.with_params`, never mutate.
@@ -400,6 +436,11 @@ class MorphometricsConfig:
                 f"LESION_REFERENCE_METHOD must be one of {LESION_REFERENCE_METHODS}, "
                 f"got {self.params['LESION_REFERENCE_METHOD']!r}."
             )
+        if str(self.params["LESION_DETECTION_METHOD"]).lower() not in LESION_DETECTION_METHODS:
+            raise ValueError(
+                f"LESION_DETECTION_METHOD must be one of {LESION_DETECTION_METHODS}, "
+                f"got {self.params['LESION_DETECTION_METHOD']!r}."
+            )
         if str(self.params["ENLARGEMENT_RADIUS_SOURCE"]).lower() not in ENLARGEMENT_RADIUS_SOURCES:
             raise ValueError(
                 f"ENLARGEMENT_RADIUS_SOURCE must be one of {ENLARGEMENT_RADIUS_SOURCES}, "
@@ -455,6 +496,7 @@ def active_config(config: MorphometricsConfig) -> Iterator[MorphometricsConfig]:
 __all__ = [
     "CENTERLINE_BACKENDS",
     "DEFAULT_PROFILE",
+    "LESION_DETECTION_METHODS",
     "PARAMETER_NAMES",
     "PROFILES",
     "TREE_REGION_CODES",

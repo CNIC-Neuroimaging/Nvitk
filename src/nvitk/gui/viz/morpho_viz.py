@@ -33,7 +33,8 @@ MORPHO_LESIONS_LAYER = "Morpho lesions"
 LESION_COLOURS: dict[str, tuple[float, float, float]] = {
     "stenosis": (0.93, 0.33, 0.10),
     "enlargement": (0.20, 0.50, 0.95),
-    "hypoplasia": (0.62, 0.40, 0.85),  # an absent vessel: no point is drawn (lesions table only)
+    "hypoplasia": (0.62, 0.40, 0.85),  # an absent vessel: drawn only where it has a place (an A1's course)
+    "fetal": (0.95, 0.75, 0.20),  # a fetal PCA: drawn on the PComm
 }
 
 _COLOR_BY_ARRAYS: dict[str, tuple[str, ...]] = {
@@ -444,7 +445,7 @@ def add_morpho_lesion_points(
         if lyr.name == MORPHO_LESIONS_LAYER:
             viewer.layers.remove(lyr)
     xyz = np.array(df[["x_mm", "y_mm", "z_mm"]].apply(pd.to_numeric, errors="coerce"), dtype=float)  # writable
-    # One point per lesions.csv row (the index is the lesion's); a hypoplasia (an absent vessel) has
+    # One point per lesions.csv row (the index is the lesion's); a hypoplasia (an absent vessel, but an A1) has
     # no position: it sits hidden on a finite placeholder so the layer's extent stays sound.
     located = np.isfinite(xyz).all(axis=1)
     if not located.all():

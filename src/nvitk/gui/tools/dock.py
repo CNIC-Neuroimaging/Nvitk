@@ -540,6 +540,9 @@ def build_tools_dock(
         tool_panel.category.value = spec.category
         tool_panel.operation.value = spec.label
         _sync_aux_panels()
+        from nvitk.gui.core.workspace import raise_panel
+
+        raise_panel(viewer, "nvitk:tools")  # the Imaging tab, wherever it is docked
         notify(f"{spec.category} → {spec.label} selected. Set any parameters, then Run tool.")
 
     from nvitk.gui.tools.palette import (

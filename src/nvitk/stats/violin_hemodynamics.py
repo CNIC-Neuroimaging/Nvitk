@@ -235,7 +235,9 @@ def prepare_plot_frame(
     region_to_group = {db: grp for _d, db, grp in specs}
     order = [disp for disp, _db, _g in specs]
 
-    sub["region_id"] = sub["region_id"].astype(str)
+    from nvitk.pipes.qvtpy.labels import qvtpy_legacy_vessel_name
+
+    sub["region_id"] = sub["region_id"].astype(str).map(qvtpy_legacy_vessel_name)  # LMCA_M1 -> LMCA
     sub = sub[sub["region_id"].isin(region_to_display)].copy()
     if sub.empty:
         return pd.DataFrame(columns=["subject_uid", "vessel", "group", "value"])

@@ -27,23 +27,23 @@ _PRESETS: dict[str, dict[str, ToolPreset]] = {
         "custom": ToolPreset("custom", "Custom", {}, "Manual seed and intensity fraction."),
         "qvtpy_default": ToolPreset(
             "qvtpy_default",
-            "QVTpy default (frac=0.45)",
+            "Default (frac=0.45)",
             {"threshold": 0.45},
-            "Matches stage-4 default rg_intensity_frac.",
+            "Moderate growth: CD above 0.45 of the seed mean.",
         ),
         "qvtpy_explore": ToolPreset(
             "qvtpy_explore",
-            "QVTpy explore (frac=0.25)",
+            "Explore (frac=0.25)",
             {
                 "threshold": 0.25,
                 "mask_barrier_dilation_vox": 1,
                 "centerline_barrier_dilation_vox": 3,
             },
-            "ACA / MCA / PCA explore RG in QVTpy (mask barrier @1, CL @3).",
+            "More growth for thin distal arteries (mask barrier @1, centerline barrier @3).",
         ),
         "qvtpy_ica": ToolPreset(
             "qvtpy_ica",
-            "QVTpy ICA test (frac=0.45)",
+            "ICA seed (frac=0.45)",
             {"threshold": 0.45, "seed_from_label": True},
             "Use label id 1 (LICA) under qvtpy-4dflow mapping as seed.",
         ),

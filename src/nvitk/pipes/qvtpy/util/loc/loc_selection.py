@@ -23,6 +23,7 @@ from nvitk.pipes.qvtpy.labels import (
     QVTPY_ACA_IDS,
     QVTPY_ACOMM,
     QVTPY_BASILAR,
+    QVTPY_DISTAL_IDS,
     QVTPY_ICA_BASILAR_IDS,
     QVTPY_LACA,
     QVTPY_LICA,
@@ -1132,9 +1133,11 @@ def select_arterial_locs(
     LOC policy (``strategy="qvtpy"``):
 
     - ICA / basilar: one shared-z mid LOC on the trunk
-    - MCA / ACA / PCA: init at the midpoint of the stage-3 A1/M1/P1 centerline
-      (pre-RG / pre-distal expansion); when *distal_locs* is true, also place fin
-      distal of that span on the stage-4 trunk (stage-3 coverage forbidden for fin)
+    - MCA / ACA / PCA (the A1 / M1 / P1 labels): init at the midpoint of the stage-3 centerline
+      (before the flood); when *distal_locs* is true, also place fin distal of that span on the
+      stage-4 trunk (stage-3 coverage forbidden for fin)
+    - A2 / M2 / P2 labels: one mid LOC on the trunk, only when *distal_locs* is true
+    - SCAs: one mid LOC on the trunk
     - ACOMM: never measured (insufficient resolution)
     - PCOMM: only when present in the arterial set (stage-3 min-points survivors)
     - Other labels: one mid LOC on the trunk
@@ -1202,6 +1205,9 @@ def select_arterial_locs(
             continue
         # ACOMM: never place LOCs (insufficient resolution for measurement).
         if int(vid) == int(QVTPY_ACOMM):
+            continue
+        # A2 / M2 / P2 (their own labels since 2026-10-28): one mid LOC, only with distal LOCs.
+        if int(vid) in QVTPY_DISTAL_IDS and not distal_locs:
             continue
         # PCOMM survivors only: absent labels (stage-3 drop) never appear here.
         trunk = to_numpy(branch_list[0][1])

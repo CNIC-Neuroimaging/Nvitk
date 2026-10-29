@@ -53,7 +53,7 @@ from nvitk.pipes.qvtpy.util.centerline.centerline_io import (
 )
 from nvitk.pipes.qvtpy.util.eicab.brain_mask import brain_mask_for_reference
 from nvitk.pipes.qvtpy.util.io.paths import resolve_totalseg_model_dir
-from nvitk.pipes.qvtpy.util.eicab.eicab_masks import EicabMaskKind, resolve_eicab_mask
+from nvitk.pipes.qvtpy.util.eicab.eicab_masks import EicabMaskKind, resolve_eicab_mask, resolve_eicab_pp_mask
 from nvitk.pipes.qvtpy.util.centerline.flow_volume_masks import (
     arterial_exclusion_mask,
     binary_vessel_segment_cd,
@@ -85,11 +85,11 @@ def _load_wb_arterial_labels_for_venous_exclusion(
     CW Circle-of-Willis masks omit distal MCA/ACA/PCA territory that often enters
     the superior venous slab on CD; WB covers those for exclusion only.
     """
-    wb_res = resolve_eicab_mask(
-        eicab_dir,
-        preference="wb",
-        prefer_postprocessed=bool(eicab_prefer_pp),
-    )
+    # eICAB's own whole-brain mask covers the most distal arteries; stage 1's distal-grown WB_pp
+    # (the circle plus ~60 mm) is the next best.
+    wb_res = resolve_eicab_mask(eicab_dir, preference="wb", prefer_postprocessed=False)
+    if wb_res.used != "wb" and eicab_prefer_pp:
+        wb_res = resolve_eicab_pp_mask(eicab_dir, preference="wb")
     if wb_res.used != "wb":
         log.info(
             "venous arterial exclusion: WB eICAB not available "
@@ -200,7 +200,7 @@ def run_subject(
     nifti_root: Path,
     output_root: Path,
     eicab_subdir: str | None = None,
-    eicab_mask: EicabMaskKind = "cw",
+    eicab_mask: EicabMaskKind = "wb",
     skip_existing: bool = False,
     cd_up_thresh: float | None = None,
     cd_shift_hm: bool | None = None,
@@ -222,11 +222,9 @@ def run_subject(
     fixed = Path(meta["fixed"])
     subdir = (eicab_subdir or cfg.STAGE1_EICAB_DIR).strip() or "eicab"
     eicab_dir = output_root / subject / subdir
-    eicab_res = resolve_eicab_mask(
-        eicab_dir,
-        preference=eicab_mask,
-        prefer_postprocessed=bool(eicab_prefer_pp),
-    )
+    # pp: the distal-grown WB_pp (its A2 / M2 reach stage 4) before CW_pp, unless "cw" is asked.
+    eicab_res = (resolve_eicab_pp_mask(eicab_dir, preference=eicab_mask) if eicab_prefer_pp
+                 else resolve_eicab_mask(eicab_dir, preference="cw", prefer_postprocessed=False))
 
     out_dir = _stage3_out(output_root, subject)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -470,8 +468,10 @@ def _stage3_cli_options(func):
     func = click.option(
         "--eicab-mask",
         type=click.Choice(["cw", "wb"], case_sensitive=False),
-        default="cw",
+        default="wb",
         show_default=True,
+        help="With --eicab-prefer-pp: wb = the distal-grown *_eICAB_WB_pp, else *_CW_pp; cw = *_CW_pp only. "
+        "Without: eICAB's own CW mask.",
     )(func)
     func = click.option("--cd-up-thresh", type=float, default=None, help="CD sliding-threshold upper fraction.")(func)
     func = click.option(
@@ -533,7 +533,7 @@ def _subject_sge_spec(
     container: Path,
     src_dir: Path | None = None,
     skip_existing: bool = False,
-    eicab_mask: str = "cw",
+    eicab_mask: str = "wb",
     cd_up_thresh: float | None = None,
     cd_shift_hm: bool | None = None,
     venous_min_component_frac: float = 0.005,
@@ -626,7 +626,7 @@ def build_subject_sge_command(
     container: Path,
     src_dir: Path | None = None,
     skip_existing: bool = False,
-    eicab_mask: str = "cw",
+    eicab_mask: str = "wb",
     cd_up_thresh: float | None = None,
     cd_shift_hm: bool | None = None,
     venous_min_component_frac: float = 0.005,
@@ -679,7 +679,7 @@ def submit_subject_sge(
     skip_existing: bool = False,
     hold_jid: str | None = None,
     emit: TextIO | None = None,
-    eicab_mask: str = "cw",
+    eicab_mask: str = "wb",
     cd_up_thresh: float | None = None,
     cd_shift_hm: bool | None = None,
     venous_min_component_frac: float = 0.005,

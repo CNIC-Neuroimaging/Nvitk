@@ -54,7 +54,7 @@ from nvitk.segmentation.eicab.runner import run_eicab
 
 from . import config as cfg
 from .util.eicab.eicab_masks import (
-    eicab_pp_path,
+    eicab_pp_variant_path,
     find_eicab_cw_mask,
     find_tof_resampled_volume,
     resolve_eicab_mask,
@@ -172,10 +172,26 @@ def _require_eicab_for_postprocess(out_dir: Path) -> None:
     resolve_eicab_mask(out_dir, preference="cw")
 
 
+def _pp_outputs_exist(cw: Path, pp_distal: bool) -> bool:
+    """Whether the post-process outputs for *cw* are all there: CW_pp, and WB_pp with *pp_distal*."""
+    kinds = ("cw", "wb") if pp_distal else ("cw",)
+    return all(eicab_pp_variant_path(cw, k).is_file() for k in kinds)  # type: ignore[arg-type]
+
+
+def _original_tof(nifti_root: Path | None, subject: str) -> Path | None:
+    """The acquired TOF (stage 0's ``TOF/TOF.nii.gz``) under *nifti_root*, if there: the pp writes
+    its masks in its scanner frame."""
+    if nifti_root is None:
+        return None
+    subj = Path(nifti_root) / subject
+    return find_tof_volume(subj) if subj.is_dir() else None
+
+
 def run_postprocess_only(
     subject: str,
     *,
     output_root: Path,
+    nifti_root: Path | None = None,
     eicab_subdir: str | None = None,
     pp_siphon: bool = True,
     pp_distal: bool = True,
@@ -186,7 +202,8 @@ def run_postprocess_only(
     log.info(f"qvtpy stage1 eICAB post-process only | subject={subject}")
     log.info(f"  output: {out_dir}")
     tof_resampled = find_tof_resampled_volume(out_dir)
-    postprocess_eicab_directory(out_dir, tof_path=tof_resampled, siphon=pp_siphon, distal=pp_distal)
+    postprocess_eicab_directory(out_dir, tof_path=tof_resampled, tof_original_path=_original_tof(nifti_root, subject),
+                                siphon=pp_siphon, distal=pp_distal)
     return out_dir
 
 
@@ -235,11 +252,15 @@ def run_subject(
             if not post_process_eicab:
                 log.info(f"[{subject}] stage1: post-process disabled: nothing to do")
                 return out_dir
-            if skip_existing and eicab_pp_path(cw).is_file():
-                log.info(f"[{subject}] stage1: skipping the existing post-process -> {eicab_pp_path(cw).name}")
+            if skip_existing and _pp_outputs_exist(cw, pp_distal):
+                log.info(f"[{subject}] stage1: skipping the existing post-process -> "
+                         f"{eicab_pp_variant_path(cw, 'cw').name}" + (" + WB_pp" if pp_distal else ""))
                 return out_dir
-            log.step(f"[{subject}] eICAB post-process (re-segment + extend + siphon → *_pp + centerlines_mask_pp)")
-            postprocess_eicab_directory(out_dir, tof_path=tof_resampled, siphon=pp_siphon, distal=pp_distal)
+            log.step(f"[{subject}] eICAB post-process (re-segment + extend + siphon → CW_pp"
+                     + (" + distal → WB_pp)" if pp_distal else ")"))
+            postprocess_eicab_directory(out_dir, tof_path=tof_resampled,
+                                        tof_original_path=_original_tof(nifti_root, subject),
+                                        siphon=pp_siphon, distal=pp_distal)
             return out_dir
         log.info(
             f"[{subject}] stage1: no eICAB CW mask in {out_dir}: "
@@ -250,6 +271,7 @@ def run_subject(
         return run_postprocess_only(
             subject,
             output_root=output_root,
+            nifti_root=nifti_root,
             eicab_subdir=eicab_subdir,
             pp_siphon=pp_siphon,
             pp_distal=pp_distal,
@@ -306,11 +328,13 @@ def run_subject(
             "(stage 3's venous exclusion falls back to the CW labels)"
         )
     if post_process_eicab:
-        log.step(f"[{subject}] eICAB post-process (re-segment + extend + siphon → *_pp + centerlines_mask_pp)")
+        log.step(f"[{subject}] eICAB post-process (re-segment + extend + siphon → CW_pp"
+                 + (" + distal → WB_pp)" if pp_distal else ")"))
         tof_resampled = find_tof_resampled_volume(out_dir)
         postprocess_eicab_directory(
             out_dir,
             tof_path=tof_resampled,
+            tof_original_path=tof,
             siphon=pp_siphon,
             distal=pp_distal,
         )
@@ -840,7 +864,7 @@ def _submit_postprocess_only_sge(
     "--eicab-pp-distal/--no-eicab-pp-distal",
     default=True,
     show_default=True,
-    help="Grow the ACAs / MCAs / PCAs / SCAs distally along the Frangi tree in the eICAB post-process.",
+    help="Also write *_eICAB_WB_pp: the ACAs / MCAs / PCAs / SCAs grown distally along the Frangi tree, the ACA / MCA growth labelled A2 / M2 (21-24). *_eICAB_CW_pp (no distal growth) is always written.",
 )
 @click.option(
     "--only-pp",

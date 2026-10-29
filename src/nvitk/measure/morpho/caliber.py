@@ -25,30 +25,39 @@ def detection_radius_is_cross_section() -> bool:
     return str(_cfg.RADIUS_SOURCE_FOR_CALIBER_DETECTION).lower() not in {"maximum_inscribed_sphere", "mis", "vmtk"}
 
 
-def enlargement_cross_section_radius(s, r) -> np.ndarray:
-    """The cross-section radius an enlargement test reads: *r* itself, or (with
-    ``ENLARGEMENT_SMOOTH_CROSS_SECTION``) its running median over ``ENLARGEMENT_CROSS_SECTION_MEDIAN_MM``
-    of arc length (NaNs ignored; the ends padded with their own value).
-
-    A single bad cut (the plane catching a branch opening, or oblique in a bend) spikes the
-    area-equivalent radius for one or two 0.1 mm samples; the median removes it, while a bulge
-    longer than half the window survives.
-    """
+def running_median(s, r, width_mm: float) -> np.ndarray:
+    """*r* smoothed by a running median over *width_mm* of arc length *s* (NaNs ignored; the ends
+    padded with their own value; *r* unchanged where a window is all NaN)."""
     import warnings
 
     r = np.asarray(r, dtype=float)
-    if not bool(_cfg.ENLARGEMENT_SMOOTH_CROSS_SECTION) or len(r) < 3:
-        return r.copy()
     s = np.asarray(s, dtype=float)
+    if width_mm <= 0 or len(r) < 3:
+        return r.copy()
     ds = float(np.median(np.diff(s))) if len(s) > 1 else 0.0
     if not np.isfinite(ds) or ds <= 0.0:
         return r.copy()
-    half = max(1, int(round(0.5 * float(_cfg.ENLARGEMENT_CROSS_SECTION_MEDIAN_MM) / ds)))
+    half = max(1, int(round(0.5 * float(width_mm) / ds)))
     windows = np.lib.stride_tricks.sliding_window_view(np.pad(r, half, mode="edge"), 2 * half + 1)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN windows stay NaN
         out = np.nanmedian(windows, axis=1)
     return np.where(np.isfinite(out), out, r)
+
+
+def enlargement_cross_section_radius(s, r) -> np.ndarray:
+    """The cross-section radius an enlargement test reads: *r* itself, or (with
+    ``ENLARGEMENT_SMOOTH_CROSS_SECTION``) its :func:`running_median` over
+    ``ENLARGEMENT_CROSS_SECTION_MEDIAN_MM`` of arc length.
+
+    A single bad cut (the plane catching a branch opening, or oblique in a bend) spikes the
+    area-equivalent radius for one or two 0.1 mm samples; the median removes it, while a bulge
+    longer than half the window survives.
+    """
+    r = np.asarray(r, dtype=float)
+    if not bool(_cfg.ENLARGEMENT_SMOOTH_CROSS_SECTION):
+        return r.copy()
+    return running_median(s, r, float(_cfg.ENLARGEMENT_CROSS_SECTION_MEDIAN_MM))
 
 
 def enlargement_radius(s, cross_section_r, detection_r, *, cow_source: str) -> Tuple[np.ndarray, str]:
@@ -116,7 +125,9 @@ def compute_siphon_mask(
 
 # The junctions (branch points, mm) of the component being measured: set by the orchestration
 # around one component, read by the stretch-wise taper reference of every path measured in it.
-_JUNCTIONS: dict = {"points": None}
+# "extra": the bifurcations a split vessel shares with its other half (an M1's with its M2s), from
+# the merged mask (:func:`nvitk.measure.morpho.labels_util.split_partner_junctions`).
+_JUNCTIONS: dict = {"points": None, "extra": None}
 
 
 def set_detection_junctions(points_mm: Optional[np.ndarray]) -> None:
@@ -125,9 +136,19 @@ def set_detection_junctions(points_mm: Optional[np.ndarray]) -> None:
     _JUNCTIONS["points"] = pts if pts is not None and len(pts) else None
 
 
+def set_extra_detection_junctions(points_mm: Optional[np.ndarray]) -> None:
+    """Install junctions that do not belong to the component's own skeleton but bound its
+    measures: the bifurcations it shares with the other half of a split vessel (M1 / M2, A1 / A2,
+    P1 / P2). Kept until cleared with ``None``."""
+    pts = None if points_mm is None else np.asarray(points_mm, dtype=float).reshape(-1, 3)
+    _JUNCTIONS["extra"] = pts if pts is not None and len(pts) else None
+
+
 def detection_junctions() -> Optional[np.ndarray]:
-    """The junctions installed by :func:`set_detection_junctions` (``None`` when none)."""
-    return _JUNCTIONS["points"]
+    """The junctions installed by :func:`set_detection_junctions` and
+    :func:`set_extra_detection_junctions` (``None`` when none)."""
+    parts = [p for p in (_JUNCTIONS["points"], _JUNCTIONS["extra"]) if p is not None]
+    return np.vstack(parts) if parts else None
 
 
 def blanking_mask(points: np.ndarray, radius: np.ndarray, junctions: Optional[np.ndarray]) -> np.ndarray:
@@ -158,16 +179,12 @@ def junction_crossings(points: np.ndarray, radius: np.ndarray, junctions: Option
     return np.unique(idx[d <= zone])
 
 
-def path_stretches(pts: Optional[np.ndarray], r: np.ndarray) -> Tuple[Optional[np.ndarray], np.ndarray]:
-    """``(stretch id per point, blanking mask)`` for the ``stretch`` taper reference: the path cut
-    at the installed junctions it passes through. A stretch shorter than
-    ``TAPER_STRETCH_MIN_LENGTH_MM`` joins its upstream neighbour (the first one, its downstream
-    neighbour): two branch points close together would otherwise give a few millimetres (often
-    exactly a narrowing) a reference of their own. ``(None, all-False)`` for the ``envelope``
-    method or without points."""
+def junction_stretches(pts: np.ndarray, r: np.ndarray) -> np.ndarray:
+    """Stretch id per point: the path cut at the installed junctions it passes through. A stretch
+    shorter than ``TAPER_STRETCH_MIN_LENGTH_MM`` joins its upstream neighbour (the first one, its
+    downstream neighbour): two branch points close together would otherwise give a few millimetres
+    (often exactly a narrowing) a reference of their own."""
     n = len(r)
-    if str(_cfg.TAPER_REFERENCE_METHOD).lower() != "stretch" or pts is None or len(pts) != n:
-        return None, np.zeros(n, dtype=bool)
     pts = np.asarray(pts, dtype=float)
     junctions = detection_junctions()
     cuts = list(junction_crossings(pts, r, junctions))
@@ -180,8 +197,18 @@ def path_stretches(pts: Optional[np.ndarray], r: np.ndarray) -> Tuple[Optional[n
         if lengths[k] >= min_len:
             break
         cuts.pop(k - 1 if k > 0 else 0)  # drop the cut upstream of it (the first: downstream)
-    stretch = np.searchsorted(np.asarray(cuts, dtype=int), np.arange(n), side="left").astype(int)
-    return stretch, blanking_mask(pts, r, junctions)
+    return np.searchsorted(np.asarray(cuts, dtype=int), np.arange(n), side="left").astype(int)
+
+
+def path_stretches(pts: Optional[np.ndarray], r: np.ndarray) -> Tuple[Optional[np.ndarray], np.ndarray]:
+    """``(stretch id per point, blanking mask)`` for the ``stretch`` taper reference
+    (:func:`junction_stretches`). ``(None, all-False)`` for the ``envelope`` method or without
+    points."""
+    n = len(r)
+    if str(_cfg.TAPER_REFERENCE_METHOD).lower() != "stretch" or pts is None or len(pts) != n:
+        return None, np.zeros(n, dtype=bool)
+    pts = np.asarray(pts, dtype=float)
+    return junction_stretches(pts, r), blanking_mask(pts, r, detection_junctions())
 
 
 def taper_stretch_ids(pts: Optional[np.ndarray], r: np.ndarray) -> np.ndarray:

@@ -4,7 +4,8 @@ Long-form rows go under pipeline ``tof_morpho_v1``, one region per vessel, and a
 stage-7 report (:mod:`nvitk.measure.morpho.export_utils.report`): the report features of every
 present vessel, and its lesion flags from high-confidence lesions only (``has_stenosis`` /
 ``stenosis_diameter_percent_max``, ``has_enlargement`` / ``enlargement_diameter_percent_max``,
-``has_hypoplasia`` for the main vessels, absent ones included; flags are 1/0, unit ``boolean``).
+``has_hypoplasia`` for the main vessels, absent ones included, and ``has_fetal_pca`` on the P2s;
+flags are 1/0, unit ``boolean``).
 ``morphometrics_report.csv`` is read when present and built from the run's tables otherwise. A
 publish replaces all of the subject's ``tof_morpho_v1`` rows, so variables earlier runs published
 and the report no longer has do not linger. Runs older than ``vessel_summary.csv`` fall back to
@@ -297,6 +298,8 @@ def _rows_from_report(subject_uid: str, stage7_dir: Path, updated_at: str) -> li
     report = pd.read_csv(path) if path.is_file() else morphometrics_report(stage7_dir)
     source = REPORT_CSV
     main = {str(v) for v in _cfg.HYPOPLASIA_MAIN_VESSELS}
+    # Runs before the A1 / M1 split named those vessels LACA / RACA / LMCA / RMCA.
+    main |= {v.rsplit("_", 1)[0] for v in main if v.endswith(("ACA_A1", "MCA_M1"))}
     rows: list[dict[str, Any]] = []
 
     def add(variable: str, value: Any, region: str, unit: str, kind: str = "float") -> None:
@@ -320,6 +323,8 @@ def _rows_from_report(subject_uid: str, stage7_dir: Path, updated_at: str) -> li
                 add(f"{kind}_diameter_percent_max", r.get(f"{kind}_diameter_percent_max"), region, "%")
         if region in main:
             add("has_hypoplasia", float(bool(r.get("has_hypoplasia", False))), region, "boolean", "bool")
+        if region.endswith("PCA_P2") and "has_fetal_pca" in r:
+            add("has_fetal_pca", float(bool(r.get("has_fetal_pca", False))), region, "boolean", "bool")
     return rows
 
 

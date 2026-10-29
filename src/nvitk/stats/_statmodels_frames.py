@@ -254,7 +254,9 @@ def region_to_hemisphere_pair_key(region_id: str) -> str:
     in separator or case land on the same key. That is what lets a 4D-flow measurement grouped by
     hemisphere join an ASL one on ``(subject_uid, territory)``.
     """
-    raw = str(region_id).strip()
+    from nvitk.pipes.qvtpy.labels import qvtpy_legacy_vessel_name
+
+    raw = qvtpy_legacy_vessel_name(str(region_id).strip())  # LMCA_M1 -> LMCA
     if not raw:
         return raw
     su = raw.upper().replace("-", "_")

@@ -35,7 +35,10 @@ from nvitk.measure.morpho.io_utils import (
     safe_sheet_name,
     vessel_sheet_sort_key,
 )
+from nvitk.measure.morpho.caliber import set_extra_detection_junctions
 from nvitk.measure.morpho.labels_util import (
+    split_partner_junctions,
+    split_partner_labels,
     connected_components,
     empty_vessel_info,
     keep_largest_component,
@@ -47,7 +50,9 @@ from nvitk.measure.morpho.surface import set_world_transform
 from nvitk.measure.morpho.export_utils.vessel_tables import (
     add_hypoplasia_columns,
     component_tables,
+    fetal_pca_rows,
     hypoplasia_rows,
+    locate_a1_hypoplasia,
     subject_summary,
     vessel_summary,
 )
@@ -100,6 +105,13 @@ def _worker(args: Tuple[Any, ...]) -> Dict[str, Any]:
     try:
         print(f"\n=== Label {label} / component {component_id} ===")
         print(f"  Component voxels: {int(mask_cc.sum())}")
+        # A split vessel (M1 / M2, A1 / A2, P1 / P2): the bifurcations it shares with its other
+        # half, from the merged mask, bound its lesion measures like its own junctions.
+        partners = split_partner_labels(vessel_info.name, mapping)
+        extra_junctions = split_partner_junctions(mask_cc, multilabel, partners, spacing)
+        set_extra_detection_junctions(extra_junctions)
+        if len(extra_junctions):
+            print(f"  Junctions shared with {partners} (merged mask): {len(extra_junctions)}")
         (
             path_results, point_sheets, tree_summary, branch_df,
             region_summaries, region_sheets, recursive_segments, donut_loop_df,
@@ -145,7 +157,7 @@ def _worker(args: Tuple[Any, ...]) -> Dict[str, Any]:
         compact = component_tables(
             case_id=case_id, label=label, component_id=component_id, vessel_info=vessel_info,
             path_results=path_results, split_results=split_results, branch_df=branch_df,
-            tree_summary=tree_summary, axes=ctx.axes,
+            tree_summary=tree_summary, axes=ctx.axes, extra_junctions=extra_junctions,
         )
 
         if not branch_df.empty:
@@ -178,6 +190,8 @@ def _worker(args: Tuple[Any, ...]) -> Dict[str, Any]:
             "error": str(e),
             "traceback": traceback.format_exc(),
         }
+    finally:
+        set_extra_detection_junctions(None)
 
 
 # Helpers
@@ -550,13 +564,18 @@ def _run_case(
         vessels_df["case_id"] = case_id
     # Absent main vessels -> "hypoplasia" lesions (no location), flagged per vessel too.
     hypoplasia = hypoplasia_rows(vessels_df, resolved_mapping, input_volumetry)
+    # An A1 hypoplasia is shown where the missing A1 would run (ICA end -> AComm / other A1).
+    locate_a1_hypoplasia(hypoplasia, multilabel, resolved_mapping, spacing)
     lesion_rows.extend(hypoplasia)
     vessels_df = add_hypoplasia_columns(vessels_df, hypoplasia)
+    # A P2 fed from the ICA through the PComm, its P1 absent or hypoplastic -> "fetal" lesions.
+    fetal = fetal_pca_rows(multilabel, resolved_mapping, vessels_df, hypoplasia, spacing)
+    lesion_rows.extend(fetal)
     compact_tables = {
         "vessels": vessels_df,
         "segments": pd.DataFrame(segment_rows),
         "lesions": _lesions_with_world_position(pd.DataFrame(lesion_rows)),
-        "subject": subject_summary(vessels_df),
+        "subject": subject_summary(vessels_df, fetal),
     }
     out_xlsx = _write_excel(
         case_out_dir, path_summaries, tree_summaries, tree_region_summaries,

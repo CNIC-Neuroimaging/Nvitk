@@ -1,4 +1,4 @@
-"""qvtpy stage 4t: per-timepoint local CD segmentation -> ``seg_4dflow_4d``.
+"""qvtpy stage 4t: per-timepoint local CD segmentation (threshold + blood flood, as stage 4) -> ``seg_4dflow_4d``.
 
 **Inputs**
 
@@ -41,6 +41,7 @@ from nvitk.io.imageio import imread, imsave
 from nvitk.measure import dice as measure_dice
 from nvitk.pipes.qvtpy import config as cfg
 from nvitk.pipes.qvtpy.stage4_4dflow_segmentation import EICAB_IN_4DFLOW_NIFTI
+from nvitk.pipes.qvtpy.util.segmentation.flood_options import flood_cli_args, flood_click_options, flood_settings
 from nvitk.pipes.qvtpy.util.centerline.centerline_io import (
     centerline_meta_path,
     centerlines_mask_path,
@@ -50,10 +51,6 @@ from nvitk.pipes.qvtpy.util.centerline.centerline_io import (
 from nvitk.pipes.qvtpy.util.segmentation.vessel_cd_segmentation import (
     ThrAlgorithm,
     VESSEL_EXTRA_PADDING,
-    _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
-    _ACOMM_JUNCTION_RADIUS_DEFAULT,
-    _DEFAULT_RG_INTENSITY_FRAC,
-    _RG_INTENSITY_FRAC_EXPLORE,
     build_seg_4dflow_local,
     vessel_stats_to_dict,
 )
@@ -154,14 +151,8 @@ def build_temporal_seg_summary(
     label_ids: list[int],
     crop_padding_bbox: int,
     thr_algorithm: str,
-    region_growing: bool,
-    rg_intensity_frac: float,
-    rg_intensity_frac_explore: float,
     cl_barrier_radius: int,
-    rg_barrier_radius: int,
-    aca_sequential_grow: bool,
-    aca_overlap_min_voxels: int,
-    acomm_junction_radius: int,
+    flood: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Summarize per-label stability across temporal segmentations."""
     if seg_stack.ndim != 4:
@@ -204,14 +195,9 @@ def build_temporal_seg_summary(
         "crop_padding_bbox": int(crop_padding_bbox),
         "vessel_extra_padding": int(VESSEL_EXTRA_PADDING),
         "thr_algorithm": thr_algorithm,
-        "region_growing": bool(region_growing),
-        "rg_intensity_frac": float(rg_intensity_frac),
-        "rg_intensity_frac_explore": float(rg_intensity_frac_explore),
         "cl_barrier_radius": int(cl_barrier_radius),
-        "rg_barrier_radius": int(rg_barrier_radius),
-        "aca_sequential_grow": bool(aca_sequential_grow),
-        "aca_overlap_min_voxels": int(aca_overlap_min_voxels),
-        "acomm_junction_radius": int(acomm_junction_radius),
+        "growth": "blood_flood",
+        **dict(flood or {}),
         "per_label": per_label,
         "multilabel_dice_vs_t0": multilabel_dice_vs_t0,
     }
@@ -227,15 +213,8 @@ def _segmentation_meta_for_timepoint(
     eicab_in_4dflow: str | None,
     crop_padding_bbox: int,
     thr_algorithm: str,
-    region_growing: bool,
-    rg_intensity_frac: float,
-    rg_intensity_frac_explore: float,
     cl_barrier_radius: int,
-    rg_barrier_radius: int,
-    aca_sequential_grow: bool,
-    aca_overlap_min_voxels: int,
-    acomm_junction_radius: int,
-    aca_sequential_grow_info: dict[str, Any] | None,
+    flood: dict[str, Any],
     vessels: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Per-timepoint ``segmentation_meta`` JSON payload (mirrors stage-4 fields)."""
@@ -249,20 +228,11 @@ def _segmentation_meta_for_timepoint(
         "crop_padding_bbox": int(crop_padding_bbox),
         "vessel_extra_padding": int(VESSEL_EXTRA_PADDING),
         "thr_algorithm": thr_algorithm,
-        "region_growing": bool(region_growing),
-        "rg_intensity_frac": float(rg_intensity_frac),
-        "rg_intensity_frac_explore": float(rg_intensity_frac_explore),
-        "rg_intensity_frac_explore_labels": "ACA,MCA,PCA (ids 4-9)",
-        "rg_skip_labels": "all venous (ids 31-34)",
-        "venous_region_growing": False,
-        "comm_segmentation_strategy": "centerline_rg_only",
+        "comm_segmentation_strategy": "centerline_plus_threshold_then_flood_near_field",
         "post_threshold_clean": "largest_cc_per_label",
         "cl_barrier_radius": int(cl_barrier_radius),
-        "rg_barrier_radius": int(rg_barrier_radius),
-        "aca_sequential_grow": bool(aca_sequential_grow),
-        "aca_overlap_min_voxels": int(aca_overlap_min_voxels),
-        "acomm_junction_radius": int(acomm_junction_radius),
-        "aca_sequential_grow_info": aca_sequential_grow_info,
+        "growth": "blood_flood",
+        **flood,
         "vessels": vessels,
     }
 
@@ -278,16 +248,14 @@ def run_subject(
     skip_existing: bool = False,
     crop_padding_bbox: int = 3,
     thr_algorithm: ThrAlgorithm = "lsthr",
-    region_growing: bool = True,
-    rg_intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC,
-    rg_intensity_frac_explore: float = _RG_INTENSITY_FRAC_EXPLORE,
     cl_barrier_radius: int = 2,
-    rg_barrier_radius: int = 3,
-    aca_sequential_grow: bool = True,
-    aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
-    acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
+    segment_acomm: bool = False,
+    **flood: Any,
 ) -> Path:
-    """Segment each CD time frame; return stage-4t output directory."""
+    """Segment each CD time frame as stage 4 does (threshold + blood flood, *flood*: the settings of
+    :data:`~nvitk.pipes.qvtpy.util.segmentation.flood_options.FLOOD_DEFAULTS`); return the stage-4t
+    output directory."""
+    flood_kw = flood_settings(**flood)
     s3 = _stage3_dir(output_root, subject)
     cl_path = centerlines_mask_path(s3)
     if not cl_path.is_file():
@@ -298,7 +266,7 @@ def run_subject(
     if eicab_path.is_file():
         eicab_qvtpy = as_backend_array(imread(eicab_path).data).astype(np.int32, copy=False)
     else:
-        log.warning(f"[{subject}] stage4t: missing {eicab_path}; ACA Voronoi uses centerlines only")
+        log.warning(f"[{subject}] stage4t: missing {eicab_path}; the ACAs' components are not anchored on eICAB")
 
     cd4d_path = _cd4d_path(nifti_root, subject)
     cd_img = imread(cd4d_path)
@@ -329,14 +297,9 @@ def run_subject(
         eicab_qvtpy=eicab_qvtpy,
         crop_padding_bbox=int(crop_padding_bbox),
         thr_algorithm=thr_algorithm,
-        region_growing=bool(region_growing),
-        rg_intensity_frac=float(rg_intensity_frac),
-        rg_intensity_frac_explore=float(rg_intensity_frac_explore),
         cl_barrier_radius=int(cl_barrier_radius),
-        rg_barrier_radius=int(rg_barrier_radius),
-        aca_sequential_grow=bool(aca_sequential_grow),
-        aca_overlap_min_voxels=int(aca_overlap_min_voxels),
-        acomm_junction_radius=int(acomm_junction_radius),
+        segment_acomm=bool(segment_acomm),
+        **flood_kw,
     )
 
     vertebral_split_t0 = None
@@ -354,19 +317,8 @@ def run_subject(
             eicab_in_4dflow=eicab_str,
             crop_padding_bbox=crop_padding_bbox,
             thr_algorithm=thr_algorithm,
-            region_growing=region_growing,
-            rg_intensity_frac=rg_intensity_frac,
-            rg_intensity_frac_explore=rg_intensity_frac_explore,
             cl_barrier_radius=cl_barrier_radius,
-            rg_barrier_radius=rg_barrier_radius,
-            aca_sequential_grow=aca_sequential_grow,
-            aca_overlap_min_voxels=aca_overlap_min_voxels,
-            acomm_junction_radius=acomm_junction_radius,
-            aca_sequential_grow_info=(
-                None
-                if result.aca_sequential_grow is None
-                else result.aca_sequential_grow.as_dict()
-            ),
+            flood=flood_kw,
             vessels=[vessel_stats_to_dict(st) for st in result.vessel_stats],
         )
         _meta_path_for_timepoint(out_dir, t).write_text(
@@ -388,14 +340,8 @@ def run_subject(
         label_ids=label_ids,
         crop_padding_bbox=crop_padding_bbox,
         thr_algorithm=thr_algorithm,
-        region_growing=region_growing,
-        rg_intensity_frac=rg_intensity_frac,
-        rg_intensity_frac_explore=rg_intensity_frac_explore,
         cl_barrier_radius=cl_barrier_radius,
-        rg_barrier_radius=rg_barrier_radius,
-        aca_sequential_grow=aca_sequential_grow,
-        aca_overlap_min_voxels=aca_overlap_min_voxels,
-        acomm_junction_radius=acomm_junction_radius,
+        flood=flood_kw,
     )
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     if vertebral_split_t0 is not None:
@@ -414,13 +360,11 @@ def run_subject(
 
 
 def _stage4t_cli_options(func):
-    """Decorator applying all shared stage-4t click options (subject/paths, threshold/region-growing
-    and ACA/AComm tuning) to *func*."""
-    func = click.option("--subject", required=True)(func)
-    func = click.option("--nifti-root", type=click.Path(path_type=Path), required=True)(func)
-    func = click.option("--output-root", type=click.Path(path_type=Path), required=True)(func)
-    func = click.option("--skip-existing", is_flag=True, default=False)(func)
-    func = click.option("--crop-padding-bbox", type=int, default=3, show_default=True)(func)
+    """Decorator applying all shared stage-4t click options (subject / paths, threshold, blood flood)."""
+    func = flood_click_options()(func)
+    func = click.option("--segment-acomm/--no-segment-acomm", default=False, show_default=True,
+                        help="Segment the AComm as its own label.")(func)
+    func = click.option("--cl-barrier-radius", type=int, default=2, show_default=True)(func)
     func = click.option(
         "--4dflow-thr-algorithm",
         "thr_algorithm",
@@ -428,47 +372,11 @@ def _stage4t_cli_options(func):
         default="lsthr",
         show_default=True,
     )(func)
-    func = click.option(
-        "--region-growing/--no-region-growing",
-        default=True,
-        show_default=True,
-    )(func)
-    func = click.option(
-        "--rg-intensity-frac",
-        type=float,
-        default=_DEFAULT_RG_INTENSITY_FRAC,
-        show_default=True,
-        help="RG gate: grow_thresh = max(mean(CD_seeds)*frac, local_thr). Lower = more growth.",
-    )(func)
-    func = click.option(
-        "--rg-intensity-frac-explore",
-        type=float,
-        default=_RG_INTENSITY_FRAC_EXPLORE,
-        show_default=True,
-        help="RG frac for ACA/MCA/PCA (lower = explore more).",
-    )(func)
-    func = click.option("--cl-barrier-radius", type=int, default=2, show_default=True)(func)
-    func = click.option("--rg-barrier-radius", type=int, default=3, show_default=True)(func)
-    func = click.option(
-        "--aca-sequential-grow/--no-aca-sequential-grow",
-        default=True,
-        show_default=True,
-        help="Grow LACA then RACA; second ACA ignores first as RG barrier; fix overlap at junction.",
-    )(func)
-    func = click.option(
-        "--aca-overlap-min-voxels",
-        type=int,
-        default=_ACA_OVERLAP_MIN_VOXELS_DEFAULT,
-        show_default=True,
-        help="Min LACA∩RACA voxels to apply convergence correction at AComm.",
-    )(func)
-    func = click.option(
-        "--acomm-junction-radius",
-        type=int,
-        default=_ACOMM_JUNCTION_RADIUS_DEFAULT,
-        show_default=True,
-        help="Vox: only overlap within this distance of AComm junction is Voronoi-split.",
-    )(func)
+    func = click.option("--crop-padding-bbox", type=int, default=3, show_default=True)(func)
+    func = click.option("--skip-existing", is_flag=True, default=False)(func)
+    func = click.option("--output-root", type=click.Path(path_type=Path), required=True)(func)
+    func = click.option("--nifti-root", type=click.Path(path_type=Path), required=True)(func)
+    func = click.option("--subject", required=True)(func)
     return func
 
 
@@ -482,15 +390,10 @@ def _subject_sge_spec(
     skip_existing: bool = False,
     crop_padding_bbox: int = 3,
     thr_algorithm: str = "lsthr",
-    region_growing: bool = True,
-    rg_intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC,
-    rg_intensity_frac_explore: float = _RG_INTENSITY_FRAC_EXPLORE,
     cl_barrier_radius: int = 2,
-    rg_barrier_radius: int = 3,
-    aca_sequential_grow: bool = True,
-    aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
-    acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
+    segment_acomm: bool = False,
     backend: str = "gpu",
+    **flood: Any,
 ) -> tuple[StageSpec, ClusterPaths]:
     """Build the SGE ``StageSpec``/``ClusterPaths`` pair for one subject's stage 4t task."""
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
@@ -508,27 +411,11 @@ def _subject_sge_spec(
         str(int(crop_padding_bbox)),
         "--4dflow-thr-algorithm",
         shlex.quote(str(thr_algorithm).lower()),
-        "--rg-intensity-frac",
-        str(float(rg_intensity_frac)),
-        "--rg-intensity-frac-explore",
-        str(float(rg_intensity_frac_explore)),
         "--cl-barrier-radius",
         str(int(cl_barrier_radius)),
-        "--rg-barrier-radius",
-        str(int(rg_barrier_radius)),
-        "--aca-overlap-min-voxels",
-        str(int(aca_overlap_min_voxels)),
-        "--acomm-junction-radius",
-        str(int(acomm_junction_radius)),
+        "--segment-acomm" if segment_acomm else "--no-segment-acomm",
+        *flood_cli_args(flood),
     ]
-    if region_growing:
-        parts.append("--region-growing")
-    else:
-        parts.append("--no-region-growing")
-    if aca_sequential_grow:
-        parts.append("--aca-sequential-grow")
-    else:
-        parts.append("--no-aca-sequential-grow")
     if skip_existing:
         parts.append("--skip-existing")
     python_cmd = " ".join(parts)
@@ -552,93 +439,25 @@ def _subject_sge_spec(
     return spec, paths
 
 
-def build_subject_sge_command(
-    subject: str,
-    *,
-    nifti_root: Path,
-    output_root: Path,
-    container: Path,
-    src_dir: Path | None = None,
-    skip_existing: bool = False,
-    crop_padding_bbox: int = 3,
-    thr_algorithm: str = "lsthr",
-    region_growing: bool = True,
-    rg_intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC,
-    rg_intensity_frac_explore: float = _RG_INTENSITY_FRAC_EXPLORE,
-    cl_barrier_radius: int = 2,
-    rg_barrier_radius: int = 3,
-    aca_sequential_grow: bool = True,
-    aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
-    acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
-    backend: str = "gpu",
-) -> str:
-    """Return the host shell command for one stage4t array/SGE task."""
+def build_subject_sge_command(subject: str, **kwargs: Any) -> str:
+    """Return the host shell command for one stage4t array/SGE task (*kwargs*: as
+    :func:`_subject_sge_spec`)."""
     from nvitk.cluster.sge import build_singularity_command
 
-    spec, paths = _subject_sge_spec(
-        subject,
-        nifti_root=nifti_root,
-        output_root=output_root,
-        container=container,
-        src_dir=src_dir,
-        skip_existing=skip_existing,
-        crop_padding_bbox=crop_padding_bbox,
-        thr_algorithm=thr_algorithm,
-        region_growing=region_growing,
-        rg_intensity_frac=rg_intensity_frac,
-        rg_intensity_frac_explore=rg_intensity_frac_explore,
-        cl_barrier_radius=cl_barrier_radius,
-        rg_barrier_radius=rg_barrier_radius,
-        aca_sequential_grow=aca_sequential_grow,
-        aca_overlap_min_voxels=aca_overlap_min_voxels,
-        acomm_junction_radius=acomm_junction_radius,
-        backend=backend,
-    )
+    spec, paths = _subject_sge_spec(subject, **kwargs)
     return build_singularity_command(spec, paths)
 
 
 def submit_subject_sge(
     subject: str,
     *,
-    nifti_root: Path,
-    output_root: Path,
-    container: Path,
-    src_dir: Path | None = None,
-    skip_existing: bool = False,
     hold_jid: str | None = None,
     emit: TextIO | None = None,
-    crop_padding_bbox: int = 3,
-    thr_algorithm: str = "lsthr",
-    region_growing: bool = True,
-    rg_intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC,
-    rg_intensity_frac_explore: float = _RG_INTENSITY_FRAC_EXPLORE,
-    cl_barrier_radius: int = 2,
-    rg_barrier_radius: int = 3,
-    aca_sequential_grow: bool = True,
-    aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
-    acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
-    backend: str = "gpu",
+    **kwargs: Any,
 ) -> str:
-    """Emit or submit one stage-4t SGE job. Returns qsub job id."""
-    spec, paths = _subject_sge_spec(
-        subject,
-        nifti_root=nifti_root,
-        output_root=output_root,
-        container=container,
-        src_dir=src_dir,
-        skip_existing=skip_existing,
-        crop_padding_bbox=crop_padding_bbox,
-        thr_algorithm=thr_algorithm,
-        region_growing=region_growing,
-        rg_intensity_frac=rg_intensity_frac,
-        rg_intensity_frac_explore=rg_intensity_frac_explore,
-        cl_barrier_radius=cl_barrier_radius,
-        rg_barrier_radius=rg_barrier_radius,
-        aca_sequential_grow=aca_sequential_grow,
-        aca_overlap_min_voxels=aca_overlap_min_voxels,
-        acomm_junction_radius=acomm_junction_radius,
-        backend=backend,
-    )
+    """Emit or submit one stage-4t SGE job (*kwargs*: as :func:`_subject_sge_spec`). Returns the
+    qsub job id."""
+    spec, paths = _subject_sge_spec(subject, **kwargs)
     return submit_stage(spec, paths, hold_jid=hold_jid, emit=emit)
 
 
@@ -652,18 +471,14 @@ def main(
     skip_existing: bool,
     crop_padding_bbox: int,
     thr_algorithm: str,
-    region_growing: bool,
-    rg_intensity_frac: float,
-    rg_intensity_frac_explore: float,
     cl_barrier_radius: int,
-    rg_barrier_radius: int,
-    aca_sequential_grow: bool,
-    aca_overlap_min_voxels: int,
-    acomm_junction_radius: int,
+    segment_acomm: bool,
+    **flood: Any,
 ) -> None:
-    """CLI entry point (``qvtpy-stage4t-seg``): run stage 4t temporal 4D-flow segmentation
-    for one subject."""
+    """CLI entry point (``qvtpy-stage4t-seg``): run stage 4t temporal 4D-flow segmentation for one
+    subject."""
     Logger()
+    flood.pop("backend", None)
     run_subject(
         subject,
         nifti_root=nifti_root,
@@ -671,14 +486,9 @@ def main(
         skip_existing=skip_existing,
         crop_padding_bbox=crop_padding_bbox,
         thr_algorithm=thr_algorithm.lower(),
-        region_growing=region_growing,
-        rg_intensity_frac=rg_intensity_frac,
-        rg_intensity_frac_explore=rg_intensity_frac_explore,
         cl_barrier_radius=cl_barrier_radius,
-        rg_barrier_radius=rg_barrier_radius,
-        aca_sequential_grow=aca_sequential_grow,
-        aca_overlap_min_voxels=aca_overlap_min_voxels,
-        acomm_junction_radius=acomm_junction_radius,
+        segment_acomm=segment_acomm,
+        **flood,
     )
 
 

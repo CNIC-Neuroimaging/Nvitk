@@ -10,8 +10,9 @@ PESA TOF cohort's eICAB **circle-of-Willis (CW)** masks. Every parameter lives i
 [morphometrics_config.py](src/nvitk/measure/morphometrics_config.py).
 
 ```
-eICAB CW mask (stage-7 default; WB needs its own profile, not yet tuned)
-   │  Taubin smoothing (20 iters, λ=0.65, μ=−0.65)
+stage 1's *_eICAB_WB_pp (A1/A2, M1/M2, P1/P2 split), else *_eICAB_CW_pp (ACA/MCA named A1/M1)
+   │  Taubin smoothing: off by default since 2026-10-28 (--taubin: 20 iters, λ=0.65, μ=−0.65);
+   │  the pp masks are already drawn at the local half maximum
    │  largest connected component per label (no gap bridging — cow parity)
    ▼
 per label job
@@ -240,6 +241,36 @@ they have since been raised to 20 % (§5.2).
 
 ## 5 · Caliber lesions — stenosis and enlargement
 
+### 5.0 Two detection methods (`LESION_DETECTION_METHOD`, `--lesion-detection-method`)
+
+- **`robust_reference`** (default since 2026-10-28; `measure/morpho/robust_reference.py`). One
+  reference and one signed deviation per path, for both kinds:
+  1. *Signal*: the cross-section radius (`ray_median`; MIS where missing; `ROBUST_RADIUS_SOURCE`),
+     running median over `ROBUST_RADIUS_MEDIAN_MM` (1 mm).
+  2. *Reference*: per junction-to-junction stretch, a robust LOWESS of log r (tricube window
+     `ROBUST_REFERENCE_BANDWIDTH_MM` = 20 mm, 4 Tukey-bisquare passes; bumps and dips are
+     down-weighted alike). Blanking zones and the path ends carry no weight and are bridged, never
+     extrapolated into. The siphon is fitted like the rest: bridging its 25-30 mm would read the
+     whole cavernous ICA as an enlargement and hide a C7 stenosis behind its step down. A weighted PAVA projection then lets the reference rise by
+     at most `ROBUST_MAX_RISE_PER_MM` (1 %/mm): the petrous → cavernous widening is followed, a
+     bulge cannot lift its own reference.
+  3. *Detection*: `d = r / ref − 1`. Core `|d| ≥ max(20 %, 3 σ_path)` (σ_path: the path's robust
+     scatter around the unconstrained fit), support half of it, the kind's minimum length. A point
+     has one sign, so it is never both kinds. No core lies in a bifurcation's blanking zone, in a
+     tip's wall ramp (two radii) or where the reference radius is under
+     `ROBUST_MIN_REFERENCE_RADIUS_MM` (0.75 mm: a lumen 1–2 voxels across).
+  4. *Lesion table*: severity against the robust reference at the extreme point
+     (`reference = robust`); the windows (§6.3) only cross-check it. `in_siphon` counts only
+     together with `radius_disagreement`; `noisy_path` (σ_path > 10 %) ×0.8.
+- **`taper`**: cow_morpho's separate q85 stenosis / enlargement fits, below (§5.1–5.2), unchanged.
+
+**Bifurcations and vessel ends, both methods.** A run whose extreme point lies in a bifurcation's
+blanking zone or within two local radii (at least the kind's end exclusion) of a path end is
+dropped, not just penalised. For a split vessel the bifurcations it shares with its other half
+count too: the branch points of the **merged** M1 + M2 (A1 + A2, P1 + P2) mask near the
+component (`labels_util.split_partner_junctions`). Measured alone, an M1 ends in the flare where
+its M2s leave, which otherwise reads as an enlargement.
+
 ### 5.1 The taper reference (`_compute_vessel_taper`)
 
 The taper reference is the expected healthy radius at every point of the path, the denominator
@@ -459,8 +490,12 @@ an enlargement's severity on the other radius understated it.
 (§5.1); the lesion table measures severity against windows of healthy vessel next to the lesion:
 
 - **`interpolated`** (default; QCA's interpolated reference diameter):
-  - A proximal window 2–10 mm upstream of the lesion and a distal one 2–10 mm downstream
-    (`LESION_PROXIMAL_REFERENCE_WINDOW_MM`). The median radius of each is interpolated linearly in
+  - A proximal window upstream of the lesion and a distal one downstream: since 2026-10-28 each is
+    the nearest `LESION_REFERENCE_WINDOW_LENGTH_MM` (10 mm) of eligible points from
+    `LESION_REFERENCE_GAP_MM` (2 mm) up to `LESION_REFERENCE_SEARCH_MM` (30 mm) away, so it reaches
+    past a neighbouring lesion or a short eroded stretch (before: 2–10 mm fixed). A side with no
+    room in the lesion's stretch crosses the junction (`reference_crosses_junction`, ×0.9). The
+    median radius of each is interpolated linearly in
     arc length to the lesion's narrowest (widest) point. The vessel's natural taper between the two
     windows therefore is not counted as stenosis.
   - The windows keep to **healthy points of the lesion's own junction-to-junction stretch**. They
@@ -544,6 +579,16 @@ circle (a label selection, a crop), not a whole one, and gets no hypoplasia rows
 (`HYPOPLASIA_MIN_PRESENT_FRACTION`). With the profile's `PROCESS_SELECTED_TAGS_ONLY`, only the
 selected tags are checked. In the GUI the rows are listed in the lesions table and shown in the lesion
 inspector (card and flags, no profile); they have no point or extent in the viewer.
+
+**Variants (2026-10-28).**
+- A main vessel in the mask but without a measured centerline (a few voxels, no length or
+  diameter) is a `hypoplasia` row with `too_small`, and its subject status is `hypoplastic`.
+- An **A1 hypoplasia** gets a position where the missing A1 would run: midway between its ICA's end
+  and the AComm (without one, the other A1's end), so the GUI can show and centre on it.
+- **`kind = fetal`**, one row per side, on the P2: the P1 absent, too small or hypoplastic, and in
+  the label volume the PComm touches the ICA and the P2 (directly, or through the P1 stump:
+  `via_p1`). Placed at the PComm's centroid; `left_fetal_pca` / `right_fetal_pca` in the subject
+  table and `has_fetal_pca` in the report and the database.
 
 ### 6.4 `subject_summary.csv` / `Subject` — one row per subject
 
@@ -673,11 +718,12 @@ Stage-7 CLI:
 
 | Flag | Default | Effect |
 |---|---|---|
-| `--eicab-mask-preference` | `cw` | `cw` / `wb` eICAB mask (the profile is tuned on CW) |
+| `--eicab-mask-preference` | `wb` | `wb`: stage 1's distal-grown `*_eICAB_WB_pp` (A1/A2, M1/M2, P1/P2 measured as separate vessels), else `*_CW_pp`; `cw`: `*_CW_pp` |
 | `--profile` | `eicab_cw` | morphometrics profile |
 | `--centerline-backend` | profile (`vmtk`) | `vmtk` / `native` / `raycast` |
 | `--use-postprocessed-mask/--no-…` | on | prefer `*_eICAB_CW_pp.nii.gz`, stage 1's post-process (docs/pipelines/qvtpy.md): no anterior choroidals; labels re-drawn at their local half maximum; ICAs / basilar to the image floor, with the vertebrals as their own vessels (LVA / RVA, labels 19 / 20 of `eicab_topology.json`); ACAs / MCAs / PCAs / SCAs grown distally along the Frangi tree; siphon loops cut. The `eicab_cw` thresholds were calibrated on eICAB's own, thicker masks |
-| `--input-already-smoothed` | off | skip Taubin smoothing |
+| `--taubin/--no-taubin` | off | Taubin-smooth the label mask first (`nvitk-qvtpy --stage7-taubin`) |
+| `--lesion-detection-method` | profile (`robust_reference`) | `robust_reference` / `taper` (§5.0; `nvitk-qvtpy --lesion-detection-method`) |
 | `--n-workers N` | min(4, CPUs/2) | vessels measured in parallel: one process per label/component job, 1 = one at a time (VMTK is memory-hungry). On SGE, N > 1 requests `-pe smp N` |
 | `--skip-existing` | off | skip when `case_metrics_donut_tree.xlsx` exists |
 
@@ -704,9 +750,11 @@ The parameters that move the numbers most (change them with `with_params`):
 | `TAPER_REFERENCE_PERCENTILE` / `_WINDOW_MM` | 85 / 20 | how generous the healthy reference is |
 | `SIPHON_LEGACY_MASK` | False | True = cow's (100 %-coverage) siphon mask |
 | `LESION_REFERENCE_METHOD` | `interpolated` | the lesion table's healthy reference: proximal + distal windows interpolated, or `proximal` (§6.3) |
-| `LESION_PROXIMAL_REFERENCE_WINDOW_MM` / `LESION_REFERENCE_EXCLUDE_END_MM` | (2, 10) / 3 | the reference windows' distance from the lesion (mirrored downstream), kept clear of the path ends |
+| `LESION_REFERENCE_GAP_MM` / `_WINDOW_LENGTH_MM` / `_SEARCH_MM` / `LESION_REFERENCE_EXCLUDE_END_MM` | 2 / 10 / 30 / 3 | the reference windows: gap from the lesion, length, how far they may search, kept clear of the path ends |
+| `LESION_DETECTION_METHOD` | `robust_reference` | §5.0; `taper` = cow's fits |
+| `ROBUST_*` | see §5.0 | the robust reference: bandwidth 20 mm, max rise 1 %/mm, k σ = 3, support ½, min reference radius 0.75 mm |
 | `LESION_REFERENCE_DISAGREEMENT_FRACTION` | 0.25 | proximal vs distal median gap that flags `reference_inconsistent` |
-| `HYPOPLASIA_MAIN_VESSELS` | ICAs, BASILAR, MCAs, ACAs, PCA P1/P2 | the vessels whose absence is a `hypoplasia` lesion (§6.3) |
+| `HYPOPLASIA_MAIN_VESSELS` | ICAs, BASILAR, M1s, A1s, PCA P1/P2 | the vessels whose absence (or a mask without a measured centerline, `too_small`) is a `hypoplasia` lesion (§6.3); an A2 / M2 never is |
 | `SIPHON_CURVATURE_SMOOTH_MM` / `SIPHON_KAPPA_THRESHOLD` / `SIPHON_DILATION_MM` | 3 / 0.20 / 5 | the siphon mask (§4) |
 | `MIN_CENTERLINE_PATH_LENGTH_MM` | 7.5 | which paths exist at all |
 | `PROCESS_ALL_CONNECTED_COMPONENTS` / `BRIDGE_LABEL_GAPS_BEFORE_CENTERLINES` | False / False | fragment handling (cow parity) |

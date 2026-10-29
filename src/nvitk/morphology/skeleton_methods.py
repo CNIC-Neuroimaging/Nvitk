@@ -214,6 +214,31 @@ def rasterize_polylines(shape: Sequence[int], polylines: Sequence[np.ndarray], *
     return out
 
 
+def rasterize_labelled_polylines(
+    shape: Sequence[int], polylines: Sequence[np.ndarray], labels: Sequence[int], *, step: float = 0.25
+) -> np.ndarray:
+    """int32 volume with each polyline (voxel coordinates) drawn as a 26-connected voxel chain of its
+    label in *labels* (one per polyline; a later polyline overwrites an earlier one where they
+    cross). Points outside the volume are dropped, not clamped."""
+    out = np.zeros(tuple(int(s) for s in shape), dtype=np.int32)
+    hi = np.asarray(out.shape) - 1
+    for poly, lab in zip(polylines, labels):
+        p = np.asarray(poly, dtype=float).reshape(-1, 3)
+        if len(p) == 0:
+            continue
+        if len(p) == 1:
+            dense = p
+        else:
+            seg = np.linalg.norm(np.diff(p, axis=0), axis=1)
+            s = np.concatenate([[0.0], np.cumsum(seg)])
+            ss = np.arange(0.0, s[-1] + step, step)
+            dense = np.column_stack([np.interp(ss, s, p[:, k]) for k in range(3)])
+        idx = np.round(dense).astype(int)
+        idx = idx[np.all((idx >= 0) & (idx <= hi), axis=1)]
+        out[idx[:, 0], idx[:, 1], idx[:, 2]] = int(lab)
+    return out
+
+
 def method_skeleton(
     mask: np.ndarray,
     *,

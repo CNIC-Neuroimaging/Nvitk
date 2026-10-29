@@ -546,6 +546,10 @@ def _run_gui_tool(
         _run_centerline_to_polyline(viewer, layer, label_ids, params)
         return None
 
+    if tool_id == "polyline_to_centerline":
+        _run_polyline_to_centerline(viewer, layer, params)
+        return None
+
     if tool_id == "viz_cross_sections_generic":
         _run_cross_sections_generic(viewer, layer, params)
         return None
@@ -2460,6 +2464,50 @@ def _run_centerline_detect_junctions(
     notify(f"Marked {junctions.shape[0]} junction(s) on '{JUNCTION_POINTS_LAYER}'.")
 
 
+
+
+def _polyline_centerline_on(viewer: Any, params: dict[str, Any], grid_layer: Any, *,
+                            label_volume: Any = None) -> Any:
+    """The centerline image, on *grid_layer*'s grid, of the polyline layer picked as
+    ``centerline_layer`` (:func:`~nvitk.gui.viz.centerline_centering.is_polyline_layer`); ``None``
+    when none is picked or it is a centerline image (the caller aligns that one)."""
+    from nvitk.gui.viz.centerline_centering import is_polyline_layer, polylines_to_centerline_image
+
+    name = _layer_param(params, "centerline_layer")
+    if not name or not is_polyline_layer(_resolve_layer(viewer, name)):
+        return None
+    image, _counts = polylines_to_centerline_image(grid_layer, _resolve_layer(viewer, name), label_volume=label_volume)
+    return image
+
+
+def _run_polyline_to_centerline(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
+    """Draw a polyline layer back into a centerline (Labels) image on the active layer's grid."""
+    from nvitk.gui.core.spatial import layer_spatial_kwargs
+
+    src_name = _layer_param(params, "polyline_layer")
+    if not src_name:
+        raise ValueError("Pick the polyline layer (Shapes paths, mesh-panel polylines or ordered Points).")
+    src = _resolve_layer(viewer, src_name)
+    if src is layer:
+        raise ValueError("Make the image or label map whose grid the centerline goes on the active layer.")
+    from nvitk.gui.viz.centerline_centering import polylines_to_centerline_image
+
+    image, counts = polylines_to_centerline_image(layer, src, label_id=int(params.get("label_id") or 0))
+    if not image.any():
+        raise ValueError(f"The polylines of '{src.name}' fall outside '{layer.name}'.")
+    out = viewer.add_labels(image, name=f"{src.name} centerline", **layer_spatial_kwargs(layer))
+    try:  # keep the source's label names when the grid layer has them
+        from nvitk.gui.labels.catalog import LABEL_NAMES_KEY
+
+        names = (getattr(layer, "metadata", {}) or {}).get(LABEL_NAMES_KEY)
+        if names:
+            out.metadata = {**dict(out.metadata or {}), LABEL_NAMES_KEY: dict(names)}
+    except Exception:  # noqa: BLE001 (names are cosmetic)
+        pass
+    notify(f"Centerline image of {sum(counts.values())} path(s) on '{layer.name}': "
+           + ", ".join(f"label {k}: {v}" for k, v in sorted(counts.items())))
+
+
 def _run_centerline_to_polyline(
     viewer: Any,
     layer: Any,
@@ -3513,8 +3561,10 @@ def _run_viz_vessel_cpr(
                 "labels selected on the lumen."
             )
 
-    _cl_layer, cl_img = _aligned("centerline_layer", order=0, what="Centerline layer")
-    centerlines = None if cl_img is None else coerce_label_output(cl_img).data
+    centerlines = _polyline_centerline_on(viewer, params, layer)  # Shapes / mesh polylines / Points
+    if centerlines is None:
+        _cl_layer, cl_img = _aligned("centerline_layer", order=0, what="Centerline layer")
+        centerlines = None if cl_img is None else coerce_label_output(cl_img).data
 
     lumen_data = lumen.data
     spacing = None
@@ -3712,6 +3762,7 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
     from nvitk.measure.morphometrics_config import (
         DEFAULT_PROFILE,
         ENLARGEMENT_RADIUS_SOURCE_LABELS,
+        LESION_DETECTION_METHODS,
         morphometrics_config,
     )
     from nvitk.measure.morpho.anatomy_axes import SPECIES_AUTO
@@ -3751,7 +3802,7 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
     species = str(params.get("species") or SPECIES_AUTO).strip() or SPECIES_AUTO
     n_workers = int(params.get("n_workers") or 1)
     skip_existing = bool(params.get("skip_existing")) and persist
-    already_smoothed = bool(params.get("input_already_smoothed"))
+    already_smoothed = not bool(params.get("taubin"))
     config = morphometrics_config(str(params.get("profile") or "") or DEFAULT_PROFILE, n_workers=n_workers)
     if bool(params.get("siphon_legacy")):
         config = config.with_params(SIPHON_LEGACY_MASK=True)
@@ -3761,6 +3812,9 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
         config = config.with_params(ENLARGEMENT_RADIUS_SOURCE=enl_source)
     if bool(params.get("smooth_cross_section")):
         config = config.with_params(ENLARGEMENT_SMOOTH_CROSS_SECTION=True)
+    detection = str(params.get("lesion_detection") or "").strip().lower()
+    if detection in LESION_DETECTION_METHODS:
+        config = config.with_params(LESION_DETECTION_METHOD=detection)
     case_id = re.sub(r"[^\w.-]+", "_", str(params.get("case_id") or "").strip() or str(layer.name)).strip("_")
 
     if persist:
@@ -3979,7 +4033,11 @@ def _run_cross_sections_generic(viewer: Any, layer: Any, params: dict[str, Any])
     # Centerlines: supplied, or skeletonised from the mask by the engine's own
     # generic path.
     cl_name = _layer_param(params, "centerline_layer")
-    if cl_name:
+    # A polyline centerline is drawn on the intensity grid, labelled from the mask under it.
+    centerline_arr = _polyline_centerline_on(viewer, params, intensity_layer, label_volume=seg_arr)
+    if centerline_arr is not None:
+        centerline_arr = to_numpy(centerline_arr).astype(np.int32, copy=False)
+    elif cl_name:
         cl_layer = _resolve_layer(viewer, cl_name)
         _ref, cl_img, _ = align_mask_to_reference_layer(cl_layer, intensity_layer, order=0)
         centerline_arr = to_numpy(coerce_label_output(cl_img).data).astype(np.int32, copy=False)
@@ -4871,13 +4929,14 @@ def _notify_results(
 
 
 def _run_eicab_postprocess(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
-    """Stage 1's eICAB post-process on *layer* (a label map) against the reference TOF layer."""
+    """Stage 1's eICAB post-process on *layer* (a label map) against the reference TOF layer: the CW
+    pp layer, and with the distal growth also the WB pp layer (A2 / M2 split off), as in stage 1."""
     import json
 
     import numpy as numpy_host  # module ``np`` may be a CuPy proxy via ``setup(globals())``
 
     from nvitk.gui.core.spatial import layer_spatial_kwargs
-    from nvitk.pipes.qvtpy.util.eicab.eicab_postprocess import postprocess_eicab_labels
+    from nvitk.pipes.qvtpy.util.eicab.eicab_postprocess import postprocess_eicab_variants
 
     tof_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
     tof_img = layer_to_image(tof_layer)
@@ -4887,9 +4946,8 @@ def _run_eicab_postprocess(viewer: Any, layer: Any, params: dict[str, Any]) -> N
     if labels.shape != intensity.shape:
         raise ValueError(f"Label layer {labels.shape} and TOF layer {intensity.shape} are not on one grid.")
     ids = lambda key, default: parse_label_ids(str(params.get(key) or default)) or parse_label_ids(default)  # noqa: E731
-    notify("Running the eICAB post-process (CPU)…")
-    before = labels.copy()
-    summary = postprocess_eicab_labels(
+    notify("Running the eICAB post-process…")
+    masks, summary = postprocess_eicab_variants(
         intensity, labels, affine=lab_img.affine if lab_img.affine is not None else tof_img.affine,
         remove_ids=(17, 18) if bool(params.get("eicab_pp_remove_acha", True)) else (),
         resegment=bool(params.get("eicab_pp_resegment", True)), extend=bool(params.get("eicab_pp_extend", True)),
@@ -4898,28 +4956,41 @@ def _run_eicab_postprocess(viewer: Any, layer: Any, params: dict[str, Any]) -> N
         trunk_ids=ids("eicab_pp_trunks", "1,2,3"), distal_ids=ids("eicab_pp_distal_ids", "5,6,7,8,13,14,15,16"),
         ica_ids=ids("eicab_pp_icas", "1,2"),
     )
+    masks = {k: to_numpy(v).astype(numpy_host.int32) for k, v in masks.items()}
     kw = layer_spatial_kwargs(layer)
-    pp_layer = viewer.add_labels(labels, name=f"{getattr(layer, 'name', 'labels')} pp", opacity=0.7, **kw)
-    try:  # name the new vertebral labels like the eICAB ones
-        from nvitk.gui.labels.catalog import LABEL_NAMES_KEY
-        from nvitk.pipes.qvtpy.labels import EICAB_ID_TO_NAME
+    base = getattr(layer, "name", "labels")
+    for kind in ("cw", "wb"):
+        if kind not in masks:
+            continue
+        pp_layer = viewer.add_labels(masks[kind], name=f"{base} {kind.upper()}_pp", opacity=0.7,
+                                     visible=kind == ("wb" if "wb" in masks else "cw"), **kw)
+        try:  # name the post-process's own labels (vertebrals, A2 / M2) like the eICAB ones
+            from nvitk.gui.labels.catalog import LABEL_NAMES_KEY
+            from nvitk.pipes.qvtpy.labels import EICAB_ID_TO_NAME
 
-        meta = dict(pp_layer.metadata or {})
-        meta[LABEL_NAMES_KEY] = {int(k): v for k, v in EICAB_ID_TO_NAME.items() if int(k) > 0}
-        pp_layer.metadata = meta
-    except Exception:  # noqa: BLE001 (names are cosmetic)
-        pass
+            meta = dict(pp_layer.metadata or {})
+            meta[LABEL_NAMES_KEY] = {int(k): v for k, v in EICAB_ID_TO_NAME.items() if int(k) > 0}
+            pp_layer.metadata = meta
+        except Exception:  # noqa: BLE001 (names are cosmetic)
+            pass
     ext = (summary.get("extension") or {}).get("labels", {})
-    dist = (summary.get("distal_growth") or {}).get("labels", {})
-    sip = summary.get("siphon_correction") or {}
+    dist = ((summary.get("wb") or {}).get("distal_growth") or {}).get("labels", {})
+    sip = (summary.get("cw") or {}).get("siphon_correction") or {}
     rows: dict[str, dict[str, Any]] = {}
-    for lid in sorted({int(v) for v in numpy_host.unique(before) if v > 0} | {int(v) for v in numpy_host.unique(labels) if v > 0}):
-        n0, n1 = int((before == lid).sum()), int((labels == lid).sum())
-        row: dict[str, Any] = {"voxels before": n0, "voxels after": n1,
-                               "change %": round(100.0 * (n1 - n0) / n0, 1) if n0 else None}
+    present = {int(v) for v in numpy_host.unique(labels) if v > 0}
+    for m in masks.values():
+        present |= {int(v) for v in numpy_host.unique(m) if v > 0}
+    for lid in sorted(present):
+        n0 = int((labels == lid).sum())
+        row: dict[str, Any] = {"voxels before": n0}
+        for kind, m in masks.items():
+            n1 = int((m == lid).sum())
+            row[f"{kind.upper()}_pp voxels"] = n1
+            row[f"{kind.upper()}_pp change %"] = round(100.0 * (n1 - n0) / n0, 1) if n0 else None
         e = ext.get(str(lid))
         if e:
-            row.update({"extension mm": e.get("length_mm"), "extension stop": e.get("stop")})
+            row.update({"extension mm": e.get("length_mm"), "extension stop": e.get("stop"),
+                        "reached floor": e.get("reached_floor")})
         dg = dist.get(str(lid))
         if dg:
             row["distal growth mm³"] = dg.get("volume_added_mm3", 0)
@@ -4935,7 +5006,8 @@ def _run_eicab_postprocess(viewer: Any, layer: Any, params: dict[str, Any]) -> N
 
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
-        imsave(out / "eicab_pp.nii.gz", labels, metadata=dict(lab_img.metadata or {}))
+        for kind, m in masks.items():
+            imsave(out / f"eicab_{kind.upper()}_pp.nii.gz", m, metadata=dict(lab_img.metadata or {}))
         (out / "eicab_postprocess.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
         note = f"Written to {out}"
     _notify_results(viewer, _tool_label("seg_eicab_postprocess"), rows, subtitle=getattr(layer, "name", ""),

@@ -173,7 +173,7 @@ def _write_provenance(case_dir: Path, *, seg_path: Path, pipeline_seg: Path, cfg
         "input_mask": str(seg_path),
         "pipeline_input": str(pipeline_seg),
         "input_already_smoothed": bool(input_already_smoothed),
-        "taubin": {"iters": cfg.taubin_iters, "lambda": cfg.taubin_lambda, "mu": cfg.taubin_mu,
+        "taubin": {"applied": not bool(input_already_smoothed), "iters": cfg.taubin_iters, "lambda": cfg.taubin_lambda, "mu": cfg.taubin_mu,
                    "keep_largest_component": cfg.keep_largest_component_taubin},
         "topology": topology_json,
         "species": species,

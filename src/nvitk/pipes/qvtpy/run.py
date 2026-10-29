@@ -10,7 +10,7 @@ Stages (select with ``--stages``; default ``stage0_c,stage1``)
 - ``stage1``: eICAB on ``TOF/TOF.nii.gz``.
 - ``stage2``: eICAB ``TOF_resampled`` -> 4D flow rigid FLIRT (NiPype FSL; fixed = Angiography_3D or CD).
 - ``stage3``: eICAB in 4Dflow space + arterial/venous centerlines (``--eicab-mask``, geometry venous branches).
-- ``stage4``: Local CD crop per vessel + threshold + optional region growing -> ``seg_4dflow``.
+- ``stage4``: Local CD crop per vessel + threshold, then the blood flood (A1/M1/P1 -> A2/M2/P2 split) -> ``seg_4dflow``.
 - ``stage4t``: Same as stage 4 on each ``ComplexDifference_4D`` frame -> ``seg_4dflow_4d`` (opt-in).
 - ``stage5``: QVTplus-style LOC CSV (arterial + venous).
 - ``stage6``: Per-LOC masked-plane flow / PI / RI from phase volumes.
@@ -33,7 +33,7 @@ import shlex
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 import click
 
@@ -94,6 +94,7 @@ from .stages import (
     parse_stages as _parse_stages,
 )
 from nvitk.core.click_config import config_dir_click_option
+from nvitk.pipes.qvtpy.util.segmentation.flood_options import flood_click_options
 
 
 log = Logger()
@@ -351,22 +352,8 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     totalseg_model_dir: Path | None,
     crop_padding_bbox: int,
     thr_algorithm_4dflow: str,
-    region_growing: bool,
-    rg_intensity_frac: float,
-    rg_intensity_frac_explore: float,
-    rg_intensity_frac_aca: float,
     cl_barrier_radius: int,
-    rg_barrier_radius: int,
-    aca_sequential_grow: bool,
-    aca_overlap_min_voxels: int,
-    acomm_junction_radius: int,
-    distal_flow_expand: bool,
-    distal_hyst_low_factor: float,
-    distal_hyst_high_factor: float,
-    distal_thicken_iter: int,
-    distal_max_image_frac: float,
-    distal_lr_halfspace_slack: int,
-    pp_distal: bool,
+    flood: dict[str, Any],
     loc_arterial_strategy: str,
     cross_section_radius_vox: float,
     loc_endpoint_inset_frac: float,
@@ -384,6 +371,8 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     pitc_measure_resegment: bool = False,
     pitc_label_constrain: bool = True,
     stage7_n_workers: int | None = None,
+    stage7_taubin: bool | None = None,
+    lesion_detection_method: str | None = None,
 ) -> int:
     """Append one SGE array ``qsub`` per subject; return array jobs emitted."""
     from . import (
@@ -574,22 +563,8 @@ def _emit_qvtpy_sge_subjects_for_chunk(
                             skip_existing=skip_existing,
                             crop_padding_bbox=crop_padding_bbox,
                             thr_algorithm=thr_algorithm_4dflow,
-                            region_growing=region_growing,
-                            rg_intensity_frac=rg_intensity_frac,
-                            rg_intensity_frac_explore=rg_intensity_frac_explore,
-                            rg_intensity_frac_aca=rg_intensity_frac_aca,
                             cl_barrier_radius=cl_barrier_radius,
-                            rg_barrier_radius=rg_barrier_radius,
-                            aca_sequential_grow=aca_sequential_grow,
-                            aca_overlap_min_voxels=aca_overlap_min_voxels,
-                            acomm_junction_radius=acomm_junction_radius,
-                            distal_flow_expand=distal_flow_expand,
-                            distal_hyst_low_factor=distal_hyst_low_factor,
-                            distal_hyst_high_factor=distal_hyst_high_factor,
-                            distal_thicken_iter=distal_thicken_iter,
-                            distal_max_image_frac=distal_max_image_frac,
-                            distal_lr_halfspace_slack=distal_lr_halfspace_slack,
-                            pp_distal=pp_distal,
+                            **flood,
                             backend=backend,
                         ),
                     )
@@ -616,14 +591,8 @@ def _emit_qvtpy_sge_subjects_for_chunk(
                             skip_existing=skip_existing,
                             crop_padding_bbox=crop_padding_bbox,
                             thr_algorithm=thr_algorithm_4dflow,
-                            region_growing=region_growing,
-                            rg_intensity_frac=rg_intensity_frac,
-                            rg_intensity_frac_explore=rg_intensity_frac_explore,
                             cl_barrier_radius=cl_barrier_radius,
-                            rg_barrier_radius=rg_barrier_radius,
-                            aca_sequential_grow=aca_sequential_grow,
-                            aca_overlap_min_voxels=aca_overlap_min_voxels,
-                            acomm_junction_radius=acomm_junction_radius,
+                            **flood,
                             backend=backend,
                         ),
                     )
@@ -712,6 +681,10 @@ def _emit_qvtpy_sge_subjects_for_chunk(
                             container=container,
                             src_dir=src_p,
                             skip_existing=skip_existing,
+                            eicab_mask_preference=eicab_mask,
+                            use_postprocessed_mask=eicab_prefer_pp,
+                            taubin=stage7_taubin,
+                            lesion_detection_method=lesion_detection_method,
                             n_workers=stage7_n_workers,
                             backend=backend,
                         ),
@@ -1096,7 +1069,7 @@ def _submit_qvtpy_sge_subjects_remote(
     "--eicab-pp-distal/--no-eicab-pp-distal",
     default=True,
     show_default=True,
-    help="Stage1: grow the ACAs / MCAs / PCAs / SCAs distally along the Frangi tree in the eICAB post-process.",
+    help="Stage1: Also write *_eICAB_WB_pp: the ACAs / MCAs / PCAs / SCAs grown distally along the Frangi tree, the ACA / MCA growth labelled A2 / M2 (21-24). *_eICAB_CW_pp (no distal growth) is always written.",
 )
 @click.option(
     '--only-pp/--no-only-pp',
@@ -1131,9 +1104,10 @@ def _submit_qvtpy_sge_subjects_remote(
 @click.option(
     "--eicab-mask",
     type=click.Choice(["cw", "wb"], case_sensitive=False),
-    default="cw",
+    default="wb",
     show_default=True,
-    help="Stage3: prefer Circle-of-Willis or whole-brain eICAB mask.",
+    help="Stage3 / stage7: wb = stage 1's distal-grown *_eICAB_WB_pp (A2 / M2 split), else *_CW_pp; "
+    "cw = *_CW_pp. Without --eicab-prefer-pp, eICAB's own CW mask.",
 )
 @click.option(
     "--eicab-prefer-pp/--no-eicab-prefer-pp",
@@ -1187,90 +1161,8 @@ def _submit_qvtpy_sge_subjects_remote(
     show_default=True,
     help="Stage4: local threshold on CD crop.",
 )
-@click.option(
-    "--region-growing/--no-region-growing",
-    default=True,
-    show_default=True,
-    help="Stage4: grow labels into unassigned high-CD voxels.",
-)
-@click.option("--rg-intensity-frac", type=float, default=0.45, show_default=True, help="Stage4: RG intensity factor (default vessels).")
-@click.option("--rg-intensity-frac-explore", type=float, default=0.25, show_default=True, help="Stage4: RG frac for MCA/PCA.")
-@click.option("--rg-intensity-frac-aca", type=float, default=0.35, show_default=True, help="Stage4: RG frac for ACA.")
 @click.option("--cl-barrier-radius", type=int, default=5, show_default=True, help="Stage4: dilate other centerlines (vox).")
-@click.option("--rg-barrier-radius", type=int, default=3, show_default=True, help="Stage4: dilate other seg during RG (vox).")
-@click.option(
-    "--aca-sequential-grow/--no-aca-sequential-grow",
-    default=False,
-    show_default=True,
-    help="Stage4: LACA then RACA grow; overlap corrected at junction when needed.",
-)
-@click.option(
-    "--aca-overlap-min-voxels",
-    type=int,
-    default=10,
-    show_default=True,
-    help="Stage4: min LACA∩RACA voxels to apply convergence correction at AComm.",
-)
-@click.option(
-    "--acomm-junction-radius",
-    type=int,
-    default=10,
-    show_default=True,
-    help="Stage4: Voronoi-split overlap only within this many vox of AComm junction.",
-)
-@click.option(
-    "--distal-flow-expand/--no-distal-flow-expand",
-    default=True,
-    show_default=True,
-    help=(
-        "Stage4: after region growing, expand MCA/ACA/PCA into a Frangi+hysteresis "
-        "vessel tree via watershed (eICAB-inspired, Python-only). Default ON."
-    ),
-)
-@click.option(
-    "--distal-hyst-low-factor",
-    type=float,
-    default=3,
-    show_default=True,
-    help="Stage4: distal GMM hysteresis low factor (higher → thinner tree; 3.5–4.5).",
-)
-@click.option(
-    "--distal-hyst-high-factor",
-    type=float,
-    default=0.5,
-    show_default=True,
-    help="Stage4: distal GMM hysteresis high factor.",
-)
-@click.option(
-    "--distal-thicken-iter",
-    type=int,
-    default=0,
-    show_default=True,
-    help="Stage4: lumen thicken iterations (0=thinnest; 1 can look blobbier).",
-)
-@click.option(
-    "--distal-max-image-frac",
-    type=float,
-    default=0.08,
-    show_default=True,
-    help="Stage4: max voxels claimed by distal expand as fraction of image.",
-)
-@click.option(
-    "--distal-lr-halfspace-slack",
-    type=int,
-    default=2,
-    show_default=True,
-    help="Stage4: L/R midline slack so contralateral ACA/MCA/PCA claims are blocked.",
-)
-@click.option(
-    "--pp-distal/--no-pp-distal",
-    default=True,
-    show_default=True,
-    help=(
-        "Stage4: after distal expand, remove small wart-like surface protrusions "
-        "(curvature filter; pre-expansion voxels protected)."
-    ),
-)
+@flood_click_options(help_prefix="Stage4/4t: ")
 # stage 5
 @click.option(
     "--loc-arterial-strategy",
@@ -1349,6 +1241,18 @@ def _submit_qvtpy_sge_subjects_remote(
     help="Stage7: vessels measured in parallel per subject, one process per label/component job "
          "(1 = one at a time; default min(4, CPUs/2)). On SGE, N > 1 requests -pe smp N.",
 )
+@click.option(
+    "--stage7-taubin/--no-stage7-taubin",
+    default=None,
+    help="Stage7: Taubin-smooth the label mask before measuring. Default: off for stage 1's "
+    "post-processed masks (already at the local half maximum), on for eICAB's own mask.",
+)
+@click.option(
+    "--lesion-detection-method",
+    type=click.Choice(["robust_reference", "taper"], case_sensitive=False),
+    default=None,
+    help="Stage7: stenosis / enlargement detection (default: the profile's, robust_reference).",
+)
 # stage 8 (XNAT upload)
 @click.option(
     "--xnat-upload-require-stages",
@@ -1418,6 +1322,8 @@ def main(
     eicab_min_island_fraction: float,
     eicab_bridge_open_radius: int,
     stage7_n_workers: int | None,
+    stage7_taubin: bool | None,
+    lesion_detection_method: str | None,
     venous_min_branch_points: int,
     pcomm_min_points: int,
     arterial_branch_min_points: int,
@@ -1425,22 +1331,7 @@ def main(
     totalseg_model_dir: Path | None,
     crop_padding_bbox: int,
     thr_algorithm_4dflow: str,
-    region_growing: bool,
-    rg_intensity_frac: float,
-    rg_intensity_frac_explore: float,
-    rg_intensity_frac_aca: float,
     cl_barrier_radius: int,
-    rg_barrier_radius: int,
-    aca_sequential_grow: bool,
-    aca_overlap_min_voxels: int,
-    acomm_junction_radius: int,
-    distal_flow_expand: bool,
-    distal_hyst_low_factor: float,
-    distal_hyst_high_factor: float,
-    distal_thicken_iter: int,
-    distal_max_image_frac: float,
-    distal_lr_halfspace_slack: int,
-    pp_distal: bool,
     loc_arterial_strategy: str,
     cross_section_radius_vox: float,
     loc_endpoint_inset_frac: float,
@@ -1467,6 +1358,7 @@ def main(
     xnat_upload_qvtpy: bool,
     xnat_upload_skip_existing: bool,
     xnat_upload_dry_run: bool,
+    **flood: Any,
 ) -> None:
     """CLI entry point (``nvitk-qvtpy``) driving the full QVTpy pipeline for one or more subjects:
     resolves local/cluster paths, then downloads/converts, runs eICAB, registration, centerline,
@@ -1474,18 +1366,26 @@ def main(
     either locally or as SGE array jobs per *submit*/*stages_spec*."""
     Logger()
 
+    from nvitk.core import config_paths
     from nvitk.pipes.qvtpy.util.io.paths import layout_cluster, layout_local, resolve_totalseg_model_dir
 
-    local_paths = layout_local(
-        dicom_root=cfg.LOCAL_DEFAULT_DICOM_ROOT if dicom_root is None else dicom_root,
-        nifti_root=cfg.LOCAL_DEFAULT_NIFTI_ROOT if nifti_root is None else nifti_root,
-        results_root=cfg.LOCAL_DEFAULT_RESULTS_ROOT if output_root is None else output_root,
-    )
-    cluster_paths = layout_cluster(
-        dicom_root=dicom_root,
-        nifti_root=nifti_root,
-        results_root=cfg.DEFAULT_RESULTS_ROOT if output_root is None else output_root,
-    )
+    # The --*-root flags beat sge.json in both modes. Only the active mode's layout must be
+    # fully configured; the other one (the XNAT download target under SGE, the log line
+    # locally) falls back to the active roots.
+    roots = dict(dicom_root=dicom_root, nifti_root=nifti_root, results_root=output_root)
+    if submit == "sge":
+        cluster_paths = layout_cluster(**roots)
+        try:
+            local_paths = layout_local(**roots)
+        except config_paths.ConfigError as exc:
+            log.warning(f"No local layout ({exc}); the XNAT download target falls back to the cluster roots")
+            local_paths = cluster_paths
+    else:
+        local_paths = layout_local(**roots)
+        try:
+            cluster_paths = layout_cluster(**roots)
+        except config_paths.ConfigError:
+            cluster_paths = local_paths
     if submit == "sge":
         dicom_root_eff = cluster_paths.dicom_root
         nifti_root_eff = cluster_paths.nifti_root
@@ -1850,22 +1750,8 @@ def main(
                             skip_existing=skip_existing,
                             crop_padding_bbox=crop_padding_bbox,
                             thr_algorithm=thr_algorithm_4dflow.lower(),
-                            region_growing=region_growing,
-                            rg_intensity_frac=rg_intensity_frac,
-                            rg_intensity_frac_explore=rg_intensity_frac_explore,
-                            rg_intensity_frac_aca=rg_intensity_frac_aca,
                             cl_barrier_radius=cl_barrier_radius,
-                            rg_barrier_radius=rg_barrier_radius,
-                            aca_sequential_grow=aca_sequential_grow,
-                            aca_overlap_min_voxels=aca_overlap_min_voxels,
-                            acomm_junction_radius=acomm_junction_radius,
-                            distal_flow_expand=distal_flow_expand,
-                            distal_hyst_low_factor=distal_hyst_low_factor,
-                            distal_hyst_high_factor=distal_hyst_high_factor,
-                            distal_thicken_iter=distal_thicken_iter,
-                            distal_max_image_frac=distal_max_image_frac,
-                            distal_lr_halfspace_slack=distal_lr_halfspace_slack,
-                            pp_distal=pp_distal,
+                            **flood,
                         ),
                     )
                 if run_s4t and _local_stage_pending(subj, STAGE_SEG_T, **_local_skip):
@@ -1879,15 +1765,8 @@ def main(
                             skip_existing=skip_existing,
                             crop_padding_bbox=crop_padding_bbox,
                             thr_algorithm=thr_algorithm_4dflow.lower(),
-                            region_growing=region_growing,
-                            rg_intensity_frac=rg_intensity_frac,
-                            rg_intensity_frac_explore=rg_intensity_frac_explore,
-                            rg_intensity_frac_aca=rg_intensity_frac_aca,
                             cl_barrier_radius=cl_barrier_radius,
-                            rg_barrier_radius=rg_barrier_radius,
-                            aca_sequential_grow=aca_sequential_grow,
-                            aca_overlap_min_voxels=aca_overlap_min_voxels,
-                            acomm_junction_radius=acomm_junction_radius,
+                            **flood,
                         ),
                     )
                 if run_s5 and _local_stage_pending(subj, STAGE_LOC, **_local_skip):
@@ -1937,6 +1816,10 @@ def main(
                             s,
                             output_root=output_root_eff,
                             skip_existing=skip_existing,
+                            eicab_mask_preference=eicab_mask,
+                            use_postprocessed_mask=eicab_prefer_pp,
+                            taubin=stage7_taubin,
+                            lesion_detection_method=lesion_detection_method,
                             n_workers=stage7_n_workers,
                         ),
                     )
@@ -2138,6 +2021,8 @@ def main(
         eicab_min_island_fraction=eicab_min_island_fraction,
         eicab_bridge_open_radius=eicab_bridge_open_radius,
         stage7_n_workers=stage7_n_workers,
+        stage7_taubin=stage7_taubin,
+        lesion_detection_method=lesion_detection_method,
         venous_min_branch_points=venous_min_branch_points,
         pcomm_min_points=pcomm_min_points,
         arterial_branch_min_points=arterial_branch_min_points,
@@ -2145,22 +2030,8 @@ def main(
         totalseg_model_dir=totalseg_model_dir_eff,
         crop_padding_bbox=crop_padding_bbox,
         thr_algorithm_4dflow=thr_algorithm_4dflow,
-        region_growing=region_growing,
-        rg_intensity_frac=rg_intensity_frac,
-        rg_intensity_frac_explore=rg_intensity_frac_explore,
-        rg_intensity_frac_aca=rg_intensity_frac_aca,
         cl_barrier_radius=cl_barrier_radius,
-        rg_barrier_radius=rg_barrier_radius,
-        aca_sequential_grow=aca_sequential_grow,
-        aca_overlap_min_voxels=aca_overlap_min_voxels,
-        acomm_junction_radius=acomm_junction_radius,
-        distal_flow_expand=distal_flow_expand,
-        distal_hyst_low_factor=distal_hyst_low_factor,
-        distal_hyst_high_factor=distal_hyst_high_factor,
-        distal_thicken_iter=distal_thicken_iter,
-        distal_max_image_frac=distal_max_image_frac,
-        distal_lr_halfspace_slack=distal_lr_halfspace_slack,
-        pp_distal=pp_distal,
+        flood=flood,
         loc_arterial_strategy=loc_arterial_strategy,
         cross_section_radius_vox=cross_section_radius_vox,
         loc_endpoint_inset_frac=loc_endpoint_inset_frac,

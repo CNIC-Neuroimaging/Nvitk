@@ -299,6 +299,11 @@ class ResultsWindow(QWidget):
         copy_button.setToolTip("Copy this result to the clipboard as text")
         copy_button.clicked.connect(self._copy)
 
+        export_button = QPushButton("Export…")
+        export_button.setToolTip("Save the displayed table (the rows and columns the filters show, "
+                                 "in their sorted order) as an Excel workbook or a CSV file")
+        export_button.clicked.connect(self._export)
+
         self._clear_highlight = QPushButton("Clear highlight")
         self._clear_highlight.setToolTip("Stop showing the selected row in the viewer")
         self._clear_highlight.clicked.connect(self._unhighlight)
@@ -332,6 +337,7 @@ class ResultsWindow(QWidget):
         toolbar.addWidget(self._history, stretch=1)
         toolbar.addWidget(self._clear_highlight)
         toolbar.addWidget(copy_button)
+        toolbar.addWidget(export_button)
 
         root = QVBoxLayout(self)
         root.setSpacing(SPACE_TIGHT)
@@ -676,6 +682,20 @@ class ResultsWindow(QWidget):
         clipboard = QApplication.clipboard()
         if clipboard is not None:
             clipboard.setText(self.current_text())
+
+    def table_frame(self) -> Any:
+        """The displayed table as a DataFrame (:func:`~nvitk.gui.viz.table_export.visible_table_frame`)."""
+        from nvitk.gui.viz.table_export import visible_table_frame
+
+        return visible_table_frame(self._table, self._shown.payload if self._shown is not None else {})
+
+    def _export(self) -> None:
+        """Save the displayed table where the user picks (:func:`~nvitk.gui.viz.table_export.export_dialog`)."""
+        from nvitk.gui.viz.table_export import export_dialog
+
+        if self._shown is not None and (out := export_dialog(self, self.table_frame(), self._shown.title)):
+            self._note.setText(f"Saved to {out}")
+            self._note.setVisible(True)
 
     def _notify_row(self, result: _Result | None, key: str | None) -> None:
         """Tell *result*'s owner which row is selected (``None``: none)."""

@@ -354,6 +354,48 @@ def resegment_local(
     return out, info
 
 
+def tidy_labels(
+    labels: Any, ids: Sequence[int] | None = None, *, anchors: dict[int, int] | None = None
+) -> tuple[Any, dict[str, Any]]:
+    """Each label in *ids* (default: all) reduced to its largest 26-connected component, then its
+    enclosed holes filled (3-D; only unlabelled voxels are taken, so a neighbouring label is never
+    overwritten and a loop's open hole stays open). A label in *anchors* (``{label: anchor}``, e.g.
+    an M2 and its M1) keeps instead every component touching its anchor label: its branches meet
+    only through the anchor. Returns the label volume (int32, on the active backend) and, per
+    label, the voxels dropped and filled."""
+    anchors = {int(k): int(v) for k, v in (anchors or {}).items()}
+    out = as_backend_array(labels).astype(np.int32)
+    present = [int(v) for v in to_numpy(np.unique(out)) if int(v) > 0]
+    ids = [int(i) for i in (ids if ids is not None else present) if int(i) in present]
+    info: dict[str, Any] = {}
+    for lid in ids:
+        box = _bbox(out == lid, (1, 1, 1))
+        if box is None:
+            continue
+        sub = out[box]  # a view: writes land in *out*
+        own = sub == lid
+        cc, n = ndi.label(own, structure=_cube())
+        dropped = 0
+        if int(n) > 1:
+            sizes = np.bincount(cc.ravel())
+            sizes[0] = 0
+            keep = cc == int(np.argmax(sizes))
+            if lid in anchors:  # every piece on the anchor (the largest when none touches it)
+                near = ndi.binary_dilation(sub == anchors[lid], structure=_cube())
+                touching = np.unique(cc[near & own])
+                touching = touching[touching > 0]
+                if touching.size:
+                    keep = np.isin(cc, touching)
+            dropped = int((own & ~keep).sum())
+            sub[own & ~keep] = 0
+            own = keep
+        holes = ndi.binary_fill_holes(own) & ~own & (sub == 0)
+        sub[holes] = lid
+        if dropped or bool(holes.any()):
+            info[str(lid)] = {"dropped": dropped, "filled": int(holes.sum())}
+    return out, info
+
+
 # Frangi vesselness
 
 
@@ -634,8 +676,7 @@ def _paths_to_floor(
             if ends:
                 break
         ends.sort()
-        info: dict[str, Any] = {"floor_pieces_reached": len(ends), "floor_target": ("lumen", "any")[min(k, 1)]
-                                if floors_h else None}
+        info: dict[str, Any] = {"floor_pieces_reached": len(ends), "floor_target": int(k) if floors_h else None}
         if not ends:
             return [], info
         paths: list[Any] = []
@@ -670,14 +711,17 @@ def _end_band(coords: Any, sup: Any, sign: float, seed_band_mm: float) -> tuple[
 
 
 def _extension_box(band: Any, sup: Any, sign: float, sp: Spacing, shape: Sequence[int],
-                   max_extension_mm: float) -> tuple[Any, Any]:
+                   max_extension_mm: float | None) -> tuple[Any, Any]:
     """Host: the crop beyond a trunk's open end, as ``(lo, hi)`` index vectors: *max_extension_mm*
-    ahead along the extension direction (from :data:`UP_SLACK_MM` + 3 mm back), :data:`LATERAL_MM`
-    across it."""
+    ahead along the extension direction (``None``: to the image's edge), from :data:`UP_SLACK_MM`
+    + 3 mm back, and :data:`LATERAL_MM` across it."""
     with using("cpu"):
         sp_h = to_numpy(sp)
         shape_h = to_numpy(tuple(int(n) for n in shape))
-        reach = np.ceil((max_extension_mm + 5.0) / sp_h).astype(int)
+        if max_extension_mm is None:
+            reach = shape_h.copy()
+        else:
+            reach = np.ceil((max_extension_mm + 5.0) / sp_h).astype(int)
         lo = np.maximum(band.min(0) - reach, 0)
         hi = np.minimum(band.max(0) + reach + 1, shape_h)
         axis_w = np.abs(sup) / (np.abs(sup).sum() + 1e-12)  # how much each index axis is along the direction
@@ -720,6 +764,26 @@ def _distance_to_point_mm(shape: Sequence[int], point: Sequence[int], sp: Spacin
     return np.sqrt(d2)
 
 
+#: How far (mm) along the floor an edge trunk's lumen is followed past where its route met the floor.
+FLOOR_RUN_MM = 25.0
+
+
+def _floor_lumen(new: Any, above: Any, h: Any, h_floor: float, region: Any, line: Any, sp: Spacing,
+                 r_trunk: float) -> Any:
+    """The lumen (*above* the local threshold) that runs on along the image's floor from an edge
+    trunk's new voxels: the petrous ICA often lies along the lowest slices past the point where its
+    route met the floor. Kept: the part of the bottom band (2 trunk radii + 1 mm) connected to
+    *new* and within :data:`FLOOR_RUN_MM` of the route."""
+    band = above & region & (h >= h_floor - (2.0 * r_trunk + 1.0))
+    seed = new & band
+    if not bool(seed.any()):
+        return np.zeros_like(new)
+    near = ndi.distance_transform_edt(~line, sampling=sp) <= FLOOR_RUN_MM
+    cc, _ = ndi.label(band & near, structure=_cube())
+    keep = np.unique(cc[seed])
+    return np.isin(cc, keep[keep > 0]) & ~new
+
+
 def extend_trunks(
     intensity: Any,
     labels: Any,
@@ -738,6 +802,7 @@ def extend_trunks(
     seed_band_mm: float = 1.5,
     to_floor: bool = True,
     floor_branches: dict[int, int] | None = None,
+    edge_ids: Sequence[int] = (),
 ) -> tuple[Any, dict[str, Any]]:
     """Extend each trunk in *ids* beyond its open end in *direction* (module docstring).
 
@@ -752,7 +817,11 @@ def extend_trunks(
     lets a trunk follow *n* pieces down, e.g. the basilar into both vertebrals. A trunk with no path
     to the floor falls back to following the tree as one tube; there *split_ratio* (per label
     allowed) sets what counts as a bifurcation. Returns the new label volume (int32, on the active
-    backend) and a per-label log (length, voxels added, how it ended)."""
+    backend) and a per-label log (length, voxels added, how it ended, and whether the lumen reached
+    the floor).
+
+    *edge_ids* (the ICAs) ignore *max_extension_mm*: their crop and route run to the image's edge
+    however far it is (a route may be up to 2.5 times the straight drop, plus 20 mm, long)."""
     if direction not in DIRECTIONS:
         raise ValueError(f"direction must be one of {DIRECTIONS}, got {direction!r}")
     from nvitk.segmentation.blood_flood import hysteresis_vessel_tree
@@ -777,7 +846,8 @@ def extend_trunks(
         # 1. Open end and crop (host geometry on the label's voxel list)
         coords = to_numpy(np.argwhere(own))
         end, band = _end_band(coords, sup, sign, seed_band_mm)
-        lo, hi = _extension_box(band, sup, sign, sp, out.shape, max_extension_mm)
+        to_edge = lid in [int(i) for i in edge_ids]
+        lo, hi = _extension_box(band, sup, sign, sp, out.shape, None if to_edge else max_extension_mm)
         with using("cpu"):
             band_centre = band.mean(0) - lo
         box = tuple(slice(int(a), int(b)) for a, b in zip(lo, hi))
@@ -810,11 +880,18 @@ def extend_trunks(
         tree = (as_backend_array(tree).astype(bool) & (img > gate) | lumen) & region
         ext.info.update(core=round(core, 1), background=round(bg, 1), gate=round(gate, 1),
                         tree_voxels=int(tree.sum()))
+        # The image's floor: its lowest voxels with real signal. Resampling leaves a slice of
+        # near-zero values below the first acquired one, which is no floor to reach.
+        pos = img > 0
+        inside = img > (0.05 * float(np.median(img[pos])) if bool(pos.any()) else 0.0)
+        h_floor = float(h[inside].max()) if bool(inside.any()) else float(h.max())
+        max_mm = float(max_extension_mm)
+        if to_edge:  # the whole drop to the image's edge, with room for the bends
+            max_mm = max(max_mm, 2.5 * max(h_floor - end, 0.0) + 20.0)
+            ext.info["drop_to_floor_mm"] = round(max(h_floor - end, 0.0), 1)
         # 4. Route: minimum-cost paths to the floor, else the tube follower
         paths: list[Any] = []
         if to_floor:
-            inside = img > 0
-            h_floor = float(h[inside].max()) if bool(inside.any()) else float(h.max())
             edge = region & inside & (h >= h_floor - 3.0) & (smooth > gate)
             allowed = tree | edge
             v_ref = float(np.percentile(vess[tree], 95)) if bool(tree.any()) else 1.0
@@ -822,8 +899,12 @@ def extend_trunks(
             floor_band = allowed & inside & (h >= h_floor - 1.0)
             n_paths = int((floor_branches or {}).get(lid, 1))
             # Targets: vessel cross-sections at the floor; any allowed floor voxel if none is reached.
-            paths, pinfo = _paths_to_floor(allowed, seeds, cost, (floor_band & lumen, floor_band), sp,
-                                           max_paths=n_paths, max_mm=max_extension_mm,
+            targets = (floor_band & lumen, floor_band)
+            if to_edge:  # the lowest slice itself first (its lumen is often dim at the slab's edge)
+                last = floor_band & (h >= h_floor - 0.5 * min(sp))
+                targets = (last & (smooth > gate), *targets)
+            paths, pinfo = _paths_to_floor(allowed, seeds, cost, targets, sp,
+                                           max_paths=n_paths, max_mm=max_mm,
                                            min_sep_mm=max(2.0 * r_end, 3.0))
             ext.info.update(pinfo)
             if paths:
@@ -839,7 +920,7 @@ def extend_trunks(
         else:
             seed_area = int(int(seeds.sum()) / max(1.0, seed_band_mm / mean_sp))
             ratio = float(split_ratio.get(lid, SPLIT_RATIO)) if isinstance(split_ratio, dict) else float(split_ratio)
-            _route, cents, stop = _follow_tube(tree | seeds, seeds, sp, max_mm=max_extension_mm, shell_mm=shell_mm,
+            _route, cents, stop = _follow_tube(tree | seeds, seeds, sp, max_mm=max_mm, shell_mm=shell_mm,
                                                split_ratio=ratio, leak_factor=leak_factor, seed_area=seed_area)
             ext.info["split_ratio"] = ratio
             ext.stop = (stop + " (no path to the floor)") if to_floor else stop
@@ -862,14 +943,23 @@ def extend_trunks(
         ring_r = (d_line > r_lim) & (d_line <= r_lim + 2.0) & (lab == 0)
         thr, _ = local_threshold(img, line | sk, ring_r | ring, sp, alpha=alpha, sigma_mm=sigma_mm)
         hood = (d_line <= r_lim) & beyond & (lab == 0) & ~ahead
-        cand = (hood & (smooth > thr)) | own_c
+        # The route itself is lumen where it is above the trunk's gate: a stretch below the local
+        # half maximum (a dim bend) must not cut off the rest of the route from the label.
+        bridge = _dilate(line, 0.5 * r_trunk, sp) & hood & (smooth > gate)
+        cand = (hood & (smooth > thr)) | own_c | bridge
         cc, _ = ndi.label(cand, structure=_cube())
-        keep = np.unique(cc[own_c])
+        keep = np.unique(cc[own_c | bridge])
         new = np.isin(cc, keep[keep > 0]) & hood
         new = ndi.binary_fill_holes(new | own_c) & (hood | own_c) & ~own_c
+        if to_edge and paths:
+            new |= _floor_lumen(new, smooth > thr, h, h_floor, region, line, sp, r_trunk)
         lab[new & (lab == 0)] = lid  # *lab* is a view of *out*
         ext.n_voxels = int(new.sum())
         ext.info.update(trunk_radius_mm=round(r_trunk, 2), volume_added_mm3=round(ext.n_voxels * _voxel_mm3(sp), 1))
+        # Did the lumen reach the floor? (the gap left, in mm along the extension direction)
+        reached = np.where(lab == lid, h, -np.inf)
+        gap = max(h_floor - float(reached.max()), 0.0) if bool((lab == lid).any()) else float("nan")
+        ext.info.update(floor_gap_mm=round(gap, 1), reached_floor=bool(gap <= 1.5 * max(sp)))
         info["labels"][str(lid)] = ext.to_dict()
         log.step(f"[label {lid}] extended {ext.length_mm:.1f} mm {direction} ({ext.n_voxels} voxels): {ext.stop}")
     info["seconds"] = round(time.time() - t0, 2)
@@ -1005,9 +1095,11 @@ def grow_distal(
     hemisphere_pairs: Sequence[tuple[int, int, int | None]] = (),
     midline_refs: Sequence[tuple[int, int]] = (),
     midline_slack_mm: float = MIDLINE_SLACK_MM,
+    relabel: dict[int, int] | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """Grow the labels in *ids* along the multi-scale Frangi tree beyond their own voxels, all at
-    once and in competition, as the blood flood floods its markers.
+    once and in competition, as the blood flood floods its markers. *relabel* (``{label: new}``)
+    writes what a label gains under another id, e.g. an ACA's growth as its A2.
 
     The tree is a GMM hysteresis tree of the Frangi vesselness (σ *frangi_sigmas_mm*) on a crop
     around the labels, gated at 0.15 of the way from the background to the labels' centreline
@@ -1122,11 +1214,13 @@ def grow_distal(
         cc, _ = ndi.label(cand, structure=_cube())
         keep = np.unique(cc[o_s])
         new = np.isin(cc, keep[keep > 0]) & hood & ~o_s
-        l_s[new & (l_s == 0)] = lid  # a view of *lab*, itself a view of *out*
+        l_s[new & (l_s == 0)] = int((relabel or {}).get(lid, lid))  # a view of *lab*, itself a view of *out*
         reach = float(np.max(best[grown]))
         n_new = int(new.sum())
         entry.update(voxels_added=n_new, volume_added_mm3=round(n_new * _voxel_mm3(sp), 1),
                      reach_cost=round(reach, 1))
+        if relabel and lid in relabel:
+            entry["written_as"] = int(relabel[lid])
         info["labels"][str(lid)] = entry
         log.step(f"[label {lid}] grew {entry['volume_added_mm3']} mm³ along the Frangi tree")
     info["seconds"] = round(time.time() - t0, 2)
@@ -1140,6 +1234,7 @@ __all__ = [
     "FRANGI_SIGMAS_MM",
     "MAX_EXTENSION_MM",
     "extend_trunks",
+    "tidy_labels",
     "frangi_vesselness",
     "grow_distal",
     "head_midplane",

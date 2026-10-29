@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
         "--eicab-pp-distal",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Grow the ACAs / MCAs / PCAs / SCAs distally in the post-process.",
+        help="Also write *_eICAB_WB_pp: the ACAs / MCAs / PCAs / SCAs grown distally along the Frangi tree, the ACA / MCA growth labelled A2 / M2 (21-24). *_eICAB_CW_pp (no distal growth) is always written.",
     )
     p.add_argument(
         "--backend",
@@ -74,7 +74,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.post_process_eicab:
             from nvitk.pipes.qvtpy.util.eicab.eicab_postprocess import postprocess_eicab_directory
 
-            postprocess_eicab_directory(args.output, siphon=args.eicab_pp_siphon, distal=args.eicab_pp_distal)
+            postprocess_eicab_directory(args.output, tof_original_path=args.input, siphon=args.eicab_pp_siphon,
+                                        distal=args.eicab_pp_distal)
     except Exception as exc:
         log.error("run_job failed: %s", exc)
         raise

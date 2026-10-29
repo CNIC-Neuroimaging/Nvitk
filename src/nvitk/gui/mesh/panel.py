@@ -830,12 +830,15 @@ class MeshPanel(QWidget):
         from qtpy.QtWidgets import QDockWidget
 
         self.select(op_id)
-        widget: Any = self
-        while widget is not None and not isinstance(widget, QDockWidget):
-            widget = widget.parentWidget()
-        if widget is not None:
-            widget.show()
-            widget.raise_()
+        from nvitk.gui.core.workspace import raise_panel
+
+        if not raise_panel(self._viewer, "nvitk:mesh"):  # the Meshlab tab, also in a panel window
+            widget: Any = self
+            while widget is not None and not isinstance(widget, QDockWidget):
+                widget = widget.parentWidget()
+            if widget is not None:
+                widget.show()
+                widget.raise_()
         op = self._current_op()
         if op is not None:
             hint = "Run, then click on the surface." if op.pick else "Set the parameters, then Run."

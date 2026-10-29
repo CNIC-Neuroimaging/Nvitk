@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -60,6 +61,18 @@ def eicab_pp_path(original: Path) -> Path:
     if p.suffix.lower() == ".nii":
         return p.with_name(f"{stem}_pp.nii")
     return p.parent / f"{stem}_pp{p.suffix}"
+
+
+def eicab_pp_variant_path(original: Path, variant: EicabMaskKind) -> Path:
+    """Post-processed mask path of one variant, named after eICAB's mask kinds:
+    ``foo_eICAB_CW.nii.gz`` -> ``foo_eICAB_CW_pp.nii.gz`` (*variant* ``"cw"``: no distal growth)
+    or ``foo_eICAB_WB_pp.nii.gz`` (``"wb"``: with the distal growth and its A2 / M2 labels)."""
+    p = eicab_pp_path(original)
+    tag = "_eICAB_WB" if str(variant).lower() == "wb" else "_eICAB_CW"
+    name = re.sub(r"_eICAB_(CW|WB)(?=_pp)", tag, p.name)
+    if name == p.name and tag not in name:  # no eICAB kind in the name: append it
+        name = name.replace("_pp", f"{tag}_pp", 1)
+    return p.with_name(name)
 
 
 def find_tof_resampled_volume(eicab_output_dir: Path) -> Path | None:
@@ -234,11 +247,40 @@ def resolve_eicab_mask(
     return base
 
 
+def resolve_eicab_pp_mask(eicab_dir: Path, preference: EicabMaskKind = "wb") -> EicabMaskResolution:
+    """The post-processed mask to measure: with *preference* ``"wb"``, the distal-grown
+    ``*_eICAB_WB_pp``, then ``*_eICAB_CW_pp``, then eICAB's own CW mask; with ``"cw"``, the last
+    two only. eICAB's raw whole-brain ``*_eICAB_WB`` is never used here: it is not a CW mask."""
+    eicab_dir = Path(eicab_dir)
+    pref = str(preference).strip().lower()
+    if pref not in ("cw", "wb"):
+        raise ValueError(f"eicab_mask preference must be 'cw' or 'wb', got {preference!r}")
+    cw = _glob_first(eicab_dir, _CW_PATTERNS)
+    order = [("wb", _WB_PP_PATTERNS), ("cw", _CW_PP_PATTERNS)] if pref == "wb" else [("cw", _CW_PP_PATTERNS)]
+    for kind, pats in order:
+        hit = _glob_first(eicab_dir, pats)
+        if hit is not None:
+            fb = kind != pref
+            msg = f"No eICAB {pref.upper()}_pp mask under {eicab_dir}; using {hit.name}" if fb else None
+            if msg:
+                log.warning(msg)
+            return EicabMaskResolution(path=hit, requested=pref, used=kind, fallback=fb,  # type: ignore[arg-type]
+                                       fallback_reason=msg, postprocessed=True, original_path=cw)
+    if cw is not None:
+        msg = f"No post-processed eICAB mask under {eicab_dir}; using eICAB's own {cw.name}"
+        log.warning(msg)
+        return EicabMaskResolution(path=cw, requested=pref, used="cw", fallback=True,  # type: ignore[arg-type]
+                                   fallback_reason=msg)
+    raise FileNotFoundError(f"No eICAB CW / pp NIfTI under {eicab_dir}")
+
+
 __all__ = [
     "CENTERLINES_MASK_PP_NIFTI",
     "EicabMaskKind",
     "EicabMaskResolution",
     "eicab_pp_path",
+    "eicab_pp_variant_path",
+    "resolve_eicab_pp_mask",
     "find_eicab_cw_mask",
     "find_tof_resampled_volume",
     "resolve_eicab_mask",

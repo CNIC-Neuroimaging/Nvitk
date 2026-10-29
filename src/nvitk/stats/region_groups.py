@@ -395,6 +395,8 @@ def region_display_panel(level: str) -> str | None:
     raw = str(level).strip()
     if not raw:
         return None
+    # qvtpy's split labels (LMCA_M1, LACA_A2, ...) sit in their parent vessel's panel.
+    raw = re.sub(r"^([LR](?:ACA|MCA|PCA))_(?:A|M|P)[12]$", r"\1", raw, flags=re.IGNORECASE)
 
     # 1. Already a panel name
     for panel in PANEL_ORDER:

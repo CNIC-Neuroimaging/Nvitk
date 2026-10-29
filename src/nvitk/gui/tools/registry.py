@@ -10,6 +10,7 @@ from nvitk.measure.morpho.anatomy_axes import SPECIES_AUTO, SPECIES_CHOICES
 from nvitk.measure.morpho.topology_io import topology_choices as _morpho_topology_choices
 from nvitk.measure.morphometrics_config import DEFAULT_PROFILE as _MORPHO_DEFAULT_PROFILE
 from nvitk.measure.morphometrics_config import ENLARGEMENT_RADIUS_SOURCE_LABELS as _ENLARGEMENT_RADIUS_LABELS
+from nvitk.measure.morphometrics_config import LESION_DETECTION_METHODS as _LESION_DETECTION_METHODS
 from nvitk.measure.morphometrics_config import PROFILES as _MORPHO_PROFILE_MAP
 from nvitk.morphology.skeleton_methods import (
     SKELETON_METHOD_CHOICES,
@@ -664,6 +665,25 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         ),
     ),
     GuiToolSpec(
+        "polyline_to_centerline",
+        "Centerline",
+        "From polyline (centerline image)",
+        (
+            ParamSpec("polyline_layer", "Polyline layer (Shapes / mesh polylines / Points)", "layer", ""),
+            ParamSpec("label_id", "Label of unlabelled paths (0 = the mask's label under it, else 1)", "int", 0,
+                      min=0, max=65535),
+        ),
+        needs_3d=True,
+        run_mode="notify",
+        description=(
+            "The reverse of To polyline: draws the paths of a Shapes layer (To polyline, CPR, centerline "
+            "network, centring), the Mesh panel's centerline polylines or an ordered Points layer as a "
+            "1-voxel, 26-connected centerline image on the active layer's grid, each path with its own "
+            "label id (paths without one take the label below, the mask's label under them, or 1). "
+            "The result can feed any tool that takes a centerline image."
+        ),
+    ),
+    GuiToolSpec(
         "vmtk_centerline_network",
         "Centerline",
         "Centerline network (VMTK)",
@@ -1192,7 +1212,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("eicab_pp_resegment", "Re-segment every label at its local half maximum", "bool", True),
             ParamSpec("eicab_pp_extend", "ICAs / basilar down to the image floor (multi-scale Frangi)", "bool", True),
             ParamSpec("eicab_pp_vertebrals", "Split the vertebral arteries off the basilar (LVA 19, RVA 20)", "bool", True),
-            ParamSpec("eicab_pp_distal", "Grow ACAs / MCAs / PCAs / SCAs along the Frangi tree", "bool", True),
+            ParamSpec("eicab_pp_distal", "Also the WB_pp layer: ACAs / MCAs / PCAs / SCAs grown along the Frangi tree", "bool", True),
             ParamSpec("eicab_pp_aca_guard", "ACAs: AComm sides + midline guard", "bool", True),
             ParamSpec("eicab_pp_siphon", "ICA siphon correction (minimum cut)", "bool", True),
             ParamSpec("eicab_pp_trunks", "Trunk label ids (to the floor)", "str", "1,2,3"),
@@ -1206,8 +1226,9 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         description=(
             "Stage 1's eICAB post-process on a label layer: the anterior choroidals dropped, each label re-drawn "
             "at its local half maximum, the ICAs and basilar followed to the image floor along a multi-scale "
-            "Frangi tree (the vertebrals split off), the ACAs / MCAs / PCAs / SCAs grown distally in competition, "
-            "and the ICA siphon loops cut. Adds the result as a Labels layer; the table lists, per label, the "
+            "Frangi tree (the vertebrals split off), each label kept to its largest component with its holes "
+            "filled after every step, and the ICA siphon loops cut: the CW_pp layer. With the distal growth, also the WB_pp layer: the ACAs / MCAs / PCAs / SCAs grown "
+            "distally in competition, the ACA / MCA growth labelled A2 / M2. The table lists, per label, the "
             "voxels before / after, each extension, the distal growth and the siphon cuts."
         ),
     ),
@@ -1218,7 +1239,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         (
             ParamSpec("image_layer", "Intensity image (optional)", "layer", ""),
             ParamSpec("wall_layer", "Wall mask (optional)", "layer", ""),
-            ParamSpec("centerline_layer", "Centerlines (optional)", "layer", ""),
+            ParamSpec("centerline_layer", "Centerlines (optional: image, Shapes paths, mesh polylines or Points)", "layer", ""),
             ParamSpec("step_mm", "Station spacing (mm)", "float", 0.5, min=0.1, max=5.0),
             ParamSpec("upsample", "Upsample image + mask (1 = off)", "float", 1.0, min=1.0, max=4.0),
             ParamSpec("join_gap_vox", "Join vessel pieces up to N voxels (0 = off)", "int", 8, min=0, max=50),
@@ -1377,7 +1398,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         "Cross-sections (mask + image)",
         (
             ParamSpec("image_layer", "Intensity image (optional)", "layer", ""),
-            ParamSpec("centerline_layer", "Centerlines (optional)", "layer", ""),
+            ParamSpec("centerline_layer", "Centerlines (optional: image, Shapes paths, mesh polylines or Points)", "layer", ""),
             ParamSpec("cross_section_radius_vox", "Plane half-size (vox)", "float", 12.0,
                       min=2.0, max=200.0),
             ParamSpec("cross_section_res", "Plane resolution (0=auto)", "int", 0, min=0, max=1024),
@@ -2200,12 +2221,9 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("show_lesions", "Show lesions as points", "bool", True),
             ParamSpec("n_workers", "Parallel vessel jobs (1 = one at a time)", "int", 1, min=1, max=64),
             ParamSpec("skip_existing", "Skip if Excel exists", "bool", False),
-            ParamSpec(
-                "input_already_smoothed",
-                "Input already Taubin-smoothed",
-                "bool",
-                False,
-            ),
+            ParamSpec("lesion_detection", "Stenosis / enlargement detection", "choice", MORPHO_PROFILE_VALUE,
+                      choices=(MORPHO_PROFILE_VALUE, *_LESION_DETECTION_METHODS)),
+            ParamSpec("taubin", "Taubin-smooth the labels (off: masks already at the half maximum)", "bool", False),
         ),
         needs_3d=True,
         run_mode="notify",
@@ -3031,6 +3049,7 @@ SGE_BLOCKLIST: frozenset[str] = frozenset({
     "centerline_detect_junctions",
     "centerline_cut_junctions",
     "centerline_to_polyline",
+    "polyline_to_centerline",
     "vmtk_centerline_network",
     "centerline_center",
     "vmtk_vessel_enhancement",

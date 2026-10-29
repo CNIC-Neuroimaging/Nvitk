@@ -1,21 +1,25 @@
 """Vessel label IDs: eICAB input masks vs qvtpy pipeline outputs.
 
-**eICAB (input)**: integers in ``*_eICAB_CW.nii(.gz)`` / ``*_eICAB_WB.nii(.gz)`` (0-18).
+**eICAB (input)**: integers in ``*_eICAB_CW.nii(.gz)`` / ``*_eICAB_WB.nii(.gz)`` (0-18), plus the
+post-process's 19-24 (vertebrals; A2 / M2 in ``*_eICAB_WB_pp``).
 Morphometrics topology for these ids: ``measure/morpho/topology/eicab_topology.json``.
 
 **qvtpy (pipeline)**: integers in ``centerlines_mask``, ``seg_4dflow``, LOCs, and
-measurement tables. Arterial ids come from :func:`relabel_eicab_mask_to_qvtpy`
-(merge PCA P1/P2; drop SCA/AChA). Venous sinuses use fixed ids 31-34.
+measurement tables. Arterial ids come from :func:`relabel_eicab_mask_to_qvtpy` (AChA dropped).
+Since 2026-10-28 the ACA / MCA / PCA are split into proximal labels 4-9 (A1 / M1 / P1) and distal
+ones 17-22 (A2 / M2 / P2), and the SCAs have labels 15 / 16. Venous sinuses use fixed ids 31-34.
 Reference morphometrics topology (unused by stage-7):
 ``measure/morpho/topology/qvtpy_topology.json``.
 
 **Outputs**
 
 - :data:`QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID`: combined arterial + venous id->name map.
-- Group frozensets (``QVTPY_ACA_IDS``, ``QVTPY_RG_SKIP_LABEL_IDS``, ...) for stage-4 heuristics.
+- Group frozensets (``QVTPY_ACA_IDS``, ``QVTPY_DISTAL_IDS``, ...) for stage-4 heuristics.
 """
 
 from __future__ import annotations
+
+import re
 
 from nvitk.core.array import as_backend_array
 from nvitk.core.backend import setup
@@ -44,9 +48,22 @@ EICAB_LSCA: int = 15
 EICAB_RSCA: int = 16
 EICAB_LACHA: int = 17
 EICAB_RACHA: int = 18
-# Added by the eICAB post-process (not eICAB outputs): the vertebral arteries below the basilar.
+# Added by the eICAB post-process (not eICAB outputs): the vertebral arteries below the basilar,
+# and, in the distal-grown ``*_WB_pp`` mask, the ACAs' and MCAs' growth beyond eICAB's own labels
+# (eICAB's ACA / MCA labels 5-8 are then the A1 / M1).
 EICAB_LVA: int = 19
 EICAB_RVA: int = 20
+EICAB_LACA_A2: int = 21
+EICAB_RACA_A2: int = 22
+EICAB_LMCA_M2: int = 23
+EICAB_RMCA_M2: int = 24
+#: Post-process distal growth: proximal label -> the label its growth is written as.
+EICAB_DISTAL_SPLIT: dict[int, int] = {
+    EICAB_LACA: EICAB_LACA_A2,
+    EICAB_RACA: EICAB_RACA_A2,
+    EICAB_LMCA: EICAB_LMCA_M2,
+    EICAB_RMCA: EICAB_RMCA_M2,
+}
 
 EICAB_BASI: int = EICAB_BASILAR
 EICAB_LABEL_4_UNDOCUMENTED: int = EICAB_ACOMM
@@ -57,10 +74,10 @@ EICAB_ID_TO_NAME: dict[int, str] = {
     EICAB_RICA: "RICA",
     EICAB_BASILAR: "BASILAR",
     EICAB_ACOMM: "ACOMM",
-    EICAB_LACA: "LACA",
-    EICAB_RACA: "RACA",
-    EICAB_LMCA: "LMCA",
-    EICAB_RMCA: "RMCA",
+    EICAB_LACA: "LACA_A1",
+    EICAB_RACA: "RACA_A1",
+    EICAB_LMCA: "LMCA_M1",
+    EICAB_RMCA: "RMCA_M1",
     EICAB_LPCOMM: "LPCOMM",
     EICAB_RPCOMM: "RPCOMM",
     EICAB_LPCA_P1: "LPCA_P1",
@@ -73,9 +90,13 @@ EICAB_ID_TO_NAME: dict[int, str] = {
     EICAB_RACHA: "RACHA",
     EICAB_LVA: "LVA",
     EICAB_RVA: "RVA",
+    EICAB_LACA_A2: "LACA_A2",
+    EICAB_RACA_A2: "RACA_A2",
+    EICAB_LMCA_M2: "LMCA_M2",
+    EICAB_RMCA_M2: "RMCA_M2",
 }
 
-EICAB_VESSEL_LABEL_IDS: frozenset[int] = frozenset(range(1, 21))
+EICAB_VESSEL_LABEL_IDS: frozenset[int] = frozenset(range(1, 25))
 
 EICAB_QVTPLUS_DOCUMENTED_COW: frozenset[int] = frozenset(
     {
@@ -101,6 +122,14 @@ _EICAB_NAME_TO_ID_RAW: dict[str, int] = {
     "RACA": EICAB_RACA,
     "LMCA": EICAB_LMCA,
     "RMCA": EICAB_RMCA,
+    "LACA_A1": EICAB_LACA,
+    "RACA_A1": EICAB_RACA,
+    "LMCA_M1": EICAB_LMCA,
+    "RMCA_M1": EICAB_RMCA,
+    "LACA_A2": EICAB_LACA_A2,
+    "RACA_A2": EICAB_RACA_A2,
+    "LMCA_M2": EICAB_LMCA_M2,
+    "RMCA_M2": EICAB_RMCA_M2,
     "LPCOMM": EICAB_LPCOMM,
     "RPCOMM": EICAB_RPCOMM,
     "LPCA_P1": EICAB_LPCA_P1,
@@ -137,38 +166,72 @@ QVTPY_RPCOMM: int = 11
 QVTPY_ACOMM: int = 12
 QVTPY_LVA: int = 13
 QVTPY_RVA: int = 14
+# Since 2026-10-28 the ACA / MCA / PCA labels 4-9 (QVTPY_LACA ... QVTPY_RPCA) are the proximal segments
+# (A1 / M1 / P1) and their distal parts (A2 / M2 / P2 and beyond) have labels of their own, as do the SCAs.
+QVTPY_LSCA: int = 15
+QVTPY_RSCA: int = 16
+QVTPY_LACA_A2: int = 17
+QVTPY_RACA_A2: int = 18
+QVTPY_LMCA_M2: int = 19
+QVTPY_RMCA_M2: int = 20
+QVTPY_LPCA_P2: int = 21
+QVTPY_RPCA_P2: int = 22
 
 QVTPY_ARTERIAL_ID_TO_NAME: dict[int, str] = {
     QVTPY_BACKGROUND: "BACKGROUND",
     QVTPY_LICA: "LICA",
     QVTPY_RICA: "RICA",
     QVTPY_BASILAR: "BASILAR",
-    QVTPY_LACA: "LACA",
-    QVTPY_RACA: "RACA",
-    QVTPY_LMCA: "LMCA",
-    QVTPY_RMCA: "RMCA",
-    QVTPY_LPCA: "LPCA",
-    QVTPY_RPCA: "RPCA",
+    QVTPY_LACA: "LACA_A1",
+    QVTPY_RACA: "RACA_A1",
+    QVTPY_LMCA: "LMCA_M1",
+    QVTPY_RMCA: "RMCA_M1",
+    QVTPY_LPCA: "LPCA_P1",
+    QVTPY_RPCA: "RPCA_P1",
     QVTPY_LPCOMM: "LPCOMM",
     QVTPY_RPCOMM: "RPCOMM",
     QVTPY_ACOMM: "ACOMM",
     QVTPY_LVA: "LVA",
     QVTPY_RVA: "RVA",
+    QVTPY_LSCA: "LSCA",
+    QVTPY_RSCA: "RSCA",
+    QVTPY_LACA_A2: "LACA_A2",
+    QVTPY_RACA_A2: "RACA_A2",
+    QVTPY_LMCA_M2: "LMCA_M2",
+    QVTPY_RMCA_M2: "RMCA_M2",
+    QVTPY_LPCA_P2: "LPCA_P2",
+    QVTPY_RPCA_P2: "RPCA_P2",
 }
 
 QVTPY_ARTERIAL_NAME_TO_ID: dict[str, int] = {
     name: int(lid) for lid, name in QVTPY_ARTERIAL_ID_TO_NAME.items() if int(lid) > 0
 }
+# Names before the split (older outputs): the whole ACA / MCA / PCA, now its proximal label.
+QVTPY_ARTERIAL_NAME_TO_ID.update({"LACA": QVTPY_LACA, "RACA": QVTPY_RACA, "LMCA": QVTPY_LMCA,
+                                  "RMCA": QVTPY_RMCA, "LPCA": QVTPY_LPCA, "RPCA": QVTPY_RPCA})
 
 QVTPY_ARTERIAL_LABEL_IDS: frozenset[int] = frozenset(
     lid for lid in QVTPY_ARTERIAL_ID_TO_NAME if int(lid) > 0
 )
 
-# Vessel groups for stage-4 bbox padding (array axes i=X, j=Y, k=Z).
+# Vessel groups for stage-4 bbox padding (array axes i=X, j=Y, k=Z). ACA / MCA / PCA: the
+# proximal (A1 / M1 / P1) labels; the *_DISTAL_* groups hold their A2 / M2 / P2.
 QVTPY_ICA_BASILAR_IDS: frozenset[int] = frozenset({QVTPY_LICA, QVTPY_RICA, QVTPY_BASILAR})
 QVTPY_ACA_IDS: frozenset[int] = frozenset({QVTPY_LACA, QVTPY_RACA})
 QVTPY_MCA_IDS: frozenset[int] = frozenset({QVTPY_LMCA, QVTPY_RMCA})
 QVTPY_PCA_IDS: frozenset[int] = frozenset({QVTPY_LPCA, QVTPY_RPCA})
+QVTPY_ACA_A2_IDS: frozenset[int] = frozenset({QVTPY_LACA_A2, QVTPY_RACA_A2})
+QVTPY_MCA_M2_IDS: frozenset[int] = frozenset({QVTPY_LMCA_M2, QVTPY_RMCA_M2})
+QVTPY_PCA_P2_IDS: frozenset[int] = frozenset({QVTPY_LPCA_P2, QVTPY_RPCA_P2})
+QVTPY_DISTAL_IDS: frozenset[int] = QVTPY_ACA_A2_IDS | QVTPY_MCA_M2_IDS | QVTPY_PCA_P2_IDS
+QVTPY_SCA_IDS: frozenset[int] = frozenset({QVTPY_LSCA, QVTPY_RSCA})
+#: Proximal label -> the label of its distal part (stage 4 writes what a proximal label floods
+#: beyond its own lumen under the distal one).
+QVTPY_PROXIMAL_TO_DISTAL: dict[int, int] = {
+    QVTPY_LACA: QVTPY_LACA_A2, QVTPY_RACA: QVTPY_RACA_A2,
+    QVTPY_LMCA: QVTPY_LMCA_M2, QVTPY_RMCA: QVTPY_RMCA_M2,
+    QVTPY_LPCA: QVTPY_LPCA_P2, QVTPY_RPCA: QVTPY_RPCA_P2,
+}
 QVTPY_COMM_IDS: frozenset[int] = frozenset({QVTPY_LPCOMM, QVTPY_RPCOMM, QVTPY_ACOMM})
 QVTPY_PCOMM_IDS: frozenset[int] = frozenset({QVTPY_LPCOMM, QVTPY_RPCOMM})
 QVTPY_VERTEBRAL_IDS: frozenset[int] = frozenset({QVTPY_LVA, QVTPY_RVA})
@@ -176,8 +239,8 @@ QVTPY_NON_COMM_ARTERIAL_IDS: frozenset[int] = (
     QVTPY_ARTERIAL_LABEL_IDS - QVTPY_COMM_IDS - QVTPY_VERTEBRAL_IDS
 )
 
-# Stage 4: gentler crop filtering (PCA/PComm/AComm); see QVTPY_SMALL_ARTERIAL_IDS below.
-QVTPY_SMALL_ARTERIAL_IDS: frozenset[int] = QVTPY_PCA_IDS | QVTPY_COMM_IDS
+# Stage 4: gentler crop filtering for the small arteries (PCAs, comms, SCAs).
+QVTPY_SMALL_ARTERIAL_IDS: frozenset[int] = QVTPY_PCA_IDS | QVTPY_PCA_P2_IDS | QVTPY_COMM_IDS | QVTPY_SCA_IDS
 
 # qvtpy: venous labels (fixed 31-34)
 
@@ -213,25 +276,6 @@ MATLAB_QVT_VENOUS_VESSEL_NAMES: tuple[str, ...] = (NAME_SSSV, NAME_STRV, NAME_LT
 
 QVTPY_VENOUS_LABEL_IDS: frozenset[int] = frozenset(VENOUS_NAME_BY_LABEL.keys())
 
-# Stage 4 region growing: more exploration on ACA/MCA/PCA; all venous skip RG.
-QVTPY_RG_EXPLORE_MORE_IDS: frozenset[int] = QVTPY_ACA_IDS | QVTPY_MCA_IDS | QVTPY_PCA_IDS
-# MCA/PCA use explore RG fraction; ACA uses a separate (typically stricter) ACA fraction.
-QVTPY_RG_MCA_PCA_EXPLORE_IDS: frozenset[int] = QVTPY_MCA_IDS | QVTPY_PCA_IDS
-# PCA + basilar: RG barriers include native eICAB labels dropped at relabel (SCA).
-QVTPY_RG_PCA_BASILAR_EICAB_BARRIER_IDS: frozenset[int] = QVTPY_PCA_IDS | frozenset({QVTPY_BASILAR})
-# Posterior communicating arteries: also wall RG with registered eICAB SCA (15/16)
-# so PComm does not leak toward the posterior SCA territory.
-QVTPY_RG_PCOMM_EICAB_BARRIER_IDS: frozenset[int] = frozenset({QVTPY_LPCOMM, QVTPY_RPCOMM})
-EICAB_RG_BARRIER_LABEL_IDS: frozenset[int] = frozenset({EICAB_LSCA, EICAB_RSCA})
-QVTPY_RG_SKIP_LABEL_IDS: frozenset[int] = QVTPY_VENOUS_LABEL_IDS
-
-# Per-sinus RG intensity fractions (lower -> more growth). STRV omitted (RG disabled).
-QVTPY_RG_INTENSITY_FRAC_VENOUS: dict[int, float] = {
-    QVTPY_SSSV: 0.40,
-    QVTPY_LTSV: 0.38,
-    QVTPY_RTSV: 0.38,
-}
-
 # qvtpy: reserved / unused on backbone+seg
 
 QVTPY_VENOUS_UNKNOWN_LABEL: int = 30
@@ -249,9 +293,7 @@ QVTPY_RESERVED_LABEL_BY_ID: dict[int, str] = {
 
 # eICAB -> qvtpy mapping (stage 3 relabel)
 
-EICAB_LABEL_IDS_OMITTED: frozenset[int] = frozenset(
-    {EICAB_LSCA, EICAB_RSCA, EICAB_LACHA, EICAB_RACHA}
-)
+EICAB_LABEL_IDS_OMITTED: frozenset[int] = frozenset({EICAB_LACHA, EICAB_RACHA})
 
 EICAB_TO_QVTPY_LABEL: dict[int, int] = {
     EICAB_BACKGROUND: QVTPY_BACKGROUND,
@@ -267,15 +309,19 @@ EICAB_TO_QVTPY_LABEL: dict[int, int] = {
     EICAB_RPCOMM: QVTPY_RPCOMM,
     EICAB_LPCA_P1: QVTPY_LPCA,
     EICAB_RPCA_P1: QVTPY_RPCA,
-    EICAB_LPCA_P2: QVTPY_LPCA,
-    EICAB_RPCA_P2: QVTPY_RPCA,
-    EICAB_LSCA: QVTPY_BACKGROUND,
-    EICAB_RSCA: QVTPY_BACKGROUND,
+    EICAB_LPCA_P2: QVTPY_LPCA_P2,
+    EICAB_RPCA_P2: QVTPY_RPCA_P2,
+    EICAB_LSCA: QVTPY_LSCA,
+    EICAB_RSCA: QVTPY_RSCA,
     EICAB_LACHA: QVTPY_BACKGROUND,
     EICAB_RACHA: QVTPY_BACKGROUND,
     # The post-process's vertebrals stay out of stages 2-4, which grow and split their own.
     EICAB_LVA: QVTPY_BACKGROUND,
     EICAB_RVA: QVTPY_BACKGROUND,
+    EICAB_LACA_A2: QVTPY_LACA_A2,
+    EICAB_RACA_A2: QVTPY_RACA_A2,
+    EICAB_LMCA_M2: QVTPY_LMCA_M2,
+    EICAB_RMCA_M2: QVTPY_RMCA_M2,
 }
 
 QVTPY_TO_EICAB_LABELS: dict[int, tuple[int, ...]] = {
@@ -286,11 +332,19 @@ QVTPY_TO_EICAB_LABELS: dict[int, tuple[int, ...]] = {
     QVTPY_RACA: (EICAB_RACA,),
     QVTPY_LMCA: (EICAB_LMCA,),
     QVTPY_RMCA: (EICAB_RMCA,),
-    QVTPY_LPCA: (EICAB_LPCA_P1, EICAB_LPCA_P2),
-    QVTPY_RPCA: (EICAB_RPCA_P1, EICAB_RPCA_P2),
+    QVTPY_LPCA: (EICAB_LPCA_P1,),
+    QVTPY_RPCA: (EICAB_RPCA_P1,),
     QVTPY_LPCOMM: (EICAB_LPCOMM,),
     QVTPY_RPCOMM: (EICAB_RPCOMM,),
     QVTPY_ACOMM: (EICAB_ACOMM,),
+    QVTPY_LSCA: (EICAB_LSCA,),
+    QVTPY_RSCA: (EICAB_RSCA,),
+    QVTPY_LACA_A2: (EICAB_LACA_A2,),
+    QVTPY_RACA_A2: (EICAB_RACA_A2,),
+    QVTPY_LMCA_M2: (EICAB_LMCA_M2,),
+    QVTPY_RMCA_M2: (EICAB_RMCA_M2,),
+    QVTPY_LPCA_P2: (EICAB_LPCA_P2,),
+    QVTPY_RPCA_P2: (EICAB_RPCA_P2,),
 }
 
 # Combined tables (centerline backbone + seg_4dflow)
@@ -362,18 +416,10 @@ def qvtpy_label_from_name(name: str) -> int | None:
     return None if out is None else int(out)
 
 
-# Arterial segment letter for anatomical sub-branch naming.
-QVTPY_BRANCH_SEGMENT_LETTER: dict[int, str] = {
-    QVTPY_LMCA: "M",
-    QVTPY_RMCA: "M",
-    QVTPY_LACA: "A",
-    QVTPY_RACA: "A",
-    QVTPY_LPCA: "P",
-    QVTPY_RPCA: "P",
-}
-
-# Vessels that are branched (bifurcation) territories; others stay single-path.
-QVTPY_BRANCHED_LABEL_IDS: frozenset[int] = frozenset(QVTPY_BRANCH_SEGMENT_LETTER)
+# Branched vessels (a trunk plus bifurcation branches): the distal A2 / M2 / P2 labels. The proximal
+# A1 / M1 / P1 are one short segment each since the split, often only a few 4D-flow voxels long,
+# and stay single paths (the branch decomposition would drop them as too short).
+QVTPY_BRANCHED_LABEL_IDS: frozenset[int] = frozenset(QVTPY_DISTAL_IDS)
 
 _BRANCH_SUFFIX_LETTERS = "abcdefghijklmnopqrstuvwxyz"
 
@@ -381,26 +427,28 @@ _BRANCH_SUFFIX_LETTERS = "abcdefghijklmnopqrstuvwxyz"
 def qvtpy_branch_names(label_id: int, n_branches: int) -> list[str]:
     """Anatomical names for the branches of one arterial label.
 
-    Branched vessels (MCA/ACA/PCA) name the trunk ``{vessel}-{L}1`` (e.g.
-    ``LACA-A1``) and each side branch a generation-2 segment ``{vessel}-{L}2a``,
-    ``{vessel}-{L}2b``, ... (e.g. ``LMCA-M2a``). Non-branched vessels
-    (ICA/basilar/comm/vertebral) use the bare vessel name for the trunk and a
-    ``{vessel}-b2`` ... suffix for any extra branches.
+    A distal label (A2 / M2 / P2) names its branches ``{vessel}-a``, ``{vessel}-b``, ... (e.g.
+    ``LMCA_M2-a``). Every other label (the proximal A1 / M1 / P1, ICA, basilar, comms,
+    vertebrals, SCAs) names its trunk after the vessel (``LMCA_M1``) and any extra branch
+    ``{vessel}-b2``, ``{vessel}-b3``, ...
     """
     base = qvtpy_vessel_name(int(label_id))
     n = max(1, int(n_branches))
-    letter = QVTPY_BRANCH_SEGMENT_LETTER.get(int(label_id))
-    names: list[str] = []
-    if letter is None:
-        names.append(base)
-        for i in range(1, n):
-            names.append(f"{base}-b{i + 1}")
-        return names
-    names.append(f"{base}-{letter}1")
-    for i in range(1, n):
-        suffix = _BRANCH_SUFFIX_LETTERS[(i - 1) % len(_BRANCH_SUFFIX_LETTERS)]
-        names.append(f"{base}-{letter}2{suffix}")
-    return names
+    if int(label_id) in QVTPY_DISTAL_IDS:
+        return [f"{base}-{_BRANCH_SUFFIX_LETTERS[i % len(_BRANCH_SUFFIX_LETTERS)]}" for i in range(n)]
+    return [base] + [f"{base}-b{i + 1}" for i in range(1, n)]
+
+
+_SPLIT_PROXIMAL_RE = re.compile(r"^([LR](?:ACA|MCA|PCA))[_\-]?(?:A1|M1|P1)$", re.IGNORECASE)
+
+
+def qvtpy_legacy_vessel_name(name: str) -> str:
+    """The name a vessel had before the A1 / M1 / P1 split (2026-10-28): ``LMCA_M1`` -> ``LMCA``,
+    ``RPCA_P1`` -> ``RPCA``; any other name unchanged. Labels 4-9 measure the same vessel as before
+    (the A1 / M1 / P1 was where their LOCs sat), so cohort tables keyed on the old names keep
+    matching new runs."""
+    m = _SPLIT_PROXIMAL_RE.match(str(name).strip())
+    return m.group(1).upper() if m else str(name)
 
 
 def qvtpy_branch_parent_label(branch_name: str) -> int | None:
@@ -411,6 +459,22 @@ def qvtpy_branch_parent_label(branch_name: str) -> int | None:
 
 
 __all__ = [
+    "qvtpy_legacy_vessel_name",
+    "QVTPY_LSCA",
+    "QVTPY_RSCA",
+    "QVTPY_LACA_A2",
+    "QVTPY_RACA_A2",
+    "QVTPY_LMCA_M2",
+    "QVTPY_RMCA_M2",
+    "QVTPY_LPCA_P2",
+    "QVTPY_RPCA_P2",
+    "QVTPY_ACA_A2_IDS",
+    "QVTPY_MCA_M2_IDS",
+    "QVTPY_PCA_P2_IDS",
+    "QVTPY_DISTAL_IDS",
+    "QVTPY_SCA_IDS",
+    "QVTPY_PROXIMAL_TO_DISTAL",
+
     "EICAB_ACOMM",
     "EICAB_BACKGROUND",
     "EICAB_BASI",
@@ -421,6 +485,9 @@ __all__ = [
     "EICAB_LACA",
     "EICAB_LACHA",
     "EICAB_LVA",
+    "EICAB_LACA_A2",
+    "EICAB_LMCA_M2",
+    "EICAB_DISTAL_SPLIT",
     "EICAB_LICA",
     "EICAB_LMCA",
     "EICAB_LPCA_P1",
@@ -432,6 +499,8 @@ __all__ = [
     "EICAB_RACA",
     "EICAB_RACHA",
     "EICAB_RVA",
+    "EICAB_RACA_A2",
+    "EICAB_RMCA_M2",
     "EICAB_RICA",
     "EICAB_RMCA",
     "EICAB_RPCA_P1",
@@ -451,7 +520,6 @@ __all__ = [
     "QVTPY_ACOMM",
     "QVTPY_ACA_IDS",
     "QVTPY_ARTERIAL_ID_TO_NAME",
-    "QVTPY_BRANCH_SEGMENT_LETTER",
     "QVTPY_BRANCHED_LABEL_IDS",
     "qvtpy_branch_names",
     "qvtpy_branch_parent_label",
@@ -466,13 +534,6 @@ __all__ = [
     "QVTPY_VERTEBRAL_IDS",
     "QVTPY_MCA_IDS",
     "QVTPY_PCA_IDS",
-    "EICAB_RG_BARRIER_LABEL_IDS",
-    "QVTPY_RG_EXPLORE_MORE_IDS",
-    "QVTPY_RG_MCA_PCA_EXPLORE_IDS",
-    "QVTPY_RG_PCA_BASILAR_EICAB_BARRIER_IDS",
-    "QVTPY_RG_PCOMM_EICAB_BARRIER_IDS",
-    "QVTPY_RG_INTENSITY_FRAC_VENOUS",
-    "QVTPY_RG_SKIP_LABEL_IDS",
     "QVTPY_SMALL_ARTERIAL_IDS",
     "QVTPY_BACKGROUND",
     "QVTPY_BASILAR",
