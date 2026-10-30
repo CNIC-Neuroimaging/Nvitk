@@ -1210,14 +1210,13 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("reference_layer", "TOF / MRA image layer", "layer", ""),
             ParamSpec("eicab_pp_remove_acha", "Drop the anterior choroidal arteries (17, 18)", "bool", True),
             ParamSpec("eicab_pp_resegment", "Re-segment every label at its local half maximum", "bool", True),
-            ParamSpec("eicab_pp_extend", "ICAs / basilar down to the image floor (multi-scale Frangi)", "bool", True),
-            ParamSpec("eicab_pp_vertebrals", "Split the vertebral arteries off the basilar (LVA 19, RVA 20)", "bool", True),
+            ParamSpec("eicab_pp_extend", "ICAs down to the image floor (multi-scale Frangi)", "bool", True),
+            ParamSpec("eicab_pp_loop_fill", "ICA loops below the siphon: fill the inner-wall notches", "bool", True),
             ParamSpec("eicab_pp_distal", "Also the WB_pp layer: ACAs / MCAs / PCAs / SCAs grown along the Frangi tree", "bool", True),
             ParamSpec("eicab_pp_aca_guard", "ACAs: AComm sides + midline guard", "bool", True),
             ParamSpec("eicab_pp_siphon", "ICA siphon correction (minimum cut)", "bool", True),
-            ParamSpec("eicab_pp_trunks", "Trunk label ids (to the floor)", "str", "1,2,3"),
             ParamSpec("eicab_pp_distal_ids", "Label ids grown distally", "str", "5,6,7,8,13,14,15,16"),
-            ParamSpec("eicab_pp_icas", "ICA label ids (siphon)", "str", "1,2"),
+            ParamSpec("eicab_pp_icas", "ICA label ids (to the floor, siphon)", "str", "1,2"),
             _OUTPUT_DIR,
         ),
         needs_reference_layer=True,
@@ -1225,8 +1224,9 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         run_mode="notify",
         description=(
             "Stage 1's eICAB post-process on a label layer: the anterior choroidals dropped, each label re-drawn "
-            "at its local half maximum, the ICAs and basilar followed to the image floor along a multi-scale "
-            "Frangi tree (the vertebrals split off), each label kept to its largest component with its holes "
+            "at its local half maximum, the ICAs followed to the image floor along a multi-scale "
+            "Frangi tree (the basilar is not extended) and their loops below the siphon filled where the "
+            "inner wall came out dark, each label kept to its largest component with its holes "
             "filled after every step, and the ICA siphon loops cut: the CW_pp layer. With the distal growth, also the WB_pp layer: the ACAs / MCAs / PCAs / SCAs grown "
             "distally in competition, the ACA / MCA growth labelled A2 / M2. The table lists, per label, the "
             "voxels before / after, each extension, the distal growth and the siphon cuts."
@@ -2224,6 +2224,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("lesion_detection", "Stenosis / enlargement detection", "choice", MORPHO_PROFILE_VALUE,
                       choices=(MORPHO_PROFILE_VALUE, *_LESION_DETECTION_METHODS)),
             ParamSpec("taubin", "Taubin-smooth the labels (off: masks already at the half maximum)", "bool", False),
+            ParamSpec("verbose", "Print the progress per vessel (log / terminal)", "bool", False),
         ),
         needs_3d=True,
         run_mode="notify",

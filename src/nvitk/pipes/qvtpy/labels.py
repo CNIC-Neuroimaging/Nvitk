@@ -1,13 +1,14 @@
 """Vessel label IDs: eICAB input masks vs qvtpy pipeline outputs.
 
 **eICAB (input)**: integers in ``*_eICAB_CW.nii(.gz)`` / ``*_eICAB_WB.nii(.gz)`` (0-18), plus the
-post-process's 19-24 (vertebrals; A2 / M2 in ``*_eICAB_WB_pp``).
+post-process's 21-24 (A2 / M2 in ``*_eICAB_WB_pp``; 19 / 20 unused).
 Morphometrics topology for these ids: ``measure/morpho/topology/eicab_topology.json``.
 
 **qvtpy (pipeline)**: integers in ``centerlines_mask``, ``seg_4dflow``, LOCs, and
 measurement tables. Arterial ids come from :func:`relabel_eicab_mask_to_qvtpy` (AChA dropped).
 Since 2026-10-28 the ACA / MCA / PCA are split into proximal labels 4-9 (A1 / M1 / P1) and distal
-ones 17-22 (A2 / M2 / P2), and the SCAs have labels 15 / 16. Venous sinuses use fixed ids 31-34.
+ones 17-22 (A2 / M2 / P2); ids 15 / 16 are unused (the SCAs are not segmented). Venous sinuses use
+fixed ids 31-34.
 Reference morphometrics topology (unused by stage-7):
 ``measure/morpho/topology/qvtpy_topology.json``.
 
@@ -48,11 +49,9 @@ EICAB_LSCA: int = 15
 EICAB_RSCA: int = 16
 EICAB_LACHA: int = 17
 EICAB_RACHA: int = 18
-# Added by the eICAB post-process (not eICAB outputs): the vertebral arteries below the basilar,
-# and, in the distal-grown ``*_WB_pp`` mask, the ACAs' and MCAs' growth beyond eICAB's own labels
-# (eICAB's ACA / MCA labels 5-8 are then the A1 / M1).
-EICAB_LVA: int = 19
-EICAB_RVA: int = 20
+# Added by the eICAB post-process (not eICAB outputs), in the distal-grown ``*_WB_pp`` mask: the
+# ACAs' and MCAs' growth beyond eICAB's own labels (eICAB's ACA / MCA labels 5-8 are then the
+# A1 / M1).
 EICAB_LACA_A2: int = 21
 EICAB_RACA_A2: int = 22
 EICAB_LMCA_M2: int = 23
@@ -88,15 +87,13 @@ EICAB_ID_TO_NAME: dict[int, str] = {
     EICAB_RSCA: "RSCA",
     EICAB_LACHA: "LACHA",
     EICAB_RACHA: "RACHA",
-    EICAB_LVA: "LVA",
-    EICAB_RVA: "RVA",
     EICAB_LACA_A2: "LACA_A2",
     EICAB_RACA_A2: "RACA_A2",
     EICAB_LMCA_M2: "LMCA_M2",
     EICAB_RMCA_M2: "RMCA_M2",
 }
 
-EICAB_VESSEL_LABEL_IDS: frozenset[int] = frozenset(range(1, 25))
+EICAB_VESSEL_LABEL_IDS: frozenset[int] = frozenset(i for i in EICAB_ID_TO_NAME if i > 0)
 
 EICAB_QVTPLUS_DOCUMENTED_COW: frozenset[int] = frozenset(
     {
@@ -142,8 +139,6 @@ _EICAB_NAME_TO_ID_RAW: dict[str, int] = {
     "RSCA": EICAB_RSCA,
     "LACHA": EICAB_LACHA,
     "RACHA": EICAB_RACHA,
-    "LVA": EICAB_LVA,
-    "RVA": EICAB_RVA,
 }
 
 EICAB_NAME_TO_ID: dict[str, int] = {k.upper(): v for k, v in _EICAB_NAME_TO_ID_RAW.items()}
@@ -167,9 +162,7 @@ QVTPY_ACOMM: int = 12
 QVTPY_LVA: int = 13
 QVTPY_RVA: int = 14
 # Since 2026-10-28 the ACA / MCA / PCA labels 4-9 (QVTPY_LACA ... QVTPY_RPCA) are the proximal segments
-# (A1 / M1 / P1) and their distal parts (A2 / M2 / P2 and beyond) have labels of their own, as do the SCAs.
-QVTPY_LSCA: int = 15
-QVTPY_RSCA: int = 16
+# (A1 / M1 / P1) and their distal parts (A2 / M2 / P2 and beyond) have labels of their own.
 QVTPY_LACA_A2: int = 17
 QVTPY_RACA_A2: int = 18
 QVTPY_LMCA_M2: int = 19
@@ -193,8 +186,6 @@ QVTPY_ARTERIAL_ID_TO_NAME: dict[int, str] = {
     QVTPY_ACOMM: "ACOMM",
     QVTPY_LVA: "LVA",
     QVTPY_RVA: "RVA",
-    QVTPY_LSCA: "LSCA",
-    QVTPY_RSCA: "RSCA",
     QVTPY_LACA_A2: "LACA_A2",
     QVTPY_RACA_A2: "RACA_A2",
     QVTPY_LMCA_M2: "LMCA_M2",
@@ -224,7 +215,6 @@ QVTPY_ACA_A2_IDS: frozenset[int] = frozenset({QVTPY_LACA_A2, QVTPY_RACA_A2})
 QVTPY_MCA_M2_IDS: frozenset[int] = frozenset({QVTPY_LMCA_M2, QVTPY_RMCA_M2})
 QVTPY_PCA_P2_IDS: frozenset[int] = frozenset({QVTPY_LPCA_P2, QVTPY_RPCA_P2})
 QVTPY_DISTAL_IDS: frozenset[int] = QVTPY_ACA_A2_IDS | QVTPY_MCA_M2_IDS | QVTPY_PCA_P2_IDS
-QVTPY_SCA_IDS: frozenset[int] = frozenset({QVTPY_LSCA, QVTPY_RSCA})
 #: Proximal label -> the label of its distal part (stage 4 writes what a proximal label floods
 #: beyond its own lumen under the distal one).
 QVTPY_PROXIMAL_TO_DISTAL: dict[int, int] = {
@@ -239,8 +229,8 @@ QVTPY_NON_COMM_ARTERIAL_IDS: frozenset[int] = (
     QVTPY_ARTERIAL_LABEL_IDS - QVTPY_COMM_IDS - QVTPY_VERTEBRAL_IDS
 )
 
-# Stage 4: gentler crop filtering for the small arteries (PCAs, comms, SCAs).
-QVTPY_SMALL_ARTERIAL_IDS: frozenset[int] = QVTPY_PCA_IDS | QVTPY_PCA_P2_IDS | QVTPY_COMM_IDS | QVTPY_SCA_IDS
+# Stage 4: gentler crop filtering for the small arteries (PCAs, comms).
+QVTPY_SMALL_ARTERIAL_IDS: frozenset[int] = QVTPY_PCA_IDS | QVTPY_PCA_P2_IDS | QVTPY_COMM_IDS
 
 # qvtpy: venous labels (fixed 31-34)
 
@@ -275,6 +265,10 @@ VENOUS_NAME_BY_LABEL: dict[int, str] = {v: k for k, v in VENOUS_LABEL_BY_NAME.it
 MATLAB_QVT_VENOUS_VESSEL_NAMES: tuple[str, ...] = (NAME_SSSV, NAME_STRV, NAME_LTSV, NAME_RTSV)
 
 QVTPY_VENOUS_LABEL_IDS: frozenset[int] = frozenset(VENOUS_NAME_BY_LABEL.keys())
+
+# Stage 4: the basilar's region-growing walls include the registered eICAB SCAs (not segmented in
+# qvtpy), so it cannot leak into them.
+EICAB_RG_BARRIER_LABEL_IDS: frozenset[int] = frozenset({EICAB_LSCA, EICAB_RSCA})
 
 # qvtpy: reserved / unused on backbone+seg
 
@@ -311,13 +305,10 @@ EICAB_TO_QVTPY_LABEL: dict[int, int] = {
     EICAB_RPCA_P1: QVTPY_RPCA,
     EICAB_LPCA_P2: QVTPY_LPCA_P2,
     EICAB_RPCA_P2: QVTPY_RPCA_P2,
-    EICAB_LSCA: QVTPY_LSCA,
-    EICAB_RSCA: QVTPY_RSCA,
+    EICAB_LSCA: QVTPY_BACKGROUND,
+    EICAB_RSCA: QVTPY_BACKGROUND,
     EICAB_LACHA: QVTPY_BACKGROUND,
     EICAB_RACHA: QVTPY_BACKGROUND,
-    # The post-process's vertebrals stay out of stages 2-4, which grow and split their own.
-    EICAB_LVA: QVTPY_BACKGROUND,
-    EICAB_RVA: QVTPY_BACKGROUND,
     EICAB_LACA_A2: QVTPY_LACA_A2,
     EICAB_RACA_A2: QVTPY_RACA_A2,
     EICAB_LMCA_M2: QVTPY_LMCA_M2,
@@ -337,8 +328,6 @@ QVTPY_TO_EICAB_LABELS: dict[int, tuple[int, ...]] = {
     QVTPY_LPCOMM: (EICAB_LPCOMM,),
     QVTPY_RPCOMM: (EICAB_RPCOMM,),
     QVTPY_ACOMM: (EICAB_ACOMM,),
-    QVTPY_LSCA: (EICAB_LSCA,),
-    QVTPY_RSCA: (EICAB_RSCA,),
     QVTPY_LACA_A2: (EICAB_LACA_A2,),
     QVTPY_RACA_A2: (EICAB_RACA_A2,),
     QVTPY_LMCA_M2: (EICAB_LMCA_M2,),
@@ -429,7 +418,7 @@ def qvtpy_branch_names(label_id: int, n_branches: int) -> list[str]:
 
     A distal label (A2 / M2 / P2) names its branches ``{vessel}-a``, ``{vessel}-b``, ... (e.g.
     ``LMCA_M2-a``). Every other label (the proximal A1 / M1 / P1, ICA, basilar, comms,
-    vertebrals, SCAs) names its trunk after the vessel (``LMCA_M1``) and any extra branch
+    vertebrals) names its trunk after the vessel (``LMCA_M1``) and any extra branch
     ``{vessel}-b2``, ``{vessel}-b3``, ...
     """
     base = qvtpy_vessel_name(int(label_id))
@@ -460,8 +449,6 @@ def qvtpy_branch_parent_label(branch_name: str) -> int | None:
 
 __all__ = [
     "qvtpy_legacy_vessel_name",
-    "QVTPY_LSCA",
-    "QVTPY_RSCA",
     "QVTPY_LACA_A2",
     "QVTPY_RACA_A2",
     "QVTPY_LMCA_M2",
@@ -472,8 +459,8 @@ __all__ = [
     "QVTPY_MCA_M2_IDS",
     "QVTPY_PCA_P2_IDS",
     "QVTPY_DISTAL_IDS",
-    "QVTPY_SCA_IDS",
     "QVTPY_PROXIMAL_TO_DISTAL",
+    "EICAB_RG_BARRIER_LABEL_IDS",
 
     "EICAB_ACOMM",
     "EICAB_BACKGROUND",
@@ -484,7 +471,6 @@ __all__ = [
     "EICAB_LABEL_IDS_OMITTED",
     "EICAB_LACA",
     "EICAB_LACHA",
-    "EICAB_LVA",
     "EICAB_LACA_A2",
     "EICAB_LMCA_M2",
     "EICAB_DISTAL_SPLIT",
@@ -498,7 +484,6 @@ __all__ = [
     "EICAB_QVTPLUS_DOCUMENTED_COW",
     "EICAB_RACA",
     "EICAB_RACHA",
-    "EICAB_RVA",
     "EICAB_RACA_A2",
     "EICAB_RMCA_M2",
     "EICAB_RICA",

@@ -396,6 +396,41 @@ def tidy_labels(
     return out, info
 
 
+def drop_small_islands(
+    labels: Any, ids: Sequence[int] | None = None, *, min_voxels: int
+) -> tuple[Any, dict[str, int]]:
+    """Clear, for each label in *ids* (default: all), its 26-connected components smaller than
+    *min_voxels*; its largest component always stays. The loose voxels a growth step leaves around
+    a vessel go, while a branch that meets its label only through another one (an M2 piece on its
+    M1) stays if it is large enough. *labels* is changed in place; returns it and the voxels cleared
+    per label."""
+    out = as_backend_array(labels)
+    present = [int(v) for v in to_numpy(np.unique(out)) if int(v) > 0]
+    ids = [int(i) for i in (ids if ids is not None else present) if int(i) in present]
+    cleared: dict[str, int] = {}
+    if int(min_voxels) <= 1:
+        return out, cleared
+    for lid in ids:
+        box = _bbox(out == lid, (1, 1, 1))
+        if box is None:
+            continue
+        sub = out[box]  # a view: writes land in *out*
+        cc, n = ndi.label(sub == lid, structure=_cube())
+        if int(n) < 2:
+            continue
+        sizes = np.bincount(cc.ravel())
+        sizes[0] = 0
+        small = sizes < int(min_voxels)
+        small[0] = False
+        small[int(np.argmax(sizes))] = False
+        drop = small[cc]
+        n_drop = int(drop.sum())
+        if n_drop:
+            sub[drop] = 0
+            cleared[str(lid)] = n_drop
+    return out, cleared
+
+
 # Frangi vesselness
 
 
@@ -1233,6 +1268,7 @@ __all__ = [
     "Extension",
     "FRANGI_SIGMAS_MM",
     "MAX_EXTENSION_MM",
+    "drop_small_islands",
     "extend_trunks",
     "tidy_labels",
     "frangi_vesselness",

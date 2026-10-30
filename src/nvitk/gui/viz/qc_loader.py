@@ -265,6 +265,43 @@ def load_eicab_qc_layers(
     return loaded
 
 
+def find_stage7_dir(eicab_dir: Path, search_roots: list[Path]) -> Path | None:
+    """The subject's stage-7 morphometrics folder: ``qvtpy/stage7_morphometrics`` beside its
+    ``eicab`` folder, else the first one under *search_roots* (e.g. a downloaded ``qvtpy``
+    resource) that holds a vessel table."""
+    beside = Path(eicab_dir).parent / cfg.QVT_SUBDIR / cfg.STAGE7_MORPHOMETRICS_DIR
+    if (beside / "vessel_summary.csv").is_file():
+        return beside
+    for root in search_roots:
+        hit = _find_first(Path(root), (f"**/{cfg.STAGE7_MORPHOMETRICS_DIR}/vessel_summary.csv",))
+        if hit is not None:
+            return hit.parent
+    return None
+
+
+def load_eicab_morphometrics(viewer: Any, loaded: dict[str, Any], search_roots: list[Path]) -> dict[str, int]:
+    """With the eICAB QC layers *loaded* (:func:`load_eicab_qc_layers`), the subject's stage-7
+    morphometrics as the TOF morphometrics tool shows them: centerlines, surfaces and lesion points
+    on the post-processed mask stage 7 measured (WB_pp, else CW_pp), and the vessel, lesion,
+    segment and subject tables in the results window. Returns what was shown (vessels / lesions),
+    empty without a stage-7 folder."""
+    stage7 = find_stage7_dir(Path(loaded["eicab_dir"]), search_roots)
+    if stage7 is None:
+        return {}
+    from nvitk.gui.viz.morpho_results import default_key_of, show_morphometrics_results
+    from nvitk.gui.viz.morpho_viz import install_morphometrics_viz
+
+    labels = loaded.get("eicab_wb_pp") or loaded.get("eicab_cw_pp")
+    reference = labels or loaded.get("tof_resampled") or loaded.get("tof")
+    info = install_morphometrics_viz(viewer, stage7, reference_layer=reference, color_by="radius")
+    counts = show_morphometrics_results(
+        viewer, stage7, label_layer=labels, surface_layer=info.get("surface_layer"),
+        lesion_layer=info.get("lesion_layer"), key_of=default_key_of(reference),
+    )
+    loaded["stage7_dir"] = stage7
+    return counts
+
+
 def load_qvtpy_qc_layers(
     viewer: Any,
     app_state: dict[str, Any],
@@ -830,6 +867,8 @@ __all__ = [
     "download_pipeline_resource_for_qc",
     "find_cd_path",
     "find_phase_paths",
+    "find_stage7_dir",
+    "load_eicab_morphometrics",
     "load_eicab_qc_layers",
     "load_qvtpy_qc_layers",
     "resolve_eicab_tree",

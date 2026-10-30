@@ -39,9 +39,7 @@ from nvitk.pipes.qvtpy.labels import (
     QVTPY_RPCA,
     QVTPY_SMALL_ARTERIAL_IDS,
     QVTPY_DISTAL_IDS,
-    QVTPY_LSCA,
     QVTPY_PROXIMAL_TO_DISTAL,
-    QVTPY_RSCA,
     qvtpy_branch_names,
     qvtpy_branch_parent_label,
 )
@@ -57,8 +55,6 @@ _ARTERIAL_PARENT_LABEL: dict[int, int] = {
     QVTPY_RACA: QVTPY_RICA,
     QVTPY_LPCA: QVTPY_BASILAR,
     QVTPY_RPCA: QVTPY_BASILAR,
-    QVTPY_LSCA: QVTPY_BASILAR,
-    QVTPY_RSCA: QVTPY_BASILAR,
     # Distal labels start where their proximal one ends.
     **{int(d): int(p) for p, d in QVTPY_PROXIMAL_TO_DISTAL.items()},
 }
@@ -322,7 +318,7 @@ def centerlines_from_segmentation(
     first. Branched territories (MCA/ACA/PCA) are decomposed into a trunk plus
     bifurcation side branches (named e.g. ``LMCA_M1`` / ``LMCA_M1-b2`` and, on the distal labels,
     ``LMCA_M2-a`` / ``LMCA_M2-b`` via :func:`~nvitk.pipes.qvtpy.labels.qvtpy_branch_names`);
-    ICA/basilar/comm/vertebral/SCA stay single-path (one branch = the bare vessel name).
+    ICA/basilar/comm/vertebral stay single-path (one branch = the bare vessel name).
 
     *pcomm_min_points* drops very short LPCOMM/RPCOMM skeletons (false positives).
     *min_branch_points* drops short MCA/ACA/PCA bifurcation side branches.

@@ -22,7 +22,7 @@ nvitk-qvtpy --subject-dir /data/subj01 --stages stage0_c,stage1,stage2,stage3,st
 | `stage1` | `eicab` | eICAB on `TOF/TOF.nii.gz`, then the eICAB post-process (below). |
 | `stage2` | `registration` | eICAB TOF (resampled) → 4D-flow reference, **rigid FSL FLIRT**. |
 | `stage3` | `centerline` | eICAB in 4D-flow space + arterial/venous centerline extraction. |
-| `stage4` | `segmentation` | Complex-difference crop per vessel + threshold, then the blood flood (Frangi + hysteresis vessel tree, watershed from every artery, the trunks, comms and venous sinuses filling only their own lumen; A1 / M1 / P1 growth labelled A2 / M2 / P2) → `seg_4dflow`. |
+| `stage4` | `segmentation` | Complex-difference crop per vessel + threshold, the ICAs' and basilar's region growing, then the blood flood (Frangi + hysteresis vessel tree on the CD divided by the subject's blood signal; watershed from the ACAs / MCAs / PCAs, the two ACAs sharing theirs in turns behind a midline guard; comms and venous sinuses fill only their own lumen; A1 / M1 / P1 growth labelled A2 / M2 / P2; small islands dropped) → `seg_4dflow`. |
 | `stage4t` | `seg_t` | Same, per `ComplexDifference_4D` frame → `seg_4dflow_4d` (opt-in). |
 | `stage5` | `loc` | QVTplus-style Location-of-Comparison (LOC) CSV, arterial + venous. |
 | `stage6` | `measure` | Per-LOC masked-plane flow / PI / RI from the phase volumes — see {doc}`qvtpy-hemodynamics`. |
@@ -67,9 +67,10 @@ In order:
      volume's, and the threshold is applied to the image lightly denoised (σ 0.3 mm).
    - The other labels are barriers. A label grows by at most half its radius (≤ 1 mm).
    - A label too faint for a half maximum (contrast < 0.5) keeps its mask.
-3. **ICAs and basilar to the image floor.** eICAB's box cuts them at its lower face while the lumen
-   goes on (the petrous ICA, the vertebrobasilar junction).
-   - Each trunk follows the minimum-cost path, cheap along bright tubes, through a multi-scale
+3. **ICAs to the image floor.** eICAB's box cuts them at its lower face while the lumen goes on
+   (the petrous ICA). Since 2026-10-29 the basilar is left as eICAB drew it (re-segmented only):
+   no extension, no vertebral arteries.
+   - Each ICA follows the minimum-cost path, cheap along bright tubes, through a multi-scale
      Frangi tree from its end down to a vessel cross-section in the image's last slices.
    - The path starts from the label's lowest band and from its lowest skeleton tip (the open end).
      It may run up to 5 mm above the label's lowest voxel, because the petrous ICA often leaves
@@ -85,18 +86,21 @@ In order:
      Past where the route meets the floor, the lumen that runs on along the bottom slices (the
      petrous ICA lying horizontally) is followed for up to 25 mm. On the 12 test subjects both
      ICAs reach the lowest slice (`reached_floor`, `floor_gap_mm` in the report).
-   - After every step (re-segmentation, trunks, distal growth, siphon) each label is reduced to its
-     largest connected component and its enclosed holes are filled (`tidy_labels`, unlabelled
-     voxels only; an A2 / M2 keeps every piece on its A1 / M1, its branches meeting only there).
-   - The basilar follows up to two branches down. A second branch is kept when at least 4 mm of
-     it runs apart from the first (beyond twice the trunk radius) along a vessel (mean step cost
-     ≤ 2.5 of 1–5). It no longer needs to cost less than 2.5× the first: the second vertebral
-     often reaches the floor two or three times farther away. Two branches: 19 / 32 subjects
-     (9 before). The 4D-flow pipeline's vertebral logic
-     (`util/segmentation/vertebral_split.split_vertebral_from_basilar`: a centerline Y below the
-     confluence, sides from the ICAs) then splits them off as **LVA / RVA**. These are new labels
-     19 / 20: stage 7's topology knows them, and stages 2–4 drop them, since they grow their own.
-   - A trunk with no path to the floor falls back to following the tree as one tube.
+   - After every step (re-segmentation, ICAs, distal growth, siphon) each label is reduced to its
+     largest connected component, its enclosed holes are filled (`tidy_labels`, unlabelled
+     voxels only; an A2 / M2 keeps every piece on its A1 / M1, its branches meeting only there),
+     and its pieces under 5 mm³ are dropped (`drop_small_islands`: the loose voxels a growth step
+     leaves; real separate M2 pieces are ~20 mm³ and more).
+   - An ICA with no path to the floor falls back to following the tree as one tube.
+   - **ICA loops below the siphon** (`loop_fill`, since 2026-10-29). In a tight loop the blood
+     runs along the outer wall and the inner wall comes out darker on TOF: the mask misses a
+     crescent there. The siphon is the cluster of bends (≥ 0.20 mm⁻¹ at a 3 mm scale, as in the
+     morphometrics) around the sharpest bend in the ICA's upper 60 %, with the bends up to 8 mm
+     before it. From the floor up to 2 mm before it, every 0.5 mm of centerline, the ICA's own
+     cross-section is compared with its convex outline, and the gaps at least 0.35 mm deep are
+     filled (`segmentation/cross_section_fill`). The staircase along a straight wall is thinner
+     than that, so the outer wall does not move. 0–147 voxels per ICA (≤ 18 mm³) on the 12 test
+     subjects.
 4. **Distal growth** (`--eicab-pp-distal`, on by default; WB_pp only). The ACAs, MCAs, PCAs (P2)
    and SCAs grow along the multi-scale Frangi tree beyond eICAB's box, as the blood flood floods
    its markers. The ACAs' and MCAs' growth is written as A2 / M2 (21–24):
@@ -139,11 +143,12 @@ as scikit-image's, about 6× faster on the CPU.
   so it skips the subject before `--reuse-eicab` can add a missing post-process.
 
 What it changes downstream:
-- Stage 7 measures longer ICAs (to the image floor), the vertebrals as their own vessels, the
+- Stage 7 measures longer ICAs (to the image floor), the
   A1 / A2, M1 / M2 and P1 / P2 as separate vessels (WB_pp; with CW_pp the ACAs / MCAs are named
   A1 / M1), and diameters ~15–25 % smaller.
 - Stage 3 maps the split into the 4D-flow labels: qvtpy 4–9 are the A1 / M1 / P1 (renamed
-  `LACA_A1` … `RPCA_P1`), 17–22 the A2 / M2 / P2 and 15 / 16 the SCAs. Stage 4 also writes what
+  `LACA_A1` … `RPCA_P1`) and 17–22 the A2 / M2 / P2 (15 / 16 unused: the SCAs are not segmented
+  in 4D flow). Stage 4 also writes what
   an A1 / M1 / P1 floods beyond its own lumen as its A2 / M2 / P2, so a CW_pp input splits too.
 - Stage 7 takes longer: ~285 s instead of ~60 s on PESA17808400 with 6 workers.
 - Stage 7's lesion thresholds were calibrated on eICAB's masks ({doc}`qvtpy-morphometrics`).
@@ -151,7 +156,6 @@ What it changes downstream:
 Known limits:
 - The competition can only continue the vessels eICAB started. In one test subject both A2s leave
   the left half of a wide AComm and both go to the left ACA.
-- When the basilar shows no Y above the floor, the vertebrals stay part of it.
 
 ## Local vs. SGE dispatch
 

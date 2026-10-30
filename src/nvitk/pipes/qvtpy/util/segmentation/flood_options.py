@@ -14,27 +14,36 @@ import click
 #: Settings name -> default. The CLI options are the names with ``-`` for ``_``.
 FLOOD_DEFAULTS: dict[str, Any] = {
     "flood_expand": True,
+    "flood_normalise_cd": True,
     "flood_hyst_low_factor": 3.0,
     "flood_hyst_high_factor": 0.5,
     "flood_thicken_iter": 0,
     "flood_max_image_frac": 0.08,
     "flood_lr_halfspace_slack": 2,
     "flood_near_radius": 2,
-    "flood_protrusion_filter": True,
+    "flood_aca_step": 2,
+    "flood_min_island_mm3": 15.0,
+    "flood_protrusion_filter": False,
 }
 
 _HELP: dict[str, str] = {
-    "flood_expand": "Blood flood, the only growth step: every artery floods a Frangi + hysteresis vessel tree "
-                    "of the CD from its threshold mask (trunks, comms and venous sinuses only fill their own "
-                    "lumen); what an "
-                    "A1 / M1 / P1 floods beyond its lumen becomes its A2 / M2 / P2.",
+    "flood_expand": "Blood flood: the ACAs / MCAs / PCAs flood a Frangi + hysteresis vessel tree of the CD "
+                    "from their threshold masks (comms and venous sinuses only fill their own lumen; the ICAs "
+                    "and basilar region-grow instead); what an A1 / M1 / P1 floods beyond its lumen becomes "
+                    "its A2 / M2 / P2.",
+    "flood_normalise_cd": "Divide the CD by the subject's blood signal (median CD on the ICA / basilar "
+                          "centerlines) before the vesselness, so the vessel tree's thresholds mean the "
+                          "same across subjects (else: each volume rescaled to its own 99.5th percentile).",
     "flood_hyst_low_factor": "GMM hysteresis low factor (higher -> thinner tree).",
     "flood_hyst_high_factor": "GMM hysteresis high factor (lower -> more seeds, thicker tree).",
     "flood_thicken_iter": "Dilations of the tree inside a high-CD gate (0 = thinnest).",
     "flood_max_image_frac": "Cap on the voxels the growing arteries claim (fraction of the image).",
-    "flood_lr_halfspace_slack": "Left/right midline slack (voxels) of the paired MCAs / PCAs / SCAs.",
-    "flood_near_radius": "How far (voxels) the trunks, communicating arteries and venous sinuses flood from "
-                         "their own mask.",
+    "flood_lr_halfspace_slack": "Left/right midline slack (voxels) of the paired MCAs / PCAs.",
+    "flood_near_radius": "How far (voxels) the communicating arteries and venous sinuses flood from their own "
+                         "mask.",
+    "flood_aca_step": "ACAs: voxels each side grows per turn when the two ACAs share their flood, right and "
+                      "left in turns.",
+    "flood_min_island_mm3": "After the flood, each label's pieces smaller than this (mm³) are dropped.",
     "flood_protrusion_filter": "Remove wart-like surface bumps after the flood (pre-flood voxels protected).",
 }
 

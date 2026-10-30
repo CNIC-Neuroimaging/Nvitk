@@ -349,7 +349,7 @@ _EICAB_CW: dict[str, Any] = {
     "LESION_REFERENCE_SEARCH_MM": 30.0,
     # No reference window reaches into the first / last this many mm of the path: the tips hold
     # VMTK's seed point on the wall and the end taper.
-    "LESION_REFERENCE_EXCLUDE_END_MM": 3.0,
+    "LESION_REFERENCE_EXCLUDE_END_MM": 5.0,
     # "interpolated": proximal and distal medians differing by more than this fraction (more than
     # taper explains: distal collapse, dilatation, an unseen branch) flag reference_inconsistent.
     "LESION_REFERENCE_DISAGREEMENT_FRACTION": 0.25,

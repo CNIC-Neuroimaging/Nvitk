@@ -373,6 +373,7 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     stage7_n_workers: int | None = None,
     stage7_taubin: bool | None = None,
     lesion_detection_method: str | None = None,
+    stage7_verbose: bool = False,
 ) -> int:
     """Append one SGE array ``qsub`` per subject; return array jobs emitted."""
     from . import (
@@ -684,6 +685,7 @@ def _emit_qvtpy_sge_subjects_for_chunk(
                             eicab_mask_preference=eicab_mask,
                             use_postprocessed_mask=eicab_prefer_pp,
                             taubin=stage7_taubin,
+                            verbose=stage7_verbose,
                             lesion_detection_method=lesion_detection_method,
                             n_workers=stage7_n_workers,
                             backend=backend,
@@ -1248,6 +1250,12 @@ def _submit_qvtpy_sge_subjects_remote(
     "post-processed masks (already at the local half maximum), on for eICAB's own mask.",
 )
 @click.option(
+    "--stage7-verbose/--no-stage7-verbose",
+    default=False,
+    show_default=True,
+    help="Stage7: print the morphometrics' progress (per vessel / component); off: only failures.",
+)
+@click.option(
     "--lesion-detection-method",
     type=click.Choice(["robust_reference", "taper"], case_sensitive=False),
     default=None,
@@ -1324,6 +1332,7 @@ def main(
     stage7_n_workers: int | None,
     stage7_taubin: bool | None,
     lesion_detection_method: str | None,
+    stage7_verbose: bool,
     venous_min_branch_points: int,
     pcomm_min_points: int,
     arterial_branch_min_points: int,
@@ -1819,6 +1828,7 @@ def main(
                             eicab_mask_preference=eicab_mask,
                             use_postprocessed_mask=eicab_prefer_pp,
                             taubin=stage7_taubin,
+                            verbose=stage7_verbose,
                             lesion_detection_method=lesion_detection_method,
                             n_workers=stage7_n_workers,
                         ),
@@ -2023,6 +2033,7 @@ def main(
         stage7_n_workers=stage7_n_workers,
         stage7_taubin=stage7_taubin,
         lesion_detection_method=lesion_detection_method,
+        stage7_verbose=stage7_verbose,
         venous_min_branch_points=venous_min_branch_points,
         pcomm_min_points=pcomm_min_points,
         arterial_branch_min_points=arterial_branch_min_points,

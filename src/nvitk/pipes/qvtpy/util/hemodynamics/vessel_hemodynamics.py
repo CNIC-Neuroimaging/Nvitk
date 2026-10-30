@@ -64,11 +64,9 @@ from nvitk.pipes.qvtpy.labels import (
     QVTPY_LACA_A2,
     QVTPY_LMCA_M2,
     QVTPY_LPCA_P2,
-    QVTPY_LSCA,
     QVTPY_RACA_A2,
     QVTPY_RMCA_M2,
     QVTPY_RPCA_P2,
-    QVTPY_RSCA,
     QVTPY_BASILAR,
     QVTPY_COMM_IDS,
     QVTPY_LACA,
@@ -121,8 +119,7 @@ ROOT_GROUPS: tuple[RootGroup, ...] = (
     RootGroup("L_ICA", QVTPY_LICA, (QVTPY_LACA, QVTPY_LMCA, QVTPY_LACA_A2, QVTPY_LMCA_M2)),
     RootGroup("R_ICA", QVTPY_RICA, (QVTPY_RACA, QVTPY_RMCA, QVTPY_RACA_A2, QVTPY_RMCA_M2)),
     # VAs are proximal dual starts when present (not distal basilar branches).
-    RootGroup("Basilar", QVTPY_BASILAR, (QVTPY_LPCA, QVTPY_RPCA, QVTPY_LPCA_P2, QVTPY_RPCA_P2,
-                                         QVTPY_LSCA, QVTPY_RSCA)),
+    RootGroup("Basilar", QVTPY_BASILAR, (QVTPY_LPCA, QVTPY_RPCA, QVTPY_LPCA_P2, QVTPY_RPCA_P2)),
 )
 
 # Hard allow-list per root so mis-tagged or overlapping stations never enter ICA PITC.
@@ -130,7 +127,7 @@ PITC_GROUP_ALLOWED_IDS: dict[str, frozenset[int]] = {
     "L_ICA": frozenset({QVTPY_LICA, QVTPY_LACA, QVTPY_LMCA, QVTPY_LACA_A2, QVTPY_LMCA_M2}),
     "R_ICA": frozenset({QVTPY_RICA, QVTPY_RACA, QVTPY_RMCA, QVTPY_RACA_A2, QVTPY_RMCA_M2}),
     "Basilar": frozenset({QVTPY_BASILAR, QVTPY_LPCA, QVTPY_RPCA, QVTPY_LPCA_P2, QVTPY_RPCA_P2,
-                          QVTPY_LSCA, QVTPY_RSCA, QVTPY_LVA, QVTPY_RVA}),
+                          QVTPY_LVA, QVTPY_RVA}),
 }
 
 

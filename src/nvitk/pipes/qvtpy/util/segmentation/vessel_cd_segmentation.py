@@ -12,17 +12,32 @@ Array indices ``(i, j, k)`` are **(X, Y, Z)** for asymmetric bbox padding.
 
 Steps (:func:`build_seg_4dflow_local`):
 
-1. **Threshold.** Each centerline label gets a local CD crop around its centerline, thresholded
-   (``lsthr`` / ``lthr`` / ``otsu``), with the other vessels' centerlines as barriers; then its
-   largest connected component. The communicating arteries are seeded the same way (their
+1. **Threshold.** Each centerline label but the A2 / M2 / P2 gets a local CD crop around its
+   centerline, thresholded (``lsthr`` / ``lthr`` / ``otsu``), with the other vessels' centerlines
+   as barriers; then the pieces of it that touch its own centerline (the crop's threshold also
+   keeps brighter tissue patches elsewhere in the crop; none on the centerline: the centerline
+   itself is the seed). The A2 / M2 / P2 are not thresholded: barely resolved in 4D flow, a crop
+   threshold gives them protrusions and blocks of noise. Their masks come from the flood only,
+   seeded with their bare centerlines (just before it) and with what their A1 / M1 / P1 floods. The communicating arteries are seeded the same way (their
    centerline plus the threshold crop).
-2. **Vertebral split** of the basilar (LVA / RVA).
-3. **Blood flood** (:func:`flood_expand_vessels`), the only growth step. A Frangi + GMM-hysteresis
-   vessel tree of the CD is flooded from every label at once (watershed). The trunks (ICAs,
-   basilar, vertebrals), the communicating arteries and the venous sinuses only fill their own
-   lumen (voxels of the tree within ``flood_near_radius`` of their mask). The other arteries (ACA / MCA / PCA, their
-   A2 / M2 / P2, the SCAs) grow along the tree. What an A1 / M1 / P1 floods
-   beyond its own lumen is written as its A2 / M2 / P2 (eICAB's post-process does the same on TOF).
+2. **Region growing of the ICAs and the basilar** (:func:`_region_grow_trunk`): 6-connected, into
+   CD above 0.45 x their seed's mean and their own threshold, walled off from the other vessels
+   (an ICA also from the PComms' dilated centerlines); rolled back past a volume cap.
+3. **Vertebral split** of the basilar (LVA / RVA).
+4. **Blood flood** (:func:`flood_expand_vessels`). A Frangi + GMM-hysteresis vessel tree of the CD
+   is flooded from the ACA / MCA / PCA labels (A1 / M1 / P1) at once (watershed); the
+   communicating arteries and the venous sinuses only fill their own lumen (voxels of the tree
+   within ``flood_near_radius`` of their mask); the ICAs and basilar are walls. The two ACAs then
+   share what they flooded in turns, right and left, ``flood_aca_step`` voxels
+   at a time, each growing from its A1 only (so an A2 is always connected to its own A1), neither
+   more than 5 mm past the midline at the AComm nor into voxels nearer the other side's
+   registered eICAB ACA (the two A2s, 2-4 voxels apart, merge in 4D flow; eICAB on TOF tells them
+   apart). What an A1 / M1 / P1 floods beyond its own lumen
+   is written as its A2 / M2 / P2 (eICAB's post-process does the same on TOF), and each label's
+   pieces under ``flood_min_island_mm3`` are dropped.
+5. **Siphon correction** of the ICAs, as eICAB's post-process does on TOF
+   (:func:`nvitk.morphology.siphon_cut.repair_icas`): where a siphon's limbs touch and close a
+   loop, only the contact is cut.
 """
 
 from __future__ import annotations
@@ -30,12 +45,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+import numpy as numpy_host  # host-side geometry (module ``np`` may be a CuPy proxy)
+
 from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup, using
 from nvitk.core.logger import Logger
 from nvitk.morphology import dilate, make_ball_footprint
 from nvitk.morphology.components import remove_small_components_by_fraction
 from nvitk.pipes.qvtpy.labels import (
+    EICAB_RG_BARRIER_LABEL_IDS,
     QVTPY_ACA_A2_IDS,
     QVTPY_ACA_IDS,
     QVTPY_ACOMM,
@@ -51,18 +69,17 @@ from nvitk.pipes.qvtpy.labels import (
     QVTPY_LMCA_M2,
     QVTPY_LPCA,
     QVTPY_LPCA_P2,
-    QVTPY_LSCA,
     QVTPY_MCA_IDS,
     QVTPY_PCA_IDS,
+    QVTPY_PCOMM_IDS,
     QVTPY_PROXIMAL_TO_DISTAL,
     QVTPY_RACA,
     QVTPY_RACA_A2,
     QVTPY_RMCA,
     QVTPY_RMCA_M2,
     QVTPY_RPCA,
+    QVTPY_RICA,
     QVTPY_RPCA_P2,
-    QVTPY_RSCA,
-    QVTPY_SCA_IDS,
     QVTPY_SMALL_ARTERIAL_IDS,
     QVTPY_VENOUS_LABEL_IDS,
     QVTPY_VERTEBRAL_IDS,
@@ -74,6 +91,8 @@ from nvitk.pipes.qvtpy.util.centerline.mask_cleaning import (
     keep_component_touching_seed_inplace,
     keep_largest_component_label_inplace,
 )
+from nvitk.segmentation.region_growing import merge_forbidden, region_grow_into_label_volume
+from nvitk.segmentation.vessel_refine import MIDLINE_SLACK_MM, drop_small_islands, head_midplane
 
 setup(globals())
 
@@ -95,8 +114,25 @@ FLOOD_HYST_LOW_FACTOR_DEFAULT: float = FLOOD_DEFAULTS["flood_hyst_low_factor"]
 FLOOD_HYST_HIGH_FACTOR_DEFAULT: float = FLOOD_DEFAULTS["flood_hyst_high_factor"]
 FLOOD_THICKEN_ITER_DEFAULT: int = FLOOD_DEFAULTS["flood_thicken_iter"]
 FLOOD_LR_HALFSPACE_SLACK_DEFAULT: int = FLOOD_DEFAULTS["flood_lr_halfspace_slack"]
-#: How far (voxels) the trunks and communicating arteries may flood from their own mask.
+#: How far (voxels) the communicating arteries and venous sinuses may flood from their own mask.
 FLOOD_NEAR_RADIUS_DEFAULT: int = FLOOD_DEFAULTS["flood_near_radius"]
+FLOOD_ACA_STEP_DEFAULT: int = FLOOD_DEFAULTS["flood_aca_step"]
+FLOOD_MIN_ISLAND_MM3_DEFAULT: float = FLOOD_DEFAULTS["flood_min_island_mm3"]
+
+# Region growing of the ICAs and the basilar (their method before the blood flood).
+_RG_INTENSITY_FRAC: float = 0.45
+#: Rollback caps: the grown label vs its seed (voxels, at least _RG_MIN_GROW_ALLOW_VOXELS more) and
+#: vs the image.
+_RG_MAX_GROW_FRAC: float = 15.0
+_RG_MIN_GROW_ALLOW_VOXELS: int = 2000
+_RG_MAX_IMAGE_FRAC: dict[int, float] = {QVTPY_LICA: 0.05, QVTPY_RICA: 0.05, QVTPY_BASILAR: 0.02}
+#: Walls: the other vessels dilated by this many voxels; the neighbours a trunk leaks into most
+#: (ICA: comms + PCAs; basilar: ICAs + PCAs) by _RG_NEIGHBOUR_RADIUS; for the basilar also the
+#: other centerlines and the registered eICAB SCAs (not segmented here).
+_RG_OTHER_SEG_RADIUS: dict[int, int] = {QVTPY_LICA: 3, QVTPY_RICA: 3, QVTPY_BASILAR: 1}
+_RG_NEIGHBOUR_RADIUS: int = 3
+_RG_OTHER_CL_RADIUS: int = 3
+_RG_EICAB_SCA_RADIUS: int = 1
 _DISTAL_LR_AXIS: int = 0  # array axis treated as L<->R (matches ACA / typical RAS)
 # Drop the lowest vesselness voxels on the tree to keep growth tubular (anti-blob).
 _DISTAL_TREE_VESSELNESS_KEEP_PERCENTILE: float = 55.0
@@ -117,17 +153,15 @@ _DISTAL_LR_PAIRS: tuple[tuple[int, int], ...] = (
     (QVTPY_LACA_A2, QVTPY_RACA_A2),
     (QVTPY_LMCA_M2, QVTPY_RMCA_M2),
     (QVTPY_LPCA_P2, QVTPY_RPCA_P2),
-    (QVTPY_LSCA, QVTPY_RSCA),
 )
 #: Arteries that grow along the vessel tree (the others only fill their own lumen).
-_DISTAL_TARGET_IDS: frozenset[int] = frozenset(
-    QVTPY_MCA_IDS | QVTPY_ACA_IDS | QVTPY_PCA_IDS | QVTPY_DISTAL_IDS | QVTPY_SCA_IDS
-)
-#: Labels that only fill their own lumen: trunks, vertebrals, communicating arteries and the venous
-#: sinuses (a growing sinus would run out along the cortical veins).
-_NEAR_FIELD_IDS: frozenset[int] = frozenset(
-    QVTPY_ICA_BASILAR_IDS | QVTPY_VERTEBRAL_IDS | QVTPY_COMM_IDS | QVTPY_VENOUS_LABEL_IDS
-)
+_DISTAL_TARGET_IDS: frozenset[int] = frozenset(QVTPY_MCA_IDS | QVTPY_ACA_IDS | QVTPY_PCA_IDS | QVTPY_DISTAL_IDS)
+#: Labels that only fill their own lumen: the communicating arteries and the venous sinuses (a
+#: growing sinus would run out along the cortical veins). The ICAs / basilar / vertebrals are
+#: region-grown before the flood and left as they are.
+_NEAR_FIELD_IDS: frozenset[int] = frozenset(QVTPY_COMM_IDS | QVTPY_VENOUS_LABEL_IDS)
+#: The ACAs' turns when they share their flood: right first. Each side grows from its A1 only.
+_ACA_SIDES: tuple[tuple[str, int], ...] = (("right", QVTPY_RACA), ("left", QVTPY_LACA))
 _ACA_FAMILY_IDS: frozenset[int] = frozenset(QVTPY_ACA_IDS | QVTPY_ACA_A2_IDS)
 
 
@@ -167,6 +201,7 @@ class VesselSegStats:
     n_voxels_after_island_clean: int
     n_voxels_final: int
     flooded: bool = False
+    n_voxels_after_region_growing: int | None = None
     warning: str | None = None
 
 
@@ -178,10 +213,11 @@ class LocalSegResult:
     vessel_stats: list[VesselSegStats] = field(default_factory=list)
     vertebral_split: VertebralSplitResult | None = None
     flood: dict[str, Any] | None = None
+    siphon: dict[str, Any] | None = None
 
 
 def crop_min_fraction_for_label(label_id: int) -> float:
-    """Min CC fraction inside the CD crop (0 for the small arteries: PCAs, comms, SCAs)."""
+    """Min CC fraction inside the CD crop (0 for the small arteries: PCAs, comms)."""
     if int(label_id) in QVTPY_SMALL_ARTERIAL_IDS:
         return _CROP_MIN_COMPONENT_FRAC_SMALL
     return _CROP_MIN_COMPONENT_FRAC
@@ -341,8 +377,10 @@ def _finalize_vessel_largest_cc(
     stats_by_id: dict[int, VesselSegStats] | None = None,
     log_name: str | None = None,
     seed_mask: np.ndarray | None = None,
+    connectivity: int = 1,
 ) -> int:
-    """Keep largest CC for one label (or the CC touching *seed_mask* if given).
+    """Keep largest CC for one label (or the CC touching *seed_mask* if given); *connectivity* 1
+    (faces) or 3 (26 neighbours: the flood's watershed connects its claims that way).
 
     When *seed_mask* is provided (e.g. eICAB A1 for ACA), the component that
     overlaps the seed is retained even if a disconnected distal island is larger.
@@ -350,10 +388,10 @@ def _finalize_vessel_largest_cc(
     lid = int(label_id)
     n_before = int(np.count_nonzero(seg == lid))
     if seed_mask is not None:
-        n_after = keep_component_touching_seed_inplace(seg, lid, seed_mask)
+        n_after = keep_component_touching_seed_inplace(seg, lid, seed_mask, connectivity=connectivity)
         mode = "seed-anchored-CC"
     else:
-        n_after = keep_largest_component_label_inplace(seg, lid)
+        n_after = keep_largest_component_label_inplace(seg, lid, connectivity=connectivity)
         mode = "largest-CC"
     dropped = n_before - n_after
     if dropped > 0 and log_name is not None:
@@ -537,6 +575,195 @@ def _lr_halfspace_ok_mask(
     return ok
 
 
+def _keep_on_centerline(seg: np.ndarray, label_id: int, centerline: np.ndarray) -> bool:
+    """Keep, of *label_id* in *seg* (in place), the 26-connected pieces that touch its own
+    *centerline* (within one voxel: the registered centerline may graze the lumen's edge). When
+    none does, the label is replaced by its centerline's unlabelled voxels, a seed for the flood.
+    Returns whether a thresholded piece was on the centerline."""
+    lid = int(label_id)
+    cube = make_ball_footprint(3, connectivity=3)
+    centerline = as_backend_array(centerline).astype(bool)
+    own = seg == lid
+    if bool(own.any()):
+        cc, _n = ndi.label(own, structure=cube)
+        near = ndi.binary_dilation(centerline, structure=cube)
+        keep = np.unique(cc[near & own])
+        keep = keep[keep > 0]
+        if keep.size:
+            seg[own & ~np.isin(cc, keep)] = 0
+            return True
+        seg[own] = 0
+    seg[centerline & (seg == 0)] = lid
+    return False
+
+
+def _correct_ica_siphons(seg: np.ndarray, cd: np.ndarray, spacing: tuple[float, float, float]) -> dict[str, Any]:
+    """The ICA siphon correction of eICAB's post-process on the 4D-flow ICAs (module docstring,
+    step 5), *seg* in place: per ICA, the log of :func:`nvitk.morphology.siphon_cut.repair_icas`,
+    or the error when its cut failed (the ICA is then left as it was)."""
+    from nvitk.morphology.siphon_cut import repair_icas
+
+    out: dict[str, Any] = {}
+    for lid in (int(QVTPY_LICA), int(QVTPY_RICA)):
+        try:
+            out.update(repair_icas(cd, seg, [lid], spacing=spacing))
+        except Exception as exc:  # noqa: BLE001 (a failed cut must not lose the segmentation)
+            log.warning(f"ICA {lid} siphon correction skipped: {exc}")
+            out[str(lid)] = {"error": str(exc)}
+    return out
+
+
+def _dilated_labels(seg: np.ndarray, ids: frozenset[int] | set[int], radius: int) -> np.ndarray:
+    """The voxels of labels *ids* in *seg*, dilated by *radius* voxels."""
+    return _dilate_bool_mask(np.isin(seg, as_backend_array(sorted(int(i) for i in ids))), radius=int(radius))
+
+
+def _region_grow_trunk(
+    seg: np.ndarray,
+    cd: np.ndarray,
+    centerlines_mask: np.ndarray,
+    label_id: int,
+    opt_thresh: float | None,
+    eicab_native: np.ndarray | None,
+) -> str | None:
+    """Region-grow one ICA or the basilar in *seg* (module docstring, step 2), in place: 6-connected
+    into unlabelled CD above ``_RG_INTENSITY_FRAC`` x its seed's mean and *opt_thresh* (its crop
+    threshold), between walls (``_RG_*`` radii): the other vessels; the PCAs, comms and the PComms'
+    centerlines (ICA) or the ICAs and PCAs (basilar); for the basilar also the other centerlines and the registered eICAB
+    SCAs (*eicab_native*). What it grew is rolled back when the label passes a volume cap. Returns
+    the rollback reason, else ``None``."""
+    lid = int(label_id)
+    others = (seg != 0) & (seg != lid)
+    walls = [_dilate_bool_mask(others, radius=_RG_OTHER_SEG_RADIUS[lid])]
+    if lid == int(QVTPY_BASILAR):
+        walls.append(_dilated_labels(seg, QVTPY_PCA_IDS | {QVTPY_LICA, QVTPY_RICA}, _RG_NEIGHBOUR_RADIUS))
+        clm = as_backend_array(centerlines_mask)
+        walls.append(_dilate_bool_mask((clm != 0) & (clm != lid), radius=_RG_OTHER_CL_RADIUS))
+        if eicab_native is not None:
+            walls.append(_dilated_labels(as_backend_array(eicab_native), EICAB_RG_BARRIER_LABEL_IDS,
+                                         _RG_EICAB_SCA_RADIUS))
+    else:
+        walls.append(_dilated_labels(seg, QVTPY_COMM_IDS | QVTPY_PCA_IDS, _RG_NEIGHBOUR_RADIUS))
+        # The PComms are seeded after the trunks: their dilated centerlines stand in for them.
+        walls.append(_dilated_labels(as_backend_array(centerlines_mask), QVTPY_PCOMM_IDS, _RG_NEIGHBOUR_RADIUS))
+    pre = seg == lid
+    n_pre = int(np.count_nonzero(pre))
+    region_grow_into_label_volume(seg, cd, lid, intensity_frac=_RG_INTENSITY_FRAC, abs_floor=opt_thresh,
+                                  forbidden=merge_forbidden(*walls))
+    post = seg == lid
+    n_post = int(np.count_nonzero(post))
+    reason = None
+    if n_post > _RG_MAX_IMAGE_FRAC[lid] * float(seg.size):
+        reason = f"rg rollback: {n_post} vox > {_RG_MAX_IMAGE_FRAC[lid]:.3f} of the image"
+    elif n_pre > 0 and n_post > max(_RG_MAX_GROW_FRAC * n_pre, float(_RG_MIN_GROW_ALLOW_VOXELS)):
+        reason = f"rg rollback: {n_post} vox > {_RG_MAX_GROW_FRAC:.0f}x seed ({n_pre} vox)"
+    if reason is not None:
+        seg[post & ~pre] = 0
+        log.warning(f"label {lid}: {reason}; kept its {n_pre} thresholded voxels")
+    return reason
+
+
+def _aca_midline_forbid(
+    seg: np.ndarray, acomm: np.ndarray | None, spacing: tuple[float, float, float]
+) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray], dict[str, Any]]:
+    """The ACA hemisphere guard of eICAB's post-process (:func:`nvitk.segmentation.vessel_refine.grow_distal`)
+    on the 4D-flow labels: a plane oriented as the head's mid-sagittal plane (from the paired ICAs /
+    MCAs / PCAs, :func:`~nvitk.segmentation.vessel_refine.head_midplane`) and anchored at the AComm
+    (*acomm*, else midway between the A1s). Returns per side (``"left"`` / ``"right"``) the voxels
+    more than ``MIDLINE_SLACK_MM`` past it (forbidden to that side's ACA), the AComm voxels on that
+    side (extra seeds of its front), and the plane; empty dicts without a plane."""
+    plane = head_midplane(seg, [(QVTPY_LICA, QVTPY_RICA), (QVTPY_LMCA, QVTPY_RMCA), (QVTPY_LPCA, QVTPY_RPCA)], spacing)
+    a = to_numpy(np.argwhere(seg == int(QVTPY_LACA)))
+    b = to_numpy(np.argwhere(seg == int(QVTPY_RACA)))
+    if plane is None or len(a) < 3 or len(b) < 3:
+        return {}, {}, {}
+    _p, n = plane
+    sp = numpy_host.asarray(spacing, dtype=float)
+    cc = None if acomm is None else to_numpy(np.argwhere(as_backend_array(acomm).astype(bool)))
+    p0 = cc.mean(0) if cc is not None and len(cc) >= 3 else 0.5 * (a.mean(0) + b.mean(0))
+    if float(((a.mean(0) - b.mean(0)) * sp) @ n) < 0:
+        n = -n  # point to the left ACA
+    idx = numpy_host.ogrid[tuple(slice(0, int(d)) for d in seg.shape)]
+    signed = as_backend_array(sum((idx[ax] - p0[ax]) * sp[ax] * n[ax] for ax in range(3)))
+    forbid = {"left": signed < -float(MIDLINE_SLACK_MM), "right": signed > float(MIDLINE_SLACK_MM)}
+    seeds: dict[str, np.ndarray] = {}
+    if acomm is not None:
+        ac = as_backend_array(acomm).astype(bool)
+        seeds = {"left": ac & (signed >= 0), "right": ac & (signed < 0)}
+    meta = {"point_vox": [round(float(v), 1) for v in p0], "normal": [round(float(v), 3) for v in n],
+            "anchor": "acomm" if cc is not None and len(cc) >= 3 else "a1_midpoint",
+            "slack_mm": float(MIDLINE_SLACK_MM)}
+    return forbid, seeds, meta
+
+
+def _eicab_aca_sides(eicab: np.ndarray | None, spacing: tuple[float, float, float]) -> dict[str, np.ndarray]:
+    """Per side (``"left"`` / ``"right"``), the voxels nearer the other side's registered eICAB
+    ACA (A1 + A2, from TOF) than its own: forbidden to that side when the ACAs share their flood.
+    In 4D flow the two A2s, 2-4 voxels apart, merge into one column; eICAB still tells them apart.
+    Empty unless eICAB has both ACAs."""
+    if eicab is None:
+        return {}
+    left = np.isin(eicab, as_backend_array([int(QVTPY_LACA), int(QVTPY_LACA_A2)]))
+    right = np.isin(eicab, as_backend_array([int(QVTPY_RACA), int(QVTPY_RACA_A2)]))
+    if not bool(left.any()) or not bool(right.any()):
+        return {}
+    d_left = ndi.distance_transform_edt(~left, sampling=spacing)
+    d_right = ndi.distance_transform_edt(~right, sampling=spacing)
+    return {"left": d_right < d_left, "right": d_left <= d_right}
+
+
+def _share_acas(
+    seg: np.ndarray,
+    domain: np.ndarray,
+    forbid: dict[str, np.ndarray],
+    seeds: dict[str, np.ndarray],
+    step: int,
+) -> dict[str, Any]:
+    """Re-share the *domain* (the vessel tree the flood gave the ACAs) between
+    the two ACAs, in place: right then left, each side grows ``step`` voxels (26-connected, from its
+    A1 and its AComm *seeds*) into unlabelled domain voxels not *forbid* -den to it (past the
+    midline, or nearer the other side's eICAB ACA: :func:`_eicab_aca_sides`), in turns until
+    neither grows. Each side thus gets the stretch of the shared tree it reaches first, not what one
+    front took in a single pass, and all of it connected to its own A1 (its far part becomes its A2
+    in :func:`_split_distal`). Domain voxels neither side reaches are left unlabelled."""
+    union = domain | np.isin(seg, as_backend_array([int(lid) for _side, lid in _ACA_SIDES]))
+    if not bool(union.any()):
+        return {"rounds": 0}
+    where = to_numpy(np.argwhere(union))
+    lo, hi = numpy_host.maximum(where.min(0) - 1, 0), numpy_host.minimum(where.max(0) + 2, seg.shape)
+    sl = tuple(slice(int(a), int(b)) for a, b in zip(lo, hi))
+    seg[domain] = 0
+    sub = seg[sl]  # a view: writes land in *seg*
+    dom = domain[sl]
+    allowed = {side: dom & ~forbid[side][sl] if side in forbid else dom for side, _lid in _ACA_SIDES}
+    extra = {side: seeds[side][sl] for side in seeds}
+    cube = make_ball_footprint(3, connectivity=3)
+    added = {int(lid): 0 for _side, lid in _ACA_SIDES}
+    rounds = 0
+    while True:
+        grew = False
+        for side, lid in _ACA_SIDES:
+            for _ in range(max(1, int(step))):
+                front = sub == int(lid)
+                if side in extra:
+                    front = front | extra[side]
+                if not bool(front.any()):
+                    break
+                new = ndi.binary_dilation(front, structure=cube) & allowed[side] & (sub == 0)
+                n_new = int(np.count_nonzero(new))
+                if not n_new:
+                    break
+                sub[new] = int(lid)
+                added[int(lid)] += n_new
+                grew = True
+        rounds += 1
+        if not grew:
+            break
+    return {"rounds": rounds, "domain_voxels": int(np.count_nonzero(domain)),
+            "unreached": int(np.count_nonzero(dom & (sub == 0))),
+            "added": {_distal_label_name(k): v for k, v in added.items() if v}}
+
+
 def _seed_communicating(
     seg: np.ndarray,
     cd: np.ndarray,
@@ -650,24 +877,37 @@ def flood_expand_vessels(
     lr_halfspace_slack: int = FLOOD_LR_HALFSPACE_SLACK_DEFAULT,
     protrusion_filter: bool = True,
     near_radius: int = FLOOD_NEAR_RADIUS_DEFAULT,
+    aca_step: int = FLOOD_ACA_STEP_DEFAULT,
+    min_island_mm3: float = FLOOD_MIN_ISLAND_MM3_DEFAULT,
+    spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    blood_reference: float | None = None,
 ) -> dict[str, Any]:
-    """The blood flood of stage 4 (module docstring, step 3), *seg* in place.
+    """The blood flood of stage 4 (module docstring, step 4), *seg* in place. *spacing*: voxel
+    size (mm) per array axis.
 
-    1. Frangi vesselness on CD (fallback: normalized CD) and a GMM + hysteresis vessel tree.
-    2. The trunks, vertebrals, communicating arteries and venous sinuses (``_NEAR_FIELD_IDS``) fill
-       the tree voxels within *near_radius* of their own mask.
-    3. The other arteries (``_DISTAL_TARGET_IDS``: ACA / MCA / PCA, their distal labels, the SCAs)
-       are watershed markers flooding the tree (only components touching them), all at once:
+    1. Frangi vesselness on CD (fallback: normalized CD) and a GMM + hysteresis vessel tree. With
+       *blood_reference* (the blood signal), the CD is divided by it first, so the tree's thresholds
+       are on one scale across subjects (:func:`nvitk.segmentation.blood_flood.intensity_vesselness`).
+    2. The communicating arteries and venous sinuses (``_NEAR_FIELD_IDS``) fill the tree voxels
+       within *near_radius* of their own mask.
+    3. The arteries in ``_DISTAL_TARGET_IDS`` (ACA / MCA / PCA and their distal labels) are
+       watershed markers flooding the tree (only components touching them), all at once:
        - dilated ICA + basilar voxels are hard walls, as is every other label;
        - left / right pairs get a scoped midline punch (pair-local, ACA-protected) and claim
          half-space filters; the ACAs have none, but an ACA-only vesselness-gated CD corridor
          reconnects a distal A2 whose Frangi components broke at the AComm;
        - claims are capped per label and in total (*max_image_frac* of the volume);
-       - each label keeps its largest component (an ACA the one on its eICAB A1).
+       - the two ACAs then share what they claimed in turns (:func:`_share_acas`), *aca_step*
+         voxels a side at a time, each from its A1 only, kept within 5 mm of the midline at the
+         AComm (:func:`_aca_midline_forbid`) and to the voxels nearer its own registered eICAB ACA
+         than the other's (:func:`_eicab_aca_sides`);
+       - each label keeps the piece on its own pre-flood voxels (not its largest: a detached claim
+         can outgrow the vessel).
     4. With *protrusion_filter*, a curvature / protrusion filter removes wart-like bumps, the
        pre-flood voxels protected.
     5. What an A1 / M1 / P1 flooded beyond *near_radius* of its own lumen is written as its
        A2 / M2 / P2 (:func:`_split_distal`).
+    6. Each flooded label's pieces under *min_island_mm3* are dropped (its largest always stays).
     """
     from nvitk.pipes.qvtpy.util.segmentation.distal_vessel_tree import (
         _DISTAL_FRANGI_SIGMAS_DEFAULT,
@@ -702,6 +942,9 @@ def flood_expand_vessels(
         "thicken_iter": thick_n,
         "lr_halfspace_slack": lr_slack,
         "near_radius": int(near_radius),
+        "aca_step": int(aca_step),
+        "min_island_mm3": float(min_island_mm3),
+        "blood_reference": None if blood_reference is None else float(blood_reference),
         "protrusion_filter": bool(protrusion_filter),
         "frangi_sigmas": [float(s) for s in sigmas],
         "labels": {},
@@ -713,7 +956,7 @@ def flood_expand_vessels(
 
     cd_pos = cd_np[cd_np > 0]
     fg_mask = cd_np > float(np.percentile(cd_pos, 25.0)) if cd_pos.size > 0 else np.ones(cd_np.shape, dtype=bool)
-    vesselness, vmode = cd_vesselness(cd_np, sigmas=sigmas)
+    vesselness, vmode = cd_vesselness(cd_np, sigmas=sigmas, reference=blood_reference)
     tree_hyst, tree_meta = hysteresis_vessel_tree(
         vesselness, fg_mask, low_factor=float(hyst_low_factor), high_factor=float(hyst_high_factor),
     )
@@ -721,7 +964,7 @@ def flood_expand_vessels(
     info["vesselness_mode"] = vmode
     info["tree"] = tree_meta
 
-    # 2. Trunks / vertebrals / comms / sinuses: their own lumen only.
+    # 2. Comms / sinuses: their own lumen only.
     info["near_field"] = _near_field_fill(seg_np, tree_hyst, sorted(int(v) for v in _NEAR_FIELD_IDS), int(near_radius))
     if not present:
         log.warning("blood flood: no growing artery has seed voxels; near-field fill only")
@@ -844,7 +1087,22 @@ def flood_expand_vessels(
             seg_np[claim] = lid
             added_total += n_claim
 
-    # Strip any spill on the ICA/basilar wall, then each label's component (ACA: on its eICAB A1).
+    # The two ACAs share what they claimed, in turns, behind the midline guard,
+    # each from its A1 only: an A2 is then always connected to its own A1.
+    aca_pre = np.zeros(seg_np.shape, dtype=bool)
+    for _side, lid in _ACA_SIDES:
+        if lid in pre_masks:
+            aca_pre |= pre_masks[lid]
+    aca_domain = np.isin(seg_np, as_backend_array(sorted(_ACA_FAMILY_IDS))) & ~aca_pre
+    if bool(aca_domain.any()):
+        acomm = None if eicab_np is None else eicab_np == int(QVTPY_ACOMM)
+        forbid, side_seeds, plane = _aca_midline_forbid(seg_np, acomm, spacing)
+        for side, other in _eicab_aca_sides(eicab_np, spacing).items():
+            forbid[side] = forbid[side] | other if side in forbid else other
+        info["aca_share"] = {"midplane": plane, **_share_acas(seg_np, aca_domain, forbid, side_seeds, int(aca_step))}
+
+    # Strip any spill on the ICA/basilar wall, then of each label the piece on its own pre-flood
+    # voxels (its largest piece can be a detached claim: keeping that would drop the vessel itself).
     spill = np.isin(seg_np, as_backend_array(target_ids)) & ica_basilar_barrier & (markers == 0)
     if bool(spill.any()):
         seg_np[spill] = 0
@@ -852,8 +1110,8 @@ def flood_expand_vessels(
     for lid in present:
         if lid in QVTPY_DISTAL_IDS:
             continue  # kept by their proximal label below
-        _finalize_vessel_largest_cc(seg_np, lid, log_name=f"flood-{lid}",
-                                    seed_mask=_aca_eicab_a1_seed_mask(eicab_np, lid))
+        _finalize_vessel_largest_cc(seg_np, lid, log_name=f"flood-{lid}", connectivity=3,
+                                    seed_mask=pre_masks.get(lid, _aca_eicab_a1_seed_mask(eicab_np, lid)))
 
     if bool(protrusion_filter):
         from nvitk.segmentation.protrusion_filter import filter_label_protrusions_in_seg
@@ -864,13 +1122,17 @@ def flood_expand_vessels(
         )
         for lid in present:
             if lid not in QVTPY_DISTAL_IDS:
-                _finalize_vessel_largest_cc(seg_np, lid, seed_mask=_aca_eicab_a1_seed_mask(eicab_np, lid))
+                _finalize_vessel_largest_cc(seg_np, lid, connectivity=3,
+                                            seed_mask=pre_masks.get(lid, _aca_eicab_a1_seed_mask(eicab_np, lid)))
 
     info["split_distal_result"] = _split_distal(seg_np, pre_masks, int(near_radius))
     for prox, dist_id in QVTPY_PROXIMAL_TO_DISTAL.items():  # a distal label stays on its proximal one
         if np.any(seg_np == int(dist_id)):
             _keep_touching(seg_np, int(dist_id), (seg_np == int(prox)) | pre_masks.get(int(dist_id),
                                                                                        np.zeros(seg_np.shape, bool)))
+    vox_mm3 = float(numpy_host.prod(numpy_host.asarray(spacing, dtype=float)))
+    _, info["islands_cleared"] = drop_small_islands(
+        seg_np, sorted(_DISTAL_TARGET_IDS), min_voxels=int(numpy_host.ceil(float(min_island_mm3) / vox_mm3)))
     _record_flood_labels(info, seg_np, before_by_id, capped)
     total_before = sum(int(v["before"]) for v in info["labels"].values())
     total_after = sum(int(v["after"]) for v in info["labels"].values())
@@ -894,12 +1156,15 @@ def build_seg_4dflow_local(
     centerlines_mask: np.ndarray,
     *,
     eicab_qvtpy: np.ndarray | None = None,
+    eicab_native: np.ndarray | None = None,
+    spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
     crop_padding_bbox: int = 3,
     thr_algorithm: ThrAlgorithm = "lsthr",
     cl_barrier_radius: int = 2,
     segment_acomm: bool = False,
     split_vertebral: bool = True,
     flood_expand: bool = True,
+    flood_normalise_cd: bool = True,
     flood_hyst_low_factor: float = FLOOD_HYST_LOW_FACTOR_DEFAULT,
     flood_hyst_high_factor: float = FLOOD_HYST_HIGH_FACTOR_DEFAULT,
     flood_thicken_iter: int = FLOOD_THICKEN_ITER_DEFAULT,
@@ -907,11 +1172,15 @@ def build_seg_4dflow_local(
     flood_lr_halfspace_slack: int = FLOOD_LR_HALFSPACE_SLACK_DEFAULT,
     flood_protrusion_filter: bool = True,
     flood_near_radius: int = FLOOD_NEAR_RADIUS_DEFAULT,
+    flood_aca_step: int = FLOOD_ACA_STEP_DEFAULT,
+    flood_min_island_mm3: float = FLOOD_MIN_ISLAND_MM3_DEFAULT,
 ) -> LocalSegResult:
     """Build multilabel ``seg_4dflow`` from CD and the per-label centerline backbone (module
-    docstring): local threshold per label, the vertebral split (*split_vertebral*), the
-    communicating arteries' seeds (the AComm only with *segment_acomm*), then the blood flood
-    (*flood_expand*; :func:`flood_expand_vessels` with the ``flood_*`` settings)."""
+    docstring): local threshold per label, the ICAs' and basilar's region growing (walled off from
+    the registered eICAB SCAs, *eicab_native*, when given), the vertebral split (*split_vertebral*),
+    the communicating arteries' seeds (the AComm only with *segment_acomm*), then the blood flood
+    (*flood_expand*; :func:`flood_expand_vessels` with the ``flood_*`` settings). *spacing*: voxel
+    size (mm) per array axis."""
     cd = as_backend_array(cd).astype(np.float64)
     clm = as_backend_array(centerlines_mask).astype(np.int32, copy=False)
     eicab = None if eicab_qvtpy is None else as_backend_array(eicab_qvtpy).astype(np.int32, copy=False)
@@ -919,7 +1188,8 @@ def build_seg_4dflow_local(
     seg = np.zeros(shape, dtype=np.int32)
 
     label_ids = sorted(int(v) for v in to_numpy(np.unique(clm)) if int(v) > 0)
-    phase1_ids = [lid for lid in label_ids if lid not in QVTPY_COMM_IDS]
+    # The A2 / M2 / P2 come from the flood only (module docstring, step 1).
+    phase1_ids = [lid for lid in label_ids if lid not in QVTPY_COMM_IDS and lid not in QVTPY_DISTAL_IDS]
     comm_ids = [lid for lid in label_ids if lid in QVTPY_COMM_IDS]
     if not segment_acomm:
         comm_ids = [lid for lid in comm_ids if lid != int(QVTPY_ACOMM)]
@@ -956,12 +1226,23 @@ def build_seg_4dflow_local(
             n_voxels_after_threshold=n_thr, n_voxels_after_island_clean=n_thr, n_voxels_final=n_thr, warning=warn,
         ))
 
-    # Largest CC after the local threshold.
-    for lid in sorted(int(v) for v in to_numpy(np.unique(seg)) if int(v) != 0):
-        keep_largest_component_label_inplace(seg, int(lid))
+    # Of each threshold, the pieces on the vessel's own centerline (a crop's Otsu also keeps
+    # brighter patches of tissue elsewhere in the crop).
+    stats_by_id = {st.label_id: st for st in stats}
+    for lid in phase1_ids:
+        if not _keep_on_centerline(seg, lid, clm == lid) and lid in stats_by_id:
+            stats_by_id[lid].warning = "threshold off the centerline; seeded with the centerline"
     for st in stats:
         st.n_voxels_after_island_clean = int(np.count_nonzero(seg == st.label_id))
-    stats_by_id = {st.label_id: st for st in stats}
+
+    for lid in (int(QVTPY_LICA), int(QVTPY_RICA), int(QVTPY_BASILAR)):
+        st = stats_by_id.get(lid)
+        if st is None or not np.any(seg == lid):
+            continue
+        reason = _region_grow_trunk(seg, cd, clm, lid, st.opt_thresh, eicab_native)
+        st.n_voxels_after_region_growing = _finalize_vessel_largest_cc(seg, lid, log_name=f"trunk-{lid}")
+        if reason is not None:
+            st.warning = reason
 
     vertebral_info: VertebralSplitResult | None = None
     if split_vertebral and int(QVTPY_BASILAR) in stats_by_id and np.any(seg == int(QVTPY_BASILAR)):
@@ -985,19 +1266,28 @@ def build_seg_4dflow_local(
 
     flood_info: dict[str, Any] | None = None
     if bool(flood_expand):
+        # The A2 / M2 / P2 enter the flood as their bare centerlines (module docstring, step 1): the
+        # tree pieces they lie on are kept and flooded, even where the A1 / M1 / P1's tree breaks.
+        distal_cl = np.isin(clm, as_backend_array(sorted(int(i) for i in QVTPY_DISTAL_IDS))) & (seg == 0)
+        seg[distal_cl] = clm[distal_cl]
+        trunk_cl = np.isin(clm, as_backend_array(sorted(int(i) for i in QVTPY_ICA_BASILAR_IDS)))
+        blood = float(np.median(cd[trunk_cl])) if bool(flood_normalise_cd) and bool(trunk_cl.any()) else None
         flood_info = flood_expand_vessels(
             seg, cd, eicab_qvtpy=eicab,
             hyst_low_factor=float(flood_hyst_low_factor), hyst_high_factor=float(flood_hyst_high_factor),
             max_image_frac=float(flood_max_image_frac), thicken_iter=int(flood_thicken_iter),
             lr_halfspace_slack=int(flood_lr_halfspace_slack), protrusion_filter=bool(flood_protrusion_filter),
-            near_radius=int(flood_near_radius),
+            near_radius=int(flood_near_radius), aca_step=int(flood_aca_step),
+            min_island_mm3=float(flood_min_island_mm3), spacing=tuple(float(v) for v in spacing),
+            blood_reference=blood,
         )
     log.step("final per-vessel connected component")
     for lid in sorted(int(v) for v in to_numpy(np.unique(seg)) if int(v) != 0):
         if lid in QVTPY_DISTAL_IDS:
             continue  # its branches meet only through its proximal label: kept by the flood
-        _finalize_vessel_largest_cc(seg, lid, stats_by_id=stats_by_id, log_name=f"final-{lid}",
+        _finalize_vessel_largest_cc(seg, lid, stats_by_id=stats_by_id, log_name=f"final-{lid}", connectivity=3,
                                     seed_mask=_aca_eicab_a1_seed_mask(eicab, lid))
+    siphon = _correct_ica_siphons(seg, cd, spacing)
     present_ids = {int(v) for v in to_numpy(np.unique(seg)) if int(v) != 0}
     for st in stats:
         st.n_voxels_final = int(np.count_nonzero(seg == st.label_id))
@@ -1014,6 +1304,7 @@ def build_seg_4dflow_local(
         vessel_stats=stats,
         vertebral_split=vertebral_info,
         flood=flood_info,
+        siphon=siphon,
     )
 
 
@@ -1032,6 +1323,7 @@ def vessel_stats_to_dict(st: VesselSegStats) -> dict[str, Any]:
         "opt_thresh": st.opt_thresh,
         "n_voxels_after_threshold": st.n_voxels_after_threshold,
         "n_voxels_after_largest_cc": st.n_voxels_after_island_clean,
+        "n_voxels_after_region_growing": st.n_voxels_after_region_growing,
         "n_voxels_final": st.n_voxels_final,
         "flooded": st.flooded,
         "warning": st.warning,

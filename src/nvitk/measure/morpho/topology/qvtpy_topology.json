@@ -36,9 +36,7 @@
     "flow_from": "systemic",
     "flow_to": [
       "LPCA_P1",
-      "RPCA_P1",
-      "LSCA",
-      "RSCA"
+      "RPCA_P1"
     ],
     "no_upstream_start": "inferior"
   },
@@ -174,26 +172,6 @@
       "BASILAR"
     ],
     "no_upstream_start": "inferior"
-  },
-  "15": {
-    "name": "LSCA",
-    "full_name": "LSCA",
-    "side": "L",
-    "pair": "SCA",
-    "territory": "posterior",
-    "flow_from": "BASILAR",
-    "flow_to": [],
-    "no_upstream_start": null
-  },
-  "16": {
-    "name": "RSCA",
-    "full_name": "RSCA",
-    "side": "R",
-    "pair": "SCA",
-    "territory": "posterior",
-    "flow_from": "BASILAR",
-    "flow_to": [],
-    "no_upstream_start": null
   },
   "17": {
     "name": "LACA_A2",

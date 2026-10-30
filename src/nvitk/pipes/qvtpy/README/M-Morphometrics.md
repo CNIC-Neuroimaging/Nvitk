@@ -269,7 +269,10 @@ blanking zone or within two local radii (at least the kind's end exclusion) of a
 dropped, not just penalised. For a split vessel the bifurcations it shares with its other half
 count too: the branch points of the **merged** M1 + M2 (A1 + A2, P1 + P2) mask near the
 component (`labels_util.split_partner_junctions`). Measured alone, an M1 ends in the flare where
-its M2s leave, which otherwise reads as an enlargement.
+its M2s leave, which otherwise reads as an enlargement; likewise a branch leaving mid-M1 that the
+distal growth labelled M2. The merged mask takes every piece of the other half, including those
+`PROCESS_ALL_CONNECTED_COMPONENTS = False` leaves unmeasured: such a mid-M1 M2 branch is often a
+piece of its own (PESA2140369's right M1: a 23 % "enlargement" at its bifurcation until 2026-10-29).
 
 ### 5.1 The taper reference (`_compute_vessel_taper`)
 
@@ -721,7 +724,7 @@ Stage-7 CLI:
 | `--eicab-mask-preference` | `wb` | `wb`: stage 1's distal-grown `*_eICAB_WB_pp` (A1/A2, M1/M2, P1/P2 measured as separate vessels), else `*_CW_pp`; `cw`: `*_CW_pp` |
 | `--profile` | `eicab_cw` | morphometrics profile |
 | `--centerline-backend` | profile (`vmtk`) | `vmtk` / `native` / `raycast` |
-| `--use-postprocessed-mask/--no-…` | on | prefer `*_eICAB_CW_pp.nii.gz`, stage 1's post-process (docs/pipelines/qvtpy.md): no anterior choroidals; labels re-drawn at their local half maximum; ICAs / basilar to the image floor, with the vertebrals as their own vessels (LVA / RVA, labels 19 / 20 of `eicab_topology.json`); ACAs / MCAs / PCAs / SCAs grown distally along the Frangi tree; siphon loops cut. The `eicab_cw` thresholds were calibrated on eICAB's own, thicker masks |
+| `--use-postprocessed-mask/--no-…` | on | prefer `*_eICAB_CW_pp.nii.gz`, stage 1's post-process (docs/pipelines/qvtpy.md): no anterior choroidals; labels re-drawn at their local half maximum; ICAs to the image floor (the basilar not extended, no vertebrals) and their loops below the siphon filled where the inner wall came out dark; ACAs / MCAs / PCAs / SCAs grown distally along the Frangi tree; siphon loops cut. The `eicab_cw` thresholds were calibrated on eICAB's own, thicker masks |
 | `--taubin/--no-taubin` | off | Taubin-smooth the label mask first (`nvitk-qvtpy --stage7-taubin`) |
 | `--lesion-detection-method` | profile (`robust_reference`) | `robust_reference` / `taper` (§5.0; `nvitk-qvtpy --lesion-detection-method`) |
 | `--n-workers N` | min(4, CPUs/2) | vessels measured in parallel: one process per label/component job, 1 = one at a time (VMTK is memory-hungry). On SGE, N > 1 requests `-pe smp N` |

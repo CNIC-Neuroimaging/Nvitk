@@ -434,7 +434,8 @@ def add_morpho_lesion_points(
     metadata: dict[str, Any] | None = None,
 ) -> Any | None:
     """The detected lesions (``lesions.csv``) as points at their midpoints: orange stenoses, blue
-    enlargements, opaque in proportion to their confidence and sized by their severity."""
+    enlargements, opaque in proportion to their confidence, all *point_size* across. The layer
+    controls' point size resizes them all (napari's own only resizes a selection)."""
     path = Path(stage7_dir) / "lesions.csv"
     if not path.is_file():
         return None
@@ -455,8 +456,6 @@ def add_morpho_lesion_points(
     kind = df.get("kind", pd.Series(["stenosis"] * len(df))).astype(str).to_numpy()
     rgba = np.asarray([[*LESION_COLOURS.get(k, (0.6, 0.6, 0.6)), 0.35 + 0.65 * float(np.clip(c, 0, 1))]
                        for k, c in zip(kind, conf)], dtype=float)
-    severity = pd.to_numeric(df.get("diameter_percent"), errors="coerce").abs().fillna(0.0).to_numpy(dtype=float)
-    sizes = float(point_size) * (1.0 + 1.5 * np.clip(severity, 0.0, 80.0) / 80.0)
     keep = [c for c in ("vessel_name", "kind", "segment", "length_mm", "taper_percent", "diameter_percent",
                         "area_percent", "reference", "confidence", "confidence_class", "confidence_flags")
             if c in df.columns]
@@ -465,7 +464,7 @@ def add_morpho_lesion_points(
         "features": df[keep].reset_index(drop=True),
         "face_color": rgba,
         "border_color": "white",
-        "size": sizes,
+        "size": float(point_size),
         "symbol": "disc",
         "out_of_slice_display": True,
         "metadata": dict(metadata or {}),
@@ -478,6 +477,13 @@ def add_morpho_lesion_points(
         layer = viewer.add_points(data.astype(np.float64), **kwargs)
     if not located.all():
         layer.shown = located
+    layer.current_size = float(point_size)
+
+    def _resize_all(_event: Any = None) -> None:
+        if not layer.selected_data and len(layer.data):
+            layer.size = float(layer.current_size)
+
+    layer.events.current_size.connect(_resize_all)
     return layer
 
 
@@ -574,7 +580,7 @@ def install_morphometrics_viz(
                 extents_layer = add_lesion_extents(viewer, run, reference_layer=reference_layer, metadata=meta)
             lesion_layer = add_morpho_lesion_points(
                 viewer, stage7_dir, reference_layer=reference_layer,
-                point_size=max(3.0 * float(point_size), 0.5), metadata=meta,
+                point_size=max(2.0 * float(point_size), 0.5), metadata=meta,
             )
             if lesion_layer is not None:
                 # Hover cards and click-to-inspect (the extents are already drawn).

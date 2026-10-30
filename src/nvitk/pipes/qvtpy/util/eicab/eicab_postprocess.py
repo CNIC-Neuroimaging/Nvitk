@@ -21,13 +21,16 @@ order (each step can be switched off):
 2. **Local re-segmentation** (``resegment``). Each label is re-drawn at its local half maximum,
    from the intensities of that vessel and its surroundings only, with the other labels as
    barriers (:func:`nvitk.segmentation.vessel_refine.resegment_local`).
-3. **Trunks to the floor** (``extend``). eICAB's box cuts the ICAs and the basilar at its lower
-   face while the lumen goes on. Each trunk follows the minimum-cost path through a multi-scale
-   Frangi tree down to the image's last slices (the ICAs however far that is)
-   (:func:`nvitk.segmentation.vessel_refine.extend_trunks`). The basilar follows up to two
-   branches, the vertebral arteries. They are then split off with the 4D-flow pipeline's
-   vertebral logic (:func:`nvitk.pipes.qvtpy.util.segmentation.vertebral_split.split_vertebral_from_basilar`:
-   a centerline Y below the confluence, L/R by side) as LVA / RVA (eICAB ids 19 / 20, new).
+3. **ICAs to the floor** (``extend``). eICAB's box cuts the ICAs at its lower face while the
+   lumen goes on. Each ICA follows the minimum-cost path through a multi-scale Frangi tree down to
+   the image's lowest slice (:func:`nvitk.segmentation.vessel_refine.extend_trunks`). The basilar
+   is left as eICAB drew it (re-segmented only): no extension, no vertebral arteries.
+   Then the **ICA loops below the siphon** (``loop_fill``): in a tight loop the blood runs along the
+   outer wall and the inner wall comes out darker on TOF, a crescent the mask misses. Along each
+   ICA's centerline from the floor up to 2 mm before its siphon (the siphon: the cluster of
+   bends, >= 0.20 / mm at a 3 mm scale as in the morphometrics, around its sharpest bend in the
+   upper 60 % of the ICA), the cross-sections' notches at least 0.35 mm deep are filled; the
+   outer wall does not move (:func:`nvitk.segmentation.cross_section_fill.fill_cross_section_notches`).
 4. **Distal growth** (``distal``, WB_pp only). The ACAs, MCAs, PCAs (P2) and SCAs grow along the Frangi tree
    beyond eICAB's box, all at once and in competition, each voxel going to the vessel that
    reaches it first (:func:`nvitk.segmentation.vessel_refine.grow_distal`). The fronts advance
@@ -54,9 +57,12 @@ log of each step).
 from __future__ import annotations
 
 import json
+import math
 import time
 from pathlib import Path
 from typing import Any, Sequence
+
+import numpy as numpy_host  # host geometry (module ``np`` may be a CuPy proxy)
 
 from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import is_cupy_array, setup, using
@@ -66,21 +72,18 @@ from nvitk.morphology.centerline import compute_centerlines
 from nvitk.pipes.qvtpy.labels import (
     EICAB_DISTAL_SPLIT,
     EICAB_ACOMM,
-    EICAB_BASILAR,
     EICAB_LACA,
     EICAB_LACHA,
     EICAB_LICA,
     EICAB_LMCA,
     EICAB_LPCA_P2,
     EICAB_LSCA,
-    EICAB_LVA,
     EICAB_RACA,
     EICAB_RACHA,
     EICAB_RICA,
     EICAB_RMCA,
     EICAB_RPCA_P2,
     EICAB_RSCA,
-    EICAB_RVA,
 )
 from nvitk.pipes.qvtpy.util.centerline.centerline_io import rasterize_centerlines_mask
 from nvitk.pipes.qvtpy.util.eicab.eicab_masks import (
@@ -95,14 +98,22 @@ setup(globals())
 log = Logger()
 
 _DEFAULT_ICA_IDS: tuple[int, ...] = (EICAB_LICA, EICAB_RICA)
-#: The trunks eICAB's box cuts at its lower face: both ICAs and the basilar.
-_DEFAULT_TRUNK_IDS: tuple[int, ...] = (EICAB_LICA, EICAB_RICA, EICAB_BASILAR)
 #: Labels dropped first: the anterior choroidal arteries.
 _DEFAULT_REMOVE_IDS: tuple[int, ...] = (EICAB_LACHA, EICAB_RACHA)
 #: Labels grown distally along the Frangi tree: ACAs, MCAs, PCAs (P2) and SCAs.
 _DEFAULT_DISTAL_IDS: tuple[int, ...] = (EICAB_LACA, EICAB_RACA, EICAB_LMCA, EICAB_RMCA, EICAB_LPCA_P2,
                                         EICAB_RPCA_P2, EICAB_LSCA, EICAB_RSCA)
 PP_REPORT_JSON = "eicab_postprocess.json"
+#: The ICA siphon, for the loop fill: bends of at least this curvature (1/mm, at a 3 mm scale),
+#: grouped around the sharpest one in the ICA's upper 60 % with the bends up to 8 mm before it.
+SIPHON_KAPPA = 0.20
+SIPHON_SMOOTH_MM = 3.0
+SIPHON_GAP_MM = 8.0
+#: The loop fill stops this far (mm) before the siphon.
+LOOP_FILL_MARGIN_MM = 2.0
+#: After each step, a label's pieces smaller than this (mm³) go: the loose voxels a growth step
+#: leaves around a vessel. Real separate pieces (an M2 branch on its M1) are ~20 mm³ and more.
+MIN_ISLAND_MM3 = 5.0
 
 
 def _compute_pp_centerlines(labels: np.ndarray, *, min_points: int = 5) -> np.ndarray:
@@ -136,47 +147,72 @@ def _label_counts(seg: Any) -> dict[str, int]:
 def _repair_icas_mincut(
     intensity: Any, labels: Any, ica_ids: Sequence[int], affine: Any, *, pretess: bool
 ) -> dict[str, Any]:
-    """Pretess + loop cuts on each ICA of *labels* (in place, host or CuPy); compact per-ICA log.
-    The cuts run on the host (:mod:`nvitk.morphology.siphon_cut`); the TOF crosses once."""
-    from nvitk.morphology.siphon_cut import repair_label
+    """Pretess + loop cuts on each ICA of *labels* (:func:`nvitk.morphology.siphon_cut.repair_icas`,
+    in place); compact per-ICA log."""
+    from nvitk.morphology.siphon_cut import repair_icas
 
-    inten = to_numpy(intensity)
+    return repair_icas(intensity, labels, ica_ids, affine=affine, pretess=pretess)
+
+
+def _ica_below_siphon(mask: Any, affine: Any) -> tuple[Any, dict[str, Any]]:
+    """The centerline of one ICA (host *mask*) from its lowest point up to ``LOOP_FILL_MARGIN_MM``
+    before its siphon (module docstring, step 3), in mm on the voxel axes; ``None`` without a
+    centerline or a siphon. Host code."""
+    from nvitk.measure.morpho.geometry import cumulative_s, resample_polyline_by_arclength
+    from nvitk.measure.morpho.metrics import smoothed_curvature
+    from nvitk.morphology.centerline import compute_centerlines
+
+    with using("cpu"):
+        cl = compute_centerlines(mask.astype(numpy_host.int32), labels=[1], min_points=10).get(1)
+    if cl is None or len(cl) < 10:
+        return None, {"reason": "no centerline"}
+    aff = numpy_host.asarray(to_numpy(affine), dtype=float) if affine is not None else numpy_host.eye(4)
+    sp = numpy_host.sqrt((aff[:3, :3] ** 2).sum(0))
+    cl = numpy_host.asarray(to_numpy(cl), dtype=float)
+    if float(cl[0] @ aff[2, :3]) > float(cl[-1] @ aff[2, :3]):
+        cl = cl[::-1]  # the inferior end first
+    pts = resample_polyline_by_arclength(cl * sp, 0.25)
+    s = cumulative_s(pts)
+    k = smoothed_curvature(pts, SIPHON_SMOOTH_MM)
+    upper = s >= 0.4 * s[-1]
+    i_max = int(numpy_host.argmax(numpy_host.where(upper, k, -1.0)))
+    if k[i_max] < SIPHON_KAPPA:
+        return None, {"reason": "no siphon bend", "length_mm": round(float(s[-1]), 1)}
+    high = numpy_host.concatenate([[False], k >= SIPHON_KAPPA, [False]])
+    edges = numpy_host.flatnonzero(numpy_host.diff(high.astype(int)))
+    runs = [(s[a], s[b - 1]) for a, b in zip(edges[::2], edges[1::2])]
+    start = next(a for a, b in runs if a <= s[i_max] <= b)
+    for a, b in reversed([r for r in runs if r[1] < start]):
+        if start - b > SIPHON_GAP_MM:
+            break
+        start = a
+    end = start - LOOP_FILL_MARGIN_MM
+    info = {"length_mm": round(float(s[-1]), 1), "siphon_start_mm": round(float(start), 1),
+            "filled_stretch_mm": round(max(0.0, float(end)), 1)}
+    return (pts[s <= end] if end > 1.0 else None), info
+
+
+def _fill_ica_loops(labels: Any, ica_ids: Sequence[int], affine: Any) -> dict[str, Any]:
+    """Fill the cross-sectional notches of each ICA below its siphon (module docstring, step 3),
+    *labels* in place (host or CuPy). Host geometry; the label volume crosses once."""
+    from nvitk.segmentation.cross_section_fill import fill_cross_section_notches
+    from nvitk.segmentation.vessel_refine import spacing_of
+
+    host = to_numpy(labels).astype(numpy_host.int32)
+    sp = spacing_of(affine)
     out: dict[str, Any] = {}
     for lid in ica_ids:
-        if not bool((labels == int(lid)).any()):
+        mask = host == int(lid)
+        if not mask.any():
             continue
-        _m, _cut, entry = repair_label(labels, int(lid), inten, affine=affine,
-                                       pretess_mode="remove" if pretess else None, label_name=f"ICA_{int(lid)}")
-        rep = entry.get("repair") or {}
-        out[str(int(lid))] = {
-            "genus_before": entry["genus_before"], "genus_after": entry["genus_after"],
-            "pretess": entry.get("pretess"), "loops_cut": rep.get("n_cut_loops", 0),
-            "loops_left": rep.get("unresolved", 0), "cut_mm3": entry.get("cut_mm3"),
-            "removed_mm3": entry.get("removed_mm3"), "volume_change_pct": entry.get("volume_change_pct"),
-        }
+        path, info = _ica_below_siphon(mask, affine)
+        if path is not None:
+            add, counts = fill_cross_section_notches(mask, path, sp, blocked=host != 0)
+            host[add] = int(lid)
+            info.update(counts, voxels_added=int(add.sum()))
+        out[str(int(lid))] = info
+    labels[...] = as_backend_array(host, backend="cupy" if is_cupy_array(labels) else "numpy")
     return out
-
-
-def split_vertebrals(labels: Any) -> tuple[Any, dict[str, Any]]:
-    """Split the vertebral arteries off the basilar with the 4D-flow pipeline's logic
-    (:func:`~nvitk.pipes.qvtpy.util.segmentation.vertebral_split.split_vertebral_from_basilar`) and
-    label them LVA / RVA (eICAB 19 / 20). The ICAs and the basilar share their ids with qvtpy's
-    labels, which the split reads for left / right. Nothing changes without a centerline Y."""
-    from nvitk.pipes.qvtpy.labels import QVTPY_LVA, QVTPY_RVA
-    from nvitk.pipes.qvtpy.util.segmentation.vertebral_split import split_vertebral_from_basilar
-
-    seg = as_backend_array(labels).astype(np.int32)
-    trunks = to_numpy(np.where(_isin(seg, [EICAB_LICA, EICAB_RICA, EICAB_BASILAR]), seg, 0))
-    with using("cpu"):  # qvtpy's split (skeleton graph) is host code
-        split, result = split_vertebral_from_basilar(trunks)
-        split = to_numpy(split)
-    split = as_backend_array(split)
-    out = seg.copy()
-    if result.split_applied:
-        out[(seg == EICAB_BASILAR) & (split == QVTPY_LVA)] = EICAB_LVA
-        out[(seg == EICAB_BASILAR) & (split == QVTPY_RVA)] = EICAB_RVA
-    info = {k: v for k, v in result.as_dict().items() if not k.endswith("_centerline")}
-    return out, info
 
 
 def postprocess_eicab_variants(
@@ -185,12 +221,11 @@ def postprocess_eicab_variants(
     *,
     affine: Any | None = None,
     ica_ids: Sequence[int] = _DEFAULT_ICA_IDS,
-    trunk_ids: Sequence[int] = _DEFAULT_TRUNK_IDS,
     distal_ids: Sequence[int] = _DEFAULT_DISTAL_IDS,
     remove_ids: Sequence[int] = _DEFAULT_REMOVE_IDS,
     resegment: bool = True,
     extend: bool = True,
-    vertebrals: bool = True,
+    loop_fill: bool = True,
     distal: bool = True,
     cw: bool = True,
     aca_guard: bool = True,
@@ -202,42 +237,53 @@ def postprocess_eicab_variants(
     the report. *affine* (voxel -> world) gives the voxel size and the superior direction.
 
     Shared steps, each switchable: drop *remove_ids*; re-segment every label (*resegment*); extend
-    *trunk_ids* to the image floor (*extend*; the ICAs however far it is; the basilar into the
-    vertebrals, split off when *vertebrals*). Then the CW mask gets the siphon loop cuts on
+    the ICAs (*ica_ids*) to the image floor (*extend*); fill the notches of the ICAs' loops below
+    the siphon (*loop_fill*). Then the CW mask gets the siphon loop cuts on
     *ica_ids* (*siphon*; *pretess* first), and the WB mask the distal growth of *distal_ids* along
     the Frangi tree first (with *aca_guard*, the ACAs start their A2s from their own side of the
     AComm and may not grow more than 5 mm past the midline; the ACAs' and MCAs' growth is written
     as A2 / M2) and then the same cuts. *cw* False skips the CW mask (only with *distal*)."""
-    from nvitk.segmentation.vessel_refine import extend_trunks, grow_distal, resegment_local, tidy_labels
+    from nvitk.segmentation.vessel_refine import (
+        drop_small_islands,
+        extend_trunks,
+        grow_distal,
+        resegment_local,
+        spacing_of,
+        tidy_labels,
+    )
 
     t0 = time.time()
     inten = as_backend_array(intensity).astype(np.float64, copy=False)
     seg = as_backend_array(labels).astype(np.int32, copy=True)
     before = _label_counts(seg)
-    summary: dict[str, Any] = {"resegment": bool(resegment), "extend": bool(extend), "vertebrals": bool(vertebrals),
+    summary: dict[str, Any] = {"resegment": bool(resegment), "extend": bool(extend), "loop_fill": bool(loop_fill),
                                "distal": bool(distal), "siphon": bool(siphon),
                                "removed_labels": [int(i) for i in remove_ids]}
     if remove_ids:
         seg[_isin(seg, remove_ids)] = 0
     tidy_log: dict[str, Any] = summary.setdefault("tidy", {})
 
+    min_island = math.ceil(MIN_ISLAND_MM3 / math.prod(spacing_of(affine)))
+
     def _tidy(vol: Any, step: str) -> Any:
-        """Every label to its largest component, holes filled, after a step (logged per step)."""
+        """Every label to its largest component (an A2 / M2: its pieces on the A1 / M1), holes
+        filled, pieces under MIN_ISLAND_MM3 dropped, after a step (logged per step)."""
         vol, tidy_log[step] = tidy_labels(vol, anchors={int(d): int(p) for p, d in EICAB_DISTAL_SPLIT.items()})
+        vol, islands = drop_small_islands(vol, min_voxels=min_island)
+        if islands:
+            tidy_log[step] = {**tidy_log[step], "islands_cleared": islands}
         return vol
 
     if resegment:
         seg, summary["resegmentation"] = resegment_local(inten, seg, affine=affine)
         seg = _tidy(seg, "resegment")
     if extend:
-        branches = {int(EICAB_BASILAR): 2} if vertebrals else {}
-        seg, summary["extension"] = extend_trunks(inten, seg, trunk_ids, affine=affine, floor_branches=branches,
-                                                  split_ratio={int(i): (0.5 if int(i) in ica_ids else 0.2)
-                                                               for i in trunk_ids},
+        seg, summary["extension"] = extend_trunks(inten, seg, ica_ids, affine=affine,
+                                                  split_ratio={int(i): 0.5 for i in ica_ids},
                                                   edge_ids=[int(i) for i in ica_ids])
-        if vertebrals and int(EICAB_BASILAR) in [int(i) for i in trunk_ids]:
-            seg, summary["vertebral_split"] = split_vertebrals(seg)
         seg = _tidy(seg, "extend")
+    if loop_fill:
+        summary["loop_fill"] = _fill_ica_loops(seg, ica_ids, affine)
 
     def _tail(vol: Any, key: str) -> Any:
         """The siphon cuts and the voxel counts of one variant (*vol* in place)."""
@@ -420,5 +466,4 @@ __all__ = [
     "postprocess_eicab_variants",
     "postprocess_eicab_directory",
     "postprocess_eicab_labels",
-    "split_vertebrals",
 ]

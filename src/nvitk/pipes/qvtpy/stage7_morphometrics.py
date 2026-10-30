@@ -73,12 +73,14 @@ def run_subject(
     use_postprocessed_mask: bool = True,
     taubin: bool | None = None,
     lesion_detection_method: str | None = None,
+    verbose: bool = False,
     n_workers: int | None = None,
     profile: str = DEFAULT_PROFILE,
     centerline_backend: str | None = None,
     morpho_config: MorphometricsConfig | None = None,
 ) -> Path:
-    """Run stage-7 TOF morphometrics for one subject (*morpho_config* overrides *profile*)."""
+    """Run stage-7 TOF morphometrics for one subject (*morpho_config* overrides *profile*).
+    *verbose*: print the morphometrics' progress (default: only failures, on stderr)."""
     out_dir = stage7_dir(output_root, subject)
     excel_path = out_dir / STAGE7_SKIP_MARKER
     if skip_existing and excel_path.is_file():
@@ -115,6 +117,7 @@ def run_subject(
         input_already_smoothed=not bool(taubin),
         skip_if_excel_exists=skip_existing,
         case_id=subject,
+        verbose=verbose,
     )
     log.info(f"[{subject}] stage7 morphometrics -> {excel_path}")
 
@@ -139,6 +142,7 @@ def _subject_sge_spec(
     use_postprocessed_mask: bool = True,
     taubin: bool | None = None,
     lesion_detection_method: str | None = None,
+    verbose: bool = False,
     n_workers: int | None = None,
     profile: str = DEFAULT_PROFILE,
     centerline_backend: str | None = None,
@@ -165,6 +169,8 @@ def _subject_sge_spec(
         parts.append("--taubin" if taubin else "--no-taubin")
     if lesion_detection_method:
         parts.extend(["--lesion-detection-method", shlex.quote(str(lesion_detection_method))])
+    if verbose:
+        parts.append("--verbose")
     if skip_existing:
         parts.append("--skip-existing")
     if n_workers is not None:
@@ -208,6 +214,7 @@ def build_subject_sge_command(
     use_postprocessed_mask: bool = True,
     taubin: bool | None = None,
     lesion_detection_method: str | None = None,
+    verbose: bool = False,
     n_workers: int | None = None,
     profile: str = DEFAULT_PROFILE,
     centerline_backend: str | None = None,
@@ -226,6 +233,7 @@ def build_subject_sge_command(
         use_postprocessed_mask=use_postprocessed_mask,
         taubin=taubin,
         lesion_detection_method=lesion_detection_method,
+        verbose=verbose,
         n_workers=n_workers,
         profile=profile,
         centerline_backend=centerline_backend,
@@ -247,6 +255,7 @@ def submit_subject_sge(
     use_postprocessed_mask: bool = True,
     taubin: bool | None = None,
     lesion_detection_method: str | None = None,
+    verbose: bool = False,
     n_workers: int | None = None,
     profile: str = DEFAULT_PROFILE,
     centerline_backend: str | None = None,
@@ -263,6 +272,7 @@ def submit_subject_sge(
         use_postprocessed_mask=use_postprocessed_mask,
         taubin=taubin,
         lesion_detection_method=lesion_detection_method,
+        verbose=verbose,
         n_workers=n_workers,
         profile=profile,
         centerline_backend=centerline_backend,
@@ -316,6 +326,12 @@ def submit_subject_sge(
     help="Override the profile's stenosis / enlargement detection (robust_reference / taper).",
 )
 @click.option(
+    "--verbose/--no-verbose",
+    default=False,
+    show_default=True,
+    help="Print the morphometrics' progress (per vessel / component); off: only failures, on stderr.",
+)
+@click.option(
     "--n-workers",
     type=click.IntRange(min=1),
     default=None,
@@ -331,6 +347,7 @@ def main(
     use_postprocessed_mask: bool,
     taubin: bool | None,
     lesion_detection_method: str | None,
+    verbose: bool,
     n_workers: int | None,
     profile: str,
     centerline_backend: str | None,
@@ -345,6 +362,7 @@ def main(
         use_postprocessed_mask=use_postprocessed_mask,
         taubin=taubin,
         lesion_detection_method=lesion_detection_method,
+        verbose=verbose,
         n_workers=n_workers,
         profile=profile,
         centerline_backend=centerline_backend,

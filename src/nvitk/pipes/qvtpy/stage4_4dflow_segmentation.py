@@ -122,7 +122,7 @@ def _segmentation_meta(
         "segment_acomm": bool(segment_acomm),
         "comm_segmentation_strategy": "centerline_plus_threshold_then_flood_near_field",
         "post_threshold_clean": "largest_cc_per_label",
-        "growth": "blood_flood",
+        "growth": "region_growing (ICAs, basilar) + blood_flood (ACA / MCA / PCA)",
         **{k: v for k, v in flood.items()},
         "centerlines_from_seg": "centerlines_mask_4dflow.nii.gz",
         "vessels": vessels,
@@ -130,6 +130,22 @@ def _segmentation_meta(
 
 
 # Stage 4: local CD crop + threshold + largest-CC clean + blood flood
+
+
+def load_stage3_eicab(s3: Path, subject: str, stage: str) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Stage 3's registered eICAB labels: ``(qvtpy ids, eICAB's own ids)``, ``None`` when missing.
+    The qvtpy ones anchor the ACAs' components and the AComm; the native ones wall the basilar's
+    region growing off the eICAB SCAs (not segmented here)."""
+    out: list[np.ndarray | None] = []
+    for name, missing in ((EICAB_IN_4DFLOW_NIFTI, "the ACAs' components are not anchored on eICAB"),
+                          (EICAB_IN_4DFLOW_EICAB_IDS_NIFTI, "the basilar's growth has no eICAB SCA walls")):
+        path = s3 / name
+        if path.is_file():
+            out.append(as_backend_array(imread(path).data).astype(np.int32, copy=False))
+        else:
+            out.append(None)
+            log.warning(f"[{subject}] {stage}: missing {path}; {missing}")
+    return out[0], out[1]
 
 
 def run_subject(
@@ -153,11 +169,7 @@ def run_subject(
         raise FileNotFoundError(f"Missing {cl_path} (run stage3)")
 
     eicab_path = s3 / EICAB_IN_4DFLOW_NIFTI
-    eicab_qvtpy = None
-    if eicab_path.is_file():
-        eicab_qvtpy = as_backend_array(imread(eicab_path).data).astype(np.int32, copy=False)
-    else:
-        log.warning(f"[{subject}] stage4: missing {eicab_path}; the ACAs' components are not anchored on eICAB")
+    eicab_qvtpy, eicab_native = load_stage3_eicab(s3, subject, "stage4")
 
     out_dir = _stage4_out(output_root, subject)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -180,6 +192,8 @@ def run_subject(
         cd,
         centerlines_mask,
         eicab_qvtpy=eicab_qvtpy,
+        eicab_native=eicab_native,
+        spacing=tuple(float(v) for v in cd_img.spacing[:3]),
         crop_padding_bbox=int(crop_padding_bbox),
         thr_algorithm=thr_algorithm,
         cl_barrier_radius=int(cl_barrier_radius),
@@ -250,6 +264,8 @@ def run_subject(
     )
     if result.flood is not None:
         meta_doc["flood_result"] = result.flood
+    if result.siphon is not None:
+        meta_doc["siphon_correction"] = result.siphon
     meta_path.write_text(
         json.dumps(meta_doc, indent=2),
         encoding="utf-8",
@@ -404,6 +420,7 @@ __all__ = [
     "flood_click_options",
     "flood_settings",
     "EICAB_IN_4DFLOW_EICAB_IDS_NIFTI",
+    "load_stage3_eicab",
     "EICAB_IN_4DFLOW_NIFTI",
     "main",
     "run_subject",

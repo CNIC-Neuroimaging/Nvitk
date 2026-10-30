@@ -1137,7 +1137,6 @@ def select_arterial_locs(
       (before the flood); when *distal_locs* is true, also place fin distal of that span on the
       stage-4 trunk (stage-3 coverage forbidden for fin)
     - A2 / M2 / P2 labels: one mid LOC on the trunk, only when *distal_locs* is true
-    - SCAs: one mid LOC on the trunk
     - ACOMM: never measured (insufficient resolution)
     - PCOMM: only when present in the arterial set (stage-3 min-points survivors)
     - Other labels: one mid LOC on the trunk

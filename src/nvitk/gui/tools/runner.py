@@ -3836,6 +3836,7 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
         input_already_smoothed=already_smoothed,
         skip_if_excel_exists=skip_existing,
         species=species,
+        verbose=bool(params.get("verbose")),
     )
 
     # Show the (bridged) vessel mask used for computation as a Labels layer.
@@ -4951,9 +4952,10 @@ def _run_eicab_postprocess(viewer: Any, layer: Any, params: dict[str, Any]) -> N
         intensity, labels, affine=lab_img.affine if lab_img.affine is not None else tof_img.affine,
         remove_ids=(17, 18) if bool(params.get("eicab_pp_remove_acha", True)) else (),
         resegment=bool(params.get("eicab_pp_resegment", True)), extend=bool(params.get("eicab_pp_extend", True)),
-        vertebrals=bool(params.get("eicab_pp_vertebrals", True)), distal=bool(params.get("eicab_pp_distal", True)),
+        loop_fill=bool(params.get("eicab_pp_loop_fill", True)),
+        distal=bool(params.get("eicab_pp_distal", True)),
         aca_guard=bool(params.get("eicab_pp_aca_guard", True)), siphon=bool(params.get("eicab_pp_siphon", True)),
-        trunk_ids=ids("eicab_pp_trunks", "1,2,3"), distal_ids=ids("eicab_pp_distal_ids", "5,6,7,8,13,14,15,16"),
+        distal_ids=ids("eicab_pp_distal_ids", "5,6,7,8,13,14,15,16"),
         ica_ids=ids("eicab_pp_icas", "1,2"),
     )
     masks = {k: to_numpy(v).astype(numpy_host.int32) for k, v in masks.items()}
@@ -4964,7 +4966,7 @@ def _run_eicab_postprocess(viewer: Any, layer: Any, params: dict[str, Any]) -> N
             continue
         pp_layer = viewer.add_labels(masks[kind], name=f"{base} {kind.upper()}_pp", opacity=0.7,
                                      visible=kind == ("wb" if "wb" in masks else "cw"), **kw)
-        try:  # name the post-process's own labels (vertebrals, A2 / M2) like the eICAB ones
+        try:  # name the post-process's own labels (A2 / M2) like the eICAB ones
             from nvitk.gui.labels.catalog import LABEL_NAMES_KEY
             from nvitk.pipes.qvtpy.labels import EICAB_ID_TO_NAME
 

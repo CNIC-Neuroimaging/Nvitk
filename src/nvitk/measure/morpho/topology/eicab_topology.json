@@ -211,30 +211,6 @@
     "flow_to": [],
     "no_upstream_start": null
   },
-  "19": {
-    "name": "LVA",
-    "full_name": "LVA",
-    "side": "L",
-    "pair": "VA",
-    "territory": "posterior",
-    "flow_from": "systemic",
-    "flow_to": [
-      "BASILAR"
-    ],
-    "no_upstream_start": "inferior"
-  },
-  "20": {
-    "name": "RVA",
-    "full_name": "RVA",
-    "side": "R",
-    "pair": "VA",
-    "territory": "posterior",
-    "flow_from": "systemic",
-    "flow_to": [
-      "BASILAR"
-    ],
-    "no_upstream_start": "inferior"
-  },
   "21": {
     "name": "LACA_A2",
     "full_name": "LACA_A2",

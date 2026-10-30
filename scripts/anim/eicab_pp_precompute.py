@@ -4,8 +4,8 @@ Runs :func:`nvitk.pipes.qvtpy.util.eicab.eicab_postprocess.postprocess_eicab_lab
 stage 1 does, on a PESA subject's eICAB Circle-of-Willis mask (PESA10061584 by default), and records every stage by wrapping
 the functions it calls for that run (nothing is re-implemented):
 
-- the label volume after each step: anterior choroidals dropped, local re-segmentation, trunks
-  to the image floor, vertebral split, distal growth, siphon correction;
+- the label volume after each step: anterior choroidals dropped, local re-segmentation, ICAs
+  to the image floor, distal growth, siphon correction;
 - inside the trunk extension, each trunk's crop and its minimum-cost paths to the floor;
 - inside the distal growth, the Frangi tree the labels compete for, the owner of each tree voxel
   and the geodesic cost at which its front arrived (the flood order), and the ACA midline plane.
@@ -29,14 +29,13 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 
-#: PESA10061584 shows every step: ICAs 37-47 mm below eICAB's box, the basilar into the
-#: vertebrals (split off as LVA / RVA), both ACAs with the AComm (the midline guard), and a right
-#: ICA siphon loop.
+#: PESA10061584 shows every step: ICAs 37-47 mm below eICAB's box, both ACAs with the AComm (the
+#: midline guard), and a right ICA siphon loop.
 DEFAULT_EICAB_DIR = Path("/home/imarcoss/DATA/PESA-Brain/Morphometrics/RESULTS/PESA10061584/eicab")
 #: Display block (voxels per side): 6 -> 3 mm cubes on the 0.5 mm grid (~1,600 cubes).
 BLOCK = 6
 PAD = 6
-STAGES = ("raw", "noacha", "reseg", "ext", "va", "distal", "final")
+STAGES = ("raw", "noacha", "reseg", "ext", "distal", "final")
 NAMES = {1: "LICA", 2: "RICA", 3: "BA", 4: "AComm", 5: "LACA", 6: "RACA", 7: "LMCA", 8: "RMCA", 9: "LPComm",
          10: "RPComm", 11: "LPCA P1", 12: "RPCA P1", 13: "LPCA P2", 14: "RPCA P2", 15: "LSCA", 16: "RSCA",
          17: "LAChA", 18: "RAChA", 19: "LVA", 20: "RVA"}
@@ -82,11 +81,6 @@ class Recorder:
             self.ext_paths.append([np.array(p) + self.ext_boxes[-1] for p in paths])
             return paths, info
 
-        def split_vertebrals(labels):
-            out, info = o[(ep, "split_vertebrals")](labels)
-            self.snap["va"], self.info["va"] = np.array(out, np.int32), info
-            return out, info
-
         def grow_distal(intensity, labels, ids, *a, **k):
             self.compete["ids"] = [int(i) for i in ids]
             out, info = o[(vr, "grow_distal")](intensity, labels, ids, *a, **k)
@@ -109,7 +103,6 @@ class Recorder:
         self._wrap(vr, "extend_trunks", extend_trunks)
         self._wrap(vr, "_extension_box", extension_box)
         self._wrap(vr, "_paths_to_floor", paths_to_floor)
-        self._wrap(ep, "split_vertebrals", split_vertebrals)
         self._wrap(vr, "grow_distal", grow_distal)
         self._wrap(vr, "_compete", compete)
         self._wrap(ep, "_repair_icas_mincut", repair_icas)
@@ -259,7 +252,7 @@ def compute(eicab_dir: Path, block: int = BLOCK) -> tuple[dict[str, np.ndarray],
 
     # distal growth in the full frame: tree, owner, arrival cost
     sp = vr.spacing_of(aff)
-    dbox = vr._bbox(vr._isin(rec.snap["va"], rec.compete["ids"]), vr._vox(vr.DISTAL_MAX_MM + 5.0, sp))
+    dbox = vr._bbox(vr._isin(rec.snap["ext"], rec.compete["ids"]), vr._vox(vr.DISTAL_MAX_MM + 5.0, sp))
     tree = np.zeros(raw.shape, bool)
     owner = np.zeros(raw.shape, np.int32)
     best = np.full(raw.shape, np.inf)
@@ -277,7 +270,7 @@ def compute(eicab_dir: Path, block: int = BLOCK) -> tuple[dict[str, np.ndarray],
     modes, occs = {}, {}
     for k in STAGES:
         modes[k], occs[k] = _blocks_label(snaps[k][crop], b)
-    tree_frac = _blocks_any(tree[crop] & (snaps["va"][crop] == 0), b)
+    tree_frac = _blocks_any(tree[crop] & (snaps["ext"][crop] == 0), b)
     present = np.zeros(modes["raw"].shape, bool)
     for k in STAGES:
         present |= occs[k] > 0
@@ -286,7 +279,7 @@ def compute(eicab_dir: Path, block: int = BLOCK) -> tuple[dict[str, np.ndarray],
     sel = tuple(bidx.T)
     centres = (bidx + 0.5) * b - 0.5 + lo  # full-volume voxel units
     world = (aff[:3, :3] @ centres.T).T + aff[:3, 3]
-    grown = (owner > 0) & (snaps["va"] == 0)
+    grown = (owner > 0) & (snaps["ext"] == 0)
     arrival = _blocks_min(best[crop], grown[crop], b)[sel]
     removed_siphon = np.argwhere((snaps["pre_siphon"] > 0) & (snaps["final"] == 0) & np.isin(snaps["pre_siphon"], [1, 2]))
 
@@ -297,7 +290,7 @@ def compute(eicab_dir: Path, block: int = BLOCK) -> tuple[dict[str, np.ndarray],
         "arrival": np.where(np.isfinite(arrival), arrival, -1.0).astype(np.float32),
         "siphon_removed": removed_siphon.astype(np.float32),
         "inset_reseg": _inset_reseg(tof, snaps["noacha"], snaps["reseg"], rec.info["reseg"]),
-        "inset_ext": _inset_extension(tof, snaps["reseg"], snaps["va"], aff),
+        "inset_ext": _inset_extension(tof, snaps["reseg"], snaps["ext"], aff),
     }
     for k in STAGES:
         arrays[f"label_{k}"] = modes[k][sel]
@@ -332,8 +325,6 @@ def compute(eicab_dir: Path, block: int = BLOCK) -> tuple[dict[str, np.ndarray],
         "extension": {lid: {"length_mm": e.get("length_mm"), "stop": e.get("stop"),
                             "added_mm3": e.get("volume_added_mm3"), "branches": len(e.get("path_costs") or [])}
                       for lid, e in ext_labels.items()},
-        "va_split": {"applied": rec.info["va"].get("split_applied"), "lva_mm3": round(float((snaps["va"] == 19).sum()) * vox, 1),
-                     "rva_mm3": round(float((snaps["va"] == 20).sum()) * vox, 1)},
         "distal": {lid: e.get("volume_added_mm3", 0.0) for lid, e in dg.get("labels", {}).items()},
         "distal_tree_voxels": dg.get("tree_voxels"),
         "distal_gate": dg.get("gate"),

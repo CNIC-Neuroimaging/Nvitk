@@ -77,21 +77,35 @@ class BloodFloodResult:
     info: dict[str, Any] = field(default_factory=dict)
 
 
+#: With a blood reference, the intensity is divided by it and clipped here (the brightest arteries
+#: and sinuses do not swamp the vesselness of the smaller ones).
+BLOOD_REFERENCE_CLIP: float = 1.5
+
+
 def intensity_vesselness(
     intensity: np.ndarray,
     *,
     sigmas: tuple[float, ...] | list[float] = FRANGI_SIGMAS_DEFAULT,
+    reference: float | None = None,
 ) -> tuple[np.ndarray, str]:
     """Tubular vesselness from a bright-blood intensity volume (skimage Frangi).
 
-    Fallback when Frangi is unavailable: percentile-normalized intensity in ``[0, 1]``.
+    Without *reference*, the volume is rescaled between its 1st and 99.5th percentiles and the
+    vesselness divided by its maximum: both follow the image's own brightest structures. With
+    *reference* (the blood signal, e.g. the median intensity on the main arteries' centerlines), the
+    volume is divided by it and clipped at ``BLOOD_REFERENCE_CLIP``, and the vesselness is kept as
+    it is: one scale for every image, so the thresholds that follow mean the same across subjects.
+    Fallback when Frangi is unavailable: the normalized intensity.
     """
     vol = as_backend_array(intensity).astype(np.float64)
     vol = np.nan_to_num(vol, nan=0.0, posinf=0.0, neginf=0.0)
-    lo, hi = float(np.percentile(vol, 1.0)), float(np.percentile(vol, 99.5))
-    if hi <= lo + 1e-8:
-        hi = float(vol.max()) if float(vol.max()) > lo else lo + 1.0
-    vol_norm = np.clip((vol - lo) / (hi - lo), 0.0, 1.0)
+    if reference is not None and float(reference) > 0.0:
+        vol_norm = np.clip(vol / float(reference), 0.0, BLOOD_REFERENCE_CLIP)
+    else:
+        lo, hi = float(np.percentile(vol, 1.0)), float(np.percentile(vol, 99.5))
+        if hi <= lo + 1e-8:
+            hi = float(vol.max()) if float(vol.max()) > lo else lo + 1.0
+        vol_norm = np.clip((vol - lo) / (hi - lo), 0.0, 1.0)
 
     try:
         from skimage.filters import frangi
@@ -104,7 +118,7 @@ def intensity_vesselness(
             )
         v = np.nan_to_num(as_backend_array(v).astype(np.float64), nan=0.0)
         vmax = float(v.max())
-        if vmax > 0.0:
+        if vmax > 0.0 and reference is None:
             v = v / vmax
         log.info(
             f"blood_flood vesselness: Frangi (sigmas={list(sigmas)}, max={vmax:.4g})"
@@ -119,9 +133,10 @@ def cd_vesselness(
     cd: np.ndarray,
     *,
     sigmas: tuple[float, ...] | list[float] = FRANGI_SIGMAS_DEFAULT,
+    reference: float | None = None,
 ) -> tuple[np.ndarray, str]:
     """Alias of :func:`intensity_vesselness` (qvtpy / CD naming)."""
-    return intensity_vesselness(cd, sigmas=sigmas)
+    return intensity_vesselness(cd, sigmas=sigmas, reference=reference)
 
 
 def _thresholds_sigma(
@@ -669,6 +684,7 @@ def blood_flood_from_scratch(
 
 
 __all__ = [
+    "BLOOD_REFERENCE_CLIP",
     "BloodFloodResult",
     "FRANGI_SIGMAS_DEFAULT",
     "HYST_HIGH_FACTOR_DEFAULT",

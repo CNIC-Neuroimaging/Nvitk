@@ -12,6 +12,7 @@ import json
 import os
 import traceback
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -23,7 +24,7 @@ from nvitk.measure.morpho.preprocess_taubin import (
     preprocess_segmentation,
     save_segmentation,
 )
-from nvitk.measure.morpho.run_case import N_WORKERS, run_case
+from nvitk.measure.morpho.run_case import N_WORKERS, quiet_stdout, run_case
 from nvitk.measure.morpho.topology_io import (
     TOPOLOGY_NONE,
     TopologyMeta,
@@ -184,7 +185,15 @@ def _write_provenance(case_dir: Path, *, seg_path: Path, pipeline_seg: Path, cfg
     (case_dir / PROVENANCE_FILE).write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
 
 
-def run_morphometrics_case(
+def run_morphometrics_case(seg_path: str | Path, out_dir: str | Path, *, verbose: bool = False, **kwargs: Any) -> Path:
+    """Run full TOF morphometrics for one multilabel segmentation NIfTI
+    (:func:`_run_morphometrics_case`, the parameters). With *verbose* False (default) it prints
+    nothing but the failures (on stderr); True prints every step's progress."""
+    with quiet_stdout(not verbose):
+        return _run_morphometrics_case(seg_path, out_dir, verbose=verbose, **kwargs)
+
+
+def _run_morphometrics_case(
     seg_path: str | Path,
     out_dir: str | Path,
     *,
@@ -201,6 +210,7 @@ def run_morphometrics_case(
     axes_override: str | None = None,
     length_scale: float | None = None,
     case_id: str | None = None,
+    verbose: bool = False,
 ) -> Path:
     """Run full TOF morphometrics for one multilabel segmentation NIfTI.
 
@@ -283,6 +293,7 @@ def run_morphometrics_case(
             length_scale=resolved_length_scale,
             config=cfg,
             case_id=case_id,
+            verbose=verbose,
         )
         _write_provenance(
             case_dir, seg_path=seg_p, pipeline_seg=pipeline_seg, cfg=cfg, topology_json=topo_json,

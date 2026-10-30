@@ -40,7 +40,7 @@ from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread, imsave
 from nvitk.measure import dice as measure_dice
 from nvitk.pipes.qvtpy import config as cfg
-from nvitk.pipes.qvtpy.stage4_4dflow_segmentation import EICAB_IN_4DFLOW_NIFTI
+from nvitk.pipes.qvtpy.stage4_4dflow_segmentation import EICAB_IN_4DFLOW_NIFTI, load_stage3_eicab
 from nvitk.pipes.qvtpy.util.segmentation.flood_options import flood_cli_args, flood_click_options, flood_settings
 from nvitk.pipes.qvtpy.util.centerline.centerline_io import (
     centerline_meta_path,
@@ -196,7 +196,7 @@ def build_temporal_seg_summary(
         "vessel_extra_padding": int(VESSEL_EXTRA_PADDING),
         "thr_algorithm": thr_algorithm,
         "cl_barrier_radius": int(cl_barrier_radius),
-        "growth": "blood_flood",
+        "growth": "region_growing (ICAs, basilar) + blood_flood (ACA / MCA / PCA)",
         **dict(flood or {}),
         "per_label": per_label,
         "multilabel_dice_vs_t0": multilabel_dice_vs_t0,
@@ -231,7 +231,7 @@ def _segmentation_meta_for_timepoint(
         "comm_segmentation_strategy": "centerline_plus_threshold_then_flood_near_field",
         "post_threshold_clean": "largest_cc_per_label",
         "cl_barrier_radius": int(cl_barrier_radius),
-        "growth": "blood_flood",
+        "growth": "region_growing (ICAs, basilar) + blood_flood (ACA / MCA / PCA)",
         **flood,
         "vessels": vessels,
     }
@@ -262,11 +262,7 @@ def run_subject(
         raise FileNotFoundError(f"Missing {cl_path} (run stage3)")
 
     eicab_path = s3 / EICAB_IN_4DFLOW_NIFTI
-    eicab_qvtpy = None
-    if eicab_path.is_file():
-        eicab_qvtpy = as_backend_array(imread(eicab_path).data).astype(np.int32, copy=False)
-    else:
-        log.warning(f"[{subject}] stage4t: missing {eicab_path}; the ACAs' components are not anchored on eICAB")
+    eicab_qvtpy, eicab_native = load_stage3_eicab(s3, subject, "stage4t")
 
     cd4d_path = _cd4d_path(nifti_root, subject)
     cd_img = imread(cd4d_path)
@@ -295,6 +291,8 @@ def run_subject(
     build_kw = dict(
         centerlines_mask=centerlines_mask,
         eicab_qvtpy=eicab_qvtpy,
+        eicab_native=eicab_native,
+        spacing=tuple(float(v) for v in cd_img.spacing[:3]),
         crop_padding_bbox=int(crop_padding_bbox),
         thr_algorithm=thr_algorithm,
         cl_barrier_radius=int(cl_barrier_radius),
