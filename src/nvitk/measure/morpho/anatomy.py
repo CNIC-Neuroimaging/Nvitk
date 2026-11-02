@@ -40,7 +40,7 @@ def anatomical_endpoint_score(
     With *axes* the rule is resolved against the volume's real orientation and
     the subject's species (see :mod:`nvitk.measure.morpho.anatomy_axes`).
     Without it the legacy hardcoded axes are used: array axis 2 = S/I, axis 1 =
-    A/P, axis 0 increasing toward L — i.e. an implicit LAS volume.
+    A/P, axis 0 increasing toward L, i.e. an implicit LAS volume.
     """
     if axes is not None:
         return float(axes.score(pt_mm, rule))
@@ -130,14 +130,14 @@ def orient_centerline_points_by_flow(
     mapping: dict,
     axes: Optional[AnatomicalAxes] = None,
 ) -> Tuple[np.ndarray, bool]:
-    """Orient a centerline so it runs upstream→downstream per *vessel_info* flow topology.
+    """Orient a centerline so it runs upstream->downstream per *vessel_info* flow topology.
 
     Returns ``(points, was_reversed)``. Falls back through downstream-only, then
     upstream-only proximity when one side of the topology is unavailable, and
     finally onto the vessel's ``no_upstream_start`` anatomical rule. That last
     fallback matters for root vessels whose topology has no usable
-    ``flow_from``/``flow_to`` (``"systemic"`` upstream, empty downstream) — e.g.
-    every entry in ``mouse_root_topology.json`` — which otherwise get no
+    ``flow_from``/``flow_to`` (``"systemic"`` upstream, empty downstream), e.g.
+    every entry in ``mouse_root_topology.json``: which otherwise get no
     orientation at all when the component is unbranched.
     """
     spacing = np.asarray(spacing, dtype=float)

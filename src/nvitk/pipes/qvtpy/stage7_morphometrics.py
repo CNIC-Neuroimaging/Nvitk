@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import shlex
+from dataclasses import replace
 from pathlib import Path
 from typing import TextIO
 
@@ -33,7 +34,14 @@ from nvitk.cluster.sge import (
 from nvitk.core.click_backend import backend_click_option
 from nvitk.core.logger import Logger
 from nvitk.measure.morphometrics import run_morphometrics_case
-from nvitk.measure.morphometrics_config import CENTERLINE_BACKENDS, DEFAULT_PROFILE, PROFILES, MorphometricsConfig
+from nvitk.measure.morphometrics_config import (
+    CENTERLINE_BACKENDS,
+    DEFAULT_PROFILE,
+    LESION_DETECTION_METHODS,
+    PROFILES,
+    MorphometricsConfig,
+    morphometrics_config,
+)
 from nvitk.measure.morpho.topology_io import default_eicab_topology_path
 from nvitk.pipes.qvtpy import config as cfg
 from nvitk.pipes.qvtpy.util.eicab.morpho_paths import (
@@ -61,15 +69,18 @@ def run_subject(
     *,
     output_root: Path,
     skip_existing: bool = False,
-    eicab_mask_preference: str = "cw",
+    eicab_mask_preference: str = "wb",
     use_postprocessed_mask: bool = True,
-    input_already_smoothed: bool = False,
+    taubin: bool | None = None,
+    lesion_detection_method: str | None = None,
+    verbose: bool = False,
     n_workers: int | None = None,
     profile: str = DEFAULT_PROFILE,
     centerline_backend: str | None = None,
     morpho_config: MorphometricsConfig | None = None,
 ) -> Path:
-    """Run stage-7 TOF morphometrics for one subject (*morpho_config* overrides *profile*)."""
+    """Run stage-7 TOF morphometrics for one subject (*morpho_config* overrides *profile*).
+    *verbose*: print the morphometrics' progress (default: only failures, on stderr)."""
     out_dir = stage7_dir(output_root, subject)
     excel_path = out_dir / STAGE7_SKIP_MARKER
     if skip_existing and excel_path.is_file():
@@ -89,6 +100,11 @@ def run_subject(
         f"[{subject}] stage7 morphometrics: input={mask_res.path.name} "
         f"(pp={mask_res.postprocessed}, used={mask_res.used})"
     )
+    if taubin is None:  # eICAB's own mask is not drawn at the lumen's half maximum: smooth it
+        taubin = not mask_res.postprocessed
+    if lesion_detection_method:
+        morpho_config = (morpho_config or morphometrics_config(profile)).with_params(
+            LESION_DETECTION_METHOD=str(lesion_detection_method).lower())
     run_morphometrics_case(
         mask_res.path,
         out_dir,
@@ -98,9 +114,10 @@ def run_subject(
         profile=profile,
         config=morpho_config,
         centerline_backend=centerline_backend,
-        input_already_smoothed=input_already_smoothed,
+        input_already_smoothed=not bool(taubin),
         skip_if_excel_exists=skip_existing,
         case_id=subject,
+        verbose=verbose,
     )
     log.info(f"[{subject}] stage7 morphometrics -> {excel_path}")
 
@@ -121,9 +138,11 @@ def _subject_sge_spec(
     container: Path,
     src_dir: Path | None = None,
     skip_existing: bool = False,
-    eicab_mask_preference: str = "cw",
+    eicab_mask_preference: str = "wb",
     use_postprocessed_mask: bool = True,
-    input_already_smoothed: bool = False,
+    taubin: bool | None = None,
+    lesion_detection_method: str | None = None,
+    verbose: bool = False,
     n_workers: int | None = None,
     profile: str = DEFAULT_PROFILE,
     centerline_backend: str | None = None,
@@ -146,8 +165,12 @@ def _subject_sge_spec(
         parts.append("--use-postprocessed-mask")
     else:
         parts.append("--no-use-postprocessed-mask")
-    if input_already_smoothed:
-        parts.append("--input-already-smoothed")
+    if taubin is not None:
+        parts.append("--taubin" if taubin else "--no-taubin")
+    if lesion_detection_method:
+        parts.extend(["--lesion-detection-method", shlex.quote(str(lesion_detection_method))])
+    if verbose:
+        parts.append("--verbose")
     if skip_existing:
         parts.append("--skip-existing")
     if n_workers is not None:
@@ -165,10 +188,14 @@ def _subject_sge_spec(
         log_dir=cfg.SGE_LOG_DIR,
         err_dir=cfg.SGE_ERR_DIR,
     )
+    resources = sge_qvtpy_stage_resources(backend)
+    if n_workers is not None and int(n_workers) > 1:
+        # One CPU slot per parallel vessel job (qsub -pe smp N).
+        resources = replace(resources, pe_smp=max(int(resources.pe_smp or 1), int(n_workers)))
     spec = StageSpec(
         job_name=f"{cfg.SGE_JOB_PREFIX}_stage7_{subject}",
         python_cmd=python_cmd,
-        resources=sge_qvtpy_stage_resources(backend),
+        resources=resources,
         binds=binds,
         use_nv=sge_stage_use_nv(backend),
         extra_env=sge_stage_extra_env(binds.src, backend),
@@ -183,9 +210,11 @@ def build_subject_sge_command(
     container: Path,
     src_dir: Path | None = None,
     skip_existing: bool = False,
-    eicab_mask_preference: str = "cw",
+    eicab_mask_preference: str = "wb",
     use_postprocessed_mask: bool = True,
-    input_already_smoothed: bool = False,
+    taubin: bool | None = None,
+    lesion_detection_method: str | None = None,
+    verbose: bool = False,
     n_workers: int | None = None,
     profile: str = DEFAULT_PROFILE,
     centerline_backend: str | None = None,
@@ -202,7 +231,9 @@ def build_subject_sge_command(
         skip_existing=skip_existing,
         eicab_mask_preference=eicab_mask_preference,
         use_postprocessed_mask=use_postprocessed_mask,
-        input_already_smoothed=input_already_smoothed,
+        taubin=taubin,
+        lesion_detection_method=lesion_detection_method,
+        verbose=verbose,
         n_workers=n_workers,
         profile=profile,
         centerline_backend=centerline_backend,
@@ -220,9 +251,11 @@ def submit_subject_sge(
     skip_existing: bool = False,
     hold_jid: str | None = None,
     emit: TextIO | None = None,
-    eicab_mask_preference: str = "cw",
+    eicab_mask_preference: str = "wb",
     use_postprocessed_mask: bool = True,
-    input_already_smoothed: bool = False,
+    taubin: bool | None = None,
+    lesion_detection_method: str | None = None,
+    verbose: bool = False,
     n_workers: int | None = None,
     profile: str = DEFAULT_PROFILE,
     centerline_backend: str | None = None,
@@ -237,7 +270,9 @@ def submit_subject_sge(
         skip_existing=skip_existing,
         eicab_mask_preference=eicab_mask_preference,
         use_postprocessed_mask=use_postprocessed_mask,
-        input_already_smoothed=input_already_smoothed,
+        taubin=taubin,
+        lesion_detection_method=lesion_detection_method,
+        verbose=verbose,
         n_workers=n_workers,
         profile=profile,
         centerline_backend=centerline_backend,
@@ -254,9 +289,10 @@ def submit_subject_sge(
 @click.option(
     "--eicab-mask-preference",
     type=click.Choice(["cw", "wb"], case_sensitive=False),
-    default="cw",
+    default="wb",
     show_default=True,
-    help="eICAB mask to measure. The default profile is tuned for CW (Circle-of-Willis) masks.",
+    help="eICAB mask to measure. wb: stage 1's distal-grown *_eICAB_WB_pp (A1/A2, M1/M2, P1/P2 as "
+    "separate vessels), else *_CW_pp; cw: *_CW_pp. Without --use-postprocessed-mask, eICAB's own mask.",
 )
 @click.option(
     "--profile",
@@ -275,15 +311,33 @@ def submit_subject_sge(
     "--use-postprocessed-mask/--no-use-postprocessed-mask",
     default=True,
     show_default=True,
-    help="Prefer ``*_eICAB_CW_pp.nii.gz`` when available.",
+    help="Prefer stage 1's ``*_eICAB_{WB,CW}_pp`` masks when available.",
 )
 @click.option(
-    "--input-already-smoothed",
-    is_flag=True,
-    default=False,
-    help="Skip Taubin smoothing (input is already smoothed).",
+    "--taubin/--no-taubin",
+    default=None,
+    help="Taubin-smooth the label mask before measuring. Default: off for stage 1's post-processed "
+    "masks (already drawn at the local half maximum), on for eICAB's own mask.",
 )
-@click.option("--n-workers", type=int, default=None, help="Parallel label/component workers.")
+@click.option(
+    "--lesion-detection-method",
+    type=click.Choice(LESION_DETECTION_METHODS, case_sensitive=False),
+    default=None,
+    help="Override the profile's stenosis / enlargement detection (robust_reference / taper).",
+)
+@click.option(
+    "--verbose/--no-verbose",
+    default=False,
+    show_default=True,
+    help="Print the morphometrics' progress (per vessel / component); off: only failures, on stderr.",
+)
+@click.option(
+    "--n-workers",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Vessels measured in parallel: one process per label/component job (1 = one at a time; "
+         "default min(4, CPUs/2)). On SGE, N > 1 requests -pe smp N.",
+)
 def main(
     backend: str,
     subject: str,
@@ -291,7 +345,9 @@ def main(
     skip_existing: bool,
     eicab_mask_preference: str,
     use_postprocessed_mask: bool,
-    input_already_smoothed: bool,
+    taubin: bool | None,
+    lesion_detection_method: str | None,
+    verbose: bool,
     n_workers: int | None,
     profile: str,
     centerline_backend: str | None,
@@ -304,7 +360,9 @@ def main(
         skip_existing=skip_existing,
         eicab_mask_preference=eicab_mask_preference,
         use_postprocessed_mask=use_postprocessed_mask,
-        input_already_smoothed=input_already_smoothed,
+        taubin=taubin,
+        lesion_detection_method=lesion_detection_method,
+        verbose=verbose,
         n_workers=n_workers,
         profile=profile,
         centerline_backend=centerline_backend,

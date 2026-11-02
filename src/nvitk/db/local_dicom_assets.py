@@ -37,7 +37,7 @@ from nvitk.core.exceptions import BackendUnavailableError
 from .repo import DataRepo
 from .storage import utc_now_iso
 
-# (directory name under subject, modality, resource_label, asset_slot — same for all files in folder)
+# (directory name under subject, modality, resource_label, asset_slot: same for all files in folder)
 _SUBJECT_FOLDER_SPECS: tuple[tuple[str, str, str, str], ...] = (
     ("4Dflow_AP", "4dflow", "4Dflow/AP", "4dflow_ap"),
     ("4Dflow_FH", "4dflow", "4Dflow/FH", "4dflow_fh"),

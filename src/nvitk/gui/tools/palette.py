@@ -2,8 +2,8 @@
 
 The tool registry has grown past a hundred entries across a dozen categories, and
 finding one means remembering which category it lives under. This indexes every
-tool — plus the quick image operations, the Meshlab panel's operations (MeshLab's
-filters among them) and the dock actions that are not tools at all — behind one
+tool, plus the quick image operations, the Meshlab panel's operations (MeshLab's
+filters among them) and the dock actions that are not tools at all, behind one
 fuzzy search, the way an editor's command palette works.
 
 Matching is subsequence-based, so ``total`` finds *TotalSegmentator*, ``orthog``
@@ -45,7 +45,7 @@ class Command:
 
     key: str
     title: str
-    #: Where it comes from — the tool category, or a group like "Image".
+    #: Where it comes from: the tool category, or a group like "Image".
     group: str = ""
     #: Extra words that should match it (``"threshold"`` finding *Binarize*).
     keywords: tuple[str, ...] = ()
@@ -62,7 +62,7 @@ def subsequence_score(query: str, text: str) -> int | None:
     """How well *query* matches *text* as a subsequence; ``None`` if it does not.
 
     Lower is better. A run of consecutive characters scores better than the same
-    letters scattered, and a match at the start of a word better than mid-word —
+    letters scattered, and a match at the start of a word better than mid-word,
     so ``total`` puts *TotalSegmentator* above *Subtotal volume*.
     """
     q, t = query.strip().lower(), text.lower()
@@ -335,7 +335,7 @@ def build_commands(viewer: Any, run_tool: Callable[[str], None]) -> list[Command
 
 
 def mesh_commands(viewer: Any) -> list[Command]:
-    """The Meshlab panel's operations — native and MeshLab filters — as palette entries.
+    """The Meshlab panel's operations (native and MeshLab filters) as palette entries.
 
     Choosing one brings the Meshlab dock to the front with that operation selected;
     like the tools, it does not run until Run is pressed.
@@ -369,7 +369,7 @@ PALETTE_SHORTCUT = "Alt+F"
 
 #: What to call that key in the interface. Same spelling here, but the two are
 #: kept apart because Qt's name for a modifier and the one a user recognises do
-#: not always agree — the Windows key, for one, is "Meta" to Qt.
+#: not always agree: the Windows key, for one, is "Meta" to Qt.
 PALETTE_SHORTCUT_LABEL = "Alt+F"
 
 
@@ -427,7 +427,7 @@ class CommandSearchBar(QLineEdit):
             self._commands = []
         ranked = rank_commands(self._commands, query)
         # Titles repeat across groups (two "Threshold"s), so the group is shown
-        # and is part of the key the choice is looked up by — except where the
+        # and is part of the key the choice is looked up by, except where the
         # title already opens with it, which is how the tool entries are built.
         self._by_title = {}
         labels: list[str] = []

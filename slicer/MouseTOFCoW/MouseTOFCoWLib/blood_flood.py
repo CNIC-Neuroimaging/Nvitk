@@ -1,4 +1,4 @@
-"""Minimal Frangi → GMM hysteresis → watershed blood-flood (no nvitk).
+"""Minimal Frangi -> GMM hysteresis -> watershed blood-flood (no nvitk).
 
 Vendored/simplified from nvitk.segmentation.blood_flood for the Slicer
 Mouse TOF CoW module. Requires: numpy, scipy, scikit-image, scikit-learn.

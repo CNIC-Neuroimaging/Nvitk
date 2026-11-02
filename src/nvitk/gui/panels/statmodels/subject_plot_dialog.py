@@ -5,7 +5,7 @@ Description
 -----------
 The analysis dataframe is a cohort: one row per subject × region, and every plot in the main window
 is a statement about the population. But the question that follows a suspicious cell is about *one
-scan* — is this subject's left MCA really carrying twice its right, or is that one bad segmentation?
+scan*: is this subject's left MCA really carrying twice its right, or is that one bad segmentation?
 A number in a table cannot answer that; a picture of the whole circle of Willis can.
 
 So this window takes a subject and draws their measurements the way the model plots draw a fit:
@@ -18,21 +18,19 @@ ASL / T1 parcel measurement   the cortical surface (:mod:`nvitk.stats.brain_map`
 
 Grouping levels are respected throughout. A frame grouped per hemisphere carries one ``ICA`` value
 for both carotids and a lobe-grouped one carries a value for every parcel of that lobe; both are
-resolved the same way the model maps resolve them, so the drawing shows what was actually measured
+resolved the same way the model maps resolve them, so the drawing shows what was measured
 rather than the subset that happens to be spelled like a single structure.
 
 Animation
 ---------
 The cardiac frames share **one colour scale**, computed over the whole cycle. Rescaling per frame
-would animate the scale rather than the flow — systole and diastole would look identical, each
+would animate the scale rather than the flow: systole and diastole would look identical, each
 saturating its own range, which is the opposite of what a waveform is worth looking at.
 """
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from pathlib import Path
 from typing import Any
 
@@ -65,7 +63,7 @@ log = Logger()
 #: fast enough that the cycle reads as one motion rather than a slideshow.
 ANIMATION_FPS: float = 6.0
 
-#: Columns that identify a row rather than measure something — never offered as a measurement.
+#: Columns that identify a row rather than measure something, never offered as a measurement.
 _IDENTIFIER_COLUMNS: frozenset[str] = frozenset(
     {"subject_uid", "territory", "group_key", "region_id", "visit_id", "session_id",
      "modality", "pipeline_id"}
@@ -150,7 +148,7 @@ class SubjectPlotDialog(FigureHostMixin, QDialog):
         controls.addWidget(self._btn_export)
         lay.addLayout(controls)
 
-        # ---- Cardiac transport, shown only for a time-resolved measurement -------
+        # Cardiac transport, shown only for a time-resolved measurement
         self._transport = QWidget()
         transport = QHBoxLayout(self._transport)
         transport.setContentsMargins(0, 0, 0, 0)
@@ -175,7 +173,7 @@ class SubjectPlotDialog(FigureHostMixin, QDialog):
         self._build_figure_host(lay)
         self._on_measurement_changed()
 
-    # ---- frame introspection --------------------------------------------------
+    # frame introspection
     def _subjects(self) -> list[str]:
         """Subjects present in the frame, in a stable order."""
         if "subject_uid" not in self._frame.columns:
@@ -186,7 +184,7 @@ class SubjectPlotDialog(FigureHostMixin, QDialog):
         """
         Numeric columns worth drawing, with each timeseries collapsed to a single entry.
 
-        A 16-frame waveform is one measurement, not sixteen: listing ``flow_tseries_f1`` … as
+        A 16-frame waveform is one measurement, not sixteen: listing ``flow_tseries_f1`` ... as
         separate entries would bury every other column and offer the reader a choice between
         cardiac frames that the animation makes for them.
         """
@@ -237,7 +235,7 @@ class SubjectPlotDialog(FigureHostMixin, QDialog):
         resolved = sum(1 for level in levels if nodes_for_label(level))
         return resolved * 2 >= len(levels)
 
-    # ---- controls -------------------------------------------------------------
+    # controls
     def _on_subject_changed(self) -> None:
         """Retitle and redraw for the newly selected subject."""
         self.setWindowTitle(f"Subject — {self._subject.currentData()}")
@@ -270,7 +268,7 @@ class SubjectPlotDialog(FigureHostMixin, QDialog):
         self._btn_play.setText("▶ Play")
 
     def _advance_frame(self) -> None:
-        """Step the slider one cardiac frame, wrapping — a cycle has no end."""
+        """Step the slider one cardiac frame, wrapping: a cycle has no end."""
         maximum = self._frame_slider.maximum()
         if maximum <= 0:
             self._stop()
@@ -282,7 +280,7 @@ class SubjectPlotDialog(FigureHostMixin, QDialog):
         self._stop()
         super().closeEvent(event)
 
-    # ---- drawing --------------------------------------------------------------
+    # drawing
     def _values_for(self, rows: pd.DataFrame, column: str) -> dict[str, float]:
         """``{region label: value}`` for one measurement column of one subject."""
         out: dict[str, float] = {}
@@ -387,7 +385,7 @@ class SubjectPlotDialog(FigureHostMixin, QDialog):
             mask_nonsignificant=False,
             cmap=cmap,
             # A single subject's measurement is a magnitude, not an effect, so it gets a sequential
-            # colormap and no zero midpoint unless the values genuinely straddle one.
+            # colormap and no zero midpoint unless the values straddle one.
             center=None,
             vmin=vmin,
             vmax=vmax,
@@ -434,7 +432,7 @@ class SubjectPlotDialog(FigureHostMixin, QDialog):
         )
         return figure, len(painted), f"This subject's measured values on the {atlas} atlas."
 
-    # ---- export ---------------------------------------------------------------
+    # export
     def _on_export(self) -> None:
         """Save a still as PNG, or a whole cardiac cycle as an animated GIF."""
         measurement = str(self._measurement.currentData() or "")

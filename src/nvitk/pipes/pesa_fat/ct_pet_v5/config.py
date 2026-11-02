@@ -24,26 +24,23 @@ from nvitk.pipes.pesa_fat.ct_pet_v5.labels import (
     BODY_LABELS,
     FAT_LABELS,
     FAT_BATCH_LABELS,
+    FAT_IM_LABELS,
     MO_LABELS,
     MUSCLES_LABELS,
     ORGANS_LABELS,
 )
 
 
-# ---------------------------------------------------------------------------
 # Pipeline identity
-# ---------------------------------------------------------------------------
 
 PIPELINE_NAME: str = "ct-pet-v5"
 SGE_JOB_PREFIX: str = "PESAFat_CTPET"
 
 
-# ---------------------------------------------------------------------------
 # Filesystem fragments (relative to BatchLayout.results_dir / nifti_dir)
-# ---------------------------------------------------------------------------
 
 STAGE1_DIR: str = "res_segmentation_ct"        # <subj>/CT/<task>.nii.gz
-STAGE2_DIR: str = "res_post_processing_ct"     # <subj>/CT/{MO,FAT,BODY,ORGANS,MUSCLES}.nii.gz
+STAGE2_DIR: str = "res_post_processing_ct"     # <subj>/CT/{MO,FAT,BODY,ORGANS,MUSCLES}[_VOL].nii.gz
 STAGE3_DIR: str = "res_measure_suv"            # <batch>_SummaryCodebook.xlsx
 
 # Per-subject CT input file stem under ``BatchLayout.nifti_dir / <subject>``.
@@ -51,9 +48,7 @@ INPUT_STEM: str = "CT"
 PET_STEM: str = "PT"
 
 
-# ---------------------------------------------------------------------------
 # TotalSegmentator task plan
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -101,23 +96,35 @@ _TOTAL_ORGAN_ROIS: tuple[str, ...] = (
     "small_bowel",
     "colon",
     "urinary_bladder",
+    "gallbladder",
+    "stomach"
 )
 
 
 CT_TASKS: tuple[CtTask, ...] = (
-    CtTask(
-        "total",
-        tuple(dict.fromkeys(_TOTAL_ORGAN_ROIS + SKELETON_ROIS)),
-    ),
-    CtTask("tissue_types"),
+    CtTask("total"), # tuple(dict.fromkeys(_TOTAL_ORGAN_ROIS + SKELETON_ROIS)), # No ROI subset | Check inference time.
+    CtTask("tissue_4_types"),
     CtTask("thigh_shoulder_muscles"),
     CtTask("body"),
 )
 
+# Tissue task the fat masks come from. ``tissue_4_types`` splits intermuscular fat
+# out of the subcutaneous label; the 3-class ``tissue_types`` is read only as a
+# fallback for batches segmented before the switch (FAT_IM is then left empty).
+FAT_TASK: str = "tissue_4_types"
+FAT_TASK_FALLBACK: str = "tissue_types"
 
-# ---------------------------------------------------------------------------
+
 # Stage-2 post-processing knobs
-# ---------------------------------------------------------------------------
+
+# Extra in-plane (XY only) erosion steps applied to the L3/L4 bone marrow after the
+# isotropic-in-voxels erosion. CT voxels are ~3x thicker than wide, so that erosion
+# trims far more in Z than in XY and leaves the marrow close to the cortex in-plane.
+MO_XY_ERODE: int = 4
+
+# Bone marrow *volume* mask: raw L3/L4 vertebra voxels below this HU, biggest
+# component. Volumes skip the erosions, so the cortex is stripped by density instead.
+MO_VOL_MAX_HU: float = 400.0
 
 # Muscle labels the skeleton is subtracted from (bone marrow uptake would
 # otherwise contaminate their SUV statistics).
@@ -149,9 +156,7 @@ MUSCLES_BIGGEST_CC_PER_SIDE: tuple[str, ...] = ("TRAPECIOS",)
 MUSCLES_SIDE_MIN_RATIO: float = 0.1
 
 
-# ---------------------------------------------------------------------------
 # Stage-3 measurement specs
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -161,7 +166,8 @@ class SuvSpec:
     ``column_prefix`` defines the Excel column prefix, with one column per
     entry in the ``(suffix, stat)`` pairs in :data:`SUV_STATS`. ``mask_file``
     is the stage-2 label file name (e.g. ``"MUSCLES.nii"``). ``label_ids``
-    holds the integer labels whose union forms the measurement mask.
+    holds the integer labels whose union forms the measurement mask. The stage-2
+    SUV masks are already eroded (``stage2_postprocess.SUV_ERODE``).
     """
 
     column_prefix: str
@@ -171,7 +177,11 @@ class SuvSpec:
 
 @dataclass(frozen=True)
 class VolSpec:
-    """Volume measurement spec (single column)."""
+    """Volume measurement spec (single column).
+
+    Volumes read the ``*_VOL`` stage-2 masks, which skip the post-processing
+    erosions and the dilations of subtracted structures.
+    """
 
     column: str
     mask_file: str
@@ -229,29 +239,29 @@ SUV_SPECS: tuple[SuvSpec, ...] = (
 
 
 VOL_SPECS: tuple[VolSpec, ...] = (
-    VolSpec("GRASA_V_VOL", "FAT.nii", (FAT_LABELS["GRASA_V"],)),
-    VolSpec("GRASA_SC_VOL", "FAT.nii", (FAT_LABELS["GRASA_SC"],)),
-    VolSpec("GRASA_V_BATCH_VOL", "FAT_BATCH.nii", (FAT_BATCH_LABELS["GRASA_V_BATCH"],)),
-    VolSpec("GRASA_SC_BATCH_VOL", "FAT_BATCH.nii", (FAT_BATCH_LABELS["GRASA_SC_BATCH"],)),
+    VolSpec("GRASA_V_VOL", "FAT_VOL.nii", (FAT_LABELS["GRASA_V"],)),
+    VolSpec("GRASA_SC_VOL", "FAT_VOL.nii", (FAT_LABELS["GRASA_SC"],)),
+    VolSpec("GRASA_V_BATCH_VOL", "FAT_BATCH_VOL.nii", (FAT_BATCH_LABELS["GRASA_V_BATCH"],)),
+    VolSpec("GRASA_SC_BATCH_VOL", "FAT_BATCH_VOL.nii", (FAT_BATCH_LABELS["GRASA_SC_BATCH"],)),
+    VolSpec("GRASA_IM_PIERNAS_VOL", "FAT_IM.nii", (FAT_IM_LABELS["GRASA_IM_PIERNAS"],)),
+    VolSpec("GRASA_IM_TORAX_VOL", "FAT_IM.nii", (FAT_IM_LABELS["GRASA_IM_TORAX"],)),
     VolSpec("CORP_VOL", "BODY.nii", (BODY_LABELS["BODY"],)),
-    VolSpec("HIGADO_VOL", "ORGANS.nii", (ORGANS_LABELS["HIGADO"],)),
-    VolSpec("BAZO_VOL", "ORGANS.nii", (ORGANS_LABELS["BAZO"],)),
-    VolSpec("PANCREAS_VOL", "ORGANS.nii", (ORGANS_LABELS["PANCREAS"],)),
-    VolSpec("CUADRICEPS_L_VOL", "MUSCLES.nii", (MUSCLES_LABELS["CUADRICEPS_L"],)),
-    VolSpec("CUADRICEPS_R_VOL", "MUSCLES.nii", (MUSCLES_LABELS["CUADRICEPS_R"],)),
-    VolSpec("PARAVERTEBRAL_L_VOL", "MUSCLES.nii", (MUSCLES_LABELS["PARAVERTEBRAL_L"],)),
-    VolSpec("PARAVERTEBRAL_R_VOL", "MUSCLES.nii", (MUSCLES_LABELS["PARAVERTEBRAL_R"],)),
-    VolSpec("DELTOIDES_L_VOL", "MUSCLES.nii", (MUSCLES_LABELS["DELTOIDES_L"],)),
-    VolSpec("DELTOIDES_R_VOL", "MUSCLES.nii", (MUSCLES_LABELS["DELTOIDES_R"],)),
-    VolSpec("TRAPECIOS_VOL", "MUSCLES.nii", (MUSCLES_LABELS["TRAPECIOS"],)),
-    VolSpec("MO_L3_VOL", "MO.nii", (MO_LABELS["L3"],)),
-    VolSpec("MO_L4_VOL", "MO.nii", (MO_LABELS["L4"],)),
+    VolSpec("HIGADO_VOL", "ORGANS_VOL.nii", (ORGANS_LABELS["HIGADO"],)),
+    VolSpec("BAZO_VOL", "ORGANS_VOL.nii", (ORGANS_LABELS["BAZO"],)),
+    VolSpec("PANCREAS_VOL", "ORGANS_VOL.nii", (ORGANS_LABELS["PANCREAS"],)),
+    VolSpec("CUADRICEPS_L_VOL", "MUSCLES_VOL.nii", (MUSCLES_LABELS["CUADRICEPS_L"],)),
+    VolSpec("CUADRICEPS_R_VOL", "MUSCLES_VOL.nii", (MUSCLES_LABELS["CUADRICEPS_R"],)),
+    VolSpec("PARAVERTEBRAL_L_VOL", "MUSCLES_VOL.nii", (MUSCLES_LABELS["PARAVERTEBRAL_L"],)),
+    VolSpec("PARAVERTEBRAL_R_VOL", "MUSCLES_VOL.nii", (MUSCLES_LABELS["PARAVERTEBRAL_R"],)),
+    VolSpec("DELTOIDES_L_VOL", "MUSCLES_VOL.nii", (MUSCLES_LABELS["DELTOIDES_L"],)),
+    VolSpec("DELTOIDES_R_VOL", "MUSCLES_VOL.nii", (MUSCLES_LABELS["DELTOIDES_R"],)),
+    VolSpec("TRAPECIOS_VOL", "MUSCLES_VOL.nii", (MUSCLES_LABELS["TRAPECIOS"],)),
+    VolSpec("MO_L3_VOL", "MO_VOL.nii", (MO_LABELS["L3"],)),
+    VolSpec("MO_L4_VOL", "MO_VOL.nii", (MO_LABELS["L4"],)),
 )
 
 
-# ---------------------------------------------------------------------------
 # SGE / Singularity defaults
-# ---------------------------------------------------------------------------
 
 SGE_PROJECT: str = "GPU"
 SGE_ACCOUNT: str = "Prod"
@@ -317,11 +327,15 @@ __all__ = [
     "PET_STEM",
     "CtTask",
     "CT_TASKS",
+    "FAT_TASK",
+    "FAT_TASK_FALLBACK",
     "SKELETON_ROIS",
     "SKELETON_SUBTRACT_FROM",
     "MUSCLE_ERODE_AFTER_SKELETON",
     "MUSCLES_BIGGEST_CC_PER_SIDE",
     "MUSCLES_SIDE_MIN_RATIO",
+    "MO_XY_ERODE",
+    "MO_VOL_MAX_HU",
     "SuvSpec",
     "VolSpec",
     "SUV_STATS",

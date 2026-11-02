@@ -24,9 +24,28 @@ def nvitk_metadata_from_layer(layer: Any) -> dict[str, Any]:
     return meta
 
 
+def _real_parts(layer: Any) -> dict[str, Any] | None:
+    """The real transform of a layer the main canvas draws on its own voxel grid
+    (resampling off, :mod:`nvitk.gui.viz.main_canvas`), else ``None``. Geometry is always
+    computed from these, never from the scale-only transform Napari is drawing with."""
+    value = getattr(layer, "_nvitk_true_transform", None)
+    return value if isinstance(value, dict) else None
+
+
+def _layer_transform_part(layer: Any, name: str) -> Any:
+    """``layer.<name>`` (scale / translate / affine matrix), the real one when overridden."""
+    real = _real_parts(layer)
+    if real is not None and name in real:
+        return real[name]
+    value = getattr(layer, name, None)
+    if name == "affine" and value is not None and hasattr(value, "affine_matrix"):
+        return value.affine_matrix
+    return value
+
+
 def layer_affine(layer: Any) -> np.ndarray | None:
-    """4x4 transform used by the Napari layer (voxel index → world)."""
-    aff = getattr(layer, "affine", None)
+    """4x4 transform used by the Napari layer (voxel index -> world)."""
+    aff = _layer_transform_part(layer, "affine")
     if aff is not None:
         aff = to_numpy(aff).astype(float)
         if aff.shape == (4, 4):
@@ -84,7 +103,7 @@ def layer_spacing(layer: Any) -> tuple[float, ...] | None:
     if scale is not None and len(scale) >= 3:
         scale_t = tuple(float(x) for x in scale[:3])
 
-    # Identity affine + meaningful scale → 4D scale-only display path.
+    # Identity affine + meaningful scale -> 4D scale-only display path.
     if (
         aff_norms is not None
         and scale_t is not None
@@ -104,30 +123,30 @@ def layer_spatial_kwargs(layer: Any, ndim: int | None = None) -> dict[str, Any]:
     """Keyword args for ``add_image`` / ``add_labels`` / ``add_surface``.
 
     With *ndim*, the placement is cut down to an output with that many
-    (trailing) dimensions — a 3D result computed from a 3D+t layer takes the
+    (trailing) dimensions: a 3D result computed from a 3D+t layer takes the
     trailing ``scale``/``translate`` entries and the spatial 4x4 block of the
     layer's 5x5 affine. Napari aligns layers by trailing dimension, so that is
     exactly where the result belongs.
 
-    Napari composes its transforms — data, then ``scale``/``translate``, then
-    ``affine``, then world — so reproducing a layer's placement means carrying
+    Napari composes its transforms (data, then ``scale``/``translate``, then
+    ``affine``, then world), so reproducing a layer's placement means carrying
     every part that is set, not just the last one. Returning ``affine`` alone
     dropped the spacing of any layer whose geometry lives in ``scale``, which is
     every layer opened with a scale and a default (identity) affine: the copy
     landed at unit spacing and no longer lined up with its source.
     """
     kwargs: dict[str, Any] = {}
-    scale = getattr(layer, "scale", None)
+    scale = _layer_transform_part(layer, "scale")
     if scale is not None:
         values = tuple(float(x) for x in scale)
         if any(abs(v - 1.0) > 1e-12 for v in values):
             kwargs["scale"] = values
-    translate = getattr(layer, "translate", None)
+    translate = _layer_transform_part(layer, "translate")
     if translate is not None:
         values = tuple(float(x) for x in translate)
         if any(abs(v) > 1e-12 for v in values):
             kwargs["translate"] = values
-    aff = getattr(layer, "affine", None)
+    aff = _layer_transform_part(layer, "affine")
     if aff is not None:
         matrix = to_numpy(aff).astype(float)
         # An identity affine carries nothing; passing it anyway is harmless but
@@ -139,9 +158,66 @@ def layer_spatial_kwargs(layer: Any, ndim: int | None = None) -> dict[str, Any]:
     return kwargs
 
 
+#: nvitk metadata keys describing a layer's *grid* (where its voxels sit, how big they
+#: are and in which axis order the file stores them), rather than what the voxels hold.
+GRID_METADATA_KEYS: tuple[str, ...] = (
+    "affine",
+    "affine_source",
+    "axes",
+    "shape",
+    "spacing",
+    "x_res",
+    "y_res",
+    "z_res",
+    "orientation",
+    "true_orientation",
+    "display_reordered",
+    "source_axes",
+    "time_leading",
+    "ImageOrientationPatient",
+    "ImagePositionPatient",
+    "PixelSpacing",
+    "SliceThickness",
+    "Rows",
+    "Columns",
+)
+
+
+def reference_grid_kwargs(layer: Any, reference: Any, *, name: str) -> dict[str, Any]:
+    """``add_image`` / ``add_labels`` kwargs for data computed from *layer* on *reference*'s grid.
+
+    The placement (``scale``/``translate``/``affine``) and the :data:`GRID_METADATA_KEYS`
+    come from *reference*, so the layer is drawn where the reference is and is saved
+    with the reference's header; every other metadata entry (modality, acquisition
+    tags, ...) stays *layer*'s. A grid key the reference lacks is dropped rather than
+    left describing *layer*'s grid.
+    """
+    from nvitk.gui.labels.visibility import copy_layer_metadata_for_output
+
+    meta = copy_layer_metadata_for_output(getattr(layer, "metadata", None))
+    ref_meta = dict(getattr(reference, "metadata", None) or {})
+    nested = dict(meta.get("nvitk_metadata") or {})
+    ref_nested = dict(ref_meta.get("nvitk_metadata") or {})
+    for out, ref in ((meta, ref_meta), (nested, ref_nested)):
+        for key in GRID_METADATA_KEYS:
+            if key in ref:
+                out[key] = ref[key]
+            else:
+                out.pop(key, None)
+    if nested or "nvitk_metadata" in meta:
+        meta["nvitk_metadata"] = nested
+
+    kwargs: dict[str, Any] = {"name": name, "metadata": meta}
+    kwargs.update(layer_spatial_kwargs(reference))
+    axis_labels = getattr(reference, "axis_labels", None)
+    if axis_labels is not None:
+        kwargs["axis_labels"] = tuple(axis_labels)
+    return kwargs
+
+
 def _lo_in_file_order(layer: Any, lo: list[int]) -> list[int] | None:
     """The spatial part of a voxel offset *lo* (in *layer*'s axis order) in the
-    order of the file's axes — what the file's affine (``affine_source``) indexes."""
+    order of the file's axes: what the file's affine (``affine_source``) indexes."""
     from nvitk.gui.core.orientation import _axes_string_from_layer, layer_is_reordered
 
     nd = len(lo)
@@ -171,8 +247,8 @@ def crop_placement(layer: Any, lo: Any) -> tuple[dict[str, Any], dict[str, Any]]
     nd = int(layer.data.ndim)
     lo = [int(v) for v in list(lo)[:nd]] + [0] * max(nd - len(list(lo)), 0)
     kwargs = dict(layer_spatial_kwargs(layer))
-    scale = [float(v) for v in getattr(layer, "scale", [1.0] * nd)]
-    matrix = np.asarray(layer.affine.affine_matrix, dtype=float)
+    scale = [float(v) for v in (_layer_transform_part(layer, "scale") if hasattr(layer, "scale") else [1.0] * nd)]
+    matrix = np.asarray(_layer_transform_part(layer, "affine"), dtype=float)
     shift = np.eye(nd + 1)
     shift[:nd, nd] = [s * o for s, o in zip(scale, lo)]
     kwargs["affine"] = matrix @ shift
@@ -203,9 +279,9 @@ def crop_placement(layer: Any, lo: Any) -> tuple[dict[str, Any], dict[str, Any]]
 def _output_dims(layer: Any, ndim: int) -> list[int]:
     """Which of *layer*'s dims an *ndim*-dimensional output corresponds to.
 
-    Its spatial (``X``/``Y``/``Z``) dims when it has exactly *ndim* of them — the
+    Its spatial (``X``/``Y``/``Z``) dims when it has exactly *ndim* of them: the
     trailing three of a time-first layer, the leading three of a legacy ``XYZT``
-    one — else the trailing *ndim*, which is how Napari aligns layers anyway.
+    one: else the trailing *ndim*, which is how Napari aligns layers anyway.
     """
     from nvitk.gui.core.orientation import _axes_string_from_layer, layer_display_ndim
 
@@ -266,8 +342,8 @@ def layer_source_order(layer: Any, data: Any = None) -> Any:
     """*layer*'s array (or *data* in the layer's order) back in the file's axis order.
 
     A time-first 3D+t layer holds a ``TXYZ`` view of an ``XYZT`` file; code that
-    reads the voxels the way the file stores them — 4D-flow phase arithmetic,
-    export — calls this instead of ``layer.data``. A zero-copy view; any other
+    reads the voxels the way the file stores them (4D-flow phase arithmetic,
+    export) calls this instead of ``layer.data``. A zero-copy view; any other
     layer's array comes back unchanged.
     """
     from nvitk.gui.core.orientation import _axes_string_from_layer, layer_is_reordered
@@ -664,7 +740,7 @@ def orientation_text(layer: Any, viewer: Any | None = None) -> str:
 
             ndim = int(layer.data.ndim)
             sup = superior_voxel_axis(aff, ndim)
-            # Match the order the viewer actually installs, which for a permuting
+            # Match the order the viewer installs, which for a permuting
             # affine is not superior-first.
             order = (
                 dim_order_2d_for_display(aff, 3)

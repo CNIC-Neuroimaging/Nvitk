@@ -3,14 +3,14 @@
 **Inputs**
 
 - a trained run from stage 2 (resolved from its provenance)
-- a folder of unlabeled volumes — the TOF cohort stage 0 assembled with ``--target corpus``,
+- a folder of unlabeled volumes: the TOF cohort stage 0 assembled with ``--target corpus``,
   or any directory given with ``--input-dir``
 
 **Outputs**
 
-- ``<results_root>/stage6_selftrain/<run>/raw/`` — predictions on the unlabeled volumes
-- ``.../accepted/{imagesTr,labelsTr}/`` — a cohort in ``--extra-train-only`` shape
-- ``.../rejected.csv``, ``.../topbrain_stage6.json`` — every case with its verdict and reason
+- ``<results_root>/stage6_selftrain/<run>/raw/``: predictions on the unlabeled volumes
+- ``.../accepted/{imagesTr,labelsTr}/``: a cohort in ``--extra-train-only`` shape
+- ``.../rejected.csv``, ``.../topbrain_stage6.json``: every case with its verdict and reason
 
 Why this rather than more masked pre-training
 ---------------------------------------------
@@ -18,7 +18,7 @@ Masked reconstruction asks the encoder to rebuild bulk brain tissue; vessels are
 voxels and contribute almost nothing to that objective. Self-training instead uses the unlabeled
 cohort for the task itself: the model labels it, the labels that survive scrutiny become
 training data, and the second round trains on 50 real cases plus however many pseudo-cases were
-convincing. With 25 subjects that is usually the larger win, and the two are not exclusive — a
+convincing. With 25 subjects that is usually the larger win, and the two are not exclusive: a
 pre-trained encoder makes the first round's pseudo-labels better.
 
 The whole method lives or dies on the filter. An accepted wrong label is worse than a discarded
@@ -35,7 +35,7 @@ Filters
     Per class, the number of connected components. A vessel that comes out in five pieces is a
     failed segmentation regardless of how confident the model was.
 ``invalid neighbours``
-    Adjacencies the anatomy does not permit — the classic sign of two labels bleeding together.
+    Adjacencies the anatomy does not permit: the classic sign of two labels bleeding together.
 ``foreground volume``
     Total labelled volume must fall inside the range the *annotated* cohort spans. Catches both
     the collapsed prediction and the flood fill.
@@ -105,7 +105,7 @@ REQUIRED_CLASS_NAMES: tuple[str, ...] = (
 )
 
 #: Default ceiling on connected components per class. One is the anatomical truth; two allows a
-#: vessel that genuinely leaves and re-enters the field of view.
+#: vessel that leaves and re-enters the field of view.
 DEFAULT_MAX_COMPONENTS: int = 2
 
 #: Default ceiling on how many classes may exceed :data:`DEFAULT_MAX_COMPONENTS`.
@@ -147,9 +147,7 @@ class CaseVerdict:
         }
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Reference statistics from the annotated cohort
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def reference_volume_mm3(labels_dir: Path, *, limit: int | None = None) -> float:
@@ -161,7 +159,7 @@ def reference_volume_mm3(labels_dir: Path, *, limit: int | None = None) -> float
     Raises
     ------
     FileNotFoundError
-        If there are no reference masks — without them the volume filter has no meaning and
+        If there are no reference masks, without them the volume filter has no meaning and
         silently skipping it would let a flood-filled prediction through.
     """
     masks = sorted(Path(labels_dir).glob("*.nii.gz"))
@@ -185,9 +183,7 @@ def reference_volume_mm3(labels_dir: Path, *, limit: int | None = None) -> float
     return median
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Per-case scrutiny
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def assess_case(
@@ -222,7 +218,7 @@ def assess_case(
     present = {int(v) for v in to_numpy(np.unique(data)) if int(v) != 0}
     verdict.num_classes = len(present)
 
-    # ---- 1. The main branches must be there ---------------------------------
+    # 1. The main branches must be there
     verdict.missing_required = [
         name for name in required_names
         if name in by_name and by_name[name] not in present
@@ -230,7 +226,7 @@ def assess_case(
     if verdict.missing_required:
         verdict.reasons.append(f"missing required class(es): {', '.join(verdict.missing_required)}")
 
-    # ---- 2. Fragmentation ----------------------------------------------------
+    # 2. Fragmentation
     verdict.fragmented_classes = [
         value for value in sorted(present)
         if count_components(data == value) > int(max_components)
@@ -241,7 +237,7 @@ def assess_case(
             f"{max_components} component(s)"
         )
 
-    # ---- 3. Impossible adjacencies -------------------------------------------
+    # 3. Impossible adjacencies
     verdict.invalid_neighbours = invalid_neighbour_error(
         data, valid_neighbours=lbl.valid_neighbours(label_set), labels=sorted(label_map)
     )
@@ -250,7 +246,7 @@ def assess_case(
             f"{verdict.invalid_neighbours:.0f} anatomically impossible adjacency(ies)"
         )
 
-    # ---- 4. Plausible total volume -------------------------------------------
+    # 4. Plausible total volume
     verdict.volume_mm3 = float((data > 0).sum()) * voxel
     verdict.volume_ratio = (
         verdict.volume_mm3 / reference_volume if reference_volume else float("nan")
@@ -262,7 +258,7 @@ def assess_case(
             f"(allowed {low}-{high}x)"
         )
 
-    # ---- 5. Fold agreement, when it was measured -----------------------------
+    # 5. Fold agreement, when it was measured
     verdict.agreement = float(agreement)
     if agreement_threshold is not None:
         if verdict.agreement != verdict.agreement:  # NaN
@@ -284,7 +280,7 @@ def fold_agreement(prediction_dirs: Sequence[Path], case_name: str) -> float:
     above any useful threshold.
 
     Returns ``NaN`` when fewer than two folds predicted the case, or when they all predicted
-    nothing — neither is agreement.
+    nothing: neither is agreement.
     """
     maps = [
         to_numpy(imread(directory / case_name).data).astype("int32", copy=False)
@@ -305,9 +301,7 @@ def fold_agreement(prediction_dirs: Sequence[Path], case_name: str) -> float:
     return float(sum(scores) / len(scores)) if scores else float("nan")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Stage entry point
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _dataset_name(label_set: str) -> str:
@@ -436,7 +430,7 @@ def run_selftrain(
         "off" if agreement_threshold is None else f">= {agreement_threshold}",
     )
 
-    # ---- 1. Predict ---------------------------------------------------------
+    # 1. Predict
     # With an agreement threshold each fold predicts separately, so the folds can be compared;
     # otherwise one ensembled pass over all folds is both cheaper and slightly more accurate.
     fold_dirs: list[Path] = []
@@ -469,7 +463,7 @@ def run_selftrain(
             checkpoint_name=checkpoint_name, num_processes=num_processes,
         )
 
-    # ---- 2. Clean up, then judge --------------------------------------------
+    # 2. Clean up, then judge
     reference = reference_volume_mm3(Path(nnunet_raw) / dataset_name / "labelsTr")
     label_values = sorted(lbl.label_map(label_set))
     accepted_images.mkdir(parents=True, exist_ok=True)
@@ -509,7 +503,7 @@ def run_selftrain(
             + ("" if verdict.accepted else f" | {'; '.join(verdict.reasons)}")
         )
 
-    # ---- 3. Emit the accepted cohort ----------------------------------------
+    # 3. Emit the accepted cohort
     # Best first, so --max-accepted keeps the most convincing rather than the alphabetically
     # first. Ranking is by agreement when it exists, and by anatomical cleanliness otherwise.
     ranked = sorted(
@@ -614,9 +608,7 @@ __all__ = [
 ]
 
 
-# ---------------------------------------------------------------------------
 # CLI + SGE submission
-# ---------------------------------------------------------------------------
 
 
 def _worker_argv(

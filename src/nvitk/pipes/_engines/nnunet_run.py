@@ -1,7 +1,7 @@
 """Invoke the in-tree nnU-Net build as a subprocess.
 
 Shared by the topbrain and cvit pipelines. The nnU-Net build lives at
-``pipes/_engines/nnunet`` — a build carrying the nnssl
+``pipes/_engines/nnunet``: a build carrying the nnssl
 fine-tuning support (``nnUNetv2_preprocess_like_nnssl``, ``PretrainedTrainer``,
 ``PretrainedTrainer_Primus``) that the released ``nnunetv2`` does not have.
 
@@ -9,7 +9,7 @@ It is **not installed**, and must not be: the rest of nvitk (TotalSegmentator in
 depends on the released ``nnunetv2``, and shadowing that globally would break it. Every call
 here therefore runs in a subprocess whose ``PYTHONPATH`` puts the in-tree build first, so the
 parent process keeps the released package and only the child sees the in-tree one. That also
-gives a long training run process isolation — an OOM-killed fold cannot take the orchestrator
+gives a long training run process isolation: an OOM-killed fold cannot take the orchestrator
 down with it.
 
 Its console scripts are not on ``PATH`` either, so entry points are invoked as ``python -m``.
@@ -34,7 +34,7 @@ MODULE_PLAN_AND_PREPROCESS: str = "nnunetv2.experiment_planning.plan_and_preproc
 MODULE_TRAIN: str = "nnunetv2.run.run_training"
 
 #: Baseline plans files ``like_nnssl`` will accept, in the order it probes for them. It uses the
-#: *first* match, and reads only its target spacing — the architecture comes from the pre-trained
+#: *first* match, and reads only its target spacing: the architecture comes from the pre-trained
 #: checkpoint. So the baseline planner effectively chooses the downstream spacing.
 BASELINE_PLANS: tuple[str, ...] = (
     "nnUNetPlans.json",
@@ -72,8 +72,8 @@ def run_entry_point(
     """Call a console-script entry point in a subprocess, with *args* as its ``sys.argv``.
 
     Needed where ``python -m <module>`` is **not** equivalent to the installed command. Some
-    nnU-Net modules keep a hand-written demo under ``if __name__ == '__main__'`` — 
-    ``predict_from_raw_data`` runs a hardcoded Hippocampus example — so ``-m`` silently ignores
+    nnU-Net modules keep a hand-written demo under ``if __name__ == '__main__'`` (
+    ``predict_from_raw_data`` runs a hardcoded Hippocampus example), so ``-m`` silently ignores
     every argument passed to it and predicts the wrong thing rather than failing outright. The
     real CLI lives in the entry-point function the console script points at, and this calls it.
 
@@ -114,10 +114,10 @@ def plan_baseline(
 ) -> None:
     """Fingerprint the dataset and write a baseline plans file.
 
-    ``nnUNetv2_preprocess_like_nnssl`` **adapts** an existing plan rather than creating one — it
+    ``nnUNetv2_preprocess_like_nnssl`` **adapts** an existing plan rather than creating one: it
     asserts that one of :data:`BASELINE_PLANS` is present, reads its ``3d_fullres`` target
     spacing, and then overwrites the architecture from the pre-trained checkpoint. So this step
-    is what actually decides the spacing the model trains at under
+    is what decides the spacing the model trains at under
     ``--adaptation-mode default_nnunet``.
 
     Preprocessing is deliberately **not** run here: ``preprocess_like_nnssl`` does its own, keyed
@@ -154,7 +154,7 @@ def preprocess_like_nnssl(
     """Generate nnssl-aware plans and preprocess the dataset for them.
 
     Reads the pre-trained checkpoint's adaptation plan, derives a target spacing and
-    normalisation from it according to *adaptation_mode*, writes a ``ptPlans__…`` plans file and
+    normalisation from it according to *adaptation_mode*, writes a ``ptPlans__...`` plans file and
     preprocesses ``3d_fullres`` against it.
 
     Parameters
@@ -182,12 +182,12 @@ def preprocess_like_nnssl(
 def ensure_gt_segmentations(dataset_id: int, *, env: dict[str, str]) -> None:
     """Make sure ``nnUNet_preprocessed/<dataset>/gt_segmentations/`` exists and is current.
 
-    nnU-Net validates a finished fold by comparing its predictions against this folder — a
+    nnU-Net validates a finished fold by comparing its predictions against this folder: a
     plain copy of the raw ``labelsTr`` kept beside the preprocessed data so validation still
     works on a node that only has the preprocessed tree.
 
     ``preprocess_dataset`` makes it as its last step, but
-    :func:`preprocess_like_nnssl` — which is what plans this pipeline's datasets — does not.
+    :func:`preprocess_like_nnssl` (which is what plans this pipeline's datasets) does not.
     The gap is invisible until the *end of the first fold*, where
     ``perform_actual_validation`` dies with ``FileNotFoundError: .../gt_segmentations`` having
     already spent the entire training. Cheap to guarantee, so it is guaranteed before training
@@ -247,7 +247,7 @@ def find_generated_plans(
     """Discover the plans identifier ``preprocess_like_nnssl`` just wrote.
 
     The name is ``ptPlans__<pretrain_name>____<data_identifier>``, and the data identifier
-    encodes the *derived* target spacing — so it cannot be constructed in advance and has to be
+    encodes the *derived* target spacing, so it cannot be constructed in advance and has to be
     found on disk.
 
     Raises
@@ -295,8 +295,8 @@ def prepare_borrowed_plans_dataset(
     The fingerprint is taken from the **source** dataset rather than extracted afresh. Nothing
     reads the target's own: preprocessing normalises from the intensity statistics baked into
     the borrowed plans, and the trainer only files the fingerprint alongside its outputs. The
-    source's is therefore both the cheap answer and the accurate one — it is the fingerprint
-    that produced the plans actually in use. Extracting the target's would re-read every volume
+    source's is therefore both the cheap answer and the accurate one: it is the fingerprint
+    that produced the plans in use. Extracting the target's would re-read every volume
     to produce a file no code consults.
     """
     snippet = (
@@ -333,7 +333,7 @@ def move_plans(
 
     This is what makes two datasets **weight-compatible**. ``load_pretrained_weights`` copies
     parameters by name and shape and asserts they match, so a model trained on dataset A can
-    only seed a model on dataset B if both networks were built from the same configuration —
+    only seed a model on dataset B if both networks were built from the same configuration:
     same target spacing, same patch size, same architecture. Planning each dataset separately
     would derive both from its own fingerprint and produce two subtly different networks.
 
@@ -367,7 +367,7 @@ def preprocess_with_plans(
 
     The counterpart to :func:`move_plans`: once the target dataset has the source's plans, its
     data has to be resampled and normalised to them. ``preprocess_like_nnssl`` cannot be used
-    here — it would derive a *new* plan from the checkpoint and defeat the point.
+    here: it would derive a *new* plan from the checkpoint and defeat the point.
     """
     snippet = (
         "from nnunetv2.experiment_planning.plan_and_preprocess_api import preprocess; "

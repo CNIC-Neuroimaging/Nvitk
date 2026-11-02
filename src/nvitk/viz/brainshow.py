@@ -8,18 +8,18 @@ atlas index.
 
 Desikan and vascular presets
 ----------------------------
-Nilearn ships no Desikan–Killiany atlas, and the arterial-territory atlas the ASL pipeline uses is
-lab-specific, so both are *located* rather than fetched — see :mod:`nvitk.viz.atlas_sources` for the
+Nilearn ships no Desikan-Killiany atlas, and the arterial-territory atlas the ASL pipeline uses is
+lab-specific, so both are *located* rather than fetched; see :mod:`nvitk.viz.atlas_sources` for the
 search order. Both are registered here as ordinary presets, so a caller says ``atlas="desikan"``
 and never learns where the file came from.
 
 Region naming
 -------------
-The same parcel is spelled several ways across this project — ``ctx-lh-precuneus`` in a published
+The same parcel is spelled several ways across this project: ``ctx-lh-precuneus`` in a published
 table, ``ctx_lh_precuneus`` once normalized into the database, ``left_precuneus`` by the T1
 pipeline, and just ``precuneus`` inside a FreeSurfer ``.annot``. :func:`normalize_region_key` reduces
 all of them to ``(side, stem)``, and :func:`atlas_indices_for_region` resolves that onto atlas
-indices — returning a **list**, because an aggregate level such as ``ctx-Left-Frontal-Lobe``,
+indices: returning a **list**, because an aggregate level such as ``ctx-Left-Frontal-Lobe``,
 ``ctx-left-hemisphere`` or a hemisphere-melted parcel belongs on several parcels at once.
 """
 
@@ -87,7 +87,7 @@ def _effective_region_order(
 
 
 def _invert_label_map(index_to_label: Mapping[int, str]) -> dict[str, int]:
-    """Invert an atlas ``index → label`` map to ``normalized_label → index``; raises on duplicate labels."""
+    """Invert an atlas ``index -> label`` map to ``normalized_label -> index``; raises on duplicate labels."""
     rev: dict[str, int] = {}
     for idx, raw in index_to_label.items():
         key = _norm_label_key(str(raw))
@@ -104,7 +104,7 @@ def _sequence_to_mapping(
     region_order: Sequence[Any],
     label_to_index: Mapping[str, int],
 ) -> dict[int, float]:
-    """Zip parallel *values* and *region_order* (label names or atlas indices) into an ``index → value`` map."""
+    """Zip parallel *values* and *region_order* (label names or atlas indices) into an ``index -> value`` map."""
     if len(values) != len(region_order):
         raise ValidationError(
             f"values length {len(values)} does not match region_order length {len(region_order)}."
@@ -282,9 +282,7 @@ def resolve_atlas_preset_surf_destrieux(atlas_kwargs: dict[str, Any] | None) -> 
     )
 
 
-# ---------------------------------------------------------------------------
-# Desikan–Killiany
-# ---------------------------------------------------------------------------
+# Desikan-Killiany
 #: Added to the right hemisphere's vertex indices so the two hemispheres address distinct entries of
 #: a single ``index_to_label``. A FreeSurfer ``.annot`` numbers each hemisphere from zero with the
 #: *same* names, so without an offset a value for ``ctx-lh-precuneus`` would paint both precunei.
@@ -292,7 +290,7 @@ def resolve_atlas_preset_surf_destrieux(atlas_kwargs: dict[str, Any] | None) -> 
 RIGHT_HEMI_INDEX_OFFSET: int = 1000
 
 #: Lobes a *cortical surface* atlas can draw. The rest of :data:`DESIKAN_LOBES` covers
-#: subcortical structures, white matter, ventricles and whole-head scalars — real groupings for
+#: subcortical structures, white matter, ventricles and whole-head scalars: real groupings for
 #: a panel layout, but nothing a surface parcellation contains.
 _CORTICAL_LOBES: tuple[str, ...] = (
     "Frontal", "Parietal", "Temporal", "Occipital", "Cingulate", "Insula",
@@ -331,10 +329,10 @@ def resolve_atlas_desikan_annot(
 
     The right hemisphere's indices are shifted by :data:`RIGHT_HEMI_INDEX_OFFSET` so each parcel is
     individually addressable through one ``index_to_label``; labels are emitted in the published
-    ``ctx-lh-…`` / ``ctx-rh-…`` spelling so they match the measurement vocabulary directly.
+    ``ctx-lh-...`` / ``ctx-rh-...`` spelling so they match the measurement vocabulary directly.
 
     Vertices belonging to no parcel (``unknown``, ``corpuscallosum``) are left out of the label map
-    and therefore never painted — the medial wall is not a region with a value.
+    and therefore never painted: the medial wall is not a region with a value.
     """
     left_map, left_names = _read_annot(left_path)
     right_map, right_names = _read_annot(right_path)
@@ -369,7 +367,7 @@ def _dkt_on_mni152(cache_path: Path) -> Nifti1Image:
     Generate (once) and cache a DKT parcellation of the MNI152 template.
 
     Last resort, used only when no Desikan atlas is configured and FreeSurfer is absent. It is
-    honest about being a *different* parcellation: DKT drops ``bankssts``, ``frontalpole`` and
+    reported as a *different* parcellation: DKT drops ``bankssts``, ``frontalpole`` and
     ``temporalpole`` from the Desikan set, so measurements in those three parcels have no geometry
     to paint and are reported as absent rather than approximated onto a neighbour.
     """
@@ -403,7 +401,7 @@ def _dkt_on_mni152(cache_path: Path) -> Nifti1Image:
 
 
 def _dkt_index_to_label() -> dict[int, str]:
-    """ANTsPyNet DKT ids → published ``ctx-lh-…`` / ``ctx-rh-…`` parcel names."""
+    """ANTsPyNet DKT ids -> published ``ctx-lh-...`` / ``ctx-rh-...`` parcel names."""
     from nvitk.segmentation.dkt import DKT_LABELS
 
     return dict(DKT_LABELS)
@@ -411,19 +409,19 @@ def _dkt_index_to_label() -> dict[int, str]:
 
 def resolve_atlas_preset_desikan(atlas_kwargs: dict[str, Any] | None) -> ResolvedAtlas:
     """
-    Resolve the Desikan–Killiany parcellation from wherever this machine has one.
+    Resolve the Desikan-Killiany parcellation from wherever this machine has one.
 
-    Order — see :mod:`nvitk.viz.atlas_sources` for what each step reads:
+    Order; see :mod:`nvitk.viz.atlas_sources` for what each step reads:
 
     1. an explicit ``maps=`` / ``annot=`` kwarg, or the configured atlas path (env or settings). A
        ``.annot`` becomes a surface atlas, a NIfTI a volumetric one;
-    2. a FreeSurfer install's fsaverage ``?h.aparc.annot`` — the canonical Desikan surface labels;
+    2. a FreeSurfer install's fsaverage ``?h.aparc.annot``: the canonical Desikan surface labels;
     3. a cached DKT parcellation of the MNI152 template, generated on demand.
 
     Raises
     ------
     ValidationError
-        When none of the three resolve, naming every place that was searched — the fix is a path,
+        When none of the three resolve, naming every place that was searched: the fix is a path,
         and an error that does not say which path to set is not actionable.
     """
     from nvitk.viz import atlas_sources
@@ -431,7 +429,7 @@ def resolve_atlas_preset_desikan(atlas_kwargs: dict[str, Any] | None) -> Resolve
     kwargs = dict(atlas_kwargs or {})
     explicit = kwargs.get("maps") or kwargs.get("annot") or kwargs.get("path")
 
-    # ---- 1. Configured path -------------------------------------------------------------------
+    # 1. Configured path
     path = Path(str(explicit)) if explicit is not None else atlas_sources.desikan_atlas_path()
     if path is not None and path.exists():
         if path.suffix.lower() == ".annot":
@@ -451,13 +449,13 @@ def resolve_atlas_preset_desikan(atlas_kwargs: dict[str, Any] | None) -> Resolve
             )
         return resolve_atlas_volume_custom(path, kwargs.get("labels"))
 
-    # ---- 2. FreeSurfer fsaverage --------------------------------------------------------------
+    # 2. FreeSurfer fsaverage
     found = atlas_sources.fsaverage_aparc_annot()
     if found is not None:
         left, right, subject = found
         return resolve_atlas_desikan_annot(left, right, surf_mesh=subject)
 
-    # ---- 3. Generated DKT ----------------------------------------------------------------------
+    # 3. Generated DKT
     try:
         image = _dkt_on_mni152(atlas_sources.atlas_cache_dir() / "dkt_mni152.nii.gz")
     except Exception as exc:
@@ -482,13 +480,13 @@ def merge_atlas_regions(
     The parcels are merged, not merely painted alike: each group becomes a single region with one
     index, so a value lands on it once. That matters because painting a lobe by writing its value
     onto each member parcel makes the *boundaries between members* disappear only if every member
-    got the same value — which is true for a lobe-grouped fit and false the moment a caller mixes
+    got the same value, which is true for a lobe-grouped fit and false the moment a caller mixes
     granularities. Merging removes the possibility.
 
     Parameters
     ----------
     groups : mapping
-        ``{new region label: [source atlas index, …]}``. Source indices not named in any group are
+        ``{new region label: [source atlas index, ...]}``. Source indices not named in any group are
         dropped from the merged atlas, so they render as "no estimate" rather than as an
         unnamed leftover region.
     """
@@ -539,12 +537,12 @@ def resolve_atlas_preset_desikan_lobes(atlas_kwargs: dict[str, Any] | None) -> R
     """
     The Desikan parcellation merged into lobes, one region per lobe per hemisphere.
 
-    What a lobe-grouped analysis is actually about: 68 parcels reduced to a handful of structures,
+    What a lobe-grouped analysis is about: 68 parcels reduced to a handful of structures,
     each drawn as one region with one boundary. Built from the Desikan atlas rather than shipped
     separately, so it follows whatever Desikan source this machine resolved and can never disagree
     with the parcel-level map about where a lobe is.
 
-    Labels are emitted in the pipeline's own published spelling — ``ctx-Left-Frontal-Lobe`` — so a
+    Labels are emitted in the pipeline's own published spelling (``ctx-Left-Frontal-Lobe``), so a
     frame grouped by the published lobe rows resolves without a translation table. The side-less
     panel name (``Frontal``) also resolves, onto both hemispheres, because that is what the
     ``lobe`` grouping produces.
@@ -605,14 +603,14 @@ def resolve_atlas(
     """
     Normalize *atlas* spec into :class:`ResolvedAtlas`.
 
-    Presets (volume): ``destrieux_2009``, ``destrieux_vol`` →
+    Presets (volume): ``destrieux_2009``, ``destrieux_vol`` ->
     :func:`nilearn.datasets.fetch_atlas_destrieux_2009`.
 
-    Presets (surface): ``destrieux_surface``, ``surf_destrieux`` →
+    Presets (surface): ``destrieux_surface``, ``surf_destrieux`` ->
     :func:`nilearn.datasets.fetch_atlas_surf_destrieux`.
 
-    Presets (located, not fetched): ``desikan`` / ``aparc`` →
-    :func:`resolve_atlas_preset_desikan`; ``vascular`` / ``arterial`` →
+    Presets (located, not fetched): ``desikan`` / ``aparc`` ->
+    :func:`resolve_atlas_preset_desikan`; ``vascular`` / ``arterial`` ->
     :func:`resolve_atlas_preset_vascular`. See :mod:`nvitk.viz.atlas_sources` for where they are
     searched for.
 
@@ -665,9 +663,7 @@ def resolve_atlas(
     raise ValidationError(f"Unsupported atlas kind {kind!r}.")
 
 
-# ---------------------------------------------------------------------------
 # Region naming
-# ---------------------------------------------------------------------------
 #: ``ctx_``/``ctx-`` prefix, then a side token, in either order and with any separator.
 _SIDE_PREFIX_RE = re.compile(r"^(?:ctx_)?(?:(lh|rh|bh|left|right|l|r)_)")
 _SIDE_SUFFIX_RE = re.compile(r"_(lh|rh|bh|left|right)$")
@@ -677,7 +673,7 @@ _KERNEL_SUFFIX_RE = re.compile(r"_(?:0|8|12)$")
 _SIDE_CANONICAL: dict[str, str] = {
     "lh": "l", "left": "l", "l": "l",
     "rh": "r", "right": "r", "r": "r",
-    # ``bh`` is a bilateral measurement — one number for both sides, so it belongs on both.
+    # ``bh`` is a bilateral measurement: one number for both sides, so it belongs on both.
     "bh": "", "both": "",
 }
 
@@ -688,13 +684,13 @@ _WHOLE_STEMS: frozenset[str] = frozenset(
 
 
 def _squash(name: Any) -> str:
-    """Lowercase, separator-free form of a region name (``ctx-lh-Precuneus`` → ``ctxlhprecuneus``)."""
+    """Lowercase, separator-free form of a region name (``ctx-lh-Precuneus`` -> ``ctxlhprecuneus``)."""
     return re.sub(r"[^0-9a-z]+", "", str(name or "").strip().lower())
 
 
 @lru_cache(maxsize=4096)
 def _normalize_region_key_cached(name: str) -> tuple[str, str]:
-    """Memoized core of :func:`normalize_region_key` (pure string → string)."""
+    """Memoized core of :func:`normalize_region_key` (pure string -> string)."""
     text = re.sub(r"[\s\-.]+", "_", name.strip().lower())
     text = re.sub(r"_+", "_", text).strip("_")
     text = _KERNEL_SUFFIX_RE.sub("", text)
@@ -753,7 +749,7 @@ def _atlas_index_by_key(index_to_label: Mapping[int, str]) -> dict[tuple[str, st
 
 
 #: Published aggregates that are not lobes. The ASL tables report an ``Anterior Cingulate`` summary
-#: alongside the parcels it pools, and the lobe table has no entry for it — ``Cingulate`` there is
+#: alongside the parcels it pools, and the lobe table has no entry for it: ``Cingulate`` there is
 #: the whole gyrus, anterior and posterior together.
 _EXTRA_AGGREGATES: dict[str, tuple[str, ...]] = {
     "anteriorcingulate": ("rostralanteriorcingulate", "caudalanteriorcingulate"),
@@ -773,7 +769,7 @@ def _lobe_stems() -> dict[str, tuple[str, ...]]:
         table[key] = stems
         # Published aggregates append "lobe" (``ctx-Left-Frontal-Lobe``); the panel names do not.
         table[f"{key}lobe"] = stems
-    # Added last so a genuine parcel of the same name is never shadowed — ``posteriorcingulate`` is
+    # Added last so a genuine parcel of the same name is never shadowed: ``posteriorcingulate`` is
     # both a Desikan parcel and the name of a two-parcel summary, and the parcel must win. The
     # exact-parcel lookup in :func:`atlas_indices_for_region` runs first, so this only ever applies
     # to a level that is not itself a parcel of the atlas in hand.
@@ -787,7 +783,7 @@ def region_index_resolver(index_to_label: Mapping[int, str]):
     A resolver closure with the atlas's inverse index built **once**.
 
     :func:`atlas_indices_for_region` is called per model term, and rebuilding a 68-entry inverse map
-    on each of those made resolving a single fit the most expensive thing the brain map did — it
+    on each of those made resolving a single fit the most expensive thing the brain map did: it
     dominated the draw. Callers that resolve many names against one atlas should use this instead.
 
     Returns
@@ -808,21 +804,21 @@ def region_index_resolver(index_to_label: Mapping[int, str]):
 
 def atlas_indices_for_region(name: Any, index_to_label: Mapping[int, str]) -> list[int]:
     """
-    Atlas indices a region level refers to — **one, several, or none**.
+    Atlas indices a region level refers to: **one, several, or none**.
 
     Several, because the grouping levels a model is fitted at are not all single parcels. A frame
     grouped by hemisphere reports ``precuneus`` for the average of both, a lobe-grouped one reports
     ``ctx-Left-Frontal-Lobe``, and the ASL tables publish ``ctx-whole-brain``. Each is one number
-    that belongs on every parcel it was averaged from — painting it on none, which an exact-match
+    that belongs on every parcel it was averaged from: painting it on none, which an exact-match
     lookup does, leaves a lobe-grouped fit with an empty brain. This mirrors
     :func:`nvitk.stats.vascular_map.nodes_for_label`, which expands a hemisphere-melted ``ICA`` onto
     both carotids for the same reason.
 
-    Resolution order: exact parcel → whole-brain / hemisphere → Desikan lobe → nothing.
+    Resolution order: exact parcel -> whole-brain / hemisphere -> Desikan lobe -> nothing.
 
     Returns ``[]`` for anything the atlas does not cover, which is how a caller tells a region that
     was measured but cannot be drawn (a FLAIR white-matter zone, a whole-head scalar such as
-    ``etiv``) from one that simply has no value.
+    ``etiv``) from one that has no value.
     """
     return _indices_for(name, _atlas_index_by_key(index_to_label), _lobe_stems())
 
@@ -846,21 +842,21 @@ def _indices_for(
             found += by_key.get((s, want), [])
         return found
 
-    # ---- 1. An actual region of this atlas -----------------------------------------------------
+    # 1. An actual region of this atlas
     exact = _sided(stem)
     if exact:
         return sorted(set(exact))
 
-    # ---- 2. A lobe *as a region*, on an atlas whose regions are lobes ---------------------------
+    # 2. A lobe *as a region*, on an atlas whose regions are lobes
     # The ``lobe`` grouping emits the bare panel name (``Frontal``), while a lobe atlas names its
-    # regions the way the pipeline publishes them (``ctx-Left-Frontal-Lobe`` → stem ``frontallobe``).
+    # regions the way the pipeline publishes them (``ctx-Left-Frontal-Lobe`` -> stem ``frontallobe``).
     # Without this the one grouping the lobe atlas exists for resolves to nothing.
     if stem in lobes:
         as_region = _sided(f"{stem}lobe")
         if as_region:
             return sorted(set(as_region))
 
-    # ---- 3. Whole brain / one hemisphere ------------------------------------------------------
+    # 3. Whole brain / one hemisphere
     if stem in _WHOLE_STEMS:
         return sorted(
             index for (parcel_side, _), indices in by_key.items()
@@ -868,7 +864,7 @@ def _indices_for(
             if not side or parcel_side == side
         )
 
-    # ---- 4. A lobe expanded into the parcels it pools -------------------------------------------
+    # 4. A lobe expanded into the parcels it pools
     # Last, so on a parcel atlas ``Frontal`` paints its eleven parcels, while on a lobe atlas step 2
     # has already matched the lobe region itself.
     stems = lobes.get(stem)

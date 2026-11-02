@@ -319,11 +319,11 @@ def centerlines_dict_from_arterial_branches(
     Returns
     -------
     centerlines
-        Synthetic int key → polyline (exact stage polylines, not re-extracted).
+        Synthetic int key -> polyline (exact stage polylines, not re-extracted).
     volume_label_by_key
-        Synthetic key → parent qvtpy seg label (for plane label constraints).
+        Synthetic key -> parent qvtpy seg label (for plane label constraints).
     branch_name_by_key
-        Synthetic key → branch name (``LMCA-M2a``, …).
+        Synthetic key -> branch name (``LMCA-M2a``, ...).
     """
     centerlines: dict[int, np.ndarray] = {}
     volume_label_by_key: dict[int, int] = {}
@@ -624,7 +624,7 @@ def _flow_at_pose(
     offset: int,
     index: int,
 ) -> dict[str, Any] | None:
-    """One flow-waveform entry at an exact center/tangent pose (stage-6–compatible sampling)."""
+    """One flow-waveform entry at an exact center/tangent pose (stage-6-compatible sampling)."""
     vx = state.get("vx")
     vy = state.get("vy")
     vz = state.get("vz")
@@ -684,7 +684,7 @@ def _neighbor_flow_waveforms(
     the one the DB / literature bands use.
 
     When *loc* is set (QC tab with ``locs.csv``), offset 0 uses the **exact** stage-5
-    LOC center + saved tangent — the same pose stage 6 wrote into ``loc_measurements.csv``.
+    LOC center + saved tangent: the same pose stage 6 wrote into ``loc_measurements.csv``.
     Neighbors still walk the matched centerline with recomputed tangents.
     """
     vx = state.get("vx")
@@ -775,7 +775,7 @@ def _schema_name(label_id: int, schema_key: str | None) -> str:
             name = str((schema.name_for(int(label_id)) if schema else "") or "").strip()
             if name and "unknown" not in name.lower():
                 return name
-        except Exception:  # noqa: BLE001 — naming is cosmetic
+        except Exception:  # noqa: BLE001 (naming is cosmetic)
             pass
     return str(int(label_id))
 
@@ -805,11 +805,11 @@ def install_vessel_cross_sections(
     those exact named polylines are used so the overlay coincides with pipeline
     centerlines. Otherwise polylines are re-extracted from *centerline_mask*.
 
-    Optional *venous_centerlines* (stage-3 name → polyline) are always appended
+    Optional *venous_centerlines* (stage-3 name -> polyline) are always appended
     when present so venous vessels are pickable alongside arterial branches.
 
     Optional *locs* (stage-5 ``locs.csv`` rows or :class:`LocPose` list) enables
-    snapping to the exact LOC pose stage 6 measured — used by the QC tab loader.
+    snapping to the exact LOC pose stage 6 measured: used by the QC tab loader.
     The standalone visualization tool omits *locs* and keeps centerline-only picks.
     """
     shutdown_vessel_cross_sections(app_state)
@@ -849,7 +849,7 @@ def install_vessel_cross_sections(
         min_points=3,
     )
     if n_venous:
-        # Venous polylines are exact stage-3 geometry — keep display unsmoothed
+        # Venous polylines are exact stage-3 geometry: keep display unsmoothed
         # whenever any stage polylines are present.
         from_stage_branches = True
     if not centerlines:

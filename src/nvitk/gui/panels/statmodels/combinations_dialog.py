@@ -1,11 +1,11 @@
 """
-Editor for region combinations — arithmetic across the rows of one measurement.
+Editor for region combinations: arithmetic across the rows of one measurement.
 
 Description
 -----------
 The derived-columns editor works *within* a row: ``log(pi)``, ``pi / flow_mean``. The quantities a
-vascular analysis actually needs are sums *over* rows of one subject — ``TCBF = RICA + LICA + BASI``,
-or the mass-balance residual ``LVA + RVA − BASI`` — because the analysis frame is long, one row per
+vascular analysis needs are sums *over* rows of one subject (``TCBF = RICA + LICA + BASI``,
+or the mass-balance residual ``LVA + RVA - BASI``), because the analysis frame is long, one row per
 subject × territory.
 
 This dialog builds those. Pick a measurement, tick the regions, give each a coefficient, and choose
@@ -19,9 +19,7 @@ and the conservation balances from :mod:`~nvitk.stats.vessel_network`, which is 
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from typing import Any, Sequence
 
 import pandas as pd
@@ -111,13 +109,13 @@ class RegionCombinationsDialog(QDialog):
         self._refresh_list()
         if not self._combinations:
             # Open on a live, editable definition rather than a disabled form. An empty list greys
-            # out every control, which reads as a broken window — the user has no way to know the
+            # out every control, which reads as a broken window: the user has no way to know the
             # form only wakes up after pressing Add.
             self._on_add()
         self._list.setCurrentRow(0)
         self._sync_form(self._current())
 
-    # ---- construction ---------------------------------------------------------
+    # construction
     def _build_list(self) -> QWidget:
         """The definitions list plus its add/remove/prefill buttons."""
         panel = QWidget()
@@ -236,9 +234,9 @@ class RegionCombinationsDialog(QDialog):
             self._spinners[level] = spin
             check.setProperty("level", level)
 
-    # ---- state ----------------------------------------------------------------
+    # state
     def _checks(self) -> dict[str, QCheckBox]:
-        """Region name → its checkbox, read back out of the list's item widgets."""
+        """Region name -> its checkbox, read back out of the list's item widgets."""
         out: dict[str, QCheckBox] = {}
         for i in range(self._regions.count()):
             widget = self._regions.itemWidget(self._regions.item(i))
@@ -354,7 +352,7 @@ class RegionCombinationsDialog(QDialog):
             f"{report['expression']}   →   {report['n_subjects']} subject(s), {summary}"
         )
 
-    # ---- actions --------------------------------------------------------------
+    # actions
     def _on_add(self) -> None:
         """Append an empty definition and select it."""
         columns = self._numeric_columns()

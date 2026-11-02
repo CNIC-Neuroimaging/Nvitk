@@ -5,21 +5,21 @@ Description
 -----------
 Ordinary least squares minimises squared residuals, so one badly segmented vessel or one mis-scaled
 ASL frame moves every coefficient in the model. The usual answers are to hunt the outlier down by
-hand or to drop it with an IQR filter — both of which mean deciding, before you have a model, which
+hand or to drop it with an IQR filter: both of which mean deciding, before you have a model, which
 observations are allowed to inform it.
 
 ``lmrob`` decides that as part of the fit. It estimates the regression by **MM-estimation**: an
 initial S-estimate with a 50% breakdown point (half the data may be arbitrary before the estimate
 does), refined by an M-step tuned for high efficiency at the Gaussian model. Each observation ends
-up with a *robustness weight* between 0 and 1, and those weights are the diagnostic worth reading —
+up with a *robustness weight* between 0 and 1, and those weights are the diagnostic worth reading:
 they tell you which subject × territory rows the model chose to discount, which is usually a list of
 scans worth re-checking.
 
 Why not ``statsmodels.RLM``
 ---------------------------
 ``RLM`` is M-estimation only. It downweights outlying *responses* but has a breakdown point of zero
-against outlying *predictors*: a single high-leverage row — an implausible flow value used as a
-covariate, say — still drags the fit wherever it likes. MM-estimation resists both. That difference
+against outlying *predictors*: a single high-leverage row (an implausible flow value used as a
+covariate, say) still drags the fit wherever it likes. MM-estimation resists both. That difference
 is the reason this module exists rather than a pure-Python path.
 
 Requirements
@@ -35,9 +35,7 @@ for :mod:`~nvitk.stats.r_mixedlm`, rather than rebuilding a design matrix locall
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import shutil
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
@@ -63,9 +61,7 @@ INSTALL_HINT = (
 )
 
 
-# ---------------------------------------------------------------------------
 # Estimator settings
-# ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class LmrobEstimator:
     """One ``lmrob`` estimation chain, as accepted by its ``method=`` argument."""
@@ -121,7 +117,7 @@ LMROB_SETTINGS: dict[str, str] = {
 
 @dataclass(frozen=True)
 class RobustBackendStatus:
-    """What the robust engine found when it probed rpy2 → R → robustbase."""
+    """What the robust engine found when it probed rpy2 -> R -> robustbase."""
 
     available: bool
     rpy2_version: str = ""
@@ -168,7 +164,7 @@ def _r_package_versions(names: Sequence[str]) -> dict[str, str]:
 
 def robust_backend_status(*, check_r_packages: bool = True) -> RobustBackendStatus:
     """
-    Probe rpy2 → R → ``robustbase``. Never raises, and never imports R as an import side effect.
+    Probe rpy2 -> R -> ``robustbase``. Never raises, and never imports R as an import side effect.
 
     Independent of the lme4 and MMRM probes: ``robustbase`` has no shared dependency with either, so
     it can be available when they are not.
@@ -210,9 +206,7 @@ def robust_backend_status(*, check_r_packages: bool = True) -> RobustBackendStat
     )
 
 
-# ---------------------------------------------------------------------------
 # R helpers
-# ---------------------------------------------------------------------------
 _R_HELPERS = """
 .nvitk_lmrob_fit <- function(data, formula, method, psi, setting, max_it, k_max, seed) {
   # A fixed seed matters here: the initial S-estimate is found by random resampling, so two runs on
@@ -308,9 +302,7 @@ def _formula_columns(columns: Sequence[str], formula: str) -> list[str]:
     return sorted(set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", str(formula or ""))) & available)
 
 
-# ---------------------------------------------------------------------------
 # Fitting
-# ---------------------------------------------------------------------------
 def fit_lmrob(
     *,
     data: pd.DataFrame,
@@ -328,8 +320,8 @@ def fit_lmrob(
     ----------
     formula : str
         An R formula, e.g. ``"pi ~ age_c + sex + territory"``. There is no random part: ``lmrob``
-        fits a single population regression. For clustered data — repeated territories within a
-        subject — the coefficients stay valid but the standard errors ignore the clustering; use
+        fits a single population regression. For clustered data (repeated territories within a
+        subject) the coefficients stay valid but the standard errors ignore the clustering; use
         ``lme4`` or MMRM when the correlation is the point.
     method : str
         Estimation chain, see :data:`LMROB_ESTIMATORS`.
@@ -344,7 +336,7 @@ def fit_lmrob(
     Returns
     -------
     (fit, model_df, metadata)
-        *fit* is the R ``lmrob`` object. *model_df* is the frame actually fitted, in the same row
+        *fit* is the R ``lmrob`` object. *model_df* is the frame fitted, in the same row
         order as the robustness weights. *metadata* matches the other engines.
     """
     status = robust_backend_status()
@@ -439,9 +431,7 @@ def fit_lmrob(
     return fit, df, meta
 
 
-# ---------------------------------------------------------------------------
 # Reading the fit
-# ---------------------------------------------------------------------------
 _COEF_ALIASES: dict[str, tuple[str, ...]] = {
     "coef": ("Estimate", "estimate"),
     "std_err": ("Std. Error", "Std.Error", "std_error"),
@@ -464,7 +454,7 @@ def lmrob_coef_frame(fit: Any, *, ci_level: float = 0.95) -> pd.DataFrame:
     """
     Coefficient table in the shared shape: ``parameter coef std_err z p_value ci_low ci_high sig``.
 
-    The standard errors are the robust ones ``summary.lmrob`` reports — computed from the estimator's
+    The standard errors are the robust ones ``summary.lmrob`` reports: computed from the estimator's
     own sandwich-type covariance, not from an OLS residual variance.
     """
     from .mixedlm import _z_critical, significance_stars
@@ -492,7 +482,7 @@ def lmrob_weights_frame(
     fit: Any, model_df: pd.DataFrame | None = None, *, key_columns: Sequence[str] = ()
 ) -> pd.DataFrame:
     """
-    Per-observation robustness weights — the diagnostic that makes a robust fit worth running.
+    Per-observation robustness weights: the diagnostic that makes a robust fit worth running.
 
     A weight of 1 means the observation was treated as ordinary; 0 means the estimator rejected it
     outright. Joining the low-weight rows back to *model_df* names the subject and territory behind
@@ -504,7 +494,7 @@ def lmrob_weights_frame(
         The frame returned by :func:`fit_lmrob`, in its original row order. Its *key_columns* are
         attached to the weights so each row is identifiable.
     key_columns : sequence of str
-        Which columns to carry over — typically ``("subject_uid", "territory")``. Defaults to those
+        Which columns to carry over, typically ``("subject_uid", "territory")``. Defaults to those
         two when they are present.
 
     Returns
@@ -613,9 +603,7 @@ def lmrob_info_dict(
     }
 
 
-# ---------------------------------------------------------------------------
 # Prediction, marginal means and plotting
-# ---------------------------------------------------------------------------
 def lmrob_predict(fit: Any, newdata: pd.DataFrame, *, use_random_effects: bool = False) -> np.ndarray:
     """
     Predictions at *newdata*, evaluated by R so factor contrasts keep R's own encoding.
@@ -712,7 +700,7 @@ def _lmrob_band(
     """Confidence bands from ``emmeans``, in the shape the shared plotter consumes."""
     from .r_mixedlm import _emmeans_band
 
-    # The band logic is engine-independent — it only needs marginal means keyed by x and group — so
+    # The band logic is engine-independent (it only needs marginal means keyed by x and group), so
     # it is shared with lme4, with this module's emmeans call substituted in.
     return _emmeans_band(
         fit,
@@ -753,8 +741,8 @@ def plot_lmrob_params(
     """
     Population and per-level curves for a robust fit, predicted through R.
 
-    Visually identical to the other engines' plots — dashed black population curve, one coloured
-    curve per level, observed data in a lighter tone — and it supports the same
+    Visually identical to the other engines' plots (dashed black population curve, one coloured
+    curve per level, observed data in a lighter tone), and it supports the same
     ``display="grouped"`` anatomical panelling. The per-level curves only separate when the grouping
     factor is in the formula: ``lmrob`` has no random effects to place them apart otherwise.
     """
@@ -796,7 +784,7 @@ def plot_lmrob_weights(
     Weight against fitted value, with the discounted observations labelled.
 
     Reading it: a cloud at weight 1 with a short tail is a well-behaved fit; a long tail, or a
-    cluster of low weights sharing one territory, says the model and that territory disagree — which
+    cluster of low weights sharing one territory, says the model and that territory disagree, which
     is either a real subgroup or a segmentation problem, and worth knowing which.
     """
     import matplotlib.pyplot as plt

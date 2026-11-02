@@ -1,5 +1,5 @@
 """
-Plot pane — Matplotlib canvas, group include/exclude checklist, and axis-limit sliders.
+Plot pane: Matplotlib canvas, group include/exclude checklist, and axis-limit sliders.
 
 Description
 -----------
@@ -7,9 +7,9 @@ Three controls sit around the figure:
 
 *Groups*      one checkbox per level of the grouping column. Unchecking a level removes both its
               model curve and its raw points, and lets the axes rescale to what remains. The fit is
-              untouched — the black fixed-effect line stays the all-group estimate — so this is a
+              untouched (the black fixed-effect line stays the all-group estimate), so this is a
               display filter, not a re-analysis. Use a ``territory`` filter on the analysis frame
-              when the levels should actually leave the model.
+              when the levels should leave the model.
 *Axis limits* sliders that rescale the current figure without recomputing anything.
 *Show legend* toggles the legend in place.
 *Export PNG*  writes the figure exactly as displayed, to a location the user picks.
@@ -20,9 +20,7 @@ against the dark chrome and exports cleanly.
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -67,7 +65,7 @@ class PlotPanel(QGroupBox):
         A control that requires the plot to be *redrawn* changed (the group selection). Axis sliders
         and the legend toggle act on the existing figure and do not emit.
     exportRequested
-        The user pressed *Export PNG…*. The window owns the dialog, because it knows the dataset
+        The user pressed *Export PNG...*. The window owns the dialog, because it knows the dataset
         root and the model name the file should be suggested under.
     """
 
@@ -80,7 +78,7 @@ class PlotPanel(QGroupBox):
         self._canvas = None
         self._fig = None
         self._axes = None
-        # The interactive backend is created lazily — a web view is expensive, and a session that
+        # The interactive backend is created lazily: a web view is expensive, and a session that
         # only ever looks at a correlation heatmap never needs one.
         self._plotly = None
         self._interactive = False
@@ -93,14 +91,14 @@ class PlotPanel(QGroupBox):
         self._suspend_group_signal = False
 
         lay = QVBoxLayout(self)
-        # The figure is the point of this pane — keep the chrome around it thin.
+        # The figure is the point of this pane: keep the chrome around it thin.
         lay.setContentsMargins(6, 4, 6, 4)
         lay.setSpacing(3)
 
         # Options supplied by the window (plot mode / x / points) sit on one compact row with the
         # figure picker, so plot controls live next to the plot instead of in the formulation box.
         # A *flow* layout, not a horizontal one. This row carries a dozen-plus controls, and a
-        # QHBoxLayout's minimum width is their sum — which Qt propagates up as the window's minimum,
+        # QHBoxLayout's minimum width is their sum, which Qt propagates up as the window's minimum,
         # so the window could not be resized below ~2600 px and ran off any normal display. Wrapping
         # makes the minimum the widest single control instead.
         self._top_row = FlowRow()
@@ -126,7 +124,7 @@ class PlotPanel(QGroupBox):
         top_lay.addWidget(self._btn_export)
         lay.addWidget(self._top_row)
 
-        # A second row for the controls that belong to one display rather than to every plot — the
+        # A second row for the controls that belong to one display rather than to every plot: the
         # anatomical maps' atlas / surface / view pickers. Kept separate rather than appended to the
         # row above so those controls stay together and in a predictable place instead of reflowing
         # into whatever gap the first row happens to leave.
@@ -151,7 +149,7 @@ class PlotPanel(QGroupBox):
 
         lay.addWidget(self._build_axis_controls())
 
-    # ---- construction ---------------------------------------------------------
+    # construction
     def _build_canvas_host(self) -> QWidget:
         """
         Container the figure is swapped into.
@@ -179,7 +177,7 @@ class PlotPanel(QGroupBox):
         """Whether *figure* is a self-contained HTML document rather than a drawable figure.
 
         Nilearn's interactive views (``view_img_on_surf``, ``view_img``) return an
-        ``HTMLDocument``, which is neither a Matplotlib figure nor a Plotly one — it has no
+        ``HTMLDocument``, which is neither a Matplotlib figure nor a Plotly one: it has no
         ``.patch``, so the Matplotlib path would raise inside ``whiten_figure``. Duck-typed on
         ``get_standalone`` rather than imported, so nilearn stays an optional dependency of the
         pane.
@@ -277,7 +275,7 @@ class PlotPanel(QGroupBox):
         lay.addWidget(row)
         return box
 
-    # ---- figure picker --------------------------------------------------------
+    # figure picker
     def kind_combo(self) -> QComboBox:
         """The optional figure picker, for analyses that produce several plots."""
         return self._kind
@@ -298,7 +296,7 @@ class PlotPanel(QGroupBox):
         """Show or hide the second options row."""
         self._map_row.setVisible(bool(visible))
         # Controls inside the row are shown and hidden with the display, which changes how many
-        # lines it wraps onto — re-measure so the row's height follows.
+        # lines it wraps onto: re-measure so the row's height follows.
         self._map_row.refresh()
         self._top_row.refresh()
 
@@ -306,7 +304,7 @@ class PlotPanel(QGroupBox):
         """Show or hide the group checklist (it only applies to grouped model plots)."""
         self._groups_box.setVisible(bool(visible))
 
-    # ---- group checklist ------------------------------------------------------
+    # group checklist
     def set_levels(self, column: str, levels: Sequence[str]) -> None:
         """
         Rebuild the group checklist for *column*, preserving which levels were unchecked.
@@ -371,7 +369,7 @@ class PlotPanel(QGroupBox):
         if not self._suspend_group_signal:
             self.optionsChanged.emit()
 
-    # ---- figure ---------------------------------------------------------------
+    # figure
     def clear(self) -> None:
         """Remove the current plot widget and release its figure."""
         if self._plotly is not None:
@@ -414,7 +412,7 @@ class PlotPanel(QGroupBox):
         self._host_layout.addWidget(canvas)
         self._canvas = canvas
         self._fig = fig
-        # Axis sliders act on every axes a plot marks as sharing one data space — the panels of a
+        # Axis sliders act on every axes a plot marks as sharing one data space: the panels of a
         # grouped display, moved together so the small multiples stay comparable. Figures that do
         # not mark any (the mediation partial-path pair, a heatmap and its colourbar) get the
         # sliders only when there is a single, unambiguous axes to rescale.
@@ -423,7 +421,7 @@ class PlotPanel(QGroupBox):
         self._axes = self._linked_axes[0] if self._linked_axes else None
         self._fit_layout(fig)
         # The canvas is resized by its splitter, but a layout computed once at creation does not
-        # follow — which is how long tick labels end up outside the figure. Re-fit on every resize.
+        # follow, which is how long tick labels end up outside the figure. Re-fit on every resize.
         canvas.mpl_connect("resize_event", lambda _event: self._fit_layout(fig))
         canvas.draw_idle()
         self._sync_axis_sliders()
@@ -485,7 +483,7 @@ class PlotPanel(QGroupBox):
     def _show_html_document(self, document: Any) -> None:
         """Hand a nilearn ``HTMLDocument`` to the web view, and stand the axis sliders down.
 
-        Same hosting as a Plotly figure — the document brings its own JS — so this reuses the web
+        Same hosting as a Plotly figure (the document brings its own JS), so this reuses the web
         view rather than adding a second one.
         """
         from .plotly_view import PlotlyView
@@ -512,12 +510,12 @@ class PlotPanel(QGroupBox):
         Re-fit the figure's layout so nothing spills outside the canvas.
 
         Skipped when the figure already carries a layout engine of its own (``constrained``, which
-        some plots set because they re-flow on every draw) — calling ``tight_layout`` on top of one
+        some plots set because they re-flow on every draw): calling ``tight_layout`` on top of one
         of those fights it and matplotlib warns.
 
         Also skipped for 3-D axes. ``tight_layout`` has no notion of a projected axes' true extent,
         so on the brain map it warns once per panel and then lays the figure out worse than the
-        plotter already had — the surface panels are sized by the plotter itself.
+        plotter already had: the surface panels are sized by the plotter itself.
         """
         try:
             if fig.get_layout_engine() is not None:
@@ -567,7 +565,7 @@ class PlotPanel(QGroupBox):
                 legend.set_visible(self._show_legend.isChecked())
         self._canvas.draw_idle()
 
-    # ---- axis sliders ---------------------------------------------------------
+    # axis sliders
     def _disable_axis_sliders(self) -> None:
         """Grey out the axis-limit controls (no single-axes figure to rescale)."""
         for key, slider in self._axis_sliders.items():
@@ -588,7 +586,7 @@ class PlotPanel(QGroupBox):
         the handles start inset and the user can zoom out as well as in.
 
         With several linked panels the baseline is their **union**, and moving a slider puts every
-        panel on that one common scale — which is how you compare magnitudes between panels that
+        panel on that one common scale, which is how you compare magnitudes between panels that
         each autoscaled to their own range. *Reset* restores the individual ranges.
         """
         if not self._linked_axes:

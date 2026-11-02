@@ -20,8 +20,8 @@ _NVITK_PROJECT = "nvitk"
 def _find_repo_root() -> Path | None:
     """The source-checkout root, for locating the ``registry/`` submodule.
 
-    Unlike configuration — which now resolves through :mod:`nvitk.core.config_paths` and lives
-    in user-owned directories — the container registry is a *repo asset* checked out as a git
+    Unlike configuration (which now resolves through :mod:`nvitk.core.config_paths` and lives
+    in user-owned directories) the container registry is a *repo asset* checked out as a git
     submodule, so a checkout really is the right (and only) place to look for it.
     """
     return config_paths.source_checkout_root()

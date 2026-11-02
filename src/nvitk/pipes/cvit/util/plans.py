@@ -1,5 +1,5 @@
 """
-CViT plans — derive an nnU-Net plans file for a CViT network from a baseline nnU-Net plan.
+CViT plans: derive an nnU-Net plans file for a CViT network from a baseline nnU-Net plan.
 
 Description
 -----------
@@ -13,7 +13,7 @@ anisotropy-aware pooling schedule. CViT keeps all of that and replaces only the 
 ``architecture``
     ``network_class_name = "nvitk.nn.cvit.CViT"`` and ``arch_kwargs`` = the serialised
     :class:`~nvitk.nn.cvit.config.CViTConfig`, plus ``strides`` (nnU-Net reads
-    ``pool_op_kernel_sizes`` — and so the deep-supervision scales — from that key).
+    ``pool_op_kernel_sizes`` (and so the deep-supervision scales) from that key).
 Stage strides
     The first ``n_levels`` entries of the baseline's pooling schedule, so anisotropic data gets
     per-axis strides such as ``(1, 2, 2)`` decided by nnU-Net's own heuristics. The token stride
@@ -25,8 +25,8 @@ Patch size
 Plans naming
 ------------
 nnU-Net names a results folder ``<trainer>__<plans>__<configuration>``, so every architectural
-variant gets its own plans identifier (:func:`variant_tag`) and therefore its own results folder
-— an ablation never overwrites another.
+variant gets its own plans identifier (:func:`variant_tag`) and therefore its own results folder:
+an ablation never overwrites another.
 """
 
 from __future__ import annotations
@@ -55,13 +55,11 @@ _RUNTIME_KEYS = ("input_channels", "num_classes", "deep_supervision")
 _TOKENIZER_TAG = {"hierarchical": "hier", "intra_patch": "intra", "linear": "lin"}
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Stem schedule helpers
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def default_stem_channels(n_levels: int) -> tuple[int, ...]:
-    """``32 · 2^i`` capped at 320 — nnU-Net's feature schedule."""
+    """``32 · 2^i`` capped at 320: nnU-Net's feature schedule."""
     return tuple(min(32 * 2 ** i, 320) for i in range(n_levels))
 
 
@@ -71,7 +69,7 @@ def default_stem_blocks(n_levels: int) -> tuple[int, ...]:
 
 
 def levels_for_token_stride(token_stride: int) -> int:
-    """Tokenizer levels for an isotropic power-of-two token stride (8 → 4 levels: 1,2,2,2)."""
+    """Tokenizer levels for an isotropic power-of-two token stride (8 -> 4 levels: 1,2,2,2)."""
     t = int(token_stride)
     if t < 2 or t & (t - 1):
         raise ValueError(f"token stride must be a power of two >= 2, got {token_stride}.")
@@ -84,7 +82,7 @@ def stem_strides_from_baseline(pool_op_kernel_sizes: Sequence[Sequence[int]], n_
     Raises
     ------
     ValueError
-        If the baseline network has fewer stages than requested — the patch would be too small to
+        If the baseline network has fewer stages than requested: the patch would be too small to
         reach the token stride.
     """
     pool = [list(int(v) for v in s) for s in pool_op_kernel_sizes]
@@ -104,17 +102,15 @@ def round_patch(patch: Sequence[int], token_stride: Sequence[int]) -> list[int]:
     return out
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Naming
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def variant_tag(cfg: CViTConfig, extra: str | None = None) -> str:
     """Short, filesystem-safe description of the architectural variant.
 
-    ``CViTB_hier_unet_s1111`` / ``CViTS_intra_unet_s0011_drop0.3_warm50_gate1e-3`` / …, with a
+    ``CViTB_hier_unet_s1111`` / ``CViTS_intra_unet_s0011_drop0.3_warm50_gate1e-3`` / ..., with a
     hash of the full config appended so two configs that differ only in a field the tag does not
-    spell out (depth, widths, registers, …) still get different plans.
+    spell out (depth, widths, registers, ...) still get different plans.
     """
     name = cfg.preset or f"E{cfg.embed_dim}D{cfg.depth}H{cfg.num_heads}"
     parts = [name, _TOKENIZER_TAG[cfg.tokenizer], cfg.decoder]
@@ -137,9 +133,7 @@ def plans_identifier(cfg: CViTConfig, extra: str | None = None) -> str:
     return f"{PLANS_PREFIX}_{variant_tag(cfg, extra)}"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Plans derivation
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _arch_kwargs(cfg: CViTConfig) -> dict[str, Any]:
@@ -198,7 +192,7 @@ def derive_cvit_plans(
     arch
         Preset name (``CViTS/B/M/L``) or ``None`` for explicit sizes in *overrides*.
     overrides
-        Any :class:`CViTConfig` field (tokenizer, decoder, skips, gates, …).
+        Any :class:`CViTConfig` field (tokenizer, decoder, skips, gates, ...).
     token_stride
         Isotropic-equivalent token stride (power of two); the per-axis stride follows the
         baseline's pooling schedule.

@@ -2,7 +2,7 @@
 
 Description
 -----------
-Every root comes from ``sge.json``'s ``pipelines.topbrain_paths`` section — there are no
+Every root comes from ``sge.json``'s ``pipelines.topbrain_paths`` section: there are no
 installation paths in this file. A root that is needed but unconfigured raises
 :class:`~nvitk.core.config_paths.ConfigError` naming the key, rather than silently resolving
 to somebody else's filesystem. Configuration is read on use, not on import, so ``--config-dir``
@@ -40,9 +40,7 @@ from nvitk.pipes.topbrain import labels as _labels
 #: ``sge.json`` section holding this pipeline's data roots.
 PIPELINE_PATHS_ID = "topbrain_paths"
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Release layout constants
-# ──────────────────────────────────────────────────────────────────────────────
 
 #: Image subdirectory of the challenge release.
 RELEASE_IMAGES_DIR: str = "imagesTr_topbrain"
@@ -50,16 +48,16 @@ RELEASE_IMAGES_DIR: str = "imagesTr_topbrain"
 #: Label-map JSON subdirectory of the challenge release.
 RELEASE_LABELMAP_DIR: str = "labelmap_jsons"
 
-#: ``topcow_{modality}_{pid}_0000.nii.gz`` — the release's only image naming scheme.
+#: ``topcow_{modality}_{pid}_0000.nii.gz``: the release's only image naming scheme.
 _IMAGE_RE = re.compile(r"^topcow_(?P<modality>ct|mr)_(?P<pid>\d+)_0000\.nii\.gz$")
 
 #: nnU-Net dataset ids per label set. Chosen in the 5xx range to stay clear of the public
 #: MSD/AMOS ids that commonly share an ``nnUNet_raw``.
 DATASET_IDS: dict[str, int] = {
     "ta36": 501, "v1_ct": 502, "v1_mr": 503,
-    # TA36 restricted to one modality — its own dataset so it never overwrites 501's mixed one.
+    # TA36 restricted to one modality: its own dataset so it never overwrites 501's mixed one.
     "ta36_ct": 507, "ta36_mr": 508,
-    # One binary dataset per multi-class set it seeds — see labels.BINARY_LABEL_SET_FOR.
+    # One binary dataset per multi-class set it seeds; see labels.BINARY_LABEL_SET_FOR.
     "binary": 504, "binary_ct": 505, "binary_mr": 506,
 }
 
@@ -107,9 +105,7 @@ def corpus_dataset_name_for(modality: str = "both") -> str:
     """nnssl collection folder name for a corpus restricted to *modality*."""
     return f"Dataset{corpus_dataset_id(modality):03d}_{CORPUS_DATASET_SUFFIXES[str(modality)]}"
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Stage output subdirectories (under ``results_root``)
-# ──────────────────────────────────────────────────────────────────────────────
 
 STAGE0_DATAPREP_DIR: str = "stage0_dataprep"
 STAGE1_PRETRAIN_DIR: str = "stage1_pretrain"
@@ -120,7 +116,7 @@ STAGE5_PACKAGE_DIR: str = "stage5_package"
 STAGE6_SELFTRAIN_DIR: str = "stage6_selftrain"
 
 #: TensorBoard event tree, shared by every stage that trains. Lives under ``results_root`` so
-#: it is bind-mounted on the cluster and visible through the same mount on the workstation —
+#: it is bind-mounted on the cluster and visible through the same mount on the workstation,
 #: which is what lets a cluster run be watched locally.
 TENSORBOARD_DIR: str = "tensorboard"
 
@@ -149,7 +145,7 @@ def _opt_root(key: str) -> Path | None:
 
     Deliberately does not raise: these are read at import time as Click option defaults, so an
     unconfigured machine must still be able to print ``--help``. :func:`layout_local` /
-    :func:`layout_cluster` raise, naming the key, when a root is actually needed.
+    :func:`layout_cluster` raise, naming the key, when a root is needed.
     """
     raw = _pipe_paths().get(key)
     if raw is None or not str(raw).strip():
@@ -168,21 +164,19 @@ _RESOLVERS: dict[str, lazy_config.Resolver] = {
 __getattr__, __dir__ = lazy_config.module_getattr(_RESOLVERS, module_name=__name__)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Release cases
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
 class ReleaseCase:
     """One image of the challenge release, with the label mask of a chosen label set.
 
-    ``patient_id`` is shared by the CT and MR case of the same subject — cross-validation
+    ``patient_id`` is shared by the CT and MR case of the same subject: cross-validation
     folds must be grouped on it or the two halves of a patient land on both sides of a split.
     """
 
     case_id: str
-    """``topcow_ct_001`` — the nnU-Net case identifier (no ``_0000`` channel suffix)."""
+    """``topcow_ct_001``: the nnU-Net case identifier (no ``_0000`` channel suffix)."""
 
     modality: str
     """``"ct"`` (CTA) or ``"mr"`` (MRA/TOF)."""
@@ -210,7 +204,7 @@ def iter_release_cases(
     Parameters
     ----------
     label_set
-        Which label directory to pair images with — see :mod:`nvitk.pipes.topbrain.labels`.
+        Which label directory to pair images with; see :mod:`nvitk.pipes.topbrain.labels`.
         ``v1_ct`` / ``v1_mr`` only cover one modality, so cases of the other modality are
         skipped rather than yielded label-less.
     modality
@@ -258,7 +252,7 @@ def parse_case_id(case_id: str) -> tuple[str, str]:
     Raises
     ------
     ValueError
-        If *case_id* does not follow the release naming scheme — callers use the modality to
+        If *case_id* does not follow the release naming scheme: callers use the modality to
         pick an intensity-normalisation branch, so guessing would be a silent data error.
     """
     parts = case_id.split("_")
@@ -269,9 +263,7 @@ def parse_case_id(case_id: str) -> tuple[str, str]:
     return parts[1], parts[2]
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Resolved layout
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -289,7 +281,7 @@ class TopBrainPaths:
     model_root: Path
     corpus_root: Path
 
-    # ---- Release accessors ---------------------------------------------------
+    # Release accessors
 
     @property
     def release_images_dir(self) -> Path:
@@ -304,7 +296,7 @@ class TopBrainPaths:
         """The release's published label-map JSON for *label_set*."""
         return self.challenge_root / RELEASE_LABELMAP_DIR / _labels.LABEL_SET_JSONS[label_set]
 
-    # ---- nnU-Net dataset accessors -------------------------------------------
+    # nnU-Net dataset accessors
 
     def dataset_name(self, label_set: str) -> str:
         """nnU-Net dataset folder name for *label_set*, e.g. ``Dataset501_TopBrainTA36``."""
@@ -322,7 +314,7 @@ class TopBrainPaths:
         """``<nnunet_results>/DatasetXXX_...`` for *label_set*."""
         return self.nnunet_results / self.dataset_name(label_set)
 
-    # ---- nnssl collection accessors ------------------------------------------
+    # nnssl collection accessors
 
     @property
     def corpus_dataset_name(self) -> str:
@@ -338,10 +330,10 @@ class TopBrainPaths:
         # The *mixed* collection only. Anything that honours --corpus-modality must build its
         # path from corpus_dataset_name_for() instead; using this one is how a CT corpus ended
         # up writing its descriptor into Dataset511.
-        """``<nnssl_raw>/Dataset511_TopBrainCorpus`` — holds ``pretrain_data.json``."""
+        """``<nnssl_raw>/Dataset511_TopBrainCorpus``: holds ``pretrain_data.json``."""
         return self.nnssl_raw / self.corpus_dataset_name
 
-    # ---- Stage output accessors ----------------------------------------------
+    # Stage output accessors
 
     def stage_dir(self, name: str) -> Path:
         """A stage output directory under ``results_root``."""
@@ -358,7 +350,7 @@ def _root_from_config(key: str, *, prefix: str, fallback: Path | None) -> Path:
 
     Under ``--submit local`` the CLI flag wins (*fallback* is preferred). Under ``--submit sge``
     the ``cluster_*`` config wins, because the flag holds a host path that is meaningless on the
-    cluster. That inversion is a repo-wide convention — see ``docs/configuration.md``.
+    cluster. That inversion is a repo-wide convention; see ``docs/configuration.md``.
     """
     raw = _pipe_paths().get(f"{prefix}_{key}")
     if prefix == "cluster" and raw is not None and str(raw).strip():
@@ -398,7 +390,7 @@ def tree_visible(path: Path) -> bool:
 
     A root the cluster has not written to yet exists nowhere, so testing it directly would
     report "not mounted" on a perfectly good mount before the first run. Walking up to the
-    deepest existing ancestor answers the question actually being asked: is this filesystem
+    deepest existing ancestor answers the question being asked: is this filesystem
     reachable from here?
     """
     current = Path(path)
@@ -413,7 +405,7 @@ def layout_auto(**overrides: Path | None) -> tuple[TopBrainPaths, str]:
     """The layout an interactive tool on this host should read; with which one it picked.
 
     Cluster storage is commonly NFS-mounted on the workstation at the *same absolute paths*, so
-    the ``cluster_*`` roots — the ones jobs actually write to — are usually readable here, while
+    the ``cluster_*`` roots (the ones jobs write to) are usually readable here, while
     the ``local_*`` roots are a separate working copy holding nothing a cluster job produced. A
     tool that defaulted to ``local`` would therefore report "no trained models" while the models
     sat right there.
@@ -453,7 +445,7 @@ def layout_container(**overrides: Path | None) -> TopBrainPaths:
     Deliberately reads no configuration. ``sge.json`` is a workstation file and is not mounted
     into the job, so consulting it here made a GUI cluster launch die on
     ``pipelines.topbrain_paths.local_challenge_root`` -- a key naming a machine that is not
-    involved in the run. The job exports the roots it actually bound (see
+    involved in the run. The job exports the roots it bound (see
     :data:`nvitk.gui.tools.topbrain_models.CONTAINER_ROOT_ENV`); every other root is marked
     :data:`UNAVAILABLE_ROOT` instead of being resolved.
     """

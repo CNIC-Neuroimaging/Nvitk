@@ -1,7 +1,7 @@
 """CLI: upload qvtpy/eICAB results to XNAT session resources.
 
 Requires a complete qvtpy tree through stage-7 morphometrics before uploading
-the ``qvtpy`` resource (stage2–stage7 by default; stage7 is always enforced).
+the ``qvtpy`` resource (stage2-stage7 by default; stage7 is always enforced).
 """
 
 from __future__ import annotations
@@ -100,9 +100,10 @@ def main(
     if not subject_list:
         raise click.ClickException("No subjects to upload.")
 
-    local_paths = layout_local(results_root=output_root)
-    cluster_paths = layout_cluster(results_root=output_root)
     cluster_mode = submit.lower() == "sge"
+    local_paths = layout_local(results_root=output_root)
+    # --output-root is the local root; under SGE the remote one comes from sge.json.
+    cluster_paths = layout_cluster(results_root=None if cluster_mode else output_root)
 
     ssh_host: str | None = None
     ssh_user: str | None = None

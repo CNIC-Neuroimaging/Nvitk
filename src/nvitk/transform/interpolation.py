@@ -6,17 +6,17 @@ Description
 The everyday interpolation jobs that :func:`~nvitk.transform.isotropy.isotropy`
 and :func:`~nvitk.transform.resampling.resample_to` do not cover:
 
-- :func:`resample_axes` — up/down-sample any subset of axes (spatial or time) by a
+- :func:`resample_axes`: up/down-sample any subset of axes (spatial or time) by a
   factor, to a target spacing, or to a target size, with an anti-aliasing filter
   on the axes that shrink. Masks resample by nearest neighbour or *shape-based*
   (signed-distance) interpolation, which upsamples a staircase mask into a smooth
   one instead of blowing up its voxels.
-- :func:`block_reduce_axes` — integer downsampling by block mean / max / min /
+- :func:`block_reduce_axes`: integer downsampling by block mean / max / min /
   median / sum, or a majority vote for label maps.
-- :func:`interpolate_mask_slices` — fill the slices between sparsely annotated
+- :func:`interpolate_mask_slices`: fill the slices between sparsely annotated
   ones (draw every 5th slice, interpolate the rest): shape-based interpolation of
   each label between consecutive annotated slices, along one or several axes.
-- :func:`fill_missing_slices` — rebuild missing (empty / NaN) or listed slices of
+- :func:`fill_missing_slices`: rebuild missing (empty / NaN) or listed slices of
   an image from their neighbours along an axis.
 
 Geometry
@@ -54,7 +54,7 @@ INTERPOLATION_ORDERS: dict[str, int] = {
 }
 
 #: How a label map is resampled: nearest neighbour, or shape-based (per-label
-#: signed distance, interpolated linearly and thresholded — smooth when upsampling).
+#: signed distance, interpolated linearly and thresholded; smooth when upsampling).
 LABEL_METHODS: tuple[str, ...] = ("nearest", "shape")
 
 #: Block reductions of :func:`block_reduce_axes` (``mode`` = majority vote, for labels).
@@ -70,9 +70,7 @@ RESAMPLE_MODES: tuple[str, ...] = ("factor", "spacing", "size")
 _TIME_LETTERS = ("T", "C")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Axes and geometry
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _plane(data: _hnp.ndarray, axis: int, index: int) -> _hnp.ndarray:
@@ -181,7 +179,7 @@ def resample_index_map(old_shape: Sequence[int], new_shape: Sequence[int]) -> _h
 
     Field-of-view preserving (voxel edges aligned): along an axis resized from
     ``n`` to ``m`` voxels, ``old = new * s + (s - 1) / 2`` with ``s = n / m``.
-    Compose it after a data→world affine to place the resampled array.
+    Compose it after a data->world affine to place the resampled array.
     """
     n = len(old_shape)
     if len(new_shape) != n:
@@ -267,9 +265,7 @@ def target_shape(
     return tuple(shape)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Resampling
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _resample_array(
@@ -402,13 +398,13 @@ def resample_axes(
     Parameters
     ----------
     axes
-        Axes to resample (see :func:`parse_axes`): ``"2"``, ``"X,Y"``, ``"T"``…
+        Axes to resample (see :func:`parse_axes`): ``"2"``, ``"X,Y"``, ``"T"``...
     mode, values
         The target, as in :func:`target_shape` (factor, spacing or size).
     shape
         Full output shape, overriding *mode*/*values*.
     order
-        Spline order 0–5 or a name from :data:`INTERPOLATION_ORDERS`.
+        Spline order 0-5 or a name from :data:`INTERPOLATION_ORDERS`.
     antialias
         Gaussian prefilter on axes that shrink (images only).
     labels
@@ -416,7 +412,7 @@ def resample_axes(
         0 is resampled as labels.
     label_method
         ``"nearest"`` or ``"shape"`` (signed-distance interpolation, smooth when
-        upsampling; spatial axes only — a time axis is nearest-neighbour).
+        upsampling; spatial axes only: a time axis is nearest-neighbour).
     boundary
         SciPy boundary mode for intensity interpolation.
 
@@ -482,7 +478,7 @@ def block_reduce_axes(
     """Downsample *axes* by integer *factors*, reducing each block with *method*.
 
     Trailing voxels that do not fill a whole block are dropped (the field of view
-    shrinks by less than one output voxel). ``"mode"`` is a majority vote — the
+    shrinks by less than one output voxel). ``"mode"`` is a majority vote: the
     reduction for label maps; ties go to the larger id.
     """
     data = to_numpy(image.data)
@@ -542,9 +538,7 @@ def _crop_image(image: Image, shape: Sequence[int]) -> Image:
     return image.with_data(data)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Slice interpolation
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def annotated_slices(mask: _hnp.ndarray, axis: int) -> _hnp.ndarray:
@@ -630,11 +624,11 @@ def interpolate_mask_slices(
     Parameters
     ----------
     mask
-        Binary or label map (3D, or 3D+t — interpolated within each frame).
+        Binary or label map (3D, or 3D+t: interpolated within each frame).
     axes
         Axes to interpolate along (:func:`parse_axes`), or ``"auto"`` for each
         label's sparsest axis (:func:`sparsest_axis`). Several axes are filled
-        independently and united — e.g. annotation drawn on axial *and* sagittal
+        independently and united, e.g. annotation drawn on axial *and* sagittal
         slices.
     method
         ``"shape"``: blend the signed distances of the two annotated slices
@@ -707,7 +701,7 @@ def interpolate_mask_slices(
 
 
 def _parse_indices(spec: Any, n: int) -> list[int]:
-    """``"3,7-9,12"`` → ``[3, 7, 8, 9, 12]`` (within ``0..n-1``)."""
+    """``"3,7-9,12"`` -> ``[3, 7, 8, 9, 12]`` (within ``0..n-1``)."""
     if spec is None:
         return []
     if not isinstance(spec, str):
@@ -752,7 +746,7 @@ def fill_missing_slices(
 
     *slices* lists the slices to rebuild (``"10,14-16"`` or indices); by default
     every slice that is all zero or holds a NaN. Each is interpolated along the
-    axis between the nearest good slices on either side — linearly (``order`` 1)
+    axis between the nearest good slices on either side: linearly (``order`` 1)
     or by copying the nearer one (0); a run at the volume's edge copies the
     nearest good slice.
     """

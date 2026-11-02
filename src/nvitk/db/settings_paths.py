@@ -24,7 +24,7 @@ def load_settings_document() -> dict[str, Any]:
     """The whole parsed ``settings.json`` (``{}`` when absent).
 
     ``nvitk.viz.atlas_sources`` needs the ``atlas`` block, which this module previously did not
-    expose — it re-opened and re-parsed the file itself. Exposing the document keeps a single
+    expose: it re-opened and re-parsed the file itself. Exposing the document keeps a single
     reader.
     """
     return config_paths.load_json(SETTINGS_JSON_NAME)

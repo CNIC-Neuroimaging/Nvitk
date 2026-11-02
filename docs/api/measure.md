@@ -318,6 +318,47 @@ nvitk Singularity images before `v2026.10.08` install `fsl-base`, `fsl-flirt`, `
 `fsl-randomise`. Local runs are unaffected, and `fsl_backend_status()` reports the gap by name.
 ```
 
+## ASL perfusion: FSL BASIL (`nvitk.fsl.asl`)
+
+CBF, arterial transit time (ATT) and arterial blood volume (aCBV) from arterial spin labelling,
+with FSL's BASIL — a variational-Bayes fit of the kinetic model (Buxton, with an adaptive spatial
+prior), run through FSL's own scripts on the FSL nvitk resolves (`$FSLDIR`, or nvitk's FSL core
+with its `asl` component):
+
+| Function | CLI | What it does |
+|---|---|---|
+| `oxford_asl` | `nvitk-fsl asl` | The whole pipeline: subtraction, motion correction, the BASIL fit, calibration to ml/100g/min (voxelwise M0, or one M0 from a CSF/WM/GM reference region), registration to a structural or `fsl_anat` folder (struct / MNI space outputs), partial-volume correction and atlas region analysis |
+| `basil` | `nvitk-fsl basil` | The fit alone on differenced data (perfusion in data units, ATT); acquisition-ordered data are regrouped by delay first |
+| `asl_file` | `nvitk-fsl asl-file` | Tag-control subtraction, tag / control split, averaging per delay |
+| `asl_calib` | `nvitk-fsl asl-calib` | Arterial-blood M0 from a reference region, and a calibrated CBF map |
+
+pCASL takes post-labelling delays (`--plds`), pASL inversion times (`--tis`); `--bolus` is the
+labelling duration (one, or one per delay). Single-delay data are fitted as `oxford_asl` does
+(bolus and arterial component fixed); `--wp` gives the white-paper (Alsop 2015) quantification.
+
+```bash
+# multi-delay pCASL, voxelwise calibration
+nvitk-fsl asl asl.nii.gz out --plds 0.25,0.5,0.75,1,1.25,1.5 --bolus 1.4 -c m0.nii.gz --tr 6
+# with a structural through fsl_anat: PV correction, MNI-space maps, region tables
+nvitk-fsl asl asl.nii.gz out --plds 1.8 --bolus 1.8 -c m0.nii.gz --fslanat T1.anat --pvcorr --region-analysis
+```
+
+Outputs are under `out/native_space/` (`perfusion_calib` = CBF in ml/100g/min, `arrival` = ATT in s,
+`aCBV_calib`, variances, `pvcorr/` GM and WM maps) and, with a structural, `struct_space/` and
+`std_space/`. `nvitk.fsl.asl.summary()` reads the GM / WM means, `region_tables()` the
+region-analysis CSVs (Harvard-Oxford regions, GM / WM CBF and ATT); `nvitk-fsl asl` prints the
+former. Every subcommand also runs with `--submit sge`.
+
+Checked against synthetic multi-delay pCASL data generated with the same kinetic model (GM 60 /
+WM 20 ml/100g/min, ATT 1.3 / 1.6 s): GM CBF 60.2 and ATT 1.29 s; with partial-volume correction
+GM 60.1 / WM 21.1 ml/100g/min and ATT 1.30 / 1.60 s.
+
+```{note}
+FSL's ASL scripts do not quote paths: inputs and outputs must not contain spaces (the wrappers
+refuse them with a clear message). Region analysis needs an `fsl_anat` folder (for its MNI
+registration) and calibrated data.
+```
+
 ```{seealso}
 Full generated reference: [`nvitk.measure`](../autoapi/nvitk/measure/index).
 ```

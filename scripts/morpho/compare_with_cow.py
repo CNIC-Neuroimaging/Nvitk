@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 """Compare nvitk stage-7 morphometrics against the cow_morpho reference, subject by subject.
 
-cow_morpho (https://… /home/imarcoss/cow_morpho-main) is the pipeline the ``eicab_cw`` profile was
-tuned with. This script runs it — in its own environment (VMTK 1.5.0 / VTK 9.2.6 / Python 3.10;
-see cow_morpho's env_ymls) — and nvitk on the same eICAB CW masks, then compares every anatomic
-centerline VTP both write (``LICA_M1.vtp``, ``LMCA_M2s.vtp``, …): length, inscribed (MIS) and
+cow_morpho (https://... /home/imarcoss/cow_morpho-main) is the pipeline the ``eicab_cw`` profile was
+tuned with. This script runs it, in its own environment (VMTK 1.5.0 / VTK 9.2.6 / Python 3.10;
+see cow_morpho's env_ymls), and nvitk on the same eICAB CW masks, then compares every anatomic
+centerline VTP both write (``LICA_M1.vtp``, ``LMCA_M2s.vtp``, ...): length, inscribed (MIS) and
 cross-section radius, curvature, and the stenosis / enlargement point fractions.
 
 Typical use (bug-for-bug parity: VMTK backend + cow's siphon mask)::

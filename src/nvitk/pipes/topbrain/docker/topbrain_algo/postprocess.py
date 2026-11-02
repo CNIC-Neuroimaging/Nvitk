@@ -3,8 +3,8 @@
 Scope
 -------------------------------------------------
 ``islands`` removes speckle: components below ``min_volume_mm3`` in physical volume, judged per
-class so a small artery is never compared against a large one. ``largest`` is stricter — one
-component per class — and is off by default because several TA36 classes legitimately appear as
+class so a small artery is never compared against a large one. ``largest`` is stricter (one
+component per class), and is off by default because several TA36 classes legitimately appear as
 more than one component in a given field of view.
 """
 
@@ -28,7 +28,7 @@ _STRUCTURE = np.ones((3, 3, 3), dtype=bool)
 
 @dataclass
 class PostProcessReport:
-    """What post-processing actually did, for the submission log."""
+    """What post-processing did, for the submission log."""
 
     steps: list[str] = field(default_factory=list)
     removed_components: int = 0
@@ -61,7 +61,7 @@ def read_config(directory: Path) -> tuple[tuple[str, ...], float]:
     ------
     RuntimeError
         When the file selects a step this runtime cannot apply. stage 5 checks the same thing at
-        build time, so reaching this means the image was assembled some other way — and running
+        build time, so reaching this means the image was assembled some other way, and running
         on anyway would apply a different pipeline from the one that was measured.
     """
     path = Path(directory) / "postprocess.json"

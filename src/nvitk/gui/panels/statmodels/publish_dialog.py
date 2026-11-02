@@ -11,9 +11,7 @@ key are stated up front, the reason that table was chosen is shown so a wrong gu
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from typing import Any, Sequence
 
 import pandas as pd
@@ -155,7 +153,7 @@ class PublishDerivedDialog(QDialog):
         self._target = target
         self._sync_table()
 
-    # ---- state ---------------------------------------------------------------
+    # state
     def _sync_table(self) -> None:
         """Show the region picker only for the table that has regions, and explain the key."""
         table, _domain = self._table.currentData()
@@ -193,10 +191,10 @@ class PublishDerivedDialog(QDialog):
         )
 
     def summary(self) -> dict[str, Any]:
-        """What the write actually did; empty until Publish succeeds."""
+        """What the write did; empty until Publish succeeds."""
         return dict(self._summary)
 
-    # ---- actions -------------------------------------------------------------
+    # actions
     def _run(self, *, dry_run: bool) -> dict[str, Any] | None:
         """Build (and optionally write) the rows, reporting any failure in the dialog."""
         try:

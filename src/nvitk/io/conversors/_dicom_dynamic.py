@@ -1,5 +1,5 @@
 """
-Dynamic (3D+t / 2D+t) DICOM series — geometry splitting and temporal stacking.
+Dynamic (3D+t / 2D+t) DICOM series: geometry splitting and temporal stacking.
 
 Description
 -----------
@@ -7,7 +7,7 @@ Two failure modes of time-resolved acquisitions that the volume-oriented
 ``dicom2nifti`` path cannot handle, solved before (or after) it runs:
 
 1. **Mixed geometry in one series.** Some series carry images of several sizes or
-   orientations — two surview projections, reformats with different heights,
+   orientations: two surview projections, reformats with different heights,
    secondary captures. Stacking them fails (``could not broadcast (158,512) into
    (122,512)``) or, worse, succeeds with a nonsense slice step.
    :func:`split_by_geometry` cuts the series into sub-series whose images share
@@ -30,7 +30,7 @@ study. Axes are ``XYZT``; the time axis is last, in seconds.
 
 Time ordering
 -------------
-Frames are ordered by the first DICOM attribute that actually varies across
+Frames are ordered by the first DICOM attribute that varies across
 them, in this order of trust: ``TemporalPositionIdentifier``, ``TriggerTime``,
 ``NominalPercentageOfCardiacPhase``, acquisition/content date-time, and finally
 ``InstanceNumber``. Frame times (seconds from the first frame) come from the
@@ -52,14 +52,12 @@ from nvitk.core.logger import Logger
 
 try:
     import nibabel as nib
-except Exception:  # pragma: no cover — guarded by _require_deps upstream
+except Exception:  # pragma: no cover: guarded by _require_deps upstream
     nib = None
 
 log = Logger()
 
-# ---------------------------------------------------------------------------
 # Tolerances
-# ---------------------------------------------------------------------------
 
 #: Two slice positions closer than this (mm, along the normal) are the same slice.
 POSITION_TOL_MM = 1e-2
@@ -71,9 +69,7 @@ _IOP_DECIMALS = 3
 _SPACING_DECIMALS = 4
 
 
-# ---------------------------------------------------------------------------
 # Small DICOM readers
-# ---------------------------------------------------------------------------
 
 
 def _floats(value: Any, n: int | None = None) -> tuple[float, ...] | None:
@@ -101,7 +97,7 @@ def _float(value: Any) -> float | None:
 
 
 def _seconds_of_day(time_value: Any) -> float | None:
-    """``HHMMSS.ffffff`` DICOM TM → seconds since midnight."""
+    """``HHMMSS.ffffff`` DICOM TM -> seconds since midnight."""
     text = str(time_value or "").strip()
     if not text:
         return None
@@ -155,7 +151,7 @@ def slice_position(ds: Any, normal: np.ndarray) -> float | None:
 
 
 def series_label(ds_or_md: Any) -> str:
-    """``series 404 'IMR, 83%'`` — how log messages name a series."""
+    """``series 404 'IMR, 83%'``: how log messages name a series."""
     get = ds_or_md.get if hasattr(ds_or_md, "get") else (lambda k, d=None: getattr(ds_or_md, k, d))
     number = str(get("SeriesNumber", "") or "").strip()
     desc = str(get("SeriesDescription", "") or "").strip()
@@ -163,9 +159,7 @@ def series_label(ds_or_md: Any) -> str:
     return f"{label} '{desc}'" if desc else label
 
 
-# ---------------------------------------------------------------------------
 # Geometry splitting
-# ---------------------------------------------------------------------------
 
 
 def geometry_signature(ds: Any) -> tuple:
@@ -204,9 +198,9 @@ def split_by_geometry(ds_list: Sequence[Any]) -> list[tuple[str, list[Any]]]:
     -------
     list of (suffix, datasets)
         One entry per geometry, largest group first. The suffix is empty when the
-        series is homogeneous; otherwise it names what differs — the plane
+        series is homogeneous; otherwise it names what differs: the plane
         (``AX``/``COR``/``SAG``/``OBL``) when orientations differ, the matrix size
-        (``158x512``) when sizes differ — plus an index when that is still
+        (``158x512``) when sizes differ, plus an index when that is still
         ambiguous, so every sub-series gets a distinct, readable file name.
     """
     groups: dict[tuple, list[Any]] = {}
@@ -243,9 +237,7 @@ def split_by_geometry(ds_list: Sequence[Any]) -> list[tuple[str, list[Any]]]:
     return out
 
 
-# ---------------------------------------------------------------------------
 # Temporal layout
-# ---------------------------------------------------------------------------
 
 
 #: Ordering attributes, most trusted first: (name, reader, is_time_in_seconds).
@@ -328,7 +320,7 @@ def detect_temporal_layout(ds_list: Sequence[Any]) -> TemporalLayout | None:
     Returns ``None`` for an ordinary volume (every position seen once) or when
     the geometry needed to decide is missing. A series whose positions repeat
     unevenly keeps, per position, as many frames as the *least* repeated position
-    has — the common time base — and reports how many instances it dropped.
+    has (the common time base), and reports how many instances it dropped.
     """
     if len(ds_list) < 2:
         return None
@@ -347,7 +339,7 @@ def detect_temporal_layout(ds_list: Sequence[Any]) -> TemporalLayout | None:
     if len(positions) == len(ds_list):
         return None  # every position once: an ordinary volume
 
-    # ---- 1. Bucket instances by slice position ---------------------------------
+    # 1. Bucket instances by slice position
     buckets: list[list[Any]] = [[] for _ in positions]
     for p, ds in pos_of:
         idx = int(np.argmin([abs(p - q) for q in positions]))
@@ -358,7 +350,7 @@ def detect_temporal_layout(ds_list: Sequence[Any]) -> TemporalLayout | None:
         # Some positions are seen once: overlapping stacks, not a time series.
         return None
 
-    # ---- 2. Order each position's instances in time ----------------------------
+    # 2. Order each position's instances in time
     order_name, reader, _ = _ordering([ds for _, ds in pos_of])
     for b in buckets:
         if reader is not None:
@@ -367,12 +359,12 @@ def detect_temporal_layout(ds_list: Sequence[Any]) -> TemporalLayout | None:
             b.sort(key=lambda d: int(getattr(d, "InstanceNumber", 0) or 0))
     dropped = sum(c - n_t for c in counts)
 
-    # ---- 3. Stack in dicom2nifti's slice order --------------------------------
+    # 3. Stack in dicom2nifti's slice order
     order = _dicom2nifti_slice_order(buckets)
     frames = [[buckets[z][t] for z in order] for t in range(n_t)]
     stack_positions = [positions[z] for z in order]
 
-    # ---- 4. Frame times --------------------------------------------------------
+    # 4. Frame times
     times, time_source = _frame_times(frames)
     phases = None
     phase_vals = [_float(f[0].get("NominalPercentageOfCardiacPhase", None)) for f in frames]
@@ -419,16 +411,14 @@ def _frame_times(frames: Sequence[Sequence[Any]]) -> tuple[list[float], str]:
     return [float(i) for i in range(len(frames))], "index"
 
 
-# ---------------------------------------------------------------------------
 # Volume building
-# ---------------------------------------------------------------------------
 
 
 def rescaled_slice(ds: Any) -> np.ndarray:
     """One slice's pixels with ``RescaleSlope``/``RescaleIntercept`` applied.
 
     Integer slope and intercept (every CT: 1 and -1024) stay in integer
-    arithmetic, as ``dicom2nifti`` does — a dynamic CT is many volumes, and
+    arithmetic, as ``dicom2nifti`` does; a dynamic CT is many volumes, and
     float32 would double what int16 holds exactly.
     """
     arr = ds.pixel_array
@@ -461,7 +451,7 @@ def dicom2nifti_affine(sorted_slices: Sequence[Any]) -> np.ndarray:
     RAS voxel-to-world affine for ``(columns, rows, slices)`` voxels.
 
     The same formula as ``dicom2nifti.common.create_affine``, except that a single
-    slice — or a step of zero — uses ``SpacingBetweenSlices`` / ``SliceThickness``
+    slice (or a step of zero) uses ``SpacingBetweenSlices`` / ``SliceThickness``
     along the normal instead of raising ``NOT_A_VOLUME``.
     """
     first = sorted_slices[0]
@@ -506,7 +496,7 @@ def build_temporal_image(layout: TemporalLayout) -> tuple[Any, dict[str, Any]]:
     """
     if nib is None:
         raise RuntimeError("nibabel is required to build a temporal NIfTI.")
-    # ---- 1. Pixels, frame by frame, already in HU / scanner units ------------
+    # 1. Pixels, frame by frame, already in HU / scanner units
     first = [rescaled_slice(ds) for ds in layout.frames[0]]
     rows, cols = first[0].shape[:2]
     volume = np.empty((cols, rows, layout.n_z, layout.n_t), dtype=storage_dtype(first))
@@ -519,10 +509,10 @@ def build_temporal_image(layout: TemporalLayout) -> tuple[Any, dict[str, Any]]:
             if wanted != volume.dtype:
                 volume = volume.astype(wanted)
         for z, arr in enumerate(slices):
-            # (rows, cols) → (cols, rows): dicom2nifti's transpose(2, 1, 0).
+            # (rows, cols) -> (cols, rows): dicom2nifti's transpose(2, 1, 0).
             volume[:, :, z, t] = arr.T
 
-    # ---- 2. Geometry ----------------------------------------------------------
+    # 2. Geometry
     affine = dicom2nifti_affine(layout.frames[0])
     image = nib.Nifti1Image(volume, affine)
     image.header.set_xyzt_units("mm", "sec")

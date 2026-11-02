@@ -11,16 +11,16 @@ For each station along a vessel it records distance from the root, pulsatility
 index (PI), waveform quality, cross-sectional area, and the flow time series. Those
 feed:
 
-- **PITC** — weighted linear fit of PI vs distance-from-root per root
+- **PITC**: weighted linear fit of PI vs distance-from-root per root
   (:func:`~nvitk.measure.hemodynamics.pitc_fit`).
-- **PWV** — Bjornfoot waveform-shift optimizer (default DB variable) and Fielding
+- **PWV**: Bjornfoot waveform-shift optimizer (default DB variable) and Fielding
   cross-correlation (QC), per root.
-- **Damping index** — root PI vs downstream branch PI.
+- **Damping index**: root PI vs downstream branch PI.
 
 **Outputs** (consumed by :mod:`nvitk.pipes.qvtpy.stage6_measure`)
 
-- ``profile_rows`` — one row per sampled station (``pitc_profile.csv``).
-- ``summary_rows`` — one row per root and per branch (``vessel_hemodynamics.csv``).
+- ``profile_rows``: one row per sampled station (``pitc_profile.csv``).
+- ``summary_rows``: one row per root and per branch (``vessel_hemodynamics.csv``).
 """
 
 from __future__ import annotations
@@ -61,6 +61,12 @@ from nvitk.measure.hemodynamics import (
 )
 from nvitk.morphology.centerline import centerline_tangents
 from nvitk.pipes.qvtpy.labels import (
+    QVTPY_LACA_A2,
+    QVTPY_LMCA_M2,
+    QVTPY_LPCA_P2,
+    QVTPY_RACA_A2,
+    QVTPY_RMCA_M2,
+    QVTPY_RPCA_P2,
     QVTPY_BASILAR,
     QVTPY_COMM_IDS,
     QVTPY_LACA,
@@ -110,17 +116,18 @@ class RootGroup:
 # Exclude/LR rows). Communicating arteries and PCAs on ICA trees are excluded
 # from ICA PITC/PWV (PCAs belong under the basilar root only).
 ROOT_GROUPS: tuple[RootGroup, ...] = (
-    RootGroup("L_ICA", QVTPY_LICA, (QVTPY_LACA, QVTPY_LMCA)),
-    RootGroup("R_ICA", QVTPY_RICA, (QVTPY_RACA, QVTPY_RMCA)),
+    RootGroup("L_ICA", QVTPY_LICA, (QVTPY_LACA, QVTPY_LMCA, QVTPY_LACA_A2, QVTPY_LMCA_M2)),
+    RootGroup("R_ICA", QVTPY_RICA, (QVTPY_RACA, QVTPY_RMCA, QVTPY_RACA_A2, QVTPY_RMCA_M2)),
     # VAs are proximal dual starts when present (not distal basilar branches).
-    RootGroup("Basilar", QVTPY_BASILAR, (QVTPY_LPCA, QVTPY_RPCA)),
+    RootGroup("Basilar", QVTPY_BASILAR, (QVTPY_LPCA, QVTPY_RPCA, QVTPY_LPCA_P2, QVTPY_RPCA_P2)),
 )
 
 # Hard allow-list per root so mis-tagged or overlapping stations never enter ICA PITC.
 PITC_GROUP_ALLOWED_IDS: dict[str, frozenset[int]] = {
-    "L_ICA": frozenset({QVTPY_LICA, QVTPY_LACA, QVTPY_LMCA}),
-    "R_ICA": frozenset({QVTPY_RICA, QVTPY_RACA, QVTPY_RMCA}),
-    "Basilar": frozenset({QVTPY_BASILAR, QVTPY_LPCA, QVTPY_RPCA, QVTPY_LVA, QVTPY_RVA}),
+    "L_ICA": frozenset({QVTPY_LICA, QVTPY_LACA, QVTPY_LMCA, QVTPY_LACA_A2, QVTPY_LMCA_M2}),
+    "R_ICA": frozenset({QVTPY_RICA, QVTPY_RACA, QVTPY_RMCA, QVTPY_RACA_A2, QVTPY_RMCA_M2}),
+    "Basilar": frozenset({QVTPY_BASILAR, QVTPY_LPCA, QVTPY_RPCA, QVTPY_LPCA_P2, QVTPY_RPCA_P2,
+                          QVTPY_LVA, QVTPY_RVA}),
 }
 
 
@@ -208,9 +215,7 @@ class VesselHemodynamicsResult:
     volume_seg: np.ndarray | None = None
 
 
-# ---------------------------------------------------------------------------
 # Geometry helpers
-# ---------------------------------------------------------------------------
 
 
 def _arc_length_mm(points_xyz: np.ndarray, voxel_spacing: tuple[float, float, float]) -> np.ndarray:
@@ -244,9 +249,7 @@ def _root_proximal_anchor(points_xyz: np.ndarray) -> np.ndarray:
     return endpoints[int(np.argmin(endpoints[:, 2]))]
 
 
-# ---------------------------------------------------------------------------
 # Station sampling
-# ---------------------------------------------------------------------------
 
 
 def _assign_branch_qualities(
@@ -459,7 +462,7 @@ def _distance_offset_for_branch(
 def _basilar_va_proximal_starts(
     named_branches_by_label: dict[int, list[tuple[str, np.ndarray]]],
 ) -> tuple[list[tuple[int, str, np.ndarray]], list[np.ndarray]] | None:
-    """Return (LVA/RVA named trunks oriented proximal→distal, proximal tips) or None."""
+    """Return (LVA/RVA named trunks oriented proximal->distal, proximal tips) or None."""
     jobs: list[tuple[int, str, np.ndarray]] = []
     tips: list[np.ndarray] = []
     for lid in (int(QVTPY_LVA), int(QVTPY_RVA)):
@@ -475,10 +478,7 @@ def _basilar_va_proximal_starts(
     return jobs, tips
 
 
-
-# ---------------------------------------------------------------------------
 # Public entry point
-# ---------------------------------------------------------------------------
 
 
 def compute_vessel_hemodynamics(
@@ -594,7 +594,7 @@ def compute_vessel_hemodynamics(
             va_starts = _basilar_va_proximal_starts(named_branches_by_label)
 
         if va_starts is not None:
-            # Orient basilar from confluence (near VA distal tips) → superior.
+            # Orient basilar from confluence (near VA distal tips) -> superior.
             va_jobs, va_tips = va_starts
             confluence = np.mean(
                 np.vstack([pts[-1] for _lid, _n, pts in va_jobs]), axis=0
@@ -680,7 +680,7 @@ def compute_vessel_hemodynamics(
             if int(blabel) not in QVTPY_COMM_IDS
             and named_branches_by_label.get(int(blabel))
         ]
-        # Flatten to (parent_label, branch_name, pts) — all bifurcation arms.
+        # Flatten to (parent_label, branch_name, pts): all bifurcation arms.
         named_jobs: list[tuple[int, str, np.ndarray]] = []
         for blabel in eligible_labels:
             for bname, bpts in named_branches_by_label[int(blabel)]:

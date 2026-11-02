@@ -85,7 +85,7 @@ def color_stations_by_feature(
     and Napari's colormap mapping renders nothing when any value is NaN. NaN values
     are drawn transparent so the remaining stations stay colored.
 
-    Returns the ``(lo, hi)`` contrast limits actually applied, or ``None`` if the
+    Returns the ``(lo, hi)`` contrast limits applied, or ``None`` if the
     layer had no points.
     """
     key = str(feature)

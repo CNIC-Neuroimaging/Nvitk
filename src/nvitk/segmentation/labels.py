@@ -215,14 +215,12 @@ def percentile_cc(
     return _wrap_like(mask, out)
 
 
-# ---------------------------------------------------------------------------
 # Per-label application
-# ---------------------------------------------------------------------------
 def _label_dtype(source: Any, labels: Sequence[int]) -> Any:
     """
     Smallest integer dtype that can hold every id in *labels*.
 
-    An integer input keeps its own dtype — a mask stored as ``int32`` should not silently narrow
+    An integer input keeps its own dtype: a mask stored as ``int32`` should not silently narrow
     to ``uint8`` just because its ids happen to be small, since callers key layers and lookup
     tables off it. Same rule as :func:`~nvitk.morphology.centerline.skeletonize_labeled`.
     """
@@ -265,13 +263,13 @@ def apply_per_label(
         and affine. Anything non-zero in the result is taken as foreground.
     label_ids : sequence of int, optional
         Labels to operate on, in the order they are applied. ``None`` uses every non-zero label.
-        **Labels not named here are copied through untouched** — an operation on a selection must
+        **Labels not named here are copied through untouched**: an operation on a selection must
         not delete the parts of the volume it was not asked about.
     dtype : optional
         Output dtype. Defaults to the input's own integer dtype, else the smallest that holds
         every id.
     overlap : {"first", "last"}
-        Which label wins where two results cover the same voxel — the inputs are disjoint but the
+        Which label wins where two results cover the same voxel; the inputs are disjoint but the
         outputs need not be (a dilation of two adjacent labels overlaps by construction).
         ``"first"`` keeps the earlier label in *label_ids* order, ``"last"`` the later one.
         Made explicit because the alternative is an ordering-dependent result that looks like a

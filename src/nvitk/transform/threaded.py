@@ -32,7 +32,7 @@ to **input** voxel indices, and *coordinates* has shape ``(input.ndim, *out)``.
 
 Backends
 --------
-A CuPy input is handed straight to ``cupyx.scipy.ndimage`` — the GPU kernel is
+A CuPy input is handed straight to ``cupyx.scipy.ndimage``: the GPU kernel is
 already parallel and slabbing it would only add launches. Host inputs use the
 NumPy/SciPy modules from :func:`~nvitk.core.backend.get_backend_modules`, which
 is safe inside worker threads (unlike :class:`~nvitk.core.backend.using`, which
@@ -43,7 +43,7 @@ Spline orders above 1
 ``prefilter=True`` with ``order > 1`` runs a whole-volume spline filter. Done per
 slab it would repeat that filter once per slab, so it is run **once** up front
 and the slabs are interpolated with ``prefilter=False`` on the filtered
-coefficients — exactly what SciPy does internally.
+coefficients: exactly what SciPy does internally.
 """
 
 from __future__ import annotations
@@ -61,12 +61,10 @@ _hnp = _HOST.xp
 _hndi = _HOST.ndi
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
-#: Slabs per call for a large output — fixed, so the decomposition (and with it
+#: Slabs per call for a large output: fixed, so the decomposition (and with it
 #: every rounding decision) is the same whatever the thread budget. 64 keeps a
 #: 32-thread pool busy with headroom for uneven slab cost.
 _SLABS = 64
@@ -75,7 +73,7 @@ _SLABS = 64
 def _slab_count(n_out: int, first_axis: int) -> int:
     """How many slabs to cut the output into (1 = hand the whole call to SciPy).
 
-    A function of the output geometry alone — see *Exactness and
+    A function of the output geometry alone; see *Exactness and
     reproducibility* in the module docstring.
     """
     if n_out < MIN_PARALLEL_ELEMENTS or first_axis < 2:
@@ -84,7 +82,7 @@ def _slab_count(n_out: int, first_axis: int) -> int:
 
 
 #: Modes for which SciPy pre-pads before spline filtering and passes the pad
-#: width to its C kernel — not reproducible through the public API, so these
+#: width to its C kernel, not reproducible through the public API, so these
 #: run serially rather than risk a different answer at the borders.
 _PREPADDED_MODES = frozenset({"nearest", "grid-constant"})
 
@@ -104,20 +102,18 @@ def _output_array(output: Any, shape: tuple[int, ...], default_dtype: Any) -> An
 
 
 def _filtered_input(data: Any, order: int, mode: str, prefilter: bool) -> tuple[Any, bool]:
-    """``(coefficients, prefilter_flag)`` — spline-filter once when the order needs it."""
+    """``(coefficients, prefilter_flag)``: spline-filter once when the order needs it."""
     if prefilter and int(order) > 1:
         coeffs = _hndi.spline_filter(data, order=int(order), output=_hnp.float64, mode=mode)
         return coeffs, False
     return data, bool(prefilter)
 
 
-# ---------------------------------------------------------------------------
 # affine_transform
-# ---------------------------------------------------------------------------
 
 
 def affine_transform(
-    input: Any,  # noqa: A002 — mirrors scipy.ndimage's signature
+    input: Any,  # noqa: A002 (mirrors scipy.ndimage's signature)
     matrix: Any,
     offset: Any = 0.0,
     output_shape: tuple[int, ...] | None = None,
@@ -167,7 +163,7 @@ def affine_transform(
     out_shape = tuple(int(s) for s in (output_shape if output_shape is not None else data.shape))
     mat = to_numpy(matrix).astype(_hnp.float64, copy=False)
 
-    # ---- 1. Normalise to (linear, offset) --------------------------------------
+    # 1. Normalise to (linear, offset)
     if mat.ndim == 1:
         linear = _hnp.diag(mat)
         shift = _hnp.broadcast_to(to_numpy(offset).astype(_hnp.float64), (ndim,)).copy()
@@ -186,7 +182,7 @@ def affine_transform(
             mode=mode, cval=cval, prefilter=prefilter, output=output,
         )
 
-    # ---- 2. Spline-filter once, then interpolate slab by slab ------------------
+    # 2. Spline-filter once, then interpolate slab by slab
     coeffs, slab_prefilter = _filtered_input(data, order, mode, prefilter)
     result = _output_array(output, out_shape, data.dtype)
 
@@ -205,13 +201,11 @@ def affine_transform(
     return result
 
 
-# ---------------------------------------------------------------------------
 # map_coordinates
-# ---------------------------------------------------------------------------
 
 
 def map_coordinates(
-    input: Any,  # noqa: A002 — mirrors scipy.ndimage's signature
+    input: Any,  # noqa: A002 (mirrors scipy.ndimage's signature)
     coordinates: Any,
     *,
     order: int = 3,

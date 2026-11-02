@@ -13,7 +13,14 @@ log = Logger()
 
 
 def _ensure_fsl_env() -> None:
-    """FSL defaults to uncompressed NIFTI; NiPype validates the exact ``out_file`` path."""
+    """FSL defaults to uncompressed NIFTI; NiPype validates the exact ``out_file`` path.
+
+    Also puts the FSL nvitk resolves (``$FSLDIR``, or nvitk's own core) on ``PATH``, since
+    NiPype runs ``flirt`` from there.
+    """
+    from nvitk.fsl.env import ensure_fsl_in_process
+
+    ensure_fsl_in_process()
     os.environ["FSLOUTPUTTYPE"] = "NIFTI_GZ"
     os.environ.setdefault("FSLMULTIFILEQUIT", "TRUE")
 
@@ -76,8 +83,8 @@ def flirt_register_rigid(
     """Run FLIRT alignment of *moving* towards *fixed* (rigid at ``dof=6``, affine at 12).
 
     Writes ``matrix_name`` under *out_dir* and optionally a warped moving image.
-    *searchr* sets the angular search range (±degrees) on all three axes —
-    *searchr_x* on X only, kept for older callers — and *no_search* skips the
+    *searchr* sets the angular search range (±degrees) on all three axes (
+    *searchr_x* on X only, kept for older callers), and *no_search* skips the
     search entirely (images already roughly aligned). *interp* is the output's
     interpolation, *bins* the cost-function histogram size.
     Requires FSL on ``PATH`` and ``FSLDIR`` set (NiPype delegates to ``flirt``).

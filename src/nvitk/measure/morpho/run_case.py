@@ -11,7 +11,9 @@ rather than forked.  Lower N_WORKERS if VMTK becomes unstable.
 
 from __future__ import annotations
 
+import contextlib
 import os
+import sys
 import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import get_context
@@ -35,7 +37,10 @@ from nvitk.measure.morpho.io_utils import (
     safe_sheet_name,
     vessel_sheet_sort_key,
 )
+from nvitk.measure.morpho.caliber import set_extra_detection_junctions
 from nvitk.measure.morpho.labels_util import (
+    split_partner_junctions,
+    split_partner_labels,
     connected_components,
     empty_vessel_info,
     keep_largest_component,
@@ -44,7 +49,15 @@ from nvitk.measure.morpho.labels_util import (
 )
 from nvitk.measure.morpho.orchestration import process_component_tree_vmtk
 from nvitk.measure.morpho.surface import set_world_transform
-from nvitk.measure.morpho.export_utils.vessel_tables import component_tables, subject_summary, vessel_summary
+from nvitk.measure.morpho.export_utils.vessel_tables import (
+    add_hypoplasia_columns,
+    component_tables,
+    fetal_pca_rows,
+    hypoplasia_rows,
+    locate_a1_hypoplasia,
+    subject_summary,
+    vessel_summary,
+)
 from nvitk.measure.morpho.export_utils.summaries import (
     branchpoint_export_dataframe,
     compute_volumetry_summary,
@@ -70,15 +83,24 @@ def _headless() -> None:
         pass
 
 
-# ---------------------------------------------------------------------------
+@contextlib.contextmanager
+def quiet_stdout(quiet: bool):
+    """Discard what the block prints to stdout when *quiet* (the morphometrics' progress output;
+    failures go to stderr and stay visible)."""
+    if not quiet:
+        yield
+        return
+    with open(os.devnull, "w") as sink, contextlib.redirect_stdout(sink):
+        yield
+
+
 # Worker (must be a top-level function to be picklable for spawn)
-# ---------------------------------------------------------------------------
 
 def _worker(args: Tuple[Any, ...]) -> Dict[str, Any]:
     """Subprocess entry point: run the full VMTK morphometrics pipeline for one label/component.
 
     Must stay a top-level function (picklable) since workers are spawned, not
-    forked — VTK/VMTK are not reliably fork-safe. Catches all exceptions and
+    forked: VTK/VMTK are not reliably fork-safe. Catches all exceptions and
     returns them as a result dict (``ok=False``) so one failed job doesn't kill
     the pool.
     """
@@ -86,16 +108,32 @@ def _worker(args: Tuple[Any, ...]) -> Dict[str, Any]:
     (
         label, component_id, mask_cc,
         multilabel, spacing, vessel_info, mapping,
-        dirs, case_id, ctx,
+        dirs, case_id, ctx, partner_multilabel,
     ) = args
     # Spawned workers start from the module defaults: install this run's profile and output frame.
     if ctx.config is not None:
         apply_config(ctx.config)
     set_world_transform(ctx.affine, spacing)
+    with quiet_stdout(not ctx.verbose):
+        return _run_job(label, component_id, mask_cc, multilabel, spacing, vessel_info, mapping, dirs, case_id, ctx,
+                        partner_multilabel)
 
+
+def _run_job(label, component_id, mask_cc, multilabel, spacing, vessel_info, mapping, dirs, case_id, ctx,
+             partner_multilabel) -> Dict[str, Any]:
+    """The body of :func:`_worker` (one label / component)."""
     try:
         print(f"\n=== Label {label} / component {component_id} ===")
         print(f"  Component voxels: {int(mask_cc.sum())}")
+        # A split vessel (M1 / M2, A1 / A2, P1 / P2): the bifurcations it shares with its other
+        # half, from the merged mask, bound its lesion measures like its own junctions. The other
+        # half with all its pieces (*partner_multilabel*): an M2 branch leaving mid-M1 is often a
+        # piece of its own, and its bifurcation is one of those.
+        partners = split_partner_labels(vessel_info.name, mapping)
+        extra_junctions = split_partner_junctions(mask_cc, partner_multilabel, partners, spacing)
+        set_extra_detection_junctions(extra_junctions)
+        if len(extra_junctions):
+            print(f"  Junctions shared with {partners} (merged mask): {len(extra_junctions)}")
         (
             path_results, point_sheets, tree_summary, branch_df,
             region_summaries, region_sheets, recursive_segments, donut_loop_df,
@@ -141,7 +179,7 @@ def _worker(args: Tuple[Any, ...]) -> Dict[str, Any]:
         compact = component_tables(
             case_id=case_id, label=label, component_id=component_id, vessel_info=vessel_info,
             path_results=path_results, split_results=split_results, branch_df=branch_df,
-            tree_summary=tree_summary, axes=ctx.axes,
+            tree_summary=tree_summary, axes=ctx.axes, extra_junctions=extra_junctions,
         )
 
         if not branch_df.empty:
@@ -174,11 +212,11 @@ def _worker(args: Tuple[Any, ...]) -> Dict[str, Any]:
             "error": str(e),
             "traceback": traceback.format_exc(),
         }
+    finally:
+        set_extra_detection_junctions(None)
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 def _output_dirs(case_out_dir: str) -> Dict[str, Optional[str]]:
     """Compute the (unconditional) output subdirectory paths for one case, per config flags."""
@@ -240,11 +278,15 @@ def _make_jobs(
     case_id: str,
     spacing: np.ndarray,
     ctx: MorphoContext,
+    partner_multilabel: Optional[np.ndarray] = None,
 ) -> List[Tuple]:
     """Build the per-(label, component) argument tuples that :func:`_worker` will process.
 
     Components with fewer than 2 voxels are skipped (too small for a centerline).
+    *partner_multilabel*: the label volume the split vessels' merged masks are drawn from (default
+    *multilabel*).
     """
+    partner_multilabel = multilabel if partner_multilabel is None else partner_multilabel
     jobs = []
     for label in labels:
         if not (multilabel == label).any():
@@ -260,13 +302,13 @@ def _make_jobs(
             vessel_info = mapping.get(label, empty_vessel_info(label))
             jobs.append((
                 int(label), int(component_id), mask_cc.astype(bool),
-                multilabel, spacing, vessel_info, mapping, dirs, case_id, ctx,
+                multilabel, spacing, vessel_info, mapping, dirs, case_id, ctx, partner_multilabel,
             ))
     return jobs
 
 
 def unique_sheet_names(keys: List[str], prefix: str = "P") -> Dict[str, str]:
-    """Map each key to a unique Excel sheet name (≤ 31 characters): ``P001_<key…>``.
+    """Map each key to a unique Excel sheet name (<= 31 characters): ``P001_<key...>``.
 
     Truncating long path ids to Excel's 31-character limit made different paths collide (and
     overwrite one another's sheet); the numeric prefix keeps them apart, and the full ids are listed
@@ -306,13 +348,13 @@ def _write_excel(
 ) -> str:
     """Assemble every result table into ``case_metrics_donut_tree.xlsx`` (+ CSVs).
 
-    Sheet order: the compact tables first — ``Vessel_Summary`` (one row per vessel), ``Segments``,
+    Sheet order: the compact tables first; ``Vessel_Summary`` (one row per vessel), ``Segments``,
     ``Lesions``, ``Subject`` (also written as ``vessel_summary.csv``, ``segments.csv``,
-    ``lesions.csv``, ``subject_summary.csv``) — then the detailed cow_morpho-style sheets.
+    ``lesions.csv``, ``subject_summary.csv``), then the detailed cow_morpho-style sheets.
     ``00_Path_Summary`` holds the **non-overlapping** segment rows: each piece of vessel is measured
-    once. The raw root→terminal paths, which re-traverse every shared trunk, are kept in
-    ``07_Root_To_Terminal_Paths`` for traceability — summing their lengths overestimates the
-    vessel tree. Point-wise tables follow as ``P###_…`` sheets (``Sheet_Index`` maps them to path
+    once. The raw root->terminal paths, which re-traverse every shared trunk, are kept in
+    ``07_Root_To_Terminal_Paths`` for traceability: summing their lengths overestimates the
+    vessel tree. Point-wise tables follow as ``P###_...`` sheets (``Sheet_Index`` maps them to path
     ids) and as ``points/<path_id>.csv``.
     """
     compact = compact or {}
@@ -379,9 +421,7 @@ def _write_excel(
     return out_xlsx
 
 
-# ---------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
 
 def run_case(
     seg_path: str,
@@ -395,14 +435,16 @@ def run_case(
     length_scale: float = 1.0,
     config: Optional[MorphometricsConfig] = None,
     case_id: Optional[str] = None,
+    verbose: bool = False,
 ) -> str:
-    """Process one segmentation file in parallel.  Returns the Excel path.
+    """Process one segmentation file in parallel.  Returns the Excel path. With *verbose* False
+    (default) nothing is printed but the failures (on stderr).
 
-    *case_id* labels every output row (default: the segmentation's file stem — give the subject
+    *case_id* labels every output row (default: the segmentation's file stem; give the subject
     id when several subjects share one file name, as stage 7's ``TOF_eICAB_CW.nii.gz`` do).
 
-    *config* (default: the ``eicab_cw`` profile) is installed for the run — here and in every
-    spawned worker — and the previous values are restored afterwards. *species* /
+    *config* (default: the ``eicab_cw`` profile) is installed for the run (here and in every
+    spawned worker), and the previous values are restored afterwards. *species* /
     *axes_override* / *length_scale* describe the subject the label ids belong to; they are
     normally taken from the topology JSON's ``_meta`` block by
     :func:`nvitk.measure.morphometrics.run_morphometrics_case`. They control how
@@ -412,13 +454,13 @@ def run_case(
     from nvitk.measure.morphometrics_config import default_morphometrics_config
 
     config = config or default_morphometrics_config()
-    with active_config(config):
+    with active_config(config), quiet_stdout(not verbose):
         try:
             return _run_case(
                 seg_path, out_dir, mapping_json=mapping_json, mapping=mapping,
                 case_out_dir_override=case_out_dir_override, n_workers=n_workers, species=species,
                 axes_override=axes_override, length_scale=length_scale, config=config,
-                case_id=case_id,
+                case_id=case_id, verbose=verbose,
             )
         finally:
             set_world_transform(None, None)
@@ -437,6 +479,7 @@ def _run_case(
     length_scale: float,
     config: MorphometricsConfig,
     case_id: Optional[str] = None,
+    verbose: bool = False,
 ) -> str:
     _headless()
     n_workers = int(n_workers) if n_workers is not None else int(N_WORKERS)
@@ -450,6 +493,7 @@ def _run_case(
         length_scale=float(length_scale),
         config=config,
         affine=tuple(map(tuple, np.asarray(affine, dtype=float))),
+        verbose=bool(verbose),
     )
     set_world_transform(ctx.affine, spacing)
     if _config.BRIDGE_LABEL_GAPS_BEFORE_CENTERLINES:
@@ -462,6 +506,7 @@ def _run_case(
             bridge_radius=1,
         )
         print(f"  Bridged nearby same-label gaps (max_gap={int(_config.BRIDGE_LABEL_MAX_GAP_VOXELS)} vx).")
+    multilabel_all = multilabel  # every piece of every label: the split vessels' merged masks
     if not _config.PROCESS_ALL_CONNECTED_COMPONENTS:
         multilabel = keep_largest_component_per_label(multilabel)
 
@@ -484,7 +529,8 @@ def _run_case(
     dirs = _setup_output_dirs(case_out_dir)
 
     input_volumetry = label_input_volumetry(multilabel, labels, spacing)
-    jobs = _make_jobs(multilabel, labels, resolved_mapping, dirs, case_id, spacing, ctx)
+    jobs = _make_jobs(multilabel, labels, resolved_mapping, dirs, case_id, spacing, ctx,
+                      partner_multilabel=multilabel_all)
 
     print("Parallel pipeline")
     print(f"  Case    : {case_id}")
@@ -527,8 +573,9 @@ def _run_case(
     for result in results:
         if not result.get("ok"):
             errors.append(result)
-            print(f"  ERROR label {result['label']} component {result['component_id']}: {result['error']}")
-            print(result["traceback"])
+            print(f"  ERROR label {result['label']} component {result['component_id']}: {result['error']}",
+                  file=sys.stderr)
+            print(result["traceback"], file=sys.stderr)
             continue
         path_summaries.extend(result["path_summaries"])
         root_to_terminal_summaries.extend(result.get("root_to_terminal_summaries", []))
@@ -548,11 +595,20 @@ def _run_case(
     vessels_df = vessel_summary(vessel_rows, lesion_rows, mapping=resolved_mapping)
     if not vessels_df.empty:
         vessels_df["case_id"] = case_id
+    # Absent main vessels -> "hypoplasia" lesions (no location), flagged per vessel too.
+    hypoplasia = hypoplasia_rows(vessels_df, resolved_mapping, input_volumetry)
+    # An A1 hypoplasia is shown where the missing A1 would run (ICA end -> AComm / other A1).
+    locate_a1_hypoplasia(hypoplasia, multilabel, resolved_mapping, spacing)
+    lesion_rows.extend(hypoplasia)
+    vessels_df = add_hypoplasia_columns(vessels_df, hypoplasia)
+    # A P2 fed from the ICA through the PComm, its P1 absent or hypoplastic -> "fetal" lesions.
+    fetal = fetal_pca_rows(multilabel, resolved_mapping, vessels_df, hypoplasia, spacing)
+    lesion_rows.extend(fetal)
     compact_tables = {
         "vessels": vessels_df,
         "segments": pd.DataFrame(segment_rows),
         "lesions": _lesions_with_world_position(pd.DataFrame(lesion_rows)),
-        "subject": subject_summary(vessels_df),
+        "subject": subject_summary(vessels_df, fetal),
     }
     out_xlsx = _write_excel(
         case_out_dir, path_summaries, tree_summaries, tree_region_summaries,

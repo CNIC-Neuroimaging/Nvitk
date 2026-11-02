@@ -1,5 +1,5 @@
 """
-CViT — Convolutional Vision Transformer.
+CViT: Convolutional Vision Transformer.
 
 Description
 -----------

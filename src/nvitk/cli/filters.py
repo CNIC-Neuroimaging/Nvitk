@@ -1,4 +1,4 @@
-"""``nvitk-filter`` CLI — image filters."""
+"""``nvitk-filter`` CLI: image filters."""
 
 from __future__ import annotations
 

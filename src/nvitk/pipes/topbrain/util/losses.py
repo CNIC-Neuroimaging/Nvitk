@@ -8,14 +8,14 @@ is a first-class, swappable axis on both stages.
 
 A name given to ``--loss`` / ``--ssl-loss`` resolves in three ways, in order:
 
-1. a **built-in registry name** — see :data:`SEGMENTATION_LOSSES` and :data:`SSL_LOSSES`;
+1. a **built-in registry name**; see :data:`SEGMENTATION_LOSSES` and :data:`SSL_LOSSES`;
 2. a **dotted path** ``package.module:Callable`` for a user-supplied loss;
-3. nothing — an unknown name is an error listing the valid ones, never a silent fallback.
+3. nothing: an unknown name is an error listing the valid ones, never a silent fallback.
 
 Torch-free by default
 ---------------------
-The registry tables — now in :mod:`nvitk.segmentation.loss_registry`, shared with the CViT
-pipeline and re-exported here — hold only names, descriptions and default kwargs, so validating
+The registry tables (now in :mod:`nvitk.segmentation.loss_registry`, shared with the CViT
+pipeline and re-exported here) hold only names, descriptions and default kwargs, so validating
 a ``--loss`` flag, listing the options, or printing ``--help`` never imports torch.
 :func:`build_segmentation_loss` and :func:`build_ssl_loss` import it when a loss is actually
 constructed, inside the worker.
@@ -75,7 +75,7 @@ def trainer_for_loss(name: str, *, architecture: str = "ResEncL") -> str:
         pretrained checkpoint's adaptation plan, so the trainer always matches the weights.
 
     A custom dotted path maps to the ``_custom`` trainer of the same family, which reads its
-    specification from :data:`LOSS_SPEC_ENV` — nnU-Net cannot pass constructor arguments.
+    specification from :data:`LOSS_SPEC_ENV`: nnU-Net cannot pass constructor arguments.
     """
     prefix = TRAINER_PREFIX_PRIMUS if str(architecture).startswith("Primus") else TRAINER_PREFIX
     if is_dotted_path(name):

@@ -11,7 +11,7 @@ setup(globals())
 
 
 def load_flirt_matrix(mat_path: str | Path) -> np.ndarray:
-    """Load a 4×4 FLIRT transform (input mm → reference mm)."""
+    """Load a 4×4 FLIRT transform (input mm -> reference mm)."""
     raw = np.loadtxt(str(mat_path), dtype=np.float64)
     mat = as_backend_array(raw).astype(np.float64, copy=False).reshape((4, 4))
     return mat

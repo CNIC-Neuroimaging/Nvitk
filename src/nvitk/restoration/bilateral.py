@@ -12,11 +12,11 @@ Backend selection
 -----------------
 The concrete implementation is chosen from :func:`nvitk.core.backend.get_current_backend`:
 
-- ``numpy``  → :func:`skimage.restoration.denoise_bilateral` (CPU, slice-by-slice for 3-D).
-- ``cupy``   → custom CUDA raw kernels from :mod:`._cuda_kernels` (GPU, native 2-D/3-D).
+- ``numpy``  -> :func:`skimage.restoration.denoise_bilateral` (CPU, slice-by-slice for 3-D).
+- ``cupy``   -> custom CUDA raw kernels from :mod:`._cuda_kernels` (GPU, native 2-D/3-D).
 
 Inputs can be raw ``numpy``/``cupy`` arrays or :class:`nvitk.types.Image`. The
-returned type mirrors the input (Image → Image, array → array).
+returned type mirrors the input (Image -> Image, array -> array).
 """
 
 from __future__ import annotations
@@ -31,9 +31,7 @@ from nvitk.types import Image
 setup(globals())
 
 
-# ---------------------------------------------------------------------------
 # Parameter estimation
-# ---------------------------------------------------------------------------
 
 
 def estimate_bilateral_parameters(
@@ -62,9 +60,7 @@ def estimate_bilateral_parameters(
     return float(sigma_spatial), float(sigma_color)
 
 
-# ---------------------------------------------------------------------------
 # CPU path: scikit-image
-# ---------------------------------------------------------------------------
 
 
 def _bilateral_cpu_2d(
@@ -107,8 +103,8 @@ def _bilateral_cpu(
         )
 
     if do_3d:
-        # skimage has no native 3-D bilateral; fall back to per-slice along *axis*.
-        # A true 3-D CPU filter is significantly slower; advise users to pick GPU.
+        # skimage has no 3-D bilateral, so *do_3d* still filters slice by slice along *axis*
+        # here; only the CuPy path is truly 3-D. Results therefore differ between backends.
         pass
 
     out = _host_np.empty_like(arr_np, dtype="float32")
@@ -125,9 +121,7 @@ def _bilateral_cpu(
     return out
 
 
-# ---------------------------------------------------------------------------
 # GPU path: custom CUDA raw kernels
-# ---------------------------------------------------------------------------
 
 
 def _launch_cuda_2d(
@@ -254,9 +248,7 @@ def _bilateral_gpu(
     return out
 
 
-# ---------------------------------------------------------------------------
 # Public entry points
-# ---------------------------------------------------------------------------
 
 
 def bilateral(

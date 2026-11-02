@@ -1,12 +1,12 @@
 """
-CViT stage 3 — cross-validation evaluation (Dice, clDice, β0 error, HD95 per label).
+CViT stage 3: cross-validation evaluation (Dice, clDice, β0 error, HD95 per label).
 
 Description
 -----------
 nnU-Net writes each fold's held-out predictions to ``fold_N/validation/``; their union is a
 proper cross-validated prediction set (every case predicted by a model that never saw it). Each
-case is scored against ``labelsTr`` with :func:`nvitk.measure.segmentation_metrics.evaluate_case`
-— HD95 in **millimetres** from the reference image's spacing.
+case is scored against ``labelsTr`` with :func:`nvitk.measure.segmentation_metrics.evaluate_case`:
+HD95 in **millimetres** from the reference image's spacing.
 
 Outputs (``<results_root>/stage3_evaluate/<dataset>/<run>/``)
 --------------------------------------------------------------
@@ -14,7 +14,7 @@ Outputs (``<results_root>/stage3_evaluate/<dataset>/<run>/``)
 ``metrics.json``   cohort means, per-label means, per-fold means and the per-case aggregates
 
 Absent-class convention: a label absent from both masks is skipped (not scored 1.0); present in
-exactly one, it scores worst-case — see :mod:`nvitk.measure.segmentation_metrics`.
+exactly one, it scores worst-case; see :mod:`nvitk.measure.segmentation_metrics`.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ def foreground_labels(dataset_json: dict[str, Any]) -> dict[int, str]:
     Raises
     ------
     ValueError
-        For region-based datasets (tuple labels) — not supported by this evaluation.
+        For region-based datasets (tuple labels), not supported by this evaluation.
     """
     out: dict[int, str] = {}
     for name, value in dataset_json["labels"].items():
@@ -172,9 +172,7 @@ def run_evaluate(
     return summary
 
 
-# ---------------------------------------------------------------------------
 # SGE + CLI
-# ---------------------------------------------------------------------------
 
 
 def _worker_argv(**o: Any) -> list[str]:

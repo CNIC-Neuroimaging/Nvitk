@@ -443,7 +443,7 @@ def _cluster_dry_run_subject(
     upload_qvtpy: bool,
 ) -> None:
     """Log which remote resource directories a cluster-source upload would fetch, without
-    actually transferring anything (``--dry-run`` path)."""
+    transferring anything (``--dry-run`` path)."""
     remote_subj = remote_subject_results_dir(remote_results_root, subject)
     if upload_eicab:
         remote_eicab = f"{remote_subj}/{XNAT_RESOURCE_EICAB}"

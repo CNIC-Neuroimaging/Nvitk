@@ -1,16 +1,16 @@
 """
-Variables across visits — per-visit columns, longitudinal derivatives, long reshape.
+Variables across visits, per-visit columns, longitudinal derivatives, long reshape.
 
 Description
 -----------
-A cohort measures the same variable at several visits: carotid plaque volume at visits 1–4,
+A cohort measures the same variable at several visits: carotid plaque volume at visits 1-4,
 blood pressure at every visit, a questionnaire at two. The statmodels frame is one row per
 subject, so a variable normally arrives *collapsed* to one visit (latest, or a pinned one). This
 module keeps every visit instead:
 
 - :func:`pivot_visits` turns the long ``(subject, visit, value)`` table into one column per visit,
-  ``total_carotid_plaque_vol_v1 … _v4`` — a **visit family**;
-- :func:`visit_series_values` computes a subject-level longitudinal summary from a family —
+  ``total_carotid_plaque_vol_v1 ... _v4``: a **visit family**;
+- :func:`visit_series_values` computes a subject-level longitudinal summary from a family:
   change between two visits (absolute, percent, annualised), area under the curve, time-averaged
   level, slope, mean / max / min / SD, first / last value, number of visits, progression and
   new-onset flags;
@@ -21,10 +21,10 @@ Time axis
 ---------
 Change rates, AUC and slopes need *when* each visit happened. Three choices, per call:
 
-- ``""`` — the visit number itself (visit ``"3"`` → 3.0);
-- a **date family** (e.g. ``peqdate_v1 … _v4``, the physical-exam date) → years since the
+- ``""``: the visit number itself (visit ``"3"`` -> 3.0);
+- a **date family** (e.g. ``peqdate_v1 ... _v4``, the physical-exam date) -> years since the
   subject's first visit in the selection, so unequal visit spacing is respected;
-- a **numeric family** (e.g. age at each visit) → used as is.
+- a **numeric family** (e.g. age at each visit) -> used as is.
 
 Column naming
 -------------
@@ -50,14 +50,14 @@ log = Logger()
 #: Separator between a variable and its visit in a per-visit column name.
 VISIT_SUFFIX = "_v"
 
-#: ``plaque_vol_v3`` → (``plaque_vol``, ``3``). Visit ids are short tokens (digits/letters).
+#: ``plaque_vol_v3`` -> (``plaque_vol``, ``3``). Visit ids are short tokens (digits/letters).
 _VISIT_COLUMN = re.compile(r"^(?P<base>.+)_v(?P<visit>[0-9]+[A-Za-z]?|[A-Za-z][0-9]*)$")
 
 #: Name of the visit / time columns a long reshape adds.
 VISIT_COLUMN_NAME = "visit"
 VISIT_TIME_COLUMN = "visit_time"
 
-#: operation key → (label, needs two visits, uses time axis)
+#: operation key -> (label, needs two visits, uses time axis)
 VISIT_OPERATIONS: dict[str, tuple[str, bool, bool]] = {
     "delta": ("Difference (to − from)", True, False),
     "pct_change": ("Percent change (to − from) / from × 100", True, False),
@@ -77,13 +77,11 @@ VISIT_OPERATIONS: dict[str, tuple[str, bool, bool]] = {
 }
 
 
-# ---------------------------------------------------------------------------
 # Naming and discovery
-# ---------------------------------------------------------------------------
 
 
 def visit_label(visit: Any) -> str:
-    """A visit id as text, with ``4.0`` → ``"4"`` (ids come back from parquet as floats)."""
+    """A visit id as text, with ``4.0`` -> ``"4"`` (ids come back from parquet as floats)."""
     text = str(visit).strip()
     try:
         number = float(text)
@@ -102,7 +100,7 @@ def visit_sort_key(visit: Any) -> tuple:
 
 
 def visit_column(variable: str, visit: Any) -> str:
-    """``plaque_vol`` at visit 3 → ``plaque_vol_v3``."""
+    """``plaque_vol`` at visit 3 -> ``plaque_vol_v3``."""
     return f"{variable}{VISIT_SUFFIX}{visit_label(visit)}"
 
 
@@ -126,9 +124,7 @@ def visit_families(columns: Sequence[str] | pd.DataFrame, *, min_visits: int = 2
     }
 
 
-# ---------------------------------------------------------------------------
-# Pivot: long → one column per visit
-# ---------------------------------------------------------------------------
+# Pivot: long -> one column per visit
 
 
 def pivot_visits(
@@ -150,7 +146,7 @@ def pivot_visits(
     variables
         Which columns to spread.
     visits
-        Restrict the visits: one list for every variable, or ``{variable: [visit, …]}``;
+        Restrict the visits: one list for every variable, or ``{variable: [visit, ...]}``;
         ``None`` keeps every visit present.
     """
     if frame.empty or subject_key not in frame.columns or visit_key not in frame.columns:
@@ -181,9 +177,7 @@ def pivot_visits(
     return out
 
 
-# ---------------------------------------------------------------------------
 # Time axis
-# ---------------------------------------------------------------------------
 
 
 def _family_matrix(df: pd.DataFrame, family: Mapping[str, str], visits: Sequence[str]) -> np.ndarray:
@@ -205,11 +199,11 @@ def visit_times(
     time_family: Mapping[str, str] | None = None,
 ) -> tuple[np.ndarray, str]:
     """
-    ``(times, unit)`` — an ``(n_rows, n_visits)`` matrix placing each visit in time.
+    ``(times, unit)``: an ``(n_rows, n_visits)`` matrix placing each visit in time.
 
     Without *time_family*: the visit numbers (``unit = "visit"``). With a family of dates: years
     since each row's earliest dated visit in *visits* (``unit = "years"``). With a numeric family
-    (age, months since baseline…): its values as they are (``unit = "time"``).
+    (age, months since baseline...): its values as they are (``unit = "time"``).
     """
     if not time_family:
         numbers = []
@@ -237,9 +231,7 @@ def visit_times(
     return (days - origin) / 365.25, "years"
 
 
-# ---------------------------------------------------------------------------
 # Longitudinal summaries
-# ---------------------------------------------------------------------------
 
 
 def _pick_visit(visits: Sequence[str], wanted: str, default_index: int) -> int:
@@ -283,7 +275,7 @@ def visit_series_values(
         For ``new_onset``: values at or below it count as "absent".
     min_visits
         Rows with fewer non-missing values among *visits* get NaN for AUC, slope and the
-        summaries — a slope through one point is not a slope.
+        summaries: a slope through one point is not a slope.
 
     Returns
     -------
@@ -355,7 +347,7 @@ def visit_series_values(
                     out[i] = row[finite[0] if operation == "first" else finite[-1]]
         return pd.Series(np.where(enough, out, np.nan), index=df.index, dtype=float)
 
-    # ---- time-based: auc, auc_mean, slope -------------------------------------
+    # time-based: auc, auc_mean, slope
     times, _unit = visit_times(df, chosen, time_family=families.get(time_family) if time_family else None)
     for i in range(len(df)):
         if not enough[i]:
@@ -380,9 +372,7 @@ def visit_series_values(
     return pd.Series(out, index=df.index, dtype=float)
 
 
-# ---------------------------------------------------------------------------
 # Long reshape
-# ---------------------------------------------------------------------------
 
 
 def melt_visit_families(

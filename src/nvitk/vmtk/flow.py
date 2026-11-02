@@ -4,13 +4,13 @@ The tracer behind ``vmtkparticletracer``: an RK45 stream tracer whose velocity i
 space within cells *and* linearly in time between the per-phase velocity arrays, optionally
 wrapping over the cardiac cycle.
 
-- **pathlines** — particles released at one cardiac phase and advected through the time-varying
+- **pathlines**: particles released at one cardiac phase and advected through the time-varying
   field (periodic over the cycle) for ``max_length`` seconds;
-- **streamlines** — the same tracer on one frozen phase (a single-row time table makes the field
+- **streamlines**: the same tracer on one frozen phase (a single-row time table makes the field
   steady), integrated for ``max_length`` millimetres.
 
-Integration is in physical units — positions in mm (``voxel × spacing``), velocity in mm/s, time in
-seconds — and the traces come back in voxel coordinates, clipped to the vessel mask.
+Integration is in physical units, positions in mm (``voxel × spacing``), velocity in mm/s, time in
+seconds, and the traces come back in voxel coordinates, clipped to the vessel mask.
 """
 
 from __future__ import annotations
@@ -69,9 +69,7 @@ class FlowTrace:
         return int(len(self.points))
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Seeds / ROI
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def mask_roi(mask: np.ndarray, label_ids: Sequence[int] | None) -> np.ndarray:
@@ -117,9 +115,7 @@ def _planar_seed_candidates(coords: np.ndarray, *, axis: int, side: str) -> np.n
     return coords
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Tracing
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _velocity_image(

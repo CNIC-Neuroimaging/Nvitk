@@ -4,9 +4,9 @@ Named CT display windows (Hounsfield unit level/width presets).
 Description
 -----------
 CT is the one modality with a physically calibrated intensity scale: Hounsfield units are fixed
-by definition (−1000 air, 0 water), so a *fixed* display window means the same tissue contrast on
-every scan from every scanner. That is why radiology works in named windows — "brain", "bone",
-"lung" — rather than per-image auto-contrast, which changes what you are looking at from case to
+by definition (-1000 air, 0 water), so a *fixed* display window means the same tissue contrast on
+every scan from every scanner. That is why radiology works in named windows ("brain", "bone",
+"lung"), rather than per-image auto-contrast, which changes what you are looking at from case to
 case.
 
 A window is stored as ``(level, width)`` in HU, the convention used on the scanner console and in
@@ -18,7 +18,7 @@ PACS, and converted to the ``(low, high)`` bounds a display library wants::
 Conventions
 -----------
 Levels and widths are **Hounsfield units**, always. Applying these to non-CT data is meaningless
-— MR intensities are arbitrary units with no fixed zero — so callers should check modality
+(MR intensities are arbitrary units with no fixed zero), so callers should check modality
 first; :func:`suggest_window` does.
 
 This module is display-only: it never modifies voxels. For *intensity* rescaling that feeds a
@@ -42,7 +42,7 @@ class CTWindow:
 
     @property
     def limits(self) -> tuple[float, float]:
-        """``(low, high)`` HU bounds — what a viewer's contrast limits expect."""
+        """``(low, high)`` HU bounds: what a viewer's contrast limits expect."""
         half = self.width / 2.0
         return (self.level - half, self.level + half)
 
@@ -115,7 +115,7 @@ def get_window(key: str) -> CTWindow:
     Raises
     ------
     KeyError
-        Listing the valid keys — a typo should not silently fall back to a different window.
+        Listing the valid keys: a typo should not silently fall back to a different window.
     """
     try:
         return CT_WINDOWS[key]
@@ -134,7 +134,7 @@ def window_from_limits(low: float, high: float, *, tolerance: float = 1.0) -> CT
     """The registered window matching ``(low, high)``, or ``None`` if it is a custom range.
 
     Lets a picker show which preset is active after limits were set from elsewhere, and fall
-    back to "Custom" honestly rather than snapping to the nearest preset.
+    back to "Custom" rather than snapping to the nearest preset.
     """
     for window in CT_WINDOWS.values():
         window_low, window_high = window.limits
@@ -146,8 +146,8 @@ def window_from_limits(low: float, high: float, *, tolerance: float = 1.0) -> CT
 def looks_like_hounsfield(minimum: float, maximum: float) -> bool:
     """Whether an intensity range plausibly holds Hounsfield units.
 
-    CT reconstructions span roughly −1024 to a few thousand HU, and crucially go **well below
-    zero** — which MR magnitude data, being non-negative, never does. That sign asymmetry is the
+    CT reconstructions span roughly -1024 to a few thousand HU, and crucially go **well below
+    zero**, which MR magnitude data, being non-negative, never does. That sign asymmetry is the
     cheap discriminator; it is not a modality detector, and callers with real modality metadata
     should prefer it.
     """

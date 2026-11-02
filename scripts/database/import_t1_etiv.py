@@ -4,13 +4,13 @@
 Description
 -----------
 The T1 volumetry exports carry one row per ``(subject, side, measurement, region)``. Among the
-regions is ``eTIV`` — not a parcel but a whole-head scalar, FreeSurfer's estimate of intracranial
+regions is ``eTIV``, not a parcel but a whole-head scalar, FreeSurfer's estimate of intracranial
 volume derived from the Talairach transform. It matters because it is the standard denominator for
 head-size normalization: a raw hippocampal volume is not comparable between a 1.9 L and a 0.85 L
 skull, and dividing by eTIV (or regressing it out) is what makes the comparison legitimate.
 
 It is written as its own variable rather than as one region among the parcels, because it *is* a
-different kind of quantity — a per-subject scalar, region ``etiv``, which every parcel is measured
+different kind of quantity: a per-subject scalar, region ``etiv``, which every parcel is measured
 against.
 
 Source layout
@@ -33,9 +33,7 @@ Examples::
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from pathlib import Path
 from typing import Any
 
@@ -68,9 +66,7 @@ SOURCE_MEASUREMENT = "Volume_mm3"
 SOURCE_REGION = "etiv"
 
 
-# ---------------------------------------------------------------------------
 # Extraction
-# ---------------------------------------------------------------------------
 def extract_etiv(path: Path, *, sheet: str = "Sheet1") -> pd.DataFrame:
     """
     One row per ``(subject_uid, session)`` carrying that subject's eTIV in mm³.
@@ -78,7 +74,7 @@ def extract_etiv(path: Path, *, sheet: str = "Sheet1") -> pd.DataFrame:
     Raises
     ------
     ValueError
-        When the workbook has none of the expected long-format columns, or holds no eTIV row —
+        When the workbook has none of the expected long-format columns, or holds no eTIV row:
         either means the export changed shape and importing it blindly would write nonsense.
     """
     raw = read_tabular_source(path, sheet_name=sheet)
@@ -186,9 +182,7 @@ def publish_etiv(
     return rows
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 @click.command("import-t1-etiv")
 @click.option(
     "--source",

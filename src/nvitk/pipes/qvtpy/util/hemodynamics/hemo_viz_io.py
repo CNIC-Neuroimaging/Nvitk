@@ -1,4 +1,4 @@
-"""Serialize / reload stage-6 PITC–PWV plot data and Napari geometry.
+"""Serialize / reload stage-6 PITC-PWV plot data and Napari geometry.
 
 QC must display the hemodynamics figures and summary values that were written
 by qvtpy stage 6, not a fresh GUI recompute.  When ``collect_plot_data`` runs,
@@ -399,7 +399,7 @@ def reconstruct_region_plot_data_from_csvs(
             "quality_thresh": data["quality_thresh"],
             "pwv_bjornfoot_m_s": data["pwv_bjornfoot_m_s"],
             "pwv_fielding_m_s": data["pwv_fielding_m_s"],
-            # Empty PWV arrays → interactive PWV tabs fall back to saved PNGs.
+            # Empty PWV arrays -> interactive PWV tabs fall back to saved PNGs.
             "pwv_distance_mm": np.asarray([], dtype="float64"),
             "pwv_xcor_time_s": np.asarray([], dtype="float64"),
             "pwv_time_to_upstroke_s": np.asarray([], dtype="float64"),
@@ -417,7 +417,7 @@ def reconstruct_region_plot_data_from_csvs(
 
 
 def stage6_saved_plot_paths(stage6_dir: Path) -> dict[str, Path]:
-    """Map plot kind → PNG path under ``stage6/plots/`` when present."""
+    """Map plot kind -> PNG path under ``stage6/plots/`` when present."""
     plots = Path(stage6_dir) / "plots"
     mapping = {
         "pitc": plots / "pitc.png",

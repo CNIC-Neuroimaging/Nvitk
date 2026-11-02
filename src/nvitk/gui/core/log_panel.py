@@ -56,7 +56,7 @@ def run_subprocess_logged(
 ) -> int:
     """Run a command and stream stdout/stderr into :func:`gui_log`.
 
-    *env* replaces the child's whole environment when given — pass ``{**os.environ, ...}`` to add
+    *env* replaces the child's whole environment when given: pass ``{**os.environ, ...}`` to add
     to it rather than to start from nothing. It exists so a caller can hand a subprocess
     credentials it must not print: the command line is echoed to the log, the environment is not.
     """

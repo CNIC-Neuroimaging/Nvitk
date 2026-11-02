@@ -103,7 +103,7 @@ def prune_short_terminal_spurs(skel: np.ndarray, max_len_mm: float, spacing=None
             if too_long:
                 continue
             # Only remove spurs that terminate at a branchpoint (degree >= 3),
-            # not short vessels that simply connect two endpoints.
+            # not short vessels that connect two endpoints.
             if degree[chain[-1]] >= 3:
                 for idx in chain[:-1]:
                     sk[tuple(map(int, pts[idx]))] = False
@@ -375,7 +375,7 @@ def find_loop_branches(pts: np.ndarray, neighbors: List[List[int]], degree: np.n
 def dijkstra_dist_from_root(tree: SkeletonTree, root: int, spacing) -> np.ndarray:
     """Physical (mm) shortest-path distance from *root* to every skeleton node.
 
-    Plain O(n²) Dijkstra without a heap — skeleton graphs here are small enough
+    Plain O(n²) Dijkstra without a heap: skeleton graphs here are small enough
     that this is simpler and fast enough than a priority-queue implementation.
     """
     spacing = np.asarray(spacing, dtype=float)

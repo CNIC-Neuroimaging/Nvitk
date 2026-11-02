@@ -46,8 +46,8 @@ def backend_array(img: Image | Any) -> Any:
     """The voxel array for *img*, on the active backend.
 
     Napari hands out host arrays whatever the compute backend is, so anything
-    that will be combined with a backend array — indexed by a mask, fed to a
-    ufunc — has to come through here first, or CuPy rejects the pairing.
+    that will be combined with a backend array (indexed by a mask, fed to a
+    ufunc) has to come through here first, or CuPy rejects the pairing.
     """
     return as_backend_array(resolve_array(img))
 

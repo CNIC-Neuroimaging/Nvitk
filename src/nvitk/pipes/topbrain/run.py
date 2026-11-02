@@ -5,23 +5,23 @@ locally (in-process) or on SGE (one job per stage, chained with ``-hold_jid``).
 
 Stages
 ------
-``stage0``  data preparation — challenge release (+ your own annotated cohorts) into an nnU-Net
+``stage0``  data preparation: challenge release (+ your own annotated cohorts) into an nnU-Net
             dataset; optionally an unlabeled pre-training corpus
-``stage1``  pre-training — a published OpenMind checkpoint, or nnssl from scratch, producing a
+``stage1``  pre-training: a published OpenMind checkpoint, or nnssl from scratch, producing a
             bundle (checkpoint + adaptation plan + a materialised segmentation model)
-``stage2``  transfer training — fine-tune the bundle on the stage-0 dataset with the in-tree
+``stage2``  transfer training: fine-tune the bundle on the stage-0 dataset with the in-tree
             nnU-Net build
-``stage3``  evaluation — the six challenge metrics
-``stage4``  inference — predict on new cases
-``stage5``  packaging — Grand Challenge submission container
-``stage6``  self-training *(optional)* — pseudo-label the unlabeled cohort with the stage-2
+``stage3``  evaluation (the six challenge metrics
+``stage4``  inference) predict on new cases
+``stage5``  packaging, Grand Challenge submission container
+``stage6``  self-training *(optional)*, pseudo-label the unlabeled cohort with the stage-2
             model, keep what survives scrutiny, and print the command that feeds it back
 
 Submitting to SGE
 -----------------
 A workstation has no ``qsub``. ``--submit sge`` therefore emits the whole run as one bash
-driver script — every stage's ``singularity exec`` payload and ``qsub`` invocation, with the
-``-hold_jid`` chain resolved through shell variables — and then executes that script where
+driver script (every stage's ``singularity exec`` payload and ``qsub`` invocation, with the
+``-hold_jid`` chain resolved through shell variables), and then executes that script where
 ``qsub`` exists: locally if this *is* a submit host, otherwise over SSH to a login node
 (copy the script over sshfs, ``bash`` it, parse the job ids back). ``--remote-host`` /
 ``--remote-user``
@@ -41,7 +41,7 @@ events under ``<results_root>/tensorboard/``, while they train. ``--tensorboard-
 where the server runs:
 
 ``auto`` *(default)*
-    ``local`` for ``--submit local``; **nothing** for ``--submit sge`` — the cluster roots are
+    ``local`` for ``--submit local``; **nothing** for ``--submit sge``: the cluster roots are
     mounted on the workstation, so serving them from here costs no cluster slot and needs no
     tunnel. The exact ``nvitk-tensorboard`` command to do that is logged at submission.
 ``local``
@@ -87,7 +87,7 @@ from nvitk.pipes.topbrain.util.sge_backend import (
 
 log = Logger()
 
-#: Stage id → the module implementing it.
+#: Stage id -> the module implementing it.
 STAGE_MODULES: dict[str, str] = {
     st.STAGE_DATAPREP: "nvitk.pipes.topbrain.stage0_dataprep",
     st.STAGE_PRETRAIN: "nvitk.pipes.topbrain.stage1_pretrain",
@@ -103,7 +103,7 @@ STAGE_MODULES: dict[str, str] = {
 def _resolve_layout(submit: str, **overrides: Path | None) -> tuple[Any, Any, Any]:
     """Resolve the local and cluster layouts and pick the active one.
 
-    Both are resolved so the log can show what the other context would have used — the
+    Both are resolved so the log can show what the other context would have used: the
     commonest cluster failure is a path that only exists on the workstation.
     """
     local = pth.layout_local(**overrides)
@@ -173,7 +173,7 @@ def _stage_options(**o: Any) -> dict[str, dict[str, Any]]:
             bundle=bundle_name, label_set=lbl_mod.binary_label_set_for(o["label_set"]),
             pretrain_name=bundle_name,
             loss=o["binary_loss"], loss_config=None,
-            # No honest validation split exists for silver labels, so the binary model trains
+            # No unbiased validation split exists for silver labels, so the binary model trains
             # on everything. 'all' is nnU-Net's own name for that.
             folds=["all"],
             # The multi-class dataset is planned first and the binary one borrows its geometry;
@@ -195,7 +195,7 @@ def _stage_options(**o: Any) -> dict[str, dict[str, Any]]:
             label_set=o["label_set"],
             # Left unset on purpose: the run directory name contains the plans identifier,
             # whose spacing stage 2 only decides at run time. Resolved from stage 2's
-            # provenance when the stage actually runs.
+            # provenance when the stage runs.
             prediction_subdir=None,
             folds_spec=",".join(str(f) for f in o["folds"]),
             iou_threshold=None, skip_neighbours=False, baseline=o["compare_to"],
@@ -432,7 +432,7 @@ def _tensorboard_for_sge(
     """Arrange TensorBoard around an SGE submission, per the resolved serve mode.
 
     *cluster* is what the jobs see. Anything that runs *here* must read the same tree as this
-    workstation sees it — usually the cluster mount at its own absolute path, occasionally the
+    workstation sees it, usually the cluster mount at its own absolute path, occasionally the
     local roots; :func:`~nvitk.pipes.topbrain.util.tensorboard.workstation_view` decides which.
     Getting this backwards yields a TensorBoard that loads cleanly and shows nothing.
     """
@@ -488,7 +488,7 @@ def _submit_via_login_node(
 ) -> list[str]:
     """Emit the whole submission as one bash driver, then run it where ``qsub`` exists.
 
-    A workstation has no ``qsub``, so submitting from here cannot work directly — which is what
+    A workstation has no ``qsub``, so submitting from here cannot work directly, which is what
     the ``FileNotFoundError: 'qsub'`` was. Every other cluster pipeline in this repo solves it
     the same way and so does this one now: build a single driver script containing every
     stage's ``singularity exec`` payload and ``qsub`` invocation, then execute that script on a
@@ -498,7 +498,7 @@ def _submit_via_login_node(
     Where it runs
     -------------
     ``qsub`` on this host
-        Run it locally — you are already on a submit host, and prompting for a password would
+        Run it locally: you are already on a submit host, and prompting for a password would
         be pointless.
     otherwise
         copy it to ``SGE_SCRIPTS_DIR`` over sshfs and ``bash`` it over SSH.
@@ -559,7 +559,7 @@ def _once(ctx, param, value):
 @click.command("nvitk-topbrain")
 @config_dir_click_option()
 @backend_click_option(default="gpu")
-# ---- selection -------------------------------------------------------------
+# selection
 @click.option("--stages", type=str, default=st.DEFAULT_STAGES, show_default=True,
               help="Comma-separated stage ids or aliases.")
 @click.option("--label-set", type=click.Choice(list(lbl_mod.MULTICLASS_LABEL_SETS)), default=None,
@@ -573,7 +573,7 @@ def _once(ctx, param, value):
               help="Print the built-in annotated cohorts and exit.")
 @click.option("--list-models", is_flag=True, default=False,
               help="Print the models stage 2 has trained and exit.")
-# ---- stage 0: data preparation ---------------------------------------------
+# stage 0: data preparation
 @click.option("--dataprep-target", type=str, default="train", show_default=True,
               help="Comma list of: train, corpus, binary. Shorthands: 'both' = train,corpus; "
                    "'all' = train,corpus,binary. Use 'train,binary' when the corpus is already "
@@ -611,7 +611,7 @@ def _once(ctx, param, value):
                    "clips away. Changes the dataset, so stage 0 must be re-run.")
 @click.option("--mr-context-percentiles", type=float, nargs=2, default=None, callback=_once,
               help="Percentiles for the MR half of the context channel (default 0 100).")
-# ---- stage 1: pre-training --------------------------------------------------
+# stage 1: pre-training
 @click.option("--pretrain-source", type=click.Choice(["openmind", "scratch"]),
               default="openmind", show_default=True)
 @click.option("--checkpoint-name", type=str, default=None,
@@ -640,7 +640,7 @@ def _once(ctx, param, value):
                    "restarting at epoch 0. Worth setting on any cluster run.")
 @click.option("--no-export-model", is_flag=True, default=False,
               help="Skip materialising the bundle's segmentation_model.pth.")
-# ---- stage 2: transfer training ---------------------------------------------
+# stage 2: transfer training
 @click.option("--loss", type=str, default=None,
               help="Segmentation loss: a registry name or 'package.module:Callable'.")
 @click.option("--loss-config", type=str, default=None)
@@ -669,7 +669,7 @@ def _once(ctx, param, value):
               help="Stages 2 and 2a: resume each fold that already has a checkpoint instead of "
                    "restarting it. Folds with no checkpoint start fresh, keeping whatever "
                    "initialisation the run asked for.")
-# ---- stage 2a: binary vessel fine-tuning -------------------------------------
+# stage 2a: binary vessel fine-tuning
 @click.option("--binary-loss", type=str, default="dice_ce", show_default=True,
               help="Stage 2a loss. The binary task has no side roads and no adjacency, so the "
                    "topology-aware losses have much less to work with than at stage 2.")
@@ -688,7 +688,7 @@ def _once(ctx, param, value):
               help="Inverse-frequency exponent for --sampling rare_aware (default 0.5).")
 @click.option("--sampling-oversample", type=float, default=None,
               help="Foreground-patch fraction under rare_aware (default 0.5; nnU-Net's is 0.33).")
-# ---- stages 4-5 --------------------------------------------------------------
+# stages 4-5
 @click.option("--compare-to", type=str, default=None,
               help="Stage 3 run to compare this one against, case by case: a run name under "
                    "<results-root>/stage3_evaluate, or a path. Use the --from-scratch control "
@@ -703,7 +703,7 @@ def _once(ctx, param, value):
               help="Stage 4: mirror fragments found on the wrong side of the midline.")
 @click.option("--repair-close-radius", type=int, default=0, show_default=True,
               help="Stage 4: per-class closing before gap bridging.")
-# ---- stage 6: self-training ---------------------------------------------------
+# stage 6: self-training
 @click.option("--unlabeled-dir", type=click.Path(path_type=Path), default=None,
               help="Stage 6: cohort of unlabeled volumes to pseudo-label. Searched recursively; "
                    "defaults to the whole corpus root.")
@@ -726,14 +726,14 @@ def _once(ctx, param, value):
               help="Stage 6: accepted foreground volume, as a multiple of the annotated median.")
 @click.option("--pseudo-max-accepted", type=int, default=None,
               help="Stage 6: keep at most this many pseudo-cases, best first.")
-# ---- shared ------------------------------------------------------------------
+# shared
 @click.option("--device", type=click.Choice(["cuda", "cpu", "mps"]), default=None)
 @click.option("--num-processes", type=int, default=1, show_default=True)
 @click.option("--workers", type=int, default=4, show_default=True)
 @click.option("--overwrite", is_flag=True, default=False)
 @click.option("--challenge-root", type=click.Path(path_type=Path), default=None)
 @click.option("--results-root", type=click.Path(path_type=Path), default=None)
-# ---- submission ---------------------------------------------------------------
+# submission
 @click.option("--submit", type=click.Choice(["local", "sge"], case_sensitive=False),
               default="local", show_default=True)
 @click.option("--container", type=click.Path(path_type=Path), default=None)
@@ -773,7 +773,7 @@ def _once(ctx, param, value):
 @click.option("--remote-user", type=str, default=None,
               help="SSH user for the login node. Prompted for if omitted; the password is "
                    "always prompted for and never taken from an argument.")
-# ---- monitoring ---------------------------------------------------------------
+# monitoring
 @click.option("--tensorboard", is_flag=True, default=False,
               help="Mirror stage 1 / stage 2 training logs into TensorBoard events under "
                    "<results-root>/tensorboard, live.")
@@ -892,7 +892,7 @@ def main(**kw: Any) -> None:
         try:
             # Not stage2_train.run_checkpoint: that reads the path the marker recorded, which is
             # the container's (/nnunet/results/...) and exists only inside the job. discover_models
-            # recomposes it against the results root this host can actually see.
+            # recomposes it against the results root this host can see.
             from nvitk.pipes.topbrain.util.models import discover_models
 
             _existing = next(

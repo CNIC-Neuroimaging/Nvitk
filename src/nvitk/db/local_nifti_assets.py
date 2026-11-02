@@ -1,14 +1,14 @@
 """Register reorganized local NIfTI files (``subject/TOF``, ``subject/4DFlow``) into ``assets``.
 
-Expected layout (same as QVT+/eICAB pipelines)::
+Expected layout (same as qvtpy/eICAB pipelines)::
 
     {nifti_root}/{subject_uid}/TOF/*.nii[.gz]
     {nifti_root}/{subject_uid}/4DFlow/**/*.nii[.gz]
 
 Under ``4DFlow/``, supported patterns for ``asset_slot`` (see :func:`_classify_4dflow_path`) include:
 
-- Directional encodings: ``{subject}/4DFlow/AP|FH|RL/<name>_m.nii`` → ``flow_ap_m``, ``flow_fh_ph``, etc.
-- Root derivatives: ``Angiography_3D.nii`` / ``Angiography_4D.nii`` → ``flow_angiography_3d`` / ``flow_angiography_4d``,
+- Directional encodings: ``{subject}/4DFlow/AP|FH|RL/<name>_m.nii`` -> ``flow_ap_m``, ``flow_fh_ph``, etc.
+- Root derivatives: ``Angiography_3D.nii`` / ``Angiography_4D.nii`` -> ``flow_angiography_3d`` / ``flow_angiography_4d``,
   and the same for ``ComplexDifference_*`` and ``VelocityMagnitude_*``.
 
 TOF files use ``asset_slot`` ``tof`` when there is a single NIfTI per subject, else ``tof_<stem>``.
@@ -92,7 +92,7 @@ def _classify_4dflow_path(rel_posix: str, filename: str) -> tuple[str | None, st
             slot = f"flow_{dir_seg}_{comp}"
             return slot, "directional"
 
-    # Root of 4DFlow: .../4DFlow/Angiography_3D.nii → single segment in tail
+    # Root of 4DFlow: .../4DFlow/Angiography_3D.nii -> single segment in tail
     if len(tail) == 1:
         key = _normalize_slot_token(_nifti_stem(filename))
         prefixes = (

@@ -1,6 +1,6 @@
 """Wrappers over ``skimage.filters``, grouped by family.
 
-scikit-image exposes its filters as several dozen loose functions — five edge
+scikit-image exposes its filters as several dozen loose functions: five edge
 operators each with directional variants, seven global threshold rules, three
 local ones. Exposing one tool per function would bury the choice that matters
 (which *family*) under the one that rarely does (which variant), so each family
@@ -13,7 +13,7 @@ plane by plane along a chosen axis rather than refused, since a 3D volume is the
 normal input here.
 
 Deliberately not wrapped: ``LPIFilter2D``, ``filter_forward``, ``filter_inverse``
-and ``wiener`` — they need a caller-supplied impulse response rather than an
+and ``wiener``; they need a caller-supplied impulse response rather than an
 image alone; ``gabor_kernel``, ``window`` and ``rank_order``, which build kernels
 or orderings rather than filtering; and ``try_all_threshold``, which returns a
 Matplotlib figure.
@@ -50,11 +50,11 @@ def _rank_methods() -> tuple[str, ...]:
     """Every ``skimage.filters.rank`` filter this wrapper can drive."""
     try:
         from skimage.filters import rank
-    except Exception:  # noqa: BLE001 — the constant is advisory until first use
+    except Exception:  # noqa: BLE001 (the constant is advisory until first use)
         return ("mean", "median", "maximum", "minimum")
     skip_suffix = ("_percentile", "_bilateral")
     # windowed_histogram returns a histogram per pixel, so its output has an extra
-    # axis and is not an image — the same reason the kernel builders are left out.
+    # axis and is not an image: the same reason the kernel builders are left out.
     skip_exact = {"windowed_histogram"}
     return tuple(
         name
@@ -70,7 +70,7 @@ RANK_METHODS: tuple[str, ...] = _rank_methods()
 
 #: Edge families scikit-image defines only for 2D input. The *directional*
 #: variants (``sobel_h`` and friends) are 2D-only for every family, including
-#: those whose magnitude form is N-dimensional — see :func:`_is_planar_edge`.
+#: those whose magnitude form is N-dimensional; see :func:`_is_planar_edge`.
 _PLANAR_ONLY: frozenset[str] = frozenset({"roberts", "farid"})
 
 
@@ -80,7 +80,7 @@ def _is_planar_edge(method: str, direction: str) -> bool:
 
 
 def _unwrap(image: Image | np.ndarray) -> tuple[np.ndarray, Image | None]:
-    """``(host array, the Image to rewrap with)`` — ``None`` when given a raw array."""
+    """``(host array, the Image to rewrap with)``: ``None`` when given a raw array."""
     if isinstance(image, Image):
         return np.asarray(to_numpy(image.data)), image
     return np.asarray(to_numpy(image)), None
@@ -105,7 +105,7 @@ def _float(arr: np.ndarray) -> np.ndarray:
     return np.nan_to_num(np.asarray(arr, dtype=np.float32), nan=0.0, posinf=0.0, neginf=0.0)
 
 
-# ── ridge / vesselness ────────────────────────────────────────────────────────
+# ridge / vesselness
 def ridge_filter(
     image: Image | np.ndarray,
     *,
@@ -129,7 +129,7 @@ def ridge_filter(
     return _rewrap(np.asarray(out, dtype=np.float32), source)
 
 
-# ── edges ─────────────────────────────────────────────────────────────────────
+# edges
 def edge_filter(
     image: Image | np.ndarray,
     *,
@@ -170,7 +170,7 @@ def edge_filter(
 
 
 def laplace_filter(image: Image | np.ndarray, *, ksize: int = 3) -> Image | np.ndarray:
-    """Laplacian of the image — a second-derivative edge/blob response.
+    """Laplacian of the image: a second-derivative edge/blob response.
 
     The kernel size is forced odd: an even one has no centre voxel to put the
     operator on, and scikit-image fails on the shape mismatch rather than saying so.
@@ -182,7 +182,7 @@ def laplace_filter(image: Image | np.ndarray, *, ksize: int = 3) -> Image | np.n
     return _rewrap(np.asarray(out, dtype=np.float32), source)
 
 
-# ── smoothing and sharpening ──────────────────────────────────────────────────
+# smoothing and sharpening
 def blur_filter(
     image: Image | np.ndarray,
     *,
@@ -311,7 +311,7 @@ def rank_filter(
     return _rewrap(np.asarray(out, dtype=np.float32), source)
 
 
-# ── thresholds ────────────────────────────────────────────────────────────────
+# thresholds
 def global_threshold_value(image: Image | np.ndarray, *, method: str = "otsu") -> float:
     """The intensity a global threshold rule picks for *image*."""
     from skimage import filters as skf

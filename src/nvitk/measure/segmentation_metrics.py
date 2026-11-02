@@ -8,17 +8,17 @@ being fragmented into disconnected pieces, because a one-voxel gap costs almost 
 destroys the topology a clinician reads the image for. These metrics add the topological and
 detection views that vessel-segmentation benchmarks score alongside Dice:
 
-- :func:`dice` — volumetric overlap
-- :func:`cl_dice` — centerline Dice, overlap measured on the skeletons
-- :func:`betti_zero_error` — difference in connected-component count
-- :func:`hd95` — 95th-percentile Hausdorff distance, in millimetres
-- :func:`invalid_neighbour_error` — adjacencies the anatomy does not allow
-- :func:`detection_f1` — per-component detection at an IoU threshold
+- :func:`dice`: volumetric overlap
+- :func:`cl_dice`: centerline Dice, overlap measured on the skeletons
+- :func:`betti_zero_error`: difference in connected-component count
+- :func:`hd95`: 95th-percentile Hausdorff distance, in millimetres
+- :func:`invalid_neighbour_error`: adjacencies the anatomy does not allow
+- :func:`detection_f1`: per-component detection at an IoU threshold
 
 Conventions
 -----------
 Masks are integer label maps of identical shape. Physical distances are **millimetres**, taken
-from an explicit ``spacing`` (z, y, x order matching the array axes) — never voxel counts.
+from an explicit ``spacing`` (z, y, x order matching the array axes), never voxel counts.
 
 Absent classes
 --------------
@@ -38,6 +38,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Sequence
 
+import itertools
 import math
 
 import numpy as np
@@ -49,7 +50,7 @@ from nvitk.core.logger import Logger
 
 log = Logger()
 
-#: HD95 substituted when a class is present in exactly one of the two masks — roughly the
+#: HD95 substituted when a class is present in exactly one of the two masks: roughly the
 #: largest distance available inside a human head, in millimetres.
 HD95_MISSING_PENALTY: float = 290.0
 
@@ -82,9 +83,7 @@ def _spacing_tuple(spacing: Sequence[float] | None, ndim: int) -> tuple[float, .
     return values
 
 
-# ---------------------------------------------------------------------------
 # Per-class primitives (binary masks)
-# ---------------------------------------------------------------------------
 
 
 def dice(reference: np.ndarray, prediction: np.ndarray) -> float:
@@ -110,14 +109,14 @@ def confusion_counts(
 
 
 def volume_similarity(reference: np.ndarray, prediction: np.ndarray) -> float:
-    """Volume similarity (VOLSIM) of two boolean masks — see :func:`nvitk.measure.voxel.volsim`."""
+    """Volume similarity (VOLSIM) of two boolean masks; see :func:`nvitk.measure.voxel.volsim`."""
     from nvitk.measure.voxel import volsim
 
     return float(volsim(reference, prediction))
 
 
 def matthews_corrcoef(reference: np.ndarray, prediction: np.ndarray) -> float:
-    """Matthews correlation coefficient — see :func:`nvitk.measure.voxel.mcc`."""
+    """Matthews correlation coefficient; see :func:`nvitk.measure.voxel.mcc`."""
     from nvitk.measure.voxel import mcc
 
     return float(mcc(reference, prediction))
@@ -159,7 +158,7 @@ def count_components(mask: np.ndarray) -> int:
 def betti_zero_error(reference: np.ndarray, prediction: np.ndarray) -> float:
     """Absolute difference in connected-component count (the 0th Betti number).
 
-    Zero means the prediction is as fragmented as the reference — not that it is correct — so
+    Zero means the prediction is as fragmented as the reference (not that it is correct), so
     read it alongside Dice rather than on its own.
     """
     return float(abs(count_components(reference) - count_components(prediction)))
@@ -203,26 +202,40 @@ def detection_matches(
     Each reference component counts as detected when some predicted component overlaps it with
     at least *iou_threshold* IoU. Used for the small "side road" vessels, where *whether* a
     branch was found matters more than how precisely it was outlined.
+
+    Reference components are visited in label order and each takes the unmatched predicted
+    component of highest IoU (lowest id on ties), so the matching is greedy, not optimal.
     """
     ref_labels, n_ref = label(reference, structure=_CONNECTIVITY)
     pred_labels, n_pred = label(prediction, structure=_CONNECTIVITY)
     if n_ref == 0 and n_pred == 0:
         return 0, 0, 0
 
+    # Component sizes and every (reference, prediction) overlap from one pass over the volume,
+    # instead of two full-volume masks per candidate pair.
+    ref_sizes = np.bincount(ref_labels.ravel(), minlength=n_ref + 1)
+    pred_sizes = np.bincount(pred_labels.ravel(), minlength=n_pred + 1)
+    both = (ref_labels > 0) & (pred_labels > 0)
+    stride = n_pred + 1
+    pair_keys, overlaps = np.unique(
+        ref_labels[both].astype(np.int64) * stride + pred_labels[both], return_counts=True
+    )
+    candidates: dict[int, list[tuple[int, int]]] = {}
+    for key, inter in zip(pair_keys.tolist(), overlaps.tolist()):
+        # Keys are sorted, so each reference's candidates come in ascending prediction id.
+        candidates.setdefault(key // stride, []).append((key % stride, inter))
+
     matched_pred: set[int] = set()
     true_positives = 0
     for ref_id in range(1, n_ref + 1):
-        ref_component = ref_labels == ref_id
-        overlapping = np.unique(pred_labels[ref_component])
         best_iou, best_id = 0.0, None
-        for pred_id in overlapping:
-            if pred_id == 0 or int(pred_id) in matched_pred:
+        for pred_id, inter in candidates.get(ref_id, ()):
+            if pred_id in matched_pred:
                 continue
-            pred_component = pred_labels == pred_id
-            union = int(np.logical_or(ref_component, pred_component).sum())
-            iou = float(np.logical_and(ref_component, pred_component).sum()) / union if union else 0.0
+            union = int(ref_sizes[ref_id]) + int(pred_sizes[pred_id]) - inter
+            iou = float(inter) / union if union else 0.0
             if iou > best_iou:
-                best_iou, best_id = iou, int(pred_id)
+                best_iou, best_id = iou, pred_id
         if best_id is not None and best_iou >= iou_threshold:
             matched_pred.add(best_id)
             true_positives += 1
@@ -238,24 +251,92 @@ def f1_from_counts(true_positives: int, false_positives: int, false_negatives: i
     return (2.0 * true_positives / denominator) if denominator else 0.0
 
 
-# ---------------------------------------------------------------------------
 # Anatomical adjacency
-# ---------------------------------------------------------------------------
+
+
+#: Up to this many labels, per-label dilation is cheaper than the neighbour-offset scan.
+_DILATION_MAX_LABELS: int = 3
+
+
+def _touching_value_pairs(mask: np.ndarray) -> set[frozenset]:
+    """Unordered pairs of distinct values found in 26-adjacent voxels of a 3D integer *mask*.
+
+    Every pair involves a non-zero voxel, so the scan is cropped to the non-zero bounding box
+    plus a one-voxel margin. Values are mapped to compact codes, and each of the 13 offsets of
+    one half of the 3x3x3 neighbourhood (the other half gives the same unordered pairs) adds
+    its code pairs to a K x K histogram.
+    """
+    nonzero = mask != 0
+    if not nonzero.any():
+        return set()
+    box = []
+    for axis in range(3):
+        hit = np.flatnonzero(nonzero.any(axis=tuple(a for a in range(3) if a != axis)))
+        box.append(slice(max(int(hit[0]) - 1, 0), int(hit[-1]) + 2))
+    sub = mask[tuple(box)]
+    if sub.dtype == bool:
+        sub = sub.astype(np.uint8)
+
+    lo_val, hi_val = int(sub.min()), int(sub.max())
+    if lo_val >= 0 and hi_val < 1 << 16:
+        present = np.flatnonzero(np.bincount(sub.ravel().astype(np.int64), minlength=hi_val + 1))
+        lut = np.zeros(hi_val + 1, dtype=np.uint8 if present.size <= 256 else np.uint16)
+        lut[present] = np.arange(present.size)
+        codes = lut[sub]
+        values = present
+    else:
+        values, inverse = np.unique(sub, return_inverse=True)
+        codes = inverse.reshape(sub.shape)
+    k = int(values.size)
+    counts = np.zeros(k * k, dtype=np.int64)
+    for offset in itertools.product((-1, 0, 1), repeat=3):
+        if offset <= (0, 0, 0):
+            continue
+        here = tuple(slice(max(0, -d), n - max(0, d)) for d, n in zip(offset, codes.shape))
+        there = tuple(slice(max(0, d), n - max(0, -d)) for d, n in zip(offset, codes.shape))
+        a, b = codes[here], codes[there]
+        differ = a != b
+        if not differ.any():
+            continue
+        a, b = a[differ].astype(np.int64), b[differ].astype(np.int64)
+        counts += np.bincount(np.minimum(a, b) * k + np.maximum(a, b), minlength=k * k)
+    found = np.flatnonzero(counts)
+    vals = values.tolist()
+    return {frozenset((vals[i // k], vals[i % k])) for i in found.tolist()}
 
 
 def neighbouring_labels(mask: np.ndarray, *, labels: Iterable[int] | None = None) -> set[frozenset[int]]:
     """Unordered pairs of labels that touch each other in *mask* (26-connectivity).
 
     Two labels "touch" when a voxel of one is within one voxel of the other in any direction.
-    Implemented by dilating each label by a single step and intersecting, which is exact for
-    26-connectivity and avoids materialising a full pairwise adjacency matrix.
+    With a handful of labels each one is dilated by a single step and intersected with the
+    others. Integer 3D masks with more labels are scanned once per neighbour offset instead
+    (:func:`_touching_value_pairs`), whose cost does not grow with the label count. Both give
+    the same pairs.
     """
-    from scipy.ndimage import binary_dilation
-
     present = sorted(labels) if labels is not None else [
         int(v) for v in np.unique(mask) if int(v) != 0
     ]
     pairs: set[frozenset[int]] = set()
+    if (
+        len(set(present)) > _DILATION_MAX_LABELS
+        and mask.ndim == 3
+        and (np.issubdtype(mask.dtype, np.integer) or mask.dtype == bool)
+    ):
+        touching = _touching_value_pairs(mask)
+        values = set(np.unique(mask).tolist())
+        for i, first in enumerate(present):
+            for second in present[i + 1:]:
+                if first == second:
+                    # A label repeated in *labels* touches itself whenever it is present.
+                    if first in values:
+                        pairs.add(frozenset((first, second)))
+                elif frozenset((first, second)) in touching:
+                    pairs.add(frozenset((first, second)))
+        return pairs
+
+    from scipy.ndimage import binary_dilation
+
     dilated = {value: binary_dilation(mask == value, structure=_CONNECTIVITY) for value in present}
     for i, first in enumerate(present):
         for second in present[i + 1:]:
@@ -275,11 +356,11 @@ def invalid_neighbour_error(
     Parameters
     ----------
     valid_neighbours
-        Label → labels it may legitimately touch. Pairs absent from the mapping are counted as
+        Label -> labels it may legitimately touch. Pairs absent from the mapping are counted as
         violations, so an incomplete mapping over-reports rather than silently passing errors.
 
     A low score means the prediction is anatomically plausible: vessels only meet where they
-    actually branch. It catches the characteristic failure of multi-class vessel models — two
+    branch. It catches the characteristic failure of multi-class vessel models: two
     labels bleeding into each other where they run side by side.
     """
     violations = 0
@@ -295,9 +376,7 @@ def invalid_neighbour_error(
     return float(violations)
 
 
-# ---------------------------------------------------------------------------
 # Case-level aggregation
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -330,7 +409,7 @@ def evaluate_case(
 ) -> CaseMetrics:
     """Compute every metric for one reference/prediction pair.
 
-    Classes absent from **both** masks are skipped in the class averages — see the module
+    Classes absent from **both** masks are skipped in the class averages; see the module
     docstring on why that matters when most classes are absent from most cases.
     """
     ref = _as_array(reference).astype(np.int32, copy=False)
@@ -405,7 +484,7 @@ class PairedComparison:
     """Cases where both models produced a finite value for this metric."""
 
     mean_delta: float
-    """Mean of (candidate − baseline), sign-corrected so positive always favours the candidate."""
+    """Mean of (candidate - baseline), sign-corrected so positive always favours the candidate."""
 
     median_delta: float
     num_better: int
@@ -463,12 +542,12 @@ def paired_comparison(
     Parameters
     ----------
     baseline, candidate
-        Case id → metric → value, e.g. the ``aggregate`` dict of each :class:`CaseMetrics`.
+        Case id -> metric -> value, e.g. the ``aggregate`` dict of each :class:`CaseMetrics`.
         Only case ids present in both are compared; anything else is not a pair.
     metrics
         Which metrics to compare. Defaults to every metric both models report.
     polarity
-        Metric → whether larger is better. Defaults to :data:`METRIC_POLARITY`; metrics absent
+        Metric -> whether larger is better. Defaults to :data:`METRIC_POLARITY`; metrics absent
         from it are assumed larger-is-better.
 
     Returns
@@ -479,8 +558,8 @@ def paired_comparison(
     Raises
     ------
     ValueError
-        If the two mappings share no case ids at all — almost always a mismatched run rather
-        than a genuinely empty comparison.
+        If the two mappings share no case ids at all: almost always a mismatched run rather
+        than a empty comparison.
     """
     polarity = dict(METRIC_POLARITY if polarity is None else polarity)
     shared = sorted(set(baseline) & set(candidate))
@@ -539,12 +618,12 @@ def fold_spread(
     The spread is the number that decides whether a difference between two runs means anything.
     If the candidate is 0.02 Dice ahead on the cohort mean but the fold-to-fold standard
     deviation is 0.05, the comparison has not resolved anything and needs either more folds or
-    a paired test — see :func:`paired_comparison`.
+    a paired test; see :func:`paired_comparison`.
 
     Parameters
     ----------
     case_folds
-        Case id → index of the fold that held that case out. Cases absent from the mapping are
+        Case id -> index of the fold that held that case out. Cases absent from the mapping are
         skipped, so a partial cross-validation still reports on the folds it does have.
     """
     grouped: dict[int, list[CaseMetrics]] = {}

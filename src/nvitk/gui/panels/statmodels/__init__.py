@@ -1,5 +1,5 @@
 """
-Statmodels explorer — interactive mixed-effects and mediation modeling over the NVITK DB.
+Statmodels explorer: interactive mixed-effects and mediation modeling over the NVITK DB.
 
 Description
 -----------

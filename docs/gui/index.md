@@ -18,7 +18,7 @@ panels, each its own dock, tabbed together:
 
 | Panel | What it's for |
 |---|---|
-| **Imaging** | The full tool catalog (below), form-driven via magicgui, with the tool search bar. The theme toggle sits on its title bar (the light theme also turns the canvas behind the images white; the dark one keeps it black). |
+| **Imaging** | The full tool catalog (below), form-driven via magicgui, with the tool search bar. Its title bar carries **▤ Results**, which opens the results window (below) at any time, closed or not, and the theme toggle (the light theme also turns the canvas behind the images white; the dark one keeps it black). |
 | **Labels** | Label selection for any label layer, whatever tool is selected (below). |
 | **Meshlab** | Meshes and point clouds, MeshLab/ParaView style (below): surfaces from labels, click-to-edit, clean/repair, smoothing, remeshing, alignment, measurements, vessel centerlines, image ↔ mesh ↔ points conversion, colouring, mesh time series. |
 | **Image properties** | Spacing, affine, orientation, and other metadata for the active layer. |
@@ -118,6 +118,8 @@ mix of panels, tabbed or side by side.
   the main window*, *Dock all floating panels*.
 - Closing a panel window gives its panels back to the main window; a window whose last
   panel leaves closes itself. Dragging a title bar moves that panel only, not its tab group.
+  The results window is the exception: closing its own window just closes it, and it comes
+  back there (below).
 
 The layout is remembered in `gui.json`: the main window's dock state, plus every panel
 window's panels, dock state, geometry and whether it was open (`panel_windows`; the single
@@ -261,33 +263,37 @@ orthogonal views follow undo and redo too.
   or a traced path being drawn waits meanwhile. The key is heard wherever the focus is
   (canvas, views, tabs, panel windows), except while typing in a text box. Brush size, *Preserve
   other labels* (write only over background and the active label — the region tools also
-  stop growing at other labels), *Paint only over* (its reverse; below), *3D brush / fill*,
+  stop growing at other labels), *Restrict to this layer's labels* (below), *3D brush / fill*,
   *Fill contiguous only*, *Outlines*
   (drawn in the orthogonal views even when the canvas is in 3D, where Napari cannot draw
   them), opacity, *Undo* / *Redo*. Napari's own brush paints on the **3D canvas** too: on the
   first label the ray meets (Napari's rule) or, where there is none, on the voxel the image
   shows (the reference, else the top visible image on the grid). Every region tool runs on
   the GPU when the GPU toggle is on ({mod}`nvitk.segmentation.interactive`).
-- **Paint only over** (Draw card) is *preserve labels* the other way round, on the layer's
-  own labels. Tick the labels that may be painted over in its list. The background is
-  listed too, unticked by default. *All labels* means every label but the background, new
-  ones included as they are drawn, which is also the default.
-  - The brush, the bucket and every tool write only over the ticked labels, so a structure
-    can be drawn inside an existing one, e.g. a thrombus inside the aorta, without spilling
-    over its edge.
-  - The eraser clears only the active label, as with preserve labels, so the labels painted
-    over are safe from it. Erased voxels become background.
+- **Restrict to this layer's labels** (Draw card) is a rule on the layer's own labels. Tick
+  the labels it is about in its list. The background is listed too, unticked by default.
+  *All labels* means every label but the background, new ones included as they are drawn,
+  which is also the default. Two modes:
+  - *Only over the ticked* is *preserve labels* the other way round. The brush, the bucket
+    and every tool write only over the ticked labels, so a structure can be drawn inside an
+    existing one, e.g. a thrombus inside the aorta, without spilling over its edge. The
+    eraser clears only the active label, as with preserve labels, so the labels painted over
+    are safe from it. Erased voxels become background.
+  - *Never over the ticked* protects them instead: nothing paints over them and the eraser
+    leaves them alone, while everything else stays editable, e.g. redraw around a vessel
+    without touching it.
   - It applies as you paint, on the canvas (2D and 3D) and in the orthogonal views. A stroke
     over the edge never shows outside it.
   - It applies to the Refine tools, slice interpolation and *Copy slice* too.
-  - Ticking it unticks *Preserve other labels*, and the other way round: the two rules
-    contradict each other. Ticks are kept per layer.
+  - Ticking it unticks *Preserve other labels*, and the other way round. Ticks are kept per
+    layer, and the mode is remembered.
 - **Editable area.** Restrict where anything paints: *Only where the reference is between*
   two values (*From view* takes the reference's display window — *From box* the box's
-  intensity range) and/or *Only inside* another mask — all its labels, or the ones ticked in
-  its list (*All* / *None*; the choice is kept per mask). A brush stroke over the edge only
-  paints the part inside, as you draw, and Undo takes back exactly that. Erasing is never
-  restricted.
+  intensity range) and/or *Restrict to* another layer's labels, in one of two modes: *only
+  inside the ticked* (all its labels, or the ones ticked) or *only outside the ticked* (with
+  all ticked, its background). The ticks are kept per layer (*All* / *None*), and the mode
+  is remembered. A brush stroke over the edge only paints the part allowed, as you draw, and
+  Undo takes back exactly that. Erasing is never restricted by this rule.
 - **Box.** A box on the volume (`nvitk.gui.labels.roi_box`). *Draw box*, then drag a
   rectangle on the canvas (2D) or in an orthogonal view: it sets the box on those two axes,
   and a drag in another view sets the third (the tool in use comes back afterwards;
@@ -401,12 +407,31 @@ without a position keep the ordinary 2D path.
 
 ## Orthogonal views
 
+The main canvas opens in **3D**, and stays in 3D when the first volume is opened (its axial
+order is still set, for when you switch to 2D). Set `"gui.ndisplay": 2` in `gui.json` to open in
+2D instead.
+
 The **Orthogonal views** dock opens with the window (tabbed with napari's layer controls; a
 position you give it is remembered) and shows axial / coronal / sagittal through one crosshair,
 drawing every visible layer on the bound layer's grid (off-grid layers are resampled once and
-cached). It follows the active layer only onto real volumes. Selecting a localizer, a
-single-slice series or a colour capture keeps the volume already shown rather than rebinding
-to a one-voxel grid.
+cached). It follows the active layer onto volumes and 2D images. Selecting shapes, points, a
+mesh or a colour capture keeps the volume already shown.
+
+- **2D images**: a 2D active layer is shown in the first (axial) view, with the layers on its
+  grid drawn over it (a 2D labels layer of the same size, say). This covers a plain 2D layer
+  (a photo, a TIFF, a 2D tool output) and a positioned slice opened as a one-voxel-thick 3D layer
+  (a localizer, one DICOM image, a 2D+t series; the title names its own plane). The other two
+  views stay empty, and projection, plane rotation and the 3D cuts are off. Selecting a volume
+  brings the three views back.
+- **Projection**: the *Projection* button above the views shows a projection of the volume in
+  the three views instead of slices, each along its own axis. Pick the type beside it: MIP
+  (maximum), MinIP (minimum) or AIP (average). *Slab* sets a thickness in mm centred on the
+  crosshair (a thin-slab projection that follows the slice); *full* projects the whole volume.
+  Every visible layer is projected with its own window and colours; label layers take their
+  highest id along the ray. Whole-volume projections are computed once per layer and axis
+  (0.15 s on a 328×406×192 TOF with its eICAB mask), so moving the crosshair costs nothing.
+  Drawing in the views is off while a projection shows, and turned planes go back to the
+  volume's axes. The type and slab are remembered in `gui.json`.
 
 - **Display follows the layers**: colormap, window, gamma, opacity, blending, the labels
   shown or hidden in a label list (the Labels panel, the layer list) — and
@@ -479,6 +504,29 @@ other grids* can be turned off to draw only same-grid layers. *Orientation figur
 canvas* shows a person with R/L, A/P and H/F arrows — the marker of the QC reports' 3D
 renders — in the corner of the 3D view, turning with the camera
 (`nvitk.gui.viz.orientation_overlay`). Both choices are remembered in `gui.json`.
+
+**The main canvas** (`nvitk.gui.viz.main_canvas`) has its own switches in the same card, which
+leave the layer list and these views alone:
+
+- *Main canvas: resample layers into world space* — on (the default), napari draws every layer
+  in world (scanner) space through its affine: an oblique or flipped acquisition is turned into
+  place, and a layer on another grid is resampled into alignment with the others. Off, every image
+  and label layer is drawn **as stored, on its own voxel grid** — its voxel size kept, but no
+  rotation, flip, obliquity or offset, the way these views lay a volume out (2D slicing of an
+  oblique series is then a plain slice through its voxels). Layers on the same grid still overlay
+  exactly; layers on other grids are shown but not aligned. Meshes, points and shapes stay in world
+  space. This is display only: each layer keeps its real transform, and tools, the orientation
+  buttons, saving and exports always work on the real geometry (they put the real transforms back
+  while they run; a layer created while it is off is placed by its real geometry).
+- *Main* column of the layers table — untick a layer to hide it **on the main canvas only**: it
+  stays visible in the layer list and is still drawn in the orthogonal views (its napari
+  `visible` is untouched; only its canvas node is hidden, through every path napari redraws it).
+- *Show the main canvas* (also **View ▸ Show main canvas**) — hide the whole main canvas: it stops
+  rendering and the docks, the orthogonal views first, take its space. Closing the orthogonal
+  views brings it back.
+
+The resampling and canvas switches are remembered in `gui.json`; the per-layer choices last
+for the session.
 
 ## Spectral CT (Philips SBI)
 
@@ -556,7 +604,7 @@ window expressed in intensity units, and the live preview is reverted if the dia
 
 `nvitk.gui.tools.registry` defines every tool as a `GuiToolSpec` (id, category, parameter
 spec, whether it needs a reference layer or 3D data, and its run mode), merged with the
-pipeline shortcuts from `nvitk.gui.pipeline.catalog`. **124 tools across 14 categories**,
+pipeline shortcuts from `nvitk.gui.pipeline.catalog`. **188 tools across 18 categories**,
 each backed by the same functions documented in the {doc}`Main API Reference <../api/index>`:
 
 | Category | Count | Examples |
@@ -565,8 +613,12 @@ each backed by the same functions documented in the {doc}`Main API Reference <..
 | Reconstruction | 1 | Background phase correction (qvtpy's polynomial correction of the complex difference; 3D and 3D+t) |
 | Filters | 18 | Sliding threshold, Hessian, Jerman vesselness, VMTK vessel enhancement (Frangi / Sato / VED), snakes, skimage thresholds and filters |
 | Morphology | 11 | Dilate/erode/open/close, fill holes, connected components, ICA siphon correction, mask genus |
-| Centerline | 4 | Detect/cut junctions, convert to polyline, centerline network (branches with inscribed radius) |
-| Segmentation | 26 | Label ops, mask boolean algebra, mask image (keep / remove regions), region growing, blood flood, ANTsPyNet brain/vessel/DKT, TotalSegmentator, eICAB |
+| Centerline | 5 | Detect/cut junctions, convert to polyline, centerline network (branches with inscribed radius), centre a centerline on the lumen |
+| Segmentation | 27 | Label ops, mask boolean algebra, mask image (keep / remove regions), region growing, blood flood, ANTsPyNet brain/vessel/DKT, TotalSegmentator, eICAB, eICAB post-process |
+| FastSurfer | 14 | Whole-brain aseg+DKT segmentation with cerebellum (CerebNet), hypothalamus (HypVINN) and corpus callosum modules, recon-surf surfaces, full and longitudinal pipelines, subject loading, PV-corrected label stats, aseg reduction, conforming, FreeSurfer installer, spectral sphere and the recon-surf topology chain (shown when FastSurfer and lapy are found) — see below |
+| FreeSurfer | 9 | Topology tools on any mask or surface: mri_pretess, mri_mc, main component, Euler number / defects, smooth, inflate, quick sphere, mris_fix_topology and mris_topo_fixer chains. Listed only when FreeSurfer is found — see below |
+| FSL | 35 | BET, FAST, FIRST, fsl_anat, SIENA/SIENAX, FNIRT/applywarp/invwarp, MCFLIRT, epi_reg, TOPUP, EDDY, DTIFIT, BEDPOSTX, PROBTRACKX2, TBSS, XTRACT, MELODIC, SUSAN, slice timing, FUGUE, fslmaths/fslstats/cluster/smoothest, any FSL command, FSL core installer — see below |
+| ASL perfusion | 4 | FSL BASIL: CBF (ml/100g/min), arrival time and aCBV with oxford_asl (calibration, partial-volume correction, MNI space, atlas region tables), the BASIL fit alone, asl_file subtraction, asl_calib M0 — see below |
 | Registration | 6 | FLIRT register (6/7/9/12 DOF, cost, search range) / apply; ANTsPy register (every `type_of_transform`, stage metrics, iteration schedules, masks) / apply; FireANTs register (moments → rigid → affine → greedy / SyN chains on the GPU) / apply. Each can also warp further layers with the new transform. |
 | Visualization | 12 | PET/SUV hotspots, 4D-flow vectors, 4D-flow particle tracing (VMTK streamlines / pathlines), vessel cross-sections, hemodynamics, TOF morphometrics |
 | Transform | 8 | Volume projection, reorient, rotate, swap axes, isotropy, resample, oblique slice |
@@ -590,6 +642,38 @@ Centerline arc length, Centerline network, Vessel CPR and Generic cross-sections
 Tools that work on a voxel skeleton receive the VMTK or ray-cast network rasterized to a 1-voxel
 skeleton, so junction detection and cutting behave the same with every method.
 
+**VMTK coverage.** A single VMTK run from the widest end point to every other one traces a
+shortest-path tree. It skips one segment of every loop (the circle of Willis is a ring) and
+reaches nothing outside that end's connected piece. On a whole circle-of-Willis tree it recovered
+about half the vessel length.
+
+*VMTK centerlines: all branches (full network)* is the default. It works per connected piece of
+the surface:
+1. a first VMTK run from the widest end point;
+2. further runs from other end points, keeping only what the first one skipped;
+3. for any skeleton branch still missed, a run between that branch's own two ends;
+4. where VMTK cannot trace a branch, the skeleton re-centred on the lumen.
+
+On the same tree this covers 97 % of the skeleton, in about 30 s. *widest end → end points
+(tree)* keeps the single run. The voxel-skeleton tools always use the full network.
+
+**Centerline network** has a coverage choice and a *Network of* choice. Its default, *all selected
+labels together*, builds one network: the bifurcations between vessels lie on label boundaries
+(ICA → MCA / ACA), so per-label networks cannot contain them. Every branch and point is still
+tagged with its label, and the summary gives each label's branches, length and diameter. *each
+label separately* builds one network per label.
+
+**Centre centerline on the lumen** (Centerline) moves a centerline onto the lumen centre of the
+active vessel mask (the selected labels, else every label):
+1. each point moves to the centroid of the lumen cross-section;
+2. it then climbs the inscribed-radius ridge, where VMTK's centerlines run.
+
+The centerline can be any Shapes path (*To polyline*, CPR, *Centerline network*), the Mesh panel's
+centerline lines or points, or a skeleton mask. With none, the mask's own skeleton is centred. The
+tool adds the centred paths and radius-coloured points. It reports the shift and the median
+inscribed radius before → after; the radius grows when the line was off-centre. The Mesh panel has
+the same operation for surfaces.
+
 **4D-flow particle tracing (VMTK)** replaces the former PyVista streamline tool. It traces
 **streamlines** (one phase, steady) or **pathlines** (released at a phase, integrated periodically
 through the cycle) with VMTK's temporal stream tracer, in physical units. Seeds are planar or
@@ -609,10 +693,110 @@ declares one by hand (`nvitk.gui.tools.panel._add_registry_widgets`), laid out i
 order the tool lists them. Widgets are shared between tools by parameter name; selecting a
 tool gives each of its fields that tool's own caption, choices and numeric range.
 
+### FastSurfer and FSL tools
+
+The *FastSurfer* and *FSL* categories run the same code as `nvitk-fastsurfer` / `nvitk-fsl`
+({doc}`../api/segmentation`, {doc}`../installation`). Each tool writes the layers it needs to a
+run folder (its *Output directory*, or a temporary one), runs the suite, and opens the outputs as
+layers placed by **their own affine** — FastSurfer's conformed grid, or the input's with
+*native image* (the default); FSL's reoriented / cropped / registered grids — never assumed to
+match the input. Label maps (segmentations, masks, cluster indices) open as Labels layers named
+from their lookup table; reports and tables (stats files, SIENA/SIENAX, fslstats, cluster,
+MCFLIRT motion) go to the results window.
+
+Long runs — FastSurfer, FAST, FIRST, fsl_anat, FNIRT, EDDY, BEDPOSTX, TBSS, … — are **background
+jobs** (`nvitk.gui.core.external_jobs`): the tool returns at once, the GUI stays usable, a
+*Jobs* window lists each job with its current stage and a **Cancel** button, the activity bar
+counts the time, and the outputs open when the job ends. Closing the window with jobs running
+asks first and stops them. These tools manage their own outputs, so they are not recorded as
+replayable steps.
+
+**On the cluster.** *Run SGE* works for every FastSurfer and FSL tool except loading a subject and
+the installers (`nvitk.gui.sge.external`). The job is staged with everything the tool reads: the
+active layer, the layers its form names, layers named in a command (`{layer:NAME}`) or as
+longitudinal time points, and every file or folder a path field names (bvecs/bvals — found next to
+the layer's source when left blank —, acqp/index, warps and matrices, a BEDPOSTX folder, the FA
+list, the FreeSurfer license). On the node the worker runs the same tool definition headless, in
+the nvitk container (which carries FSL, FastSurfer and a pruned FreeSurfer), and writes an import
+manifest into `.done`; the GUI downloads the files it lists and opens them exactly as a local run
+does — label maps named and coloured, tables in the results window. FastSurfer, eddy, bedpostx,
+probtrackx2 and XTRACT ask for a GPU node.
+
+When FastSurfer or FSL is missing, the tool offers to install it in the background
+(*FastSurfer ▸ Install FreeSurfer 7.4.1* and *FSL ▸ Install nvitk's FSL core* do it on request).
+DWI tools find `bvecs` / `bvals` next to the layer's source file when those fields are blank;
+`{layer:NAME}` in *fslmaths* and *Run any FSL command* stands for another layer's file, and
+`{out:NAME}` in the latter names an output to open afterwards.
+
+### FreeSurfer topology tools
+
+The *FreeSurfer* category (`nvitk.gui.tools.freesurfer_tools`, the same code as
+`nvitk-freesurfer` and `nvitk.freesurfer`) appears only when a FreeSurfer installation is found:
+`$FREESURFER_HOME`, `freesurfer_home` in `external_tools.json`, `/usr/local/freesurfer`,
+`/opt/freesurfer`, `~/.local/opt/freesurfer`, `~/freesurfer` or FastSurfer's installer folder. A
+tool whose programs that installation lacks is not listed.
+
+- **Volume tools** run on the active label / mask layer (*Label*: one id, or 0 for every nonzero
+  voxel). *Pretess* opens a Labels layer; *Marching cubes* opens a Surface layer in scanner RAS.
+- **Surface tools** run on the active Surface layer (*Marching cubes*, FastSurfer or the Meshlab
+  panel): *Main component*, *Smooth*, *Inflate* and *Quick sphere* open a new Surface layer.
+  *Euler number* shows FreeSurfer's Euler number, holes and defect index beside nvitk's own
+  V − E + F count, which needs no license.
+- **Fix topology** (`mris_fix_topology`) and **Topology fixer** (`mris_topo_fixer`) run the whole
+  `recon-all` chain on a mask: pretess → marching cubes → main component → smooth → inflate →
+  sphere → fixer → remove intersections, then `defect-seg`.
+  - The mask becomes a minimal subject (`filled`, `wm`, and `brain` / `norm` from the *Image the
+    mask came from*, scaled to FreeSurfer's white-matter level).
+  - They open the surface before and after, the defects as a Labels layer and an Euler report.
+  - They run as background jobs.
+  - Built for the cortex, they are offered to test and compare, e.g. with *ICA siphon centerline
+    correction*.
+
+FastSurfer's own parts sit in the *FastSurfer* category:
+
+- **Spectral sphere** projects a genus-0 surface onto the sphere with the first Laplace–Beltrami
+  eigenfunctions (FastSurfer's replacement for `mris_sphere -q`). It needs FastSurfer and
+  `lapy`, not FreeSurfer. Any surface is first turned so its principal axes match the
+  hemisphere layout FastSurfer expects.
+- **Topology chain (recon-surf order)** runs the fix chain with that sphere (`mris_sphere -q` when
+  the spectral map fails, as FastSurfer does) and FastSurfer's orientation rewrite.
+
+**License.** FreeSurfer's programs refuse to run without a license file (free:
+https://surfer.nmr.mgh.harvard.edu/registration.html). Give it in *FreeSurfer license file*, or
+with `$FS_LICENSE` / `nvitk-freesurfer use --license FILE`. FreeSurfer 5.x reads only
+`$FREESURFER_HOME/license.txt`, so nvitk runs it from a folder of links to the installation plus
+the license (`~/.cache/nvitk/freesurfer-…`) and never writes into the installation. A run
+without a license stops with that explanation. These tools run on this machine only (no *Run
+SGE*).
+
+### ASL perfusion (BASIL)
+
+The *ASL perfusion* category runs FSL's BASIL on the active ASL series, the same code as
+`nvitk-fsl asl` / `basil` / `asl-file` / `asl-calib` ({doc}`../api/measure`). *BASIL perfusion*
+takes the labelling (pCASL / pASL), the delays and labelling duration, the volume layout, and
+optionally an M0 calibration layer (or an M0 value), a brain mask, a structural layer or an
+`fsl_anat` folder, and GM / WM partial-volume layers. It runs as a background job and opens CBF
+in ml/100g/min (calibrated; *inferno*), with arrival time, aCBV, the CBF variance, the
+partial-volume-corrected GM / WM maps and the MNI-space maps as hidden layers; the GM / WM means
+and, with *Region analysis*, the per-region CBF and ATT tables go to the results window. *Run SGE*
+works for all four tools (the `fsl_anat` folder is uploaded with the job).
+
 ### Measurement results: colouring the labels
 
 Measurements open the **results window** (`nvitk.gui.viz.results_window`): one table per run,
-earlier runs kept in *History*, *Copy* as text. When a measurement was taken label by label
+earlier runs kept in *History*, *Copy* as text. Above each table, *Find rows* keeps the rows whose cells contain
+every term typed (space-separated) and *Find columns* the columns whose header contains any of
+the comma-separated terms; the key column always stays, and the filter is kept when another
+result is shown. It is a panel (*Results*) with the panels' title
+bar, and it opens as a window of its own. ⧈ docks it with the nvitk panels, and it can be moved
+into any panel window, tabbed or beside other panels. ⛶ fills the screen with it, and ✕ closes
+it. While it is open, new results appear wherever it is. Once closed, the next measurement or
+**▤ Results** on the Imaging title bar brings it back:
+- in the window it was closed in, when it was in a panel window;
+- as a window of its own, when it was docked in the main window or has never been shown.
+
+Its place is remembered with the rest of the layout. Closing it clears any row highlight in the
+viewer. When a measurement was taken label by label
 — volumes, intensity statistics, Dice / Jaccard / surface metrics against a reference,
 centerline arc length, mask hemodynamics — each label row carries a swatch of its label's
 colour, and **Colour labels by** colours the measured layer's labels by any measured column,
@@ -622,6 +806,59 @@ measured) turn grey; labels hidden in a label list stay hidden, and every label 
 *Original colours* gives the labels back the colours they had, hand-picked ones included
 (`nvitk.gui.labels.visibility.apply_label_value_colors`). An image mask is turned into a
 Labels layer to take per-label colours, as when a label's colour is changed by hand.
+
+**TOF morphometrics** (Measure → *Morphometrics*, and Visualization → *TOF morphometrics* for a
+stage-7 folder) shows its results the same way (`nvitk.gui.viz.morpho_results`). It adds five
+results to the history:
+- **vessels**: one row per vessel with the stage-7 report's columns (`morphometrics_report.csv`): the
+  selected features and the high-confidence lesion flags, the same table the pipeline writes and
+  the database imports (built from the run's tables for older runs).
+- **all vessel measures**: one row per vessel, with every measure. That is every column of `vessel_summary.csv`
+  (calibre, end-window diameters, bifurcation blanking, first / last-N-mm tortuosity, curvature
+  integrals, direction angles, branching, lesion counts, worst-lesion severity and confidence),
+  then the earlier measures: cow_morpho's path metrics per vessel, volumetry, and the literature
+  tortuosity metrics. Names that clash with a new column get `_legacy`.
+- **lesions**: severity (taper %, and diameter / area % against the healthy reference interpolated
+  between a proximal and a distal window, `LESION_REFERENCE_METHOD`) and confidence
+  with its flags. Clicking a row selects and centres that lesion. Absent main vessels (ICAs,
+  basilar, MCAs, ACAs, PCA P1 / P2) are listed as *hypoplasia* rows: high confidence when a
+  neighbouring vessel is present, low when the whole territory is missing. They have no position,
+  so they get no point or extent; clicking one shows its card in the Lesion inspector.
+- **segments** and **subject** (circle-of-Willis variants, asymmetry, totals).
+
+The run folder also holds the stage-7 final report, `morphometrics_report.csv` (and the workbook's
+first sheet, *Report*): 14 selected vessel features plus `has_stenosis` / `has_enlargement` /
+`has_hypoplasia` and the maximum diameter %, counting **high-confidence lesions only**. It is what
+the pipeline publishes to the database (`src/nvitk/pipes/qvtpy/README/M-Morphometrics.md` §6.5, §9).
+
+*Colour labels by* on the vessel table colours the measured mask **and the vessel surfaces** by the
+chosen column, in the same colours. The surfaces are one Mesh-panel surface whose vertices carry
+their `label` field. The tool also draws the centerlines, the vessel surfaces in their label
+colours, and the lesions as points: orange stenoses, blue enlargements, more opaque the higher
+their confidence, larger the more severe.
+
+Lesions can be analysed in the viewer:
+- hovering a lesion point shows its card (severity, length, position, confidence and each penalty
+  in words);
+- clicking it, or its table row, opens the **Lesion inspector**. It plots the calibre along the
+  measured path: the tested radius against the taper reference and threshold, the lesion's run,
+  the reference window, the siphon mask and the path's other lesions. ◀ / ▶ step through them;
+- *Morpho lesion extents* draws each lesion's run along its centerline;
+- the lesion table's rows are tinted by confidence class: green high (≥ 0.7), yellow moderate
+  (≥ 0.4), red low;
+- the filter above the lesion table hides the less confident lesions in the viewer, points and
+  extents alike: *all lesions*, *moderate and high*, *high only*, or any minimum confidence. Hidden
+  lesions are skipped by hover, click and ◀ / ▶, and the filter is kept for later runs.
+
+Further options:
+- the case id (default: the layer name);
+- cow_morpho's legacy siphon mask;
+- the enlargement radius: the profile's value (`cow`: cross-section, inscribed on re-measured
+  paths), the cross-section on every path, or the inscribed radius on every path;
+- a running median of the cross-section radius for enlargements;
+- *Parallel vessel jobs*: how many vessels (label / component jobs) are measured at once, one
+  process each. The default is 1, one at a time. The results do not depend on it.
+- whether to show the lesions.
 
 ### Background phase correction
 
@@ -637,6 +874,52 @@ frames). *Signed image* is for phase / velocity maps: the background is then the
 the fitted background* adds it as a layer. The result (`<name>_bgc`) is on the source's grid —
 time-first for a 3D+t series — and runs on the GPU when GPU computing is on
 (`nvitk.io.conversors._phase2volume_bg.subtract_polynomial_background`).
+
+### ICA siphon correction
+
+*Morphology ▸ ICA siphon centerline correction* opens the cavernous ICA siphon where its two
+limbs touch on TOF and close a loop (`nvitk.morphology.siphon_cut`). Run it on the vessel label
+map with the TOF as the reference layer; *ICA label ids* says which labels to correct (eICAB:
+1 and 2).
+
+The segmentation is kept and only the contact is removed:
+- edge- and corner-only touches are repaired first (*Pretess*);
+- for each remaining loop, the contact is located where the loop's TOF intensity and lumen
+  radius dip, then cut by an intensity-weighted minimum cut;
+- a cut is kept only if it opens the loop without splitting the vessel, costs at most 0.6 of a
+  lumen slice, and stays under *Largest cut* (20 mm³) and 2 % of the vessel;
+- *Re-segment* `common` first re-thresholds both ICAs with one shared Otsu threshold.
+
+The earlier correction (per-ICA Otsu, erosion, a ball cut, thickness recovery) shrank the whole
+ICA and was removed on 2026-10-23.
+
+The result adds three layers: the corrected label map, the removed voxels and the corrected
+centerlines. The results window lists, per label, β₁ before and after, the loops cut and left,
+the voxels pretess removed, the mm³ cut and removed, the volume change, and the centerline
+length. With *Output directory* set, `siphon_correction.json` (every cut attempt, and
+|ΔL − ΔR| of the two ICAs' volume changes) and the QC figures are written there too. The
+command line is `nvitk-morph siphon-correct --tof TOF.nii.gz -i labels.nii.gz -o corrected.nii.gz`
+(`--method`, `--no-pretess`, `--resegment`, `--max-cut-mm3`, `--out-dir`).
+
+### eICAB post-process
+
+*Segmentation ▸ eICAB post-process* runs stage 1's eICAB post-process
+(`nvitk.pipes.qvtpy.util.eicab.eicab_postprocess`) on a label layer, with the TOF as the
+reference layer. Each step can be switched off:
+
+- drop the anterior choroidals;
+- re-segment every label at its local half maximum;
+- ICAs / basilar down to the image floor along a multi-scale Frangi tree;
+- split the vertebral arteries off the basilar (LVA 19 / RVA 20);
+- grow the ACAs / MCAs / PCAs / SCAs along the tree, in competition, with the ACA guard: each side
+  of the AComm starts that side's front, and the ACAs stay within 5 mm of the midline;
+- the ICA siphon correction (minimum cut).
+
+The label ids of each step can be changed. The result is a new `… pp` Labels layer, with the
+new vertebral labels named. The results window lists, per label, the voxels before and after,
+each extension and how it ended, the distal growth (mm³) and the siphon cuts. With *Output
+directory* set, the mask and `eicab_postprocess.json` are also written there. The steps are
+described in the QVTPy pipeline docs (stage 1).
 
 ### Mask image: keep / remove regions
 
@@ -704,7 +987,7 @@ an image / labels layer, or a mesh time series.
 | Remesh | Decimate, subdivide (Loop / butterfly), isotropic remesh (even triangles), remesh through voxels (watertight), clip at a click; VMTK isotropic remesh, decimate, subdivide |
 | Transform & align | Translate / rotate / scale, ICP onto another surface or cloud, principal axes |
 | Measure | Area, volume, sphericity, topology (holes, genus), curvature maps, cross-section at a click; VMTK surface curvature, area / volume / shape index |
-| Vessels & tubes | Centerlines and diameter profile with the VMTK / native / ray-cast method (per-branch length, tortuosity, curvature, min / max diameter, stenosis; bifurcation angles — click a row of the table to see that branch or junction), vessel cross-section at a click, local thickness map; VMTK branches & bifurcation angles (surface coloured by branch), centerline sections, distance to centerlines, flow extensions; ray-cast skeleton + EXPIGEO descriptors (experimental) |
+| Vessels & tubes | Centerlines and diameter profile with the VMTK / native / ray-cast method (VMTK: all branches, loops and separate pieces, or one tree; native / ray-cast lines optionally re-centred on the lumen; per-branch length, tortuosity, curvature, min / max diameter, stenosis; bifurcation angles — click a row of the table to see that branch or junction), centre any centerline layer on the lumen, vessel cross-section at a click, local thickness map; VMTK branches & bifurcation angles (surface coloured by branch), centerline sections, distance to centerlines, flow extensions; ray-cast skeleton + EXPIGEO descriptors (experimental) |
 | Compare | Distance maps and ASSD / Hausdorff |
 | Convert (image ↔ mesh ↔ points) | Mesh → mask or signed-distance image on any grid, mesh → points (vertices or uniform samples), mask → points, points → mask (dots or filled), points → mesh, sample an image onto a surface or cloud |
 | Point cloud | Surface reconstruction (Poisson, MeshLab's screened Poisson and ball pivoting, IMLS, implicit, alpha shape, hull), voxel / random downsampling, outlier removal, normals |

@@ -1,4 +1,4 @@
-"""Wide ``DataRepo.image`` columns → territory labels for PESA-style imaging.
+"""Wide ``DataRepo.image`` columns -> territory labels for PESA-style imaging.
 
 Maps ``{region_id}_{variable_id}`` wide keys (and optional ``_fN`` frame suffixes
 for ``flow_tseries``) to coarse vascular territories for **4D flow** and **ASL**
@@ -7,7 +7,7 @@ vascular atlas parcels. **Desikan** ``ctx-*`` ASL regions are labeled
 from your dataset; this module does not assign them to ICA/venous territories.
 
 ``IMAGE_VARIABLE_IDS`` mirrors ``dataset/nvitk-dataset/catalog/variables.json``
-(image domain) at last sync — refresh manually if the catalog changes.
+(image domain) at last sync: refresh manually if the catalog changes.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ __all__ = [
 ]
 
 
-# dataset/nvitk-dataset/catalog/variables.json — domain == "image"
+# dataset/nvitk-dataset/catalog/variables.json: domain == "image"
 IMAGE_VARIABLE_IDS: dict[str, tuple[str, ...]] = {
     "4dflow": (
         "basilar",
@@ -185,7 +185,7 @@ FLOW_REGION_ID_TO_TERRITORY: dict[str, str] = {
     "right_pcomm": "Communicating",
     "left_posterior_communicating": "Communicating",
     "right_posterior_communicating": "Communicating",
-    # Anterior communicating artery — midline, single vessel.
+    # Anterior communicating artery: midline, single vessel.
     "acomm": "Communicating",
     "anterior_communicating": "Communicating",
     # Vertebral arteries: they form the basilar, so they belong to the posterior circulation.
@@ -264,7 +264,7 @@ def _build_region_to_territory_flow(
 ) -> dict[str, str]:
     """
     Module default (``territory_flow_regions is None``): same as
-    ``REGION_TO_TERRITORY_FLOW`` — copy ``FLOW_REGION_ID_TO_TERRITORY``, then
+    ``REGION_TO_TERRITORY_FLOW``; copy ``FLOW_REGION_ID_TO_TERRITORY``, then
     ``setdefault`` from ``TERRITORY_FLOW_REGIONS`` so explicit flow IDs win over
     short synonym tokens.
 
@@ -380,7 +380,7 @@ def parse_wide_image_column(
 ) -> ParsedWideColumn | None:
     """
     Parse a wide image column name into region, variable, and optional frame
-    index suffix (``f1``, ``f2``, … for ``flow_tseries``).
+    index suffix (``f1``, ``f2``, ... for ``flow_tseries``).
 
     When ``DataRepo.image`` is queried with a single variable, wide columns are
     region-only (no ``_{variable}`` suffix). Pass ``default_variable_id`` so those
@@ -398,7 +398,7 @@ def parse_wide_image_column(
 
 
 def asl_vascular_parcel_to_territory(region_id: str) -> str | None:
-    """Map ASL vascular parcel ``region_id`` (``…_0`` / ``…_8`` / ``…_12``) to a coarse territory."""
+    """Map ASL vascular parcel ``region_id`` (``..._0`` / ``..._8`` / ``..._12``) to a coarse territory."""
     if region_id.startswith("watershed_"):
         return "Watershed"
     if "mca_" in region_id or "aca_" in region_id:

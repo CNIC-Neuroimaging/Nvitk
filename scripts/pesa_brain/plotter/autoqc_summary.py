@@ -4,17 +4,17 @@
 Reads the ``qc_*`` variables straight out of the dataset and draws the views that answer
 "how healthy is this cohort's flow data, and where is the damage concentrated?":
 
-1. **Per-vessel pass rates** — which vessels fail the literature band, ranked. A single vessel at the
+1. **Per-vessel pass rates**: which vessels fail the literature band, ranked. A single vessel at the
    top usually means a segmentation or LOC-placement problem specific to it, not a bad cohort.
-2. **Score distributions** — the plausibility and combined scores per vessel, so a vessel that is
+2. **Score distributions**: the plausibility and combined scores per vessel, so a vessel that is
    merely borderline is distinguishable from one that is failing outright.
-3. **Conservation residuals** — the junction balances, each with **its own class tolerance** drawn
+3. **Conservation residuals**: the junction balances, each with **its own class tolerance** drawn
    on (proximal arterial / distal / venous differ). The spread matters more than the offset: a
    consistent bias is an unmeasured branch, scatter is measurement noise.
-4. **Along-segment consistency** — the per-vessel flow CV along each vessel's main path.
-5. **Subject-level summary** — the anterior/posterior split against its 72% reference, and how many
+4. **Along-segment consistency**: the per-vessel flow CV along each vessel's main path.
+5. **Subject-level summary**: the anterior/posterior split against its 72% reference, and how many
    subjects carry at least one failing check.
-6. **Cohort junction regression** — inflow against outflow per junction, the validation statistic.
+6. **Cohort junction regression**: inflow against outflow per junction, the validation statistic.
 
 Examples::
 
@@ -73,11 +73,11 @@ _PLOT_LABEL: dict[str, str] = {
 
 def conservation_tolerances() -> dict[str, tuple[float, ...]]:
     """
-    Canonical node → the class tolerance(s) stage 9 can score its conservation residual against.
+    Canonical node -> the class tolerance(s) stage 9 can score its conservation residual against.
 
-    There is no single gate. Proximal arterial junctions are held to 20 %, the distal basilar → PCA
+    There is no single gate. Proximal arterial junctions are held to 20 %, the distal basilar -> PCA
     split to 30 % (unmeasured AICA/SCA outflow inflates it), the venous confluence to 20 %. Drawing
-    one global band — as this report used to, at ``CONSERVATION_TOL`` = 15 % — paints PCAs as
+    one global band (as this report used to, at ``CONSERVATION_TOL`` = 15 %) paints PCAs as
     failing when they are inside their own gate, and is stricter than any gate the stage applies.
 
     The basilar anchors **two** rules, and stage 9 keeps whichever residual was worse together with
@@ -116,7 +116,7 @@ def _canonicalize_vessel_frame(vessel: pd.DataFrame) -> pd.DataFrame:
     Collapse mixed region spellings onto one display label per vessel.
 
     Without this, a cohort that mixed ``4dflow_v2`` (``left_ica``) and ``qvtpy`` (``LICA``) imports
-    draws every vessel twice — once per spelling — and the pass-rate / violin plots look like
+    draws every vessel twice (once per spelling), and the pass-rate / violin plots look like
     duplicated anatomy.
     """
     if vessel.empty or "region_id" not in vessel.columns:
@@ -138,18 +138,16 @@ def _canonicalize_vessel_frame(vessel: pd.DataFrame) -> pd.DataFrame:
     return out.groupby(keys, as_index=False)[value_cols].mean(numeric_only=True)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Loading
-# ──────────────────────────────────────────────────────────────────────────────
 def load_qc(repo, *, pipeline: str = "") -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     The published QC metrics, wide: one row per ``(subject, vessel)`` and one per subject.
 
     Read from the long tables directly rather than through ``DataRepo.image``, which applies
-    catalog-default and cohort restrictions this report does not want — it should describe every
+    catalog-default and cohort restrictions this report does not want: it should describe every
     row the stage wrote.
 
-    Region spellings are canonicalized (``LICA`` / ``left_ica`` → ``LICA``) so mixed importers do
+    Region spellings are canonicalized (``LICA`` / ``left_ica`` -> ``LICA``) so mixed importers do
     not fragment the figures.
 
     Returns
@@ -189,7 +187,7 @@ def load_flow(repo, *, pipeline: str = "", variable: str = "flow_mean") -> pd.Da
 
     The published QC columns are enough for the per-scan figures, but the cohort-level junction
     regression needs the flows themselves. The unit is inferred rather than assumed, exactly as
-    stage 9 infers it — a dataset holding mL/s would otherwise regress fine and report nonsense
+    stage 9 infers it: a dataset holding mL/s would otherwise regress fine and report nonsense
     intercepts.
     """
     from nvitk.pipes.qvtpy.stage9_autoqc import infer_flow_scale
@@ -212,14 +210,12 @@ def load_flow(repo, *, pipeline: str = "", variable: str = "flow_mean") -> pd.Da
     return flow.drop(columns=["value_num"])
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Figures
-# ──────────────────────────────────────────────────────────────────────────────
 def plot_consensus_junctions(
     flow: pd.DataFrame, out_dir: Path, *, robust: bool = False
 ) -> Path | None:
     """
-    Junction inflow against outflow, one panel per junction — the consensus consistency check.
+    Junction inflow against outflow, one panel per junction: the consensus consistency check.
 
     Each point is a subject. The dashed line is identity (perfect conservation); the solid line is
     the fitted regression. Read the **slope**: a pipeline that loses a constant fraction of outflow
@@ -308,7 +304,7 @@ def plot_pass_rates(vessel: pd.DataFrame, out_dir: Path) -> Path | None:
         scored=lambda s: float(s.notna().sum()),
         failing=lambda s: float((s < FAIL_BELOW).sum()),
     )
-    # A vessel with no band was never assessed — the communicating arteries and the venous sinuses.
+    # A vessel with no band was never assessed: the communicating arteries and the venous sinuses.
     # Showing those at "0% failing" would read as a clean bill of health for exactly the vessels the
     # scoring deliberately declines to judge.
     per["rate"] = 100.0 * per["failing"] / per["scored"].where(per["scored"] > 0)
@@ -372,7 +368,7 @@ def plot_conservation(
     """
     Junction mass-conservation residuals, with **each vessel's own class tolerance** drawn on.
 
-    The gate is not global: proximal arterial junctions are held to 20 %, the distal basilar → PCA
+    The gate is not global: proximal arterial junctions are held to 20 %, the distal basilar -> PCA
     split to 30 %, the venous confluence to 20 % (:func:`conservation_tolerances`). Each row gets
     its own band, so a PCA at 0.25 reads as inside its gate instead of failing a 15 % line the
     stage never applied.
@@ -428,7 +424,7 @@ def plot_conservation(
     ax.axvline(0, color="#333333", lw=1.2)
 
     # One band per row, at that vessel's own class gate. Where a vessel anchors two rules (the
-    # basilar), the stricter gate is drawn solid and the looser one as a paler outer band — which
+    # basilar), the stricter gate is drawn solid and the looser one as a paler outer band, which
     # of the two applied depends on which junction gave the worse residual for that subject.
     seen_multi = False
     for i, label in enumerate(order):
@@ -464,7 +460,7 @@ def plot_segment_cv(vessel: pd.DataFrame, out_dir: Path) -> Path | None:
     """
     Along-segment flow consistency, one row per vessel, ranked worst first.
 
-    Stage 9 computes this per **individual vessel** along that vessel's own **main path** — the
+    Stage 9 computes this per **individual vessel** along that vessel's own **main path**: the
     ACA/MCA/PCA bifurcation arms are excluded, because flow legitimately steps down past a
     bifurcation and pooling the arms would measure the branching rather than the segmentation.
     Every vessel the station profile carries appears here, so the row count is the coverage: a
@@ -482,7 +478,7 @@ def plot_segment_cv(vessel: pd.DataFrame, out_dir: Path) -> Path | None:
         return None
 
     # Worst first: with coverage now spanning every vessel rather than the three tree roots, an
-    # alphabetical axis buries the one vessel that is actually drifting.
+    # alphabetical axis buries the one vessel that is drifting.
     stats = rows.groupby("region_id")["qc_segment_cv"].agg(["median", "size"])
     order = list(stats.sort_values("median", ascending=False).index.astype(str))
 
@@ -606,7 +602,7 @@ def summary_table(vessel: pd.DataFrame, subject: pd.DataFrame) -> pd.DataFrame:
         if "qc_conservation" in group.columns:
             residual = pd.to_numeric(group["qc_conservation"], errors="coerce").dropna()
             if not residual.empty:
-                # Score against the vessel's own class gate, not one global number — a PCA is held
+                # Score against the vessel's own class gate, not one global number: a PCA is held
                 # to 30 % and an ICA to 20 %, so a single threshold mislabels both.
                 tols = _tolerances_for_label(region)
                 gate = max(tols) if tols else CONSERVATION_TOL
@@ -627,9 +623,7 @@ def summary_table(vessel: pd.DataFrame, subject: pd.DataFrame) -> pd.DataFrame:
     return table.sort_values(sort_key, ascending=False)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # CLI
-# ──────────────────────────────────────────────────────────────────────────────
 @click.command("autoqc-summary")
 @click.option(
     "--output-path",
@@ -700,7 +694,7 @@ def main(output_path: Path, dataset: Path | None, pipeline: str, export_csv: boo
             table.to_csv(csv_path, index=False)
             log.info("Wrote %s", csv_path)
 
-    # ---- Cohort-level consistency: the validation statistic, not the per-scan gate ------------
+    # Cohort-level consistency: the validation statistic, not the per-scan gate
     if not flow.empty:
         from nvitk.pipes.qvtpy.stage9_autoqc import consensus_junction_report
 

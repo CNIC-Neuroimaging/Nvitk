@@ -38,7 +38,7 @@ def centerlines_between_points(
 
     The seeds are snapped to the nearest surface vertex and passed to ``vmtkCenterlines`` with the
     ``pointlist`` selector, then ``vmtkCenterlineGeometry`` (smoothing off) adds ``Curvature``,
-    ``Torsion``, ``Tortuosity`` and ``Length`` — exactly cow_morpho's call, which the eICAB
+    ``Torsion``, ``Tortuosity`` and ``Length``: exactly cow_morpho's call, which the eICAB
     morphometrics profile was tuned with.
     """
     src = closest_surface_point(surface, source)
@@ -104,9 +104,7 @@ def resample_centerlines(centerlines: Any, step: float) -> Any:
     return run_script("vmtkCenterlineResampling", Centerlines=centerlines, Length=float(step)).Centerlines
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Networks and branches
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -151,7 +149,7 @@ class VmtkNetwork:
 
         VMTK blanks a stretch of each centerline at a bifurcation, so its branches stop short of
         one another; joined, the branches of one bifurcation share an end point. An end meets a
-        piece when it lies within *reach* mm of it (default: the branch's median radius, ≥ 1 mm).
+        piece when it lies within *reach* mm of it (default: the branch's median radius, >= 1 mm).
         """
         # Every centerline crosses a bifurcation through its own blanked cell: match against all of
         # them, each standing for its group's centre.
@@ -244,7 +242,7 @@ def mask_endpoints(
     prune_spur_mm: float = 2.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Skeleton endpoints of a binary mask, in ``index × spacing`` millimetres, and the inscribed
-    radius (EDT maximum within 2 mm) near each — the seeds for :func:`centerline_network`."""
+    radius (EDT maximum within 2 mm) near each: the seeds for :func:`centerline_network`."""
     from scipy import ndimage as ndi
 
     from nvitk.measure.morpho.skeleton import prune_short_terminal_spurs, skeleton_graph, skeletonize_mask
@@ -305,9 +303,7 @@ def centerline_network(
     return VmtkNetwork(centerlines=cl, split=split, branches=branches, source=src, targets=tgts)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Full networks: every branch, loop and fragment
-# ──────────────────────────────────────────────────────────────────────────────
 
 #: How much of a vessel tree a VMTK network covers (see :func:`full_centerline_network`).
 NETWORK_COVERAGES: tuple[str, ...] = ("full", "tree")
@@ -356,9 +352,9 @@ def _uncovered_pieces(
 
     A point is covered within max(1.5 voxels, half its radius). Each uncovered stretch is extended
     to the network point nearest its covered neighbours, so the piece meets the network; those
-    meeting points are returned with it. Stretches shorter than max(3 voxels, 1 mm) are dropped —
-    two centerlines through the same junction diverge that much — and so are stretches that stay
-    within one radius (≥ 2 voxels) of the network on 80 % of their length: inside the same lumen,
+    meeting points are returned with it. Stretches shorter than max(3 voxels, 1 mm) are dropped (
+    two centerlines through the same junction diverge that much), and so are stretches that stay
+    within one radius (>= 2 voxels) of the network on 80 % of their length: inside the same lumen,
     a second centerline drifting off the first is not a new branch.
     """
     pts = np.asarray(points, dtype=float)
@@ -417,6 +413,31 @@ def _surface_regions(surface: Any, min_points: int = 20) -> list[Any]:
     return regions
 
 
+def _axis_centerline(region: Any, step: float) -> tuple[np.ndarray, np.ndarray, str] | None:
+    """``(points, radius, source)`` of a vessel piece traced between the two ends of its main
+    (PCA) axis: VMTK (``"tree"``), else the straight axis re-centred on the lumen (``"skeleton"``)."""
+    from nvitk.morphology.centering import center_polyline, inscribed_radius
+
+    pts = points_of(region)
+    if len(pts) < 20:
+        return None
+    centre = pts.mean(axis=0)
+    axis = np.linalg.svd(pts - centre, full_matrices=False)[2][0]
+    proj = (pts - centre) @ axis
+    a, b = pts[int(np.argmin(proj))], pts[int(np.argmax(proj))]
+    try:
+        cl = centerlines_between_points(region, a, [b], resampling_step=step, geometry=False)
+        q = points_of(cl)
+        if _arc_length(q) >= 0.5 * float(np.linalg.norm(b - a)):
+            return q, point_array(cl, RADIUS_ARRAY), "tree"
+    except Exception:  # noqa: BLE001
+        pass
+    n = max(3, int(np.ceil(float(np.linalg.norm(b - a)) / max(step, 1e-6))) + 1)
+    line = a + (b - a) * np.linspace(0.0, 1.0, n)[:, None]
+    centred = center_polyline(line, region, iterations=3, sample_step_mm=step)
+    return centred, inscribed_radius(region, centred), "skeleton"
+
+
 def full_centerline_network(
     surface: Any,
     mask: np.ndarray,
@@ -430,10 +451,10 @@ def full_centerline_network(
 ) -> FullCenterlineNetwork:
     """VMTK centerlines of **every** branch of a vessel mask, loops and fragments included.
 
-    One source → all end points (:func:`centerline_network`) traces a shortest-path tree. It
+    One source -> all end points (:func:`centerline_network`) traces a shortest-path tree. It
     skips one segment of every loop (the circle of Willis is a ring) and reaches nothing outside
     the source's connected piece. Here, per connected piece of *surface* (the mask's skeleton
-    voxels go to the piece whose wall is nearest — voxels touching only at an edge or corner are
+    voxels go to the piece whose wall is nearest: voxels touching only at an edge or corner are
     one mask component but two marching-cubes pieces):
 
     1. VMTK from the widest end point to all others, on that component's piece of *surface*;
@@ -442,7 +463,7 @@ def full_centerline_network(
        unused end point nearest to them (up to *max_sources* runs), keeping only the new stretches;
     3. each branch still uncovered gets VMTK between its own two skeleton ends (up to
        *max_gap_runs* in total), accepted when it follows the skeleton branch (length ratio
-       0.5–2, median distance ≤ max(2 voxels, the branch's median radius)); otherwise the skeleton
+       0.5-2, median distance <= max(2 voxels, the branch's median radius)); otherwise the skeleton
        branch is re-centred on the lumen (:func:`nvitk.morphology.centering.center_polyline`).
 
     *mask* is in voxel indices; *voxel_to_surface* (4 × 4, default ``diag(spacing)``) maps them
@@ -477,10 +498,8 @@ def full_centerline_network(
     if prune_spur_mm > 0:
         skel = prune_short_terminal_spurs(skel, float(prune_spur_mm), spacing=sp).astype(bool)
     all_coords = np.argwhere(skel)
-    if len(all_coords) < 2:
-        return out
     regions = _surface_regions(surface)
-    if len(regions) == 1:
+    if len(regions) == 1 or len(all_coords) == 0:
         owner = np.zeros(len(all_coords), dtype=int)
     else:
         wall = np.column_stack([cKDTree(points_of(r)).query(to_surface(all_coords))[0] for r in regions])
@@ -502,6 +521,14 @@ def full_centerline_network(
     for k, region in enumerate(regions):
         coords = all_coords[owner == k]
         if len(coords) < 2:
+            # Thinning can erase a whole piece (scikit-image deletes some straight, flat-ended
+            # tubes outright): trace it between the two ends of its main axis instead.
+            piece = _axis_centerline(region, step)
+            if piece is not None:
+                out.n_components += 1
+                out.n_vmtk_runs += int(piece[2] == "tree")
+                add(piece[0], piece[1], piece[2])
+                out.paths.append(piece[0])
             continue
         out.n_components += 1
         with using("cpu"):
@@ -527,7 +554,7 @@ def full_centerline_network(
                     todo.append((pts, r))
             return todo
 
-        # 1–2. VMTK from end points until every skeleton branch is covered.
+        # 1-2. VMTK from end points until every skeleton branch is covered.
         ends_vox = np.asarray([n for n, d in deg.items() if d <= 1], dtype=float).reshape(-1, 3)
         tree = accepted_tree()
         if len(ends_vox) >= 2:
@@ -553,7 +580,7 @@ def full_centerline_network(
                 try:
                     net = centerline_network(region, ends, source_index=src, endpoint_radii=end_r,
                                              resampling_step=step)
-                except Exception:  # noqa: BLE001 — a failed run leaves the branches to the next steps
+                except Exception:  # noqa: BLE001 (a failed run leaves the branches to the next steps)
                     continue
                 out.n_vmtk_runs += 1
                 if first:
@@ -609,14 +636,12 @@ def full_centerline_network(
     return out
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Surface ↔ centerline measurements
-# ──────────────────────────────────────────────────────────────────────────────
+# Surface <-> centerline measurements
 
 
 def centerline_sections(surface: Any, centerlines: Any) -> tuple[Any, Any]:
     """``vmtkCenterlineSections``: per-centerline-point lumen section ``CenterlineSectionArea``,
-    ``…MinSize`` / ``…MaxSize`` (min/max Feret), ``…Shape`` (min/max) and ``…Closed``.
+    ``...MinSize`` / ``...MaxSize`` (min/max Feret), ``...Shape`` (min/max) and ``...Closed``.
 
     Returns ``(centerlines_with_arrays, sections_polydata)``.
     """

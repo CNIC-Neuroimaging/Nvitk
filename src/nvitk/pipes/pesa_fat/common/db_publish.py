@@ -400,7 +400,7 @@ def fetch_qc_reviews(
 
     Returns portal-shaped dicts: the DB column ``subject_uid`` is exposed as ``subject``, the
     name the QC portal and its widget use throughout. An absent table yields no rows -- that is
-    simply a dataset where nobody has reviewed anything yet.
+    a dataset where nobody has reviewed anything yet.
     """
     repo = resolve_repo(repo)
     if not repo.catalog.table_exists(PESA_FAT_QC_REVIEWS_TABLE):

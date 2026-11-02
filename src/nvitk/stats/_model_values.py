@@ -3,31 +3,29 @@ Per-region numbers pulled off a fitted model, for any anatomical map.
 
 Description
 -----------
-:mod:`nvitk.stats.vascular_map` and :mod:`nvitk.stats.brain_map` draw completely different pictures —
-a schematic circle of Willis, a cortical surface — but they ask the model exactly the same question:
+:mod:`nvitk.stats.vascular_map` and :mod:`nvitk.stats.brain_map` draw completely different pictures (
+a schematic circle of Willis, a cortical surface), but they ask the model exactly the same question:
 *what number does this fit give for this anatomical level, and how sure is it?* Answering it means
 knowing how patsy spells a categorical contrast, how each R engine wraps its coefficient table, what
 a marginal mean is on the outcome's own scale, and which half of an interaction a contrast view
 means. None of that is about anatomy.
 
 So it lives here once, parameterised by a **resolver**: a callable turning a published level label
-(``LICA``, ``ctx-lh-precuneus``, ``ctx-Left-Frontal-Lobe``) into the drawing keys it refers to — zero
+(``LICA``, ``ctx-lh-precuneus``, ``ctx-Left-Frontal-Lobe``) into the drawing keys it refers to; zero
 when the level is not on this map, one for a plain level, several when it is an aggregate that
 belongs on every member it was averaged from.
 
 Engines
 -------
 statsmodels exposes ``params``/``pvalues`` directly; every R engine wraps an object that does not,
-and each wraps it differently — an ``lmrob`` fit *is* the R object, a pymer4 model holds one, MMRM
+and each wraps it differently: an ``lmrob`` fit *is* the R object, a pymer4 model holds one, MMRM
 another. :data:`_COEF_NORMALIZERS` is tried in turn so one code path serves every engine instead of
 the maps silently working only for OLS and MixedLM.
 """
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from typing import Any, Callable, Hashable, Sequence
 
 import numpy as np
@@ -49,9 +47,7 @@ _COEF_NORMALIZERS: tuple[tuple[str, str], ...] = (
 )
 
 
-# ---------------------------------------------------------------------------
 # Coefficient tables
-# ---------------------------------------------------------------------------
 def coefficient_series(result: Any) -> tuple[pd.Series, pd.Series | None]:
     """
     ``(params, pvalues)`` as pandas Series, whichever engine produced *result*.
@@ -59,7 +55,7 @@ def coefficient_series(result: Any) -> tuple[pd.Series, pd.Series | None]:
     Raises
     ------
     ValueError
-        When no normalizer recognizes the object, naming what was tried — a silent empty result
+        When no normalizer recognizes the object, naming what was tried: a silent empty result
         here becomes "the map shows observed means" three frames up, which looks like data rather
         than a failure.
     """
@@ -93,7 +89,7 @@ def coefficient_series(result: Any) -> tuple[pd.Series, pd.Series | None]:
 
 
 def term_parts(name: str) -> list[str]:
-    """Split a patsy/R interaction term into its factors (``a[T.x]:b[T.y]`` → two parts)."""
+    """Split a patsy/R interaction term into its factors (``a[T.x]:b[T.y]`` -> two parts)."""
     return [part for part in str(name).split(":") if part]
 
 
@@ -136,8 +132,8 @@ def interaction_contrasts(
 
     A model with ``territory * sex`` estimates a different profile for each sex, and the coefficient
     table holds them as ``territory[T.LICA]:sex[T.M]``. Without naming which side of the interaction
-    to draw, a map would show only the main effect — the profile at the *other* factor's reference
-    level — and quietly present it as the whole story.
+    to draw, a map would show only the main effect (the profile at the *other* factor's reference
+    level), and silently present it as the whole story.
 
     Empty when the model has no interaction on that term, which is the signal a caller needs to hide
     the selector rather than offer one with nothing in it.
@@ -165,7 +161,7 @@ def group_coefficient_terms(result: Any, *, group_column: str = "territory") -> 
     """
     Per-group terms this fit estimates for *group_column*, e.g. ``["(Intercept)", "age_c"]``.
 
-    Empty when the model has no random structure over that factor — which is the signal a caller
+    Empty when the model has no random structure over that factor, which is the signal a caller
     needs to fall back to the fixed effects instead of offering a menu with nothing in it.
     """
     try:
@@ -187,9 +183,7 @@ def group_coefficient_terms(result: Any, *, group_column: str = "territory") -> 
     ]
 
 
-# ---------------------------------------------------------------------------
 # Value extraction
-# ---------------------------------------------------------------------------
 def values_from_frame(
     frame: pd.DataFrame,
     *,
@@ -201,7 +195,7 @@ def values_from_frame(
     """
     Map a per-region result table onto drawing keys.
 
-    Accepts whatever spelling the frame uses — the *resolver* absorbs the differences. Rows that do
+    Accepts whatever spelling the frame uses: the *resolver* absorbs the differences. Rows that do
     not resolve (an intercept term, a whole-head scalar, a region from a different modality) are
     dropped silently: a mixed result table is the normal case, and only the rows this map can draw
     belong on it.
@@ -254,7 +248,7 @@ def values_from_result(
     Sources, because they answer different questions and are read differently:
 
     ``coefficient``
-        The fixed effect of each level, read from the parameter table — patsy names them
+        The fixed effect of each level, read from the parameter table: patsy names them
         ``territory[T.LICA]``, so the level is recovered from the term. These are contrasts
         *against the reference level*, which is therefore absent from the map by construction: it
         is the zero everything else is measured from, not a region with no effect.
@@ -265,8 +259,8 @@ def values_from_result(
 
     ``mean``
         The observed mean of *outcome* within each region, from *data*. Not a model estimate at all
-        — no covariate adjustment, no p-values — but it is what "estimated marginal means" reduces
-        to for a model whose only term is the region, and it is the honest fallback when the fit has
+(no covariate adjustment, no p-values), but it is what "estimated marginal means" reduces
+        to for a model whose only term is the region, and it is the safe fallback when the fit has
         no per-region parameter to read.
 
     ``group:<term>``
@@ -275,8 +269,8 @@ def values_from_result(
 
     contrast : str
         A level of an interacting factor, as :func:`interaction_contrasts` names it (``sex[T.M]``).
-        The region's value becomes its **simple effect at that level** — main effect plus the
-        interaction — which is the profile actually seen in that group. Left empty, the map shows
+        The region's value becomes its **simple effect at that level** (main effect plus the
+        interaction), which is the profile seen in that group. Left empty, the map shows
         the main effect, i.e. the profile at the interacting factor's *reference* level; on a model
         with an interaction that is one group's answer presented as if it were everyone's.
 
@@ -341,7 +335,7 @@ def values_from_result(
                 for key in keys:
                     pvalues[key] = float(p)
 
-    # ---- Fold in the interaction, when one was asked for ---------------------------------------
+    # Fold in the interaction, when one was asked for
     if contrast:
         matched = 0
         for term, coef in params.items():
@@ -403,12 +397,12 @@ def values_from_marginal_means(
     unit: str = "region",
 ) -> tuple[dict[Hashable, float], dict[Hashable, float], str]:
     """
-    Model-predicted mean per region, on the outcome's own scale — **including the reference level**.
+    Model-predicted mean per region, on the outcome's own scale: **including the reference level**.
 
     Treatment coding gives the reference level no coefficient: it is absorbed into the intercept,
-    which is why a ``~ territory + …`` fit shows every region but one. That is correct for a
+    which is why a ``~ territory + ...`` fit shows every region but one. That is correct for a
     contrast table and wrong for a map, where the reader is looking at anatomy and one structure is
-    simply missing.
+    missing.
 
     The marginal mean rebuilds it: ``intercept + β_region`` (with ``β = 0`` for the reference), plus
     each numeric covariate held at its mean. Categorical covariates stay at their own reference
@@ -430,7 +424,7 @@ def values_from_marginal_means(
             break
 
     # Covariate offset: numeric terms at their mean, everything else at its reference. Shared by
-    # every region, so it shifts the map without changing the ordering — but it is what puts the
+    # every region, so it shifts the map without changing the ordering, but it is what puts the
     # numbers on the outcome's scale instead of an arbitrary one.
     offset = 0.0
     if data is not None:
@@ -486,13 +480,13 @@ def values_from_group_coefficients(
     Per-region values from an ``lme4`` random-effects structure.
 
     A model like ``flow_mean ~ age_c + (1 + age_c | territory)`` puts nothing about individual
-    regions in its *fixed* effects — the region information is the random structure, one intercept
+    regions in its *fixed* effects: the region information is the random structure, one intercept
     and one ``age_c`` slope per level. ``coef()`` totals are used rather than ``ranef()`` deviations
     because a total is the quantity with a physical reading: the age slope *in that region*, not its
     departure from the average slope.
 
     Random effects are shrunk point predictions, not tested parameters, so no p-values come back.
-    Greying by significance is therefore unavailable here, which is correct — a BLUP has no null
+    Greying by significance is therefore unavailable here, which is correct: a BLUP has no null
     hypothesis attached to it.
     """
     from nvitk.stats.r_mixedlm import lme4_group_coefficients

@@ -34,10 +34,10 @@ def dilate(
     img:
         Input mask (:class:`Image` or array).
     footprint:
-        Structuring element. ``None`` → unit ball; ``int`` → iterated unit ball
-        of that radius; array → used as-is (cast to the active backend).
+        Structuring element. ``None`` -> unit ball; ``int`` -> iterated unit ball
+        of that radius; array -> used as-is (cast to the active backend).
     iterations:
-        Passed to ``ndi.binary_dilation`` (integer ≥ 1).
+        Passed to ``ndi.binary_dilation`` (integer >= 1).
     mode:
         ``"binary"`` or ``"gray"``.
     isotropic, spacing:

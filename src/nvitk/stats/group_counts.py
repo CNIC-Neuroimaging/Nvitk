@@ -1,11 +1,11 @@
 """
-How many observations a distribution plot is actually showing.
+How many observations a distribution plot is showing.
 
 Description
 -----------
 ``n = 126`` over a pooled violin is the number people read, and it is rarely the number they need.
-Split by territory, the question is how many observations each territory contributed — a panel
-drawn from eleven of them should not look like one drawn from ninety, and a level that quietly
+Split by territory, the question is how many observations each territory contributed: a panel
+drawn from eleven of them should not look like one drawn from ninety, and a level that silently
 lost half its rows to a filter should say so where the figure is read rather than in a log line.
 
 Both distribution backends count through here, on the same rules they draw on:
@@ -13,8 +13,8 @@ Both distribution backends count through here, on the same rules they draw on:
 * the column is coerced to numeric when it is numeric, so a text cell in a float column is
   missing rather than mysterious;
 * rows with no value for the column are not counted, because nothing is drawn for them;
-* rows an active filter removed are counted separately — greyed on the figure, and reported as
-  such — or not at all when the figure is not drawing them.
+* rows an active filter removed are counted separately (greyed on the figure, and reported as
+  such), or not at all when the figure is not drawing them.
 
 Counting in one place is what keeps the Matplotlib figure and the Plotly one from disagreeing
 about what they are showing.
@@ -22,9 +22,7 @@ about what they are showing.
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -38,8 +36,8 @@ def ordered_levels(
     """
     *present* arranged by *order*, with anything *order* does not name kept after it.
 
-    A saved order outlives the frame it was chosen on — a filter can remove a level, a reload can
-    add one — so it selects and ranks rather than dictating: levels it names appear first in its
+    A saved order outlives the frame it was chosen on (a filter can remove a level, a reload can
+    add one), so it selects and ranks rather than dictating: levels it names appear first in its
     sequence, and a level that arrived since is appended rather than silently dropped.
     """
     if not order:
@@ -57,7 +55,7 @@ def level_strings(series: pd.Series) -> pd.Series:
 
     Two things a bare ``astype(str)`` gets wrong on a numerically coded factor:
 
-    * ``NaN`` becomes the string ``"nan"``, which then draws as a level of its own — a violin of
+    * ``NaN`` becomes the string ``"nan"``, which then draws as a level of its own: a violin of
       the rows that have no value for the column;
     * a whole float prints as ``1.0``, so ``sex`` reads as ``0.0`` / ``1.0``. That spelling is
       the *common* case rather than an odd one: a single missing value upcasts an integer-coded
@@ -102,7 +100,7 @@ class GroupCount:
         return f"n={self.n}" if not self.excluded else f"n={self.n} +{self.excluded} excl"
 
     def label(self, *, separator: str = "\n") -> str:
-        """The level's name with its count under it — an axis tick, or a trace name.
+        """The level's name with its count under it: an axis tick, or a trace name.
 
         A newline by default: on a categorical axis the count belongs under the label rather than
         doubling its width, which is what turns thirteen vessel names into an unreadable row.
@@ -122,7 +120,7 @@ def displayed_counts(
     """
     How many observations of *column* each level of *group* puts on the figure.
 
-    Returns one entry per level, in *levels* order when given — pass the order the plot drew in,
+    Returns one entry per level, in *levels* order when given: pass the order the plot drew in,
     so a level that had nothing to draw is not labelled as though it were there. Without *group*,
     returns a single ungrouped entry.
 
@@ -177,7 +175,7 @@ def counts_note(
     limit: int = 14,
 ) -> str:
     """
-    One line naming every level's N — the breakdown a crowded figure cannot spell out.
+    One line naming every level's N: the breakdown a crowded figure cannot spell out.
 
     Truncated past *limit* levels rather than run off the edge of the window; the figure's own
     tick labels still carry the rest.

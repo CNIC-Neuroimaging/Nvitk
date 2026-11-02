@@ -267,7 +267,7 @@ def mask_is_thin(mask: np.ndarray) -> bool:
     In a thin skeleton those are the real bifurcations and are rare; in a mask
     two or more voxels wide almost every voxel qualifies, the whole thing
     collapses into one junction cluster, and every chain between two members of
-    the same cluster is dropped as a within-blob edge — which is why a thick mask
+    the same cluster is dropped as a within-blob edge, which is why a thick mask
     comes back fragmented, or empty.
     """
     from nvitk.morphology.polyline_graph import skeleton_graph
@@ -300,7 +300,7 @@ def centerline_mask_to_polylines(
 
     Uses :func:`~nvitk.morphology.centerline.compute_connected_centerline_tree`
     so each label keeps its main path plus every unique junction-split branch
-    (shared only at bifurcation voxels — no dropped corridors).
+    (shared only at bifurcation voxels: no dropped corridors).
 
     Parameters
     ----------
@@ -333,7 +333,7 @@ def centerline_mask_to_polylines(
     if bridge > 0:
         # compute_connected_centerline_tree only bridges on the path where it
         # skeletonizes for itself; a mask handed straight through as the
-        # centerline skips that, so bridge it here and keep both routes honest.
+        # centerline skips that, so bridge it here and keep both routes consistent.
         from nvitk.morphology.mst_bridge import bridge_binary_components_mst
 
         joined = arr.copy()
@@ -417,6 +417,7 @@ def add_centerline_polylines_shapes(
     label_color: dict[int, str] = {}
     paths: list[np.ndarray] = []
     edge_colors: list[str] = []
+    path_labels: list[int] = []
     for item in polylines:
         pts = np.asarray(item["points"], dtype=np.float64)
         if pts.shape[0] < 2:
@@ -426,11 +427,12 @@ def add_centerline_polylines_shapes(
             label_color[lid] = palette[len(label_color) % len(palette)]
         paths.append(pts.astype(np.float32))
         edge_colors.append(label_color[lid])
+        path_labels.append(lid)
 
     if not paths:
         return None
 
-    from nvitk.gui.core.spatial import layer_affine
+    from nvitk.gui.core.spatial import layer_spatial_kwargs
 
     kwargs: dict[str, Any] = {
         "name": str(layer_name),
@@ -438,6 +440,8 @@ def add_centerline_polylines_shapes(
         "edge_color": edge_colors,
         "edge_width": float(edge_width),
         "opacity": 0.95,
+        # Each path's label id, so a centerline image can be drawn back from them (From polyline).
+        "features": {"label": path_labels},
         "metadata": {
             POLYLINE_SHAPES_META: True,
             "n_paths": int(len(paths)),
@@ -445,9 +449,9 @@ def add_centerline_polylines_shapes(
             "source_layer": str(getattr(reference_layer, "name", "")),
         },
     }
-    aff = layer_affine(reference_layer)
-    if aff is not None:
-        kwargs["affine"] = aff
+    # The reference's whole placement (scale, translate, affine): the affine alone drops the
+    # spacing of a layer that carries it in `scale`, and the paths land off the vessel.
+    kwargs.update(layer_spatial_kwargs(reference_layer))
 
     shapes = viewer.add_shapes(paths, **kwargs)
     try:

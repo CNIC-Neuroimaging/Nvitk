@@ -3,7 +3,7 @@
 VMTK-style measurements on any vessel-like surface (a segmented artery, an
 airway, a colon):
 
-- :func:`mesh_centerlines` — centerline branches by one of three methods: ``vmtk``
+- :func:`mesh_centerlines`: centerline branches by one of three methods: ``vmtk``
   (VMTK Voronoi centerlines on the surface itself, seeded at the end points of a
   voxelised skeleton: by default the full network with every loop and separate piece,
   :func:`mesh_vmtk_network_full`; or the single tree split with ``vmtkbranchextractor``,
@@ -14,14 +14,14 @@ airway, a colon):
   ``raycast`` (EXPIGEO ray probing, experimental). Each branch is smoothed and
   resampled in millimetres; ``native`` and ``raycast`` branches can be re-centred on the
   lumen (:func:`nvitk.morphology.centering.center_polyline`).
-- :func:`branch_profiles` — at stations along each branch the surface is cut
+- :func:`branch_profiles`: at stations along each branch the surface is cut
   perpendicular to the centerline: lumen area, perimeter, equivalent / min / max
   diameter, circularity, and the inscribed radius (distance to the wall).
-- :func:`branch_metrics` / :func:`bifurcations` — length, tortuosity, curvature,
+- :func:`branch_metrics` / :func:`bifurcations`: length, tortuosity, curvature,
   stenosis; the angles between branches where they meet.
-- :func:`vessel_section_at` — one cross-section at any point, perpendicular to
+- :func:`vessel_section_at`: one cross-section at any point, perpendicular to
   the local vessel axis (found from the wall itself, no centerline needed).
-- :func:`thickness_map` / :func:`radius_map` — per-vertex local diameter.
+- :func:`thickness_map` / :func:`radius_map`: per-vertex local diameter.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ class VesselBranch:
     points: np.ndarray
     tangents: np.ndarray
     arc_length: np.ndarray
-    #: Per-station arrays (``area``, ``diameter``, …) from :func:`branch_profiles`.
+    #: Per-station arrays (``area``, ``diameter``, ...) from :func:`branch_profiles`.
     profile: dict[str, np.ndarray] = field(default_factory=dict)
 
     @property
@@ -50,9 +50,7 @@ class VesselBranch:
         return float(self.arc_length[-1]) if len(self.arc_length) else 0.0
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Polyline helpers (host NumPy)
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _arc(points: np.ndarray) -> np.ndarray:
@@ -71,7 +69,7 @@ def _smooth_resample(points: np.ndarray, *, step: float, smooth: float) -> np.nd
             tck, _ = splprep(pts.T, s=float(smooth) * len(pts), k=min(3, len(pts) - 1))
             dense = max(len(pts) * 8, 64)
             pts = np.stack(splev(np.linspace(0, 1, dense), tck), axis=1)
-        except Exception:  # noqa: BLE001 — a degenerate polyline keeps its points
+        except Exception:  # noqa: BLE001 (a degenerate polyline keeps its points)
             pass
     s = _arc(pts)
     if s[-1] <= 1e-9:
@@ -89,9 +87,7 @@ def _tangents(points: np.ndarray) -> np.ndarray:
     return np.divide(t, n, out=np.zeros_like(t), where=n > 0)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Centerlines
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def auto_voxel_size(mesh: Mesh) -> float:
@@ -200,7 +196,7 @@ def _centred(mesh: Mesh, branches: list[VesselBranch]) -> list[VesselBranch]:
 
 
 def mesh_vmtk_network_full(mesh: Mesh, *, voxel_size: float = 0.0, resampling_step: float = 0.0) -> Any:
-    """Every VMTK centerline of a surface (world mm) — all branches, loops and separate pieces
+    """Every VMTK centerline of a surface (world mm): all branches, loops and separate pieces
     (:func:`nvitk.vmtk.centerlines.full_centerline_network`), seeded from the voxelised surface's
     skeleton."""
     from nvitk.meshlab.convert import to_pyvista
@@ -281,9 +277,7 @@ def _mesh_centerlines_other(
     return branches
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Cross-sections
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _plane_basis(normal: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -316,7 +310,7 @@ def _feret(points2d: np.ndarray) -> tuple[float, float]:
         return 0.0, 0.0
     try:
         hull = points2d[ConvexHull(points2d).vertices]
-    except Exception:  # noqa: BLE001 — collinear
+    except Exception:  # noqa: BLE001 (collinear)
         hull = points2d
     angles = np.linspace(0, np.pi, 90, endpoint=False)
     dirs = np.stack([np.cos(angles), np.sin(angles)], axis=1)
@@ -437,7 +431,7 @@ def branch_metrics(branch: VesselBranch) -> dict[str, float]:
 
     Diameter statistics leave out the stations within one diameter of either end
     (sections there also cut the neighbouring branch or the cap). Stenosis is
-    ``1 − min / reference`` of the area-equivalent diameter, with the branch's
+    ``1 - min / reference`` of the area-equivalent diameter, with the branch's
     median diameter as reference.
     """
     pts = branch.points
@@ -524,9 +518,7 @@ def bifurcations(branches: Sequence[VesselBranch], *, tolerance: float = 0.0) ->
     return out
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Local sections and maps
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def thickness_map(mesh: Mesh, *, vertices: np.ndarray | None = None, max_distance: float = 0.0) -> np.ndarray:
@@ -567,7 +559,7 @@ def radius_map(mesh: Mesh, branches: Sequence[VesselBranch], *, key: str = "diam
     """Per-vertex value of the nearest centerline station (its *key*, e.g. diameter).
 
     With ``key="radius"`` (or no profiles) it is the distance from each vertex to
-    the nearest centerline point — the local radius.
+    the nearest centerline point: the local radius.
     """
     from scipy.spatial import cKDTree
 

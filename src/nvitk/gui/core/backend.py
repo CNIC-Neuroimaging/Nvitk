@@ -54,7 +54,7 @@ def napari_label_array(out: Any) -> np.ndarray:
     Napari ``Labels`` layer without a second cast, and every downstream ``unique`` comes back as
     floats. Tools that return a parcellation use this instead.
 
-    A non-integer result is left alone rather than rounded — silently quantising a float map into
+    A non-integer result is left alone rather than rounded: silently quantising a float map into
     label ids would invent a parcellation that the operation never produced.
     """
     from nvitk.types import Image

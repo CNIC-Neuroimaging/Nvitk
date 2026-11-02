@@ -80,7 +80,7 @@ def load_multilabel_nifti(path: str):
 
 
 def load_mapping(path: str) -> dict:
-    """Load a JSON label→:class:`VesselInfo` mapping file, keyed by integer label id."""
+    """Load a JSON label->:class:`VesselInfo` mapping file, keyed by integer label id."""
     with open(path, "r", encoding="utf-8") as f:
         raw = json.load(f)
 

@@ -5,9 +5,9 @@ Description
 -----------
 Every exploration dialog in this panel needs the same three things: hand a Plotly figure to a web
 view, hand a Matplotlib figure to a canvas, and tear down whichever was there before without leaking
-the previous figure. The logic is short but easy to get subtly wrong — a canvas removed from a layout
+the previous figure. The logic is short but easy to get subtly wrong: a canvas removed from a layout
 without ``deleteLater`` keeps its parent alive, and a figure dropped without ``plt.close`` leaks a
-Matplotlib manager on every redraw — so it lives in one place rather than being re-typed per dialog.
+Matplotlib manager on every redraw, so it lives in one place rather than being re-typed per dialog.
 
 Mixed in rather than wrapped in a widget: the host layout differs between dialogs (a controls row
 above, a status label between, a splitter beside), and a widget that owned the layout would have to
@@ -16,9 +16,7 @@ grow a parameter for each of those.
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from typing import Any
 
 from qtpy.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
@@ -36,7 +34,7 @@ def _let_canvas_shrink(canvas: Any) -> None:
     Allow a Matplotlib canvas to be smaller than the figure it was built at.
 
     A canvas reports its figure's inch size as its size hint. Left alone in a layout that is smaller
-    than that, the hint wins and the pane grows past the window — which is how a 4-panel brain map
+    than that, the hint wins and the pane grows past the window, which is how a 4-panel brain map
     pushes its own colourbar off the screen. Making the canvas expanding with a token minimum lets
     the layout drive the size, and Matplotlib then resizes the *figure* to match.
     """
@@ -72,7 +70,7 @@ class FigureHostMixin:
         layout.addWidget(self._static_host, stretch=stretch)
         self._static_host.setVisible(False)
 
-    # ---- backends -------------------------------------------------------------
+    # backends
     def _show_interactive(self, figure: Any) -> None:
         """Hand a Plotly figure to the web view and hide the static canvas."""
         self._clear_static()

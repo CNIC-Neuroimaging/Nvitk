@@ -9,7 +9,7 @@ siblings are authored by a person, this one by the application. That is why
 anyone to create it, and why ``config_paths.AUTHORED_CONFIG_FILES`` leaves it out
 of "is this install configured?".
 
-Everything here fails soft. A preferences file is a convenience — a corrupt one,
+Everything here fails soft. A preferences file is a convenience: a corrupt one,
 an unwritable config directory or a layout saved by another Qt build must never
 stop the application starting, so every entry point swallows its errors and
 returns the neutral value instead.
@@ -39,7 +39,7 @@ DOCK_LAYOUT_VERSION = 6
 def prefs_path() -> Path:
     """Where the preferences file lives, whether or not it exists yet.
 
-    An existing one wins wherever the configuration search finds it — including
+    An existing one wins wherever the configuration search finds it, including
     through ``$NVITK_GUI_JSON`` or a ``--config-dir``. Otherwise it belongs in
     whichever directory already holds this install's configuration, and only
     falls back to the XDG default when there is no configuration at all.
@@ -55,7 +55,7 @@ def prefs_path() -> Path:
 
 
 def config_home() -> Path | None:
-    """The directory holding the configuration this install actually reads.
+    """The directory holding the configuration this install reads.
 
     The directory of the first authored file the search resolves, rather than the
     first directory that happens to exist: an empty ``~/.config/nvitk`` beside a
@@ -84,7 +84,7 @@ def ensure_prefs_file() -> Path | None:
     """Seed ``gui.json`` from the bundled template; the path, or ``None``.
 
     Only for an install that is already configured. Creating it unconditionally
-    would drop a file into a directory nobody has asked nvitk to own — and on a
+    would drop a file into a directory nobody has asked nvitk to own, and on a
     machine with no configuration at all, the layout is the least of what is
     missing. Returns the existing path untouched when there already is one.
     """
@@ -102,7 +102,7 @@ def ensure_prefs_file() -> Path | None:
             path.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
         else:
             path.write_text(json.dumps({DOCK_STATE_KEY: ""}, indent=2) + "\n", encoding="utf-8")
-    except Exception:  # noqa: BLE001 — a seedable preference file is not a requirement
+    except Exception:  # noqa: BLE001 (a seedable preference file is not a requirement)
         return None
     return path
 
@@ -114,7 +114,7 @@ def load_prefs() -> dict[str, Any]:
         if not path.is_file():
             return {}
         data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001 — unreadable or corrupt is the same as absent
+    except Exception:  # noqa: BLE001 (unreadable or corrupt is the same as absent)
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -135,14 +135,14 @@ def save_prefs(values: dict[str, Any]) -> bool:
         tmp.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
         tmp.replace(path)
         return True
-    except Exception:  # noqa: BLE001 — an unwritable config dir is not fatal
+    except Exception:  # noqa: BLE001 (an unwritable config dir is not fatal)
         return False
 
 
 def save_dock_state(window: Any) -> bool:
     """Store *window*'s dock layout. ``True`` when it was written."""
     try:
-        from qtpy.QtCore import QByteArray  # noqa: F401 — import guard only
+        from qtpy.QtCore import QByteArray  # noqa: F401 (import guard only)
 
         encoded = bytes(window.saveState().toBase64()).decode("ascii")
     except Exception:  # noqa: BLE001
@@ -176,7 +176,7 @@ def restore_dock_state(window: Any) -> bool:
         from qtpy.QtCore import QByteArray
 
         return bool(window.restoreState(QByteArray.fromBase64(encoded.encode("ascii"))))
-    except Exception:  # noqa: BLE001 — a layout from another Qt build is not
+    except Exception:  # noqa: BLE001 (a layout from another Qt build is not)
         # worth failing a launch over; the default arrangement is fine.
         return False
 

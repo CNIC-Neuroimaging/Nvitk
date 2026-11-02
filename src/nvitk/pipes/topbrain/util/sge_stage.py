@@ -13,28 +13,28 @@ Container mount map
 models), but this pipeline has ten roots. The framework roots are therefore mounted through
 ``StageSpec.extra_host_binds`` at fixed, documented locations::
 
-    /nvitk/src/     ← nvitk source checkout
-    /nvitk/data/    ← challenge_root   (read-only release)
-    /nvitk/output/  ← results_root
-    /models/        ← model_root
+    /nvitk/src/     <- nvitk source checkout
+    /nvitk/data/    <- challenge_root   (read-only release)
+    /nvitk/output/  <- results_root
+    /models/        <- model_root
     /nnunet/{raw,preprocessed,results}
     /nnssl/{raw,preprocessed,results}
-    /corpus/        ← corpus_root
+    /corpus/        <- corpus_root
 
 The **invariant** every stage must honour: the worker command is built from
-:func:`container_layout`, never from host paths. The host↔container mapping lives here and in
+:func:`container_layout`, never from host paths. The host<->container mapping lives here and in
 :class:`~nvitk.cluster.sge.ClusterPaths`; a host path leaking into a worker argv is a bug that
 only shows up on the cluster.
 
 User-supplied data paths
 ------------------------
-Some options name a location the pipeline cannot know in advance — an extra corpus source, an
-annotated cohort, a loss-config file, a baseline run. Those genuinely are host paths, and the
+Some options name a location the pipeline cannot know in advance: an extra corpus source, an
+annotated cohort, a loss-config file, a baseline run. Those are host paths, and the
 ten fixed roots cannot cover them.
 
 They are handled by **identity binding**: ``-B /host/path:/host/path``, so the path means the
 same thing inside the container as outside and the argv needs no rewriting. That is only sound
-because under ``--submit sge`` the paths in question are already cluster paths — the pipeline
+because under ``--submit sge`` the paths in question are already cluster paths: the pipeline
 resolves the ``cluster_*`` layout, and a workstation-only path passed there would be wrong for
 the job whatever we did with it. :func:`plan_data_binds` skips anything already covered by a
 fixed root, so ``--corpus-source topbrain`` adds no second mount of the release.
@@ -43,7 +43,7 @@ Enforcement
 -----------
 :func:`find_unbound_paths` scans every built argv for absolute paths and
 :func:`build_stage_spec` refuses to submit when one is not reachable inside the container. This
-is what keeps the invariant from quietly eroding: a new flag that takes a path fails at
+is what keeps the invariant from silently eroding: a new flag that takes a path fails at
 submission with a message naming it, rather than after an hour in the GPU queue.
 """
 
@@ -168,7 +168,7 @@ def warn_if_stale(deployed: Path, local: Path) -> bool:
     from last week. Comparing newest-source timestamps catches it at submission, where the fix
     is one ``rsync``.
 
-    Only a warning — running an older deployment on purpose is legitimate, and a hard failure
+    Only a warning: running an older deployment on purpose is legitimate, and a hard failure
     would make that impossible.
     """
     deployed_mtime, local_mtime = _newest_source_mtime(deployed), _newest_source_mtime(local)
@@ -380,7 +380,7 @@ def plan_data_binds(
 ) -> tuple[tuple[Path, str], ...]:
     """Identity binds for user-supplied *data_paths* not already inside a fixed root.
 
-    Returns ``(host, container)`` pairs where the two are equal — see the module docstring on
+    Returns ``(host, container)`` pairs where the two are equal; see the module docstring on
     why identity mapping is the right call for paths the pipeline did not choose.
 
     Raises
@@ -388,7 +388,7 @@ def plan_data_binds(
     FileNotFoundError
         If a path does not exist on the submitting host. Under ``--submit sge`` these are
         cluster paths, and the workstation sees the same mounts, so a miss here means the job
-        would not find it either — much better caught now than after the queue wait.
+        would not find it either: much better caught now than after the queue wait.
     """
     fixed = [
         Path(paths.challenge_root), Path(paths.results_root), Path(paths.model_root),
@@ -448,7 +448,7 @@ def find_unbound_paths(argv: Sequence[str], mounts: Sequence[str]) -> list[str]:
 def container_layout() -> TopBrainPaths:
     """The roots as the worker sees them *inside* the container.
 
-    Stage workers receive these, never host paths — see the module docstring.
+    Stage workers receive these, never host paths; see the module docstring.
     """
     binds = SingularityBinds()
     return TopBrainPaths(
@@ -483,7 +483,7 @@ def build_stage_spec(
     Parameters
     ----------
     stage
-        Stage id (``stage0`` …) — becomes part of the job name.
+        Stage id (``stage0`` ...): becomes part of the job name.
     argv
         The worker command, already shell-quoted, built against :func:`container_layout`.
     request_gpu
@@ -495,14 +495,14 @@ def build_stage_spec(
     data_paths
         Host locations named by user-supplied options (extra corpus sources, annotated
         cohorts, a loss-config file, a baseline run). Identity-bound unless a fixed root
-        already covers them — see the module docstring.
+        already covers them; see the module docstring.
 
     Raises
     ------
     ValueError
-        If the assembled argv references an absolute path that nothing would mount. Catching
-        it here is the whole point: the alternative is a job that queues for an hour and then
-        cannot find its data.
+        If the assembled argv references an absolute path that nothing would mount. Caught
+        here because the alternative is a job that queues for an hour and then cannot find
+        its data.
     """
     binds = SingularityBinds()
     name = f"{cfg.SGE_JOB_PREFIX}_{stage}"
@@ -544,7 +544,7 @@ def build_stage_spec(
 
 
 def build_stage_command(stage: str, argv: Sequence[str], **kwargs) -> str:
-    """Host shell command for one stage — the ``singularity exec`` line, unsubmitted.
+    """Host shell command for one stage: the ``singularity exec`` line, unsubmitted.
 
     Used by the master when assembling a multi-stage script rather than submitting directly.
     """

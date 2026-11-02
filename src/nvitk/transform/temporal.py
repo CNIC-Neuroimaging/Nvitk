@@ -3,8 +3,8 @@
 
 Description
 -----------
-The everyday reductions of a dynamic volume — one frame, a projection over time,
-the time–intensity curve of a region — and the inverse, stacking 3D volumes into
+The everyday reductions of a dynamic volume (one frame, a projection over time,
+the time-intensity curve of a region), and the inverse, stacking 3D volumes into
 a 3D+t one. Used by the GUI's time tools and usable from any pipeline (dynamic
 CT perfusion, bolus tracking, cine, phase stacks from ``dcm2nii --stack-phases``).
 
@@ -17,7 +17,7 @@ and the GUI's time-first ``TXYZ`` layers are both handled; without axis labels a
 ``t_res`` (seconds per frame), else the frame index.
 
 Outputs keep the spatial metadata (affine, spacing) and drop the temporal keys.
-I/O and arrays: backend ``np`` after ``setup(globals())`` — CuPy arrays stay on
+I/O and arrays: backend ``np`` after ``setup(globals())``; CuPy arrays stay on
 the GPU through every reduction.
 """
 
@@ -45,9 +45,7 @@ _TEMPORAL_KEYS: tuple[str, ...] = (
 )
 
 
-# ---------------------------------------------------------------------------
 # Axis / timing helpers
-# ---------------------------------------------------------------------------
 
 
 def time_axis(image: Image) -> int:
@@ -73,7 +71,7 @@ def frame_times(image: Image) -> list[float]:
 
     A monoenergetic spectral stack (``dcm2nii --stack-energies``) is a "series" whose
     frames are energies: its axis values are ``spectral_energies_kev``, so every tool
-    built on frame times — the curve plot above all — works in keV unchanged. See
+    built on frame times (the curve plot above all) works in keV unchanged. See
     :func:`frame_axis_unit` for the unit.
     """
     md = image.metadata or {}
@@ -128,9 +126,7 @@ def _spatial_image(image: Image, data: Any, *, name: str) -> Image:
     return Image(data=data, metadata=md, axes=spatial_axes, name=name, orientation=image.orientation)
 
 
-# ---------------------------------------------------------------------------
 # Reductions
-# ---------------------------------------------------------------------------
 
 
 def extract_frame(image: Image, index: int) -> Image:
@@ -185,7 +181,7 @@ def temporal_projection(image: Image, method: str = "max") -> Image:
     elif key == "ttp":
         times = as_backend_array(frame_times(image)).astype(np.float32)
         out = times[np.argmax(data, axis=t_ax)]
-    else:  # auc — trapezoid over the frame times
+    else:  # auc: trapezoid over the frame times
         times = as_backend_array(frame_times(image)).astype(np.float32)
         moved = np.moveaxis(data, t_ax, -1).astype(np.float32, copy=False)
         dt = np.diff(times)
@@ -204,7 +200,7 @@ def time_intensity_curve(
     statistic: str = "mean",
 ) -> tuple[list[float], list[float]]:
     """
-    ``(times, values)`` — the time–intensity curve of a region or a voxel.
+    ``(times, values)``: the time-intensity curve of a region or a voxel.
 
     Parameters
     ----------
@@ -248,9 +244,7 @@ def time_intensity_curve(
     return times, [float(v) for v in to_numpy(values)]
 
 
-# ---------------------------------------------------------------------------
 # Stacking
-# ---------------------------------------------------------------------------
 
 
 def stack_frames(

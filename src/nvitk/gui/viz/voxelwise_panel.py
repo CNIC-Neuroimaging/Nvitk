@@ -1,8 +1,8 @@
 """
 Configure-and-run (or load) dialog for voxelwise analysis with FSL ``randomise``.
 
-The tool needs a dozen inputs — a directory, an include pattern, an exclusion list, a cohort, a
-list of EVs, a contrast table, a mask, a permutation count — which is far past what the Tools
+The tool needs a dozen inputs (a directory, an include pattern, an exclusion list, a cohort, a
+list of EVs, a contrast table, a mask, a permutation count), which is far past what the Tools
 panel's flat ``ParamSpec`` list can carry, so it opens its own window (the same escape the mouse
 TOF CoW workflow takes).
 
@@ -17,14 +17,12 @@ and stream it, so the GUI path and the CLI path cannot drift apart.
 
 The second input mode, **prepared 4D stack + design files**, runs ``nvitk-voxelwise randomise`` on a
 stack and ``design.mat`` / ``.con`` / ``.fts`` built elsewhere. Its readout is the header check
-instead — volumes against design rows, EVs against contrast weights — for the same reason.
+instead (volumes against design rows, EVs against contrast weights) for the same reason.
 """
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import shlex
 from pathlib import Path
 from typing import Any, Sequence
@@ -71,15 +69,13 @@ PIPELINE_KINDS: tuple[tuple[str, str, str], ...] = (
 )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Workers
-# ──────────────────────────────────────────────────────────────────────────────
 class _IntersectionWorker(QThread):
     """Compute ``images ∩ cohort ∩ complete cases`` without merging anything.
 
-    Off the GUI thread because the design frame is several ``repo.image()`` queries — seconds on
-    this dataset — and a frozen window during a routine parameter change trains people not to
-    press the button that keeps them honest.
+    Off the GUI thread because the design frame is several ``repo.image()`` queries (seconds on
+    this dataset), and a frozen window during a routine parameter change trains people not to
+    press the button that keeps them in sync.
     """
 
     finished_ok = Signal(object)
@@ -134,7 +130,7 @@ class _IntersectionWorker(QThread):
                     covariates=list(self._p["covariates"]) + [r.column for r in rules],
                 )
                 # The readout has to reflect the rules, or it promises a cohort the run will not
-                # produce — which is the one thing this preview exists to prevent.
+                # produce, which is the one thing this preview exists to prevent.
                 frame = apply_prefilters(frame, rules)
                 columns = sorted(str(c) for c in frame.columns)
                 subjects = set(frame["subject_uid"].astype(str))
@@ -188,9 +184,7 @@ class _RunWorker(QThread):
                                                         on_line=self.lines.append)))
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dialog
-# ──────────────────────────────────────────────────────────────────────────────
 class VoxelwisePanel(QDialog):
     """Configure and launch a voxelwise analysis, or load a finished results folder."""
 
@@ -241,7 +235,7 @@ class VoxelwisePanel(QDialog):
         self._populate_cohorts()
         self._on_mode_changed()
 
-    # -- construction ---------------------------------------------------------
+    # construction
     def _build_source_group(self) -> QGroupBox:
         """Image directory, include pattern, exclusion list and cohort."""
         box = QGroupBox("Images and cohort")
@@ -465,7 +459,7 @@ class VoxelwisePanel(QDialog):
 
     def _with_browse(self, edit: QLineEdit, *, directory: bool = False,
                      file_filter: str = "") -> QWidget:
-        """Wrap *edit* with a Browse… button that fills it in."""
+        """Wrap *edit* with a Browse... button that fills it in."""
         container = QWidget()
         row = QHBoxLayout(container)
         row.setContentsMargins(0, 0, 0, 0)
@@ -487,7 +481,7 @@ class VoxelwisePanel(QDialog):
         row.addWidget(button)
         return container
 
-    # -- state ----------------------------------------------------------------
+    # state
     def _backend_line(self) -> str:
         """One line describing whether FSL can run here."""
         from nvitk.measure.voxelwise import fsl_backend_status
@@ -603,9 +597,9 @@ class VoxelwisePanel(QDialog):
         for item in self._contrasts.selectedItems():
             self._contrasts.takeItem(self._contrasts.row(item))
 
-    # -- intersection ---------------------------------------------------------
+    # intersection
     def _check_prepared(self) -> None:
-        """Compare the stack with the design files, from headers — quick enough for this thread."""
+        """Compare the stack with the design files, from headers: quick enough for this thread."""
         try:
             from nvitk.measure.voxelwise import validate_randomise_inputs
 
@@ -692,12 +686,12 @@ class VoxelwisePanel(QDialog):
         """Report why the preview could not be computed."""
         self._intersection.setText(f"Could not check: {message}")
 
-    # -- launching ------------------------------------------------------------
+    # launching
     def build_argv(self, submit: str) -> list[str]:
         """The ``nvitk-voxelwise run`` command line for the current form state.
 
         Built rather than calling the library directly so that what the GUI runs is exactly what a
-        user could paste into a terminal — and so the log shows them that command.
+        user could paste into a terminal, and so the log shows them that command.
         """
         if self.mode() == MODE_PREPARED:
             return self._build_prepared_argv(submit)
@@ -855,7 +849,7 @@ class VoxelwisePanel(QDialog):
                 on_done=done,
             )
             return True
-        except Exception as exc:  # noqa: BLE001 — following the job is a convenience
+        except Exception as exc:  # noqa: BLE001 (following the job is a convenience)
             gui_log(f"Voxelwise: cannot follow the cluster job ({exc}).")
             return False
 
@@ -919,9 +913,9 @@ class VoxelwisePanel(QDialog):
         if self._out_dir is not None:
             self._show_results(self._out_dir)
 
-    # -- results --------------------------------------------------------------
+    # results
     def _load_results(self) -> None:
-        """Pick a finished results folder and display it — no run, no database."""
+        """Pick a finished results folder and display it: no run, no database."""
         chosen = QFileDialog.getExistingDirectory(
             self, "Select a voxelwise results folder", self._out_dir_edit.text()
         )
@@ -954,9 +948,7 @@ class VoxelwisePanel(QDialog):
         self._status.setText(f"Loaded {out_dir}")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Napari layers
-# ──────────────────────────────────────────────────────────────────────────────
 def add_result_layers(
     viewer: Any,
     out_dir: str | Path,
@@ -968,7 +960,7 @@ def add_result_layers(
     """Add a result's corrected maps to *viewer*, named by contrast, over the MNI template.
 
     Each map is shown with its contrast limits starting at the significance threshold, so the
-    colour ramp spans *only* the range that means anything: a voxel at 1 − p = 0.6 is not a faint
+    colour ramp spans *only* the range that means anything: a voxel at 1 - p = 0.6 is not a faint
     result, it is no result, and giving it a faint colour would say otherwise.
     """
     from nvitk.gui.io.napari_io import open_paths_with_nvitk

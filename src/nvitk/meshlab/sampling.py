@@ -1,10 +1,10 @@
 """Images on surfaces and surfaces on image grids: probing and distance fields.
 
-- :func:`sample_image` / :func:`sample_on_surface` — read an image's values at
+- :func:`sample_image` / :func:`sample_on_surface`: read an image's values at
   points or at a mesh's vertices (ParaView's *Probe*): colour a vessel wall by
   PET uptake, a surface by the label it touches. Optionally along the normal,
   averaged or maximised over a depth (a wall's thickness).
-- :func:`signed_distance_image` — a closed mesh as a signed distance map on an
+- :func:`signed_distance_image`: a closed mesh as a signed distance map on an
   image grid (mm; negative inside).
 """
 
@@ -22,7 +22,7 @@ DEPTH_MODES: tuple[str, ...] = ("mean", "max", "min")
 
 def sample_image(points: np.ndarray, data: np.ndarray, affine: np.ndarray, *, order: int = 1,
                  outside: float = np.nan) -> np.ndarray:
-    """Values of a 3D image (array + 4x4 voxel→world affine) at world *points*.
+    """Values of a 3D image (array + 4x4 voxel->world affine) at world *points*.
 
     *order* 0 for label maps (nearest), 1 for intensities (trilinear).
     """
@@ -52,8 +52,8 @@ def sample_on_surface(
 ) -> np.ndarray:
     """Per-vertex (per-point) image values, optionally across a depth along the normal.
 
-    With *depth* > 0 each vertex reads *samples* points from ``−depth`` to
-    ``+depth`` mm along its normal and combines them with *mode* — a wall's mean
+    With *depth* > 0 each vertex reads *samples* points from ``-depth`` to
+    ``+depth`` mm along its normal and combines them with *mode*: a wall's mean
     or peak value rather than the value exactly on the boundary.
     """
     if isinstance(mesh, Mesh):

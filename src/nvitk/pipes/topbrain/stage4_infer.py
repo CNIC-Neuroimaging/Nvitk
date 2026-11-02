@@ -10,7 +10,7 @@ Choosing a model
 ``--model ta36`` / ``--model binary`` resolves a run through
 :mod:`~nvitk.pipes.topbrain.util.models`, which reads stage 2's provenance for the loss,
 trainer, plans identifier, configuration and finished folds. None of those can be reconstructed
-from flags — the plans name embeds a spacing chosen at run time — so naming the model is both
+from flags (the plans name embeds a spacing chosen at run time), so naming the model is both
 shorter and the only reliable way to point at one.
 
 Giving it images
@@ -20,14 +20,14 @@ volume and predicting a whole cohort are the same command. Anything that is not 
 directory of ``<case>_0000.nii.gz`` is staged into that shape first.
 
 ``--modality`` harmonises the inputs exactly as stage 0 did. Leave it off only when the inputs
-are *already* harmonised, as ``nnUNet_raw/.../imagesTr`` is — predicting on raw scanner
+are *already* harmonised, as ``nnUNet_raw/.../imagesTr`` is: predicting on raw scanner
 intensities is silently wrong rather than an error, so the assumption is logged either way.
 
 **Outputs**
 
-- ``<results_root>/stage4_infer/<run>/raw/`` — nnU-Net's argmax predictions
-- ``<results_root>/stage4_infer/<run>/postprocessed/`` — after island removal
-- ``.../topbrain_stage4.json`` — provenance
+- ``<results_root>/stage4_infer/<run>/raw/``: nnU-Net's argmax predictions
+- ``<results_root>/stage4_infer/<run>/postprocessed/``: after island removal
+- ``.../topbrain_stage4.json``: provenance
 
 Post-processing is applied as a separate pass over a *retained* copy of the raw predictions, so
 the effect of a threshold change can be measured (stage 3 can score either directory) without
@@ -36,13 +36,13 @@ re-running inference, which is by far the expensive half.
 Two tiers of post-processing
 ----------------------------
 ``--min-volume-mm3`` / ``--largest-only``
-    Island removal — see :mod:`nvitk.segmentation.vessel_postprocess`. Always applied.
+    Island removal; see :mod:`nvitk.segmentation.vessel_postprocess`. Always applied.
 ``--repair-gaps-mm`` / ``--repair-adjacency`` / ``--repair-lateral``
-    Topology repair — see :mod:`nvitk.segmentation.vessel_topology`. Off by default, because
+    Topology repair; see :mod:`nvitk.segmentation.vessel_topology`. Off by default, because
     each is a hypothesis about the failure mode, and three of the six challenge metrics (β0
     error, clDice, invalid neighbours) are sensitive enough to them that they must be **tuned
     on cross-validation** and never on leaderboard feedback. Run stage 3 against the raw and
-    postprocessed directories to measure what a setting actually bought.
+    postprocessed directories to measure what a setting bought.
 """
 
 from __future__ import annotations
@@ -97,7 +97,7 @@ def _dataset_name(label_set: str) -> str:
     return f"Dataset{DATASET_IDS[label_set]:03d}_{DATASET_SUFFIXES[label_set]}"
 
 
-#: ``..._ct_...`` / ``..._mr_...`` — how every cohort this pipeline reads names its modality.
+#: ``..._ct_...`` / ``..._mr_...``: how every cohort this pipeline reads names its modality.
 _MODALITY_TOKEN = re.compile(r"(?:^|_)(ct|mr)(?:_|$)")
 
 
@@ -299,15 +299,15 @@ def stage_inputs(
 ) -> tuple[Path, list[str]]:
     """Normalise arbitrary inputs into a folder nnU-Net's predictor can read.
 
-    nnU-Net insists on a directory of ``<case>_0000.nii.gz``. Anything else — one file, a
-    folder of plainly-named volumes, a mixture — is staged into *workspace* under that
+    nnU-Net insists on a directory of ``<case>_0000.nii.gz``. Anything else (one file, a
+    folder of plainly-named volumes, a mixture) is staged into *workspace* under that
     convention, so a single image and a whole cohort are the same operation.
 
     Parameters
     ----------
     modality
         ``ct``/``mr`` to harmonise the inputs exactly as stage 0 did, or ``auto`` to read it
-        per file from the name. ``None`` means the inputs are **already harmonised** — which is
+        per file from the name. ``None`` means the inputs are **already harmonised**, which is
         true of ``nnUNet_raw/.../imagesTr`` and false of anything straight off a scanner.
         Predicting on unharmonised intensities is silently wrong rather than an error, so the
         choice is logged either way.
@@ -318,13 +318,13 @@ def stage_inputs(
     Returns
     -------
     tuple
-        ``(directory, case_ids)`` — the directory to hand the predictor, and the cases in it.
+        ``(directory, case_ids)``: the directory to hand the predictor, and the cases in it.
     """
     volumes = expand_inputs(inputs)
 
-    # ---- Fast path: already exactly what the predictor wants -----------------
+    # Fast path: already exactly what the predictor wants
     # Every channel the model wants, named the way it wants them. This is the only
-    # route a multi-channel model has, so it has to accept ``_0001`` and friends —
+    # route a multi-channel model has, so it has to accept ``_0001`` and friends:
     # matching only ``_0000`` is what made the refusal below un-actionable.
     if modality is None:
         prepared = prepared_dataset(inputs, volumes, expected_channels)
@@ -421,8 +421,8 @@ def postprocess_folder(
         Bridge same-class gaps up to this many millimetres. ``None`` disables.
     repair_adjacency
         Reassign fragments touching anatomically impossible labels, using this label set's
-        adjacency table. Note that TA36's table is *derived*, not published — see
-        :func:`nvitk.pipes.topbrain.labels.valid_neighbours` — so this repairs against our own
+        adjacency table. Note that TA36's table is *derived*, not published (see
+        :func:`nvitk.pipes.topbrain.labels.valid_neighbours`), so this repairs against our own
         reading of the anatomy.
     repair_lateral
         Mirror fragments of a lateralised class found on the wrong side of the midline.
@@ -583,14 +583,14 @@ def run_infer(
     ----------
     inputs
         Volumes and/or directories to predict on. One file and a whole cohort are the same
-        operation — see :func:`stage_inputs`.
+        operation; see :func:`stage_inputs`.
     model
         Which trained model to use: a label set (``ta36``, ``binary``), a dataset folder name,
         or a path to a stage 2 marker. Resolved through
         :mod:`~nvitk.pipes.topbrain.util.models`, which recovers the loss, trainer, plans and
         folds from provenance so none of them has to be repeated on the command line.
     modality
-        Harmonise the inputs before predicting — see :func:`stage_inputs`.
+        Harmonise the inputs before predicting; see :func:`stage_inputs`.
     output
         Write the single prediction here. Only valid for exactly one input case.
     """
@@ -611,7 +611,7 @@ def run_infer(
         )
 
     loss = loss or cfg.DEFAULT_LOSS
-    # Plans name, architecture and configuration all come from what stage 2 actually trained.
+    # Plans name, architecture and configuration all come from what stage 2 trained.
     # None of them has a usable default: the plans name embeds a spacing chosen at run time,
     # and the architecture decides the trainer family.
     resolved = resolve_trained_run(
@@ -629,18 +629,18 @@ def run_infer(
     raw_dir = base / "raw"
     post_dir = base / "postprocessed"
 
-    # ---- Folds: default to the ones that actually finished --------------------
+    # Folds: default to the ones that finished
     if selected is not None and not folds:
         folds = selected.available_folds(nnunet_results) or list(selected.folds)
         log.info("Using fold(s) %s from the model's provenance.", ", ".join(str(f) for f in folds))
     folds = list(folds) or [0]
 
-    # ---- Inputs: one file, several files, folders, or all three ---------------
+    # Inputs: one file, several files, folders, or all three
     all_inputs = [*(inputs or ()), *([input_dir] if input_dir is not None else [])]
     if not all_inputs:
         raise ValueError("No input given: pass --input with one or more files or directories.")
 
-    # ---- Modality: the model's label set outranks the flag --------------------
+    # Modality: the model's label set outranks the flag
     # A modality-specific model harmonising the other modality is silently wrong, not an error:
     # the numbers come out, they are just computed from intensities normalised the wrong way.
     # Leaving --modality unset used to mean "already harmonised", which is false for anything
@@ -656,7 +656,7 @@ def run_infer(
             )
         # Measured, not assumed: a mono-modality model fed the other modality is the failure
         # that produces plausible nonsense rather than an error, so the inputs are checked
-        # against what they actually contain.
+        # against what they contain.
         wrong = verify_modality(expand_inputs(all_inputs), required)
         if wrong:
             raise ValueError(
@@ -681,7 +681,7 @@ def run_infer(
 
     paths = TopBrainPaths(
         # Only the nnU-Net roots matter to nnunet_env(); challenge_root just has to be a real
-        # path, and the staged input directory is the honest one to name here.
+        # path, and the staged input directory is the right one to name here.
         challenge_root=Path(predict_dir),
         nnssl_raw=Path(results_root), nnssl_preprocessed=Path(results_root),
         nnssl_results=Path(results_root),
@@ -802,9 +802,7 @@ def run_infer(
     return post_dir
 
 
-# ---------------------------------------------------------------------------
 # CLI + SGE submission
-# ---------------------------------------------------------------------------
 
 
 def _cluster_path(path: Path | str) -> Path:
@@ -1120,7 +1118,7 @@ def _submit_to_cluster(
         credentials = None
         return _run(options)
 
-    # ---- Staged: the data is here, the GPU is there --------------------------
+    # Staged: the data is here, the GPU is there
     from nvitk.cluster.remote_submit import prompt_ssh_credentials
 
     volumes = _local_volumes(options)
@@ -1284,7 +1282,7 @@ def main(
 
     Logger()
     # Interactive use should not have to repeat four roots that sge.json already knows. The
-    # cluster roots win when they are mounted here, because that is where trained models live —
+    # cluster roots win when they are mounted here, because that is where trained models live:
     # the local_* roots are a separate working copy. Anything passed explicitly still wins, and
     # the SGE worker passes all four (container paths), so its behaviour is unchanged.
     given = {
@@ -1343,7 +1341,7 @@ def main(
         nnunet_raw=nnunet_raw, nnunet_preprocessed=nnunet_preprocessed,
         nnunet_results=nnunet_results, results_root=results_root, label_set=label_set,
         # Left to stage 2's provenance unless overridden: it is the only place that records
-        # which checkpoint family was actually fine-tuned.
+        # which checkpoint family was fine-tuned.
         loss=loss, architecture=architecture, folds=parse_folds(folds) if folds else (),
         plans_identifier=plans_identifier,
         configuration_name=configuration_name, checkpoint_name=checkpoint_name,

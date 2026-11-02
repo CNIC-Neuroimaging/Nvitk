@@ -26,7 +26,7 @@ def to_cupy(arr: Any, copy: bool = False, strict: bool = False) -> np.ndarray:
 
 
 def as_backend_array(arr: Any, backend: str | None = None, copy: bool = False, strict: bool = False) -> np.ndarray:
-    """Convert *arr* to the active backend's array type — always NumPy here."""
+    """Convert *arr* to the active backend's array type: always NumPy here."""
     target = (backend or "numpy").strip().lower()
     if target in {"numpy", "cpu", "np"}:
         return to_numpy(arr, copy=copy)

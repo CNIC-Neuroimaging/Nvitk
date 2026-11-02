@@ -70,9 +70,9 @@ class SgeJobMonitor(QObject):
 
     Two kinds: the Imaging tab's jobs, finished when their ``output/.done`` appears
     (:meth:`track`; their results are then imported), and jobs only known by their
-    scheduler ids — a voxelwise analysis — finished when those leave ``qstat``
+    scheduler ids (a voxelwise analysis) finished when those leave ``qstat``
     (:meth:`watch_queue`). Each can carry an activity-indicator task, kept up to date
-    with the job's state (submitted, queued, running…) until it ends.
+    with the job's state (submitted, queued, running...) until it ends.
 
     The checks open SSH sessions, so they run on a worker thread; the results come
     back here, on the GUI thread, where the signals are emitted.
@@ -87,9 +87,9 @@ class SgeJobMonitor(QObject):
         super().__init__(parent)
         self._jobs: dict[str, SgePendingJob] = {}
         self._tasks: dict[str, Any] = {}
-        #: key → {"connection", "ids", "label", "task", "on_done"}: qstat-only jobs.
+        #: key -> {"connection", "ids", "label", "task", "on_done"}: qstat-only jobs.
         self._watches: dict[str, dict[str, Any]] = {}
-        #: Scheduler job id → its last ``qstat`` state ("" once it left the queue).
+        #: Scheduler job id -> its last ``qstat`` state ("" once it left the queue).
         self._states: dict[str, str] = {}
         self._polling = False
         self._last_qstat = 0.0
@@ -101,7 +101,7 @@ class SgeJobMonitor(QObject):
             self._timer.setInterval(max(5000, int(interval_ms)))
             self._timer.timeout.connect(self._poll)
 
-    # ── what is followed ─────────────────────────────────────────────────────
+    # what is followed
 
     def track(self, job: SgePendingJob, task: Any = None) -> None:
         """Follow *job* until its ``.done`` marker appears; *task* (activity) shows it meanwhile."""
@@ -131,7 +131,7 @@ class SgeJobMonitor(QObject):
         if self._timer is not None and not self._timer.isActive():
             self._timer.start()
 
-    # ── messages ─────────────────────────────────────────────────────────────
+    # messages
 
     def _state_of(self, ids: list[str]) -> str:
         from nvitk.cluster.sge_chunk import describe_sge_state
@@ -170,7 +170,7 @@ class SgeJobMonitor(QObject):
             task.update(message=f"Cluster: {watch['label']} — {self._state_of(watch['ids'])}"
                                 f"{self._ids_text(watch['ids'])}")
 
-    # ── polling ──────────────────────────────────────────────────────────────
+    # polling
 
     def _poll(self) -> None:
         """Start one round of checks on a worker thread (one at a time)."""
@@ -203,7 +203,7 @@ class SgeJobMonitor(QObject):
                         password=job.connection.password,
                         remote_job_root=job.remote_job_root,
                     )
-                except Exception:  # noqa: BLE001 — unreachable this time: ask again next poll
+                except Exception:  # noqa: BLE001 (unreachable this time: ask again next poll)
                     pass
             for key, conn in connections.items():
                 try:
@@ -273,7 +273,7 @@ class SgeJobMonitor(QObject):
                 if watch.get("on_done") is not None:
                     try:
                         watch["on_done"]()
-                    except Exception:  # noqa: BLE001 — a callback must not stop the monitor
+                    except Exception:  # noqa: BLE001 (a callback must not stop the monitor)
                         pass
                 self.queue_finished.emit(key)
             else:

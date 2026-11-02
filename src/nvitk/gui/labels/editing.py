@@ -6,8 +6,8 @@ application is one Ctrl+Z, exactly like a brush stroke. An Image layer used as a
 mask has no history: its edits are written straight to the data (and to the
 unfiltered copy the live label filter keeps, :func:`~nvitk.gui.labels.visibility.label_source_data`).
 
-The region operations (grow, shrink, smooth, components, threshold…) run on the
-active backend — CuPy when the GUI's GPU switch is on — and the result is brought
+The region operations (grow, shrink, smooth, components, threshold...) run on the
+active backend (CuPy when the GUI's GPU switch is on), and the result is brought
 back to the host only to be written into the layer, which Napari holds in NumPy.
 The magic wand grows its region with ``ndi.label`` on the backend too; only the
 polygon rasteriser (skimage) runs under ``using("cpu")``.
@@ -33,9 +33,7 @@ setup(globals())
 SCOPES = ("slice", "volume")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Layers
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def is_labels(layer: Any) -> bool:
@@ -62,8 +60,8 @@ def announce_history_loads(layer: Any) -> None:
     """Have Napari's Undo / Redo on a Labels layer emit its ``paint`` event.
 
     Napari rewrites the voxels and refreshes the canvas but announces nothing, so
-    whatever follows edits through ``paint`` — the cached label ids, the layer
-    list's label lines, the orthogonal views — kept showing the state from before
+    whatever follows edits through ``paint`` (the cached label ids, the layer
+    list's label lines, the orthogonal views) kept showing the state from before
     the Undo. The event carries no change list (``value=[]``).
     """
     if not is_labels(layer) or getattr(layer, "_nvitk_history_announced", False):
@@ -81,7 +79,7 @@ def announce_history_loads(layer: Any) -> None:
     try:
         layer._load_history = _load_history
         layer._nvitk_history_announced = True
-    except Exception:  # noqa: BLE001 — a layer that rejects attributes keeps Napari's
+    except Exception:  # noqa: BLE001 (a layer that rejects attributes keeps Napari's)
         pass
 
 
@@ -104,9 +102,7 @@ def voxel_volume_mm3(layer: Any) -> float:
     return vol
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Where an edit applies
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def time_axis(layer: Any) -> int | None:
@@ -123,7 +119,7 @@ def current_point(viewer: Any, layer: Any) -> tuple[int, ...]:
     shape = layer.data.shape
     try:
         position = layer.world_to_data(viewer.dims.point)
-    except Exception:  # noqa: BLE001 — fall back to the middle of the volume
+    except Exception:  # noqa: BLE001 (fall back to the middle of the volume)
         position = [s / 2.0 for s in shape]
     index = [int(round(float(v))) for v in list(position)[-len(shape):]]
     return tuple(min(max(v, 0), n - 1) for v, n in zip(index, shape))
@@ -161,7 +157,7 @@ def ray_through(layer: Any, position: Sequence[float], view_direction: Sequence[
 
 
 def pick_visible_voxel(image: Any, position: Sequence[float], view_direction: Sequence[float]) -> tuple[int, ...] | None:
-    """The voxel of the Image layer *image* a click on the 3D canvas lands on —
+    """The voxel of the Image layer *image* a click on the 3D canvas lands on:
     what the rendering shows there.
 
     The ray through the click is sampled voxel by voxel and the voxel kept is,
@@ -244,7 +240,7 @@ def region(viewer: Any, layer: Any, scope: str) -> tuple[Any, ...]:
     """Index of *layer*'s data an edit in *scope* works on.
 
     ``"slice"``: the plane on screen (a 2D view is required); ``"volume"``: the
-    whole volume — for a 3D+t layer, the frame on screen.
+    whole volume, for a 3D+t layer, the frame on screen.
     """
     data = layer.data
     nd = data.ndim
@@ -279,9 +275,7 @@ def _global_indices(index: Sequence[Any], local: Sequence[Any]) -> tuple[Any, ..
     return tuple(out)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Writing
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def write_region(layer: Any, index: Sequence[Any], new: Any) -> int:
@@ -373,7 +367,7 @@ def replace_label(layer: Any, source_id: int, target_id: int) -> int:
 
 
 def relabel_consecutive(layer: Any) -> dict[int, int]:
-    """Renumber *layer*'s labels 1…N in order; the ``{old: new}`` map applied."""
+    """Renumber *layer*'s labels 1...N in order; the ``{old: new}`` map applied."""
     ids = layer_label_ids(layer, max_labels=1_000_000)
     mapping = {old: new for new, old in enumerate(ids, start=1) if old != new}
     if not mapping:
@@ -393,17 +387,23 @@ def relabel_consecutive(layer: Any) -> dict[int, int]:
     return mapping
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Region operations (backend arrays in, backend arrays out)
-# ──────────────────────────────────────────────────────────────────────────────
 
 
-def writable(work: Any, label_id: int, *, preserve: bool, over: Sequence[int] | None = None) -> Any:
+def writable(
+    work: Any, label_id: int, *, preserve: bool, over: Sequence[int] | None = None, over_mode: str = "inside"
+) -> Any:
     """Where *label_id* may be written: background and itself when other labels
-    are preserved; over the labels in *over* (0 is the background) and itself
-    when given; everywhere otherwise."""
+    are preserved; with *over* (0 is the background), over those labels and itself
+    (*over_mode* ``"inside"``) or anywhere but over them (``"outside"``);
+    everywhere otherwise."""
     work = as_backend_array(work)
     if over is not None:
+        if over_mode == "outside":
+            avoid = sorted({int(i) for i in over} - {int(label_id)})
+            if not avoid:
+                return np.ones(work.shape, dtype=bool)
+            return ~np.isin(work, as_backend_array(avoid))
         ids = as_backend_array(sorted({int(i) for i in over} | {int(label_id)}))
         return np.isin(work, ids)
     if not preserve:
@@ -584,7 +584,7 @@ def wand(
 ) -> tuple[Any, int]:
     """Magic wand: the region :func:`wand_region` grows from *seed* (*options* are its).
 
-    Added to *label_id* where *allowed*, or — with *remove* — taken out of it.
+    Added to *label_id* where *allowed*, or (with *remove*) taken out of it.
     Returns the new array and the size of the region.
     """
     work = as_backend_array(work)
@@ -800,9 +800,7 @@ def step_to_slice(viewer: Any, layer: Any, axis: int, index: int) -> None:
     viewer.dims.set_point(world_axis, float(world[axis]))
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Facts about a label
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def label_counts(layer: Any) -> dict[int, int]:
@@ -850,14 +848,12 @@ def go_to_label(viewer: Any, layer: Any, label_id: int) -> bool:
     shown = [offset + d for d in displayed_axes(viewer, layer)]
     try:
         viewer.camera.center = tuple(float(world[a - offset]) for a in shown[-3:])
-    except Exception:  # noqa: BLE001 — the slice is already right
+    except Exception:  # noqa: BLE001 (the slice is already right)
         pass
     return True
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Editable area: where the brush and the fill bucket may paint
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class PaintGuard:
@@ -866,10 +862,10 @@ class PaintGuard:
     Napari's own *preserve labels* keeps other labels intact; this adds what it
     cannot: paint only where a reference image's intensity lies in a range, only
     inside a mask, only inside a box (:attr:`box`, an index of slices into the
-    layer's data), and only over some of the layer's own labels (:attr:`over`,
-    preserve labels the other way round). Erasing is not restricted, except
-    under :attr:`over`, where it clears only the active label, as with preserve
-    labels.
+    layer's data), and only over (or never over) some of the layer's own labels
+    (:attr:`over`, :attr:`over_mode` ``"inside"`` / ``"outside"``). Erasing is not
+    restricted, except by :attr:`over`: "inside" clears only the active label, as
+    with preserve labels; "outside" never clears the protected labels.
 
     Every write through the layer's ``data_setitem`` (Napari's brush, bucket and
     polygon, the orthogonal views' strokes) is trimmed as it is made, so what is
@@ -885,8 +881,10 @@ class PaintGuard:
         self.high = float("inf")
         self.inside: Any | None = None
         self.box: tuple[slice, ...] | None = None
-        #: The labels painting may cover (0 is the background); ``None``: any.
+        #: The labels the rule is about (0 is the background); ``None``: no rule.
         self.over: tuple[int, ...] | None = None
+        #: ``"inside"``: paint only over :attr:`over`; ``"outside"``: never over them.
+        self.over_mode = "inside"
         #: Edits made by the tools are already constrained: they pass through.
         self.suspended = False
         layer.events.paint.connect(self._on_paint)
@@ -913,7 +911,7 @@ class PaintGuard:
 
         try:
             layer.data_setitem = data_setitem
-        except Exception:  # noqa: BLE001 — a layer that rejects attributes is trimmed on commit only
+        except Exception:  # noqa: BLE001 (a layer that rejects attributes is trimmed on commit only)
             pass
 
     def erase_label(self) -> int:
@@ -925,7 +923,7 @@ class PaintGuard:
         return int(previous) if previous else int(layer.selected_label)
 
     def _outside(self, indices: tuple[Any, ...], old: Any, new: Any) -> Any:
-        """Which of the writes ``old → new`` at *indices* leave the area (host arrays)."""
+        """Which of the writes ``old -> new`` at *indices* leave the area (host arrays)."""
         bad = np.zeros(np.shape(old), dtype=bool)
         painting = new != 0
         if self.intensity is not None:
@@ -938,8 +936,12 @@ class PaintGuard:
             for (lo, hi), ix in zip(bounds, indices):
                 bad |= painting & ((ix < lo) | (ix >= hi))
         if self.over is not None:
-            bad |= painting & ~np.isin(old, np.array(self.over, dtype=np.int64))
-            bad |= ~painting & (old != self.erase_label())
+            ids = np.array(self.over, dtype=np.int64)
+            if self.over_mode == "outside":
+                bad |= np.isin(old, ids)  # neither painted over nor erased
+            else:
+                bad |= painting & ~np.isin(old, ids)
+                bad |= ~painting & (old != self.erase_label())
         return bad
 
     def trim(self, indices: Any, value: Any) -> tuple[Any, Any]:

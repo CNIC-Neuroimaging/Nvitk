@@ -1,9 +1,9 @@
-"""``nvitk-config`` — inspect and scaffold nvitk's configuration.
+"""``nvitk-config``: inspect and scaffold nvitk's configuration.
 
 nvitk reads its site settings from four JSON files (``sge.json``, ``settings.json``,
-``xnat.json``, and ``gui.json`` — which the GUI writes for itself) found in a configuration
+``xnat.json``, and ``gui.json``, which the GUI writes for itself) found in a configuration
 directory. This command answers the three questions a
-new install raises: *where does that directory go*, *which file am I actually using*, and
+new install raises: *where does that directory go*, *which file am I using*, and
 *what do I have to fill in*.
 
 .. code-block:: bash

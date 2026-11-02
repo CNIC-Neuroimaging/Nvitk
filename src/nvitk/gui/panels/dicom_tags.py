@@ -81,7 +81,7 @@ def expand_tag(key: str, value: Any, *, prefix: str = "") -> list[tuple[str, str
 
     A multi-valued tag (``ImageOrientationPatient``) and a sequence tag
     (``ReferencedImageSequence``, a list of datasets) both arrive as a Python list.
-    Collapsing either onto one line is what made long sequences unreadable — the
+    Collapsing either onto one line is what made long sequences unreadable: the
     values ran off the row and the per-item structure was lost. Each item gets its
     own indexed row, and a nested dataset's own tags are expanded beneath it.
     """

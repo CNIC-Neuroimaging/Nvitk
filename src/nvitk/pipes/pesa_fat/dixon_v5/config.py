@@ -19,20 +19,16 @@ from nvitk.pipes.pesa_fat.dixon_v5.labels import (
 )
 
 
-# ---------------------------------------------------------------------------
 # Pipeline identity (Just naming, nothing important)
-# ---------------------------------------------------------------------------
 
 PIPELINE_NAME = "dixon-v5"
 SGE_JOB_PREFIX = "PESAFat_DIXON"
 
 
-# ---------------------------------------------------------------------------
 # Filesystem fragments
-# ---------------------------------------------------------------------------
 
 STAGE1_DIR = "res_segmentation_dixon"     # <subj>/DIXON_<REGION>/<task>.nii.gz
-STAGE2_DIR = "res_post_processing_dixon"  # <subj>/{HEAD,THORAX,LEGS}.nii.gz
+STAGE2_DIR = "res_post_processing_dixon"  # <subj>/{HEAD,THORAX,LEGS}[_VOL].nii.gz
 STAGE3_DIR = "res_measure_dixon"          # <batch>_SummaryCodebook.xlsx
 
 # Expected Dixon input stems: DIXON_<REGION>_<SUFFIX>.nii[.gz]
@@ -40,19 +36,24 @@ INPUT_PREFIX = "DIXON"
 INPUT_SUFFIXES = ("FAT", "WATER", "FAT_FRACTION", "T2STAR")
 
 
-# ---------------------------------------------------------------------------
 # TotalSegmentator task plan (per Dixon region)
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class MrTask:
-    """MR TotalSegmentator task and which DIXON sequence it uses."""
+    """MR TotalSegmentator task and which DIXON sequence it uses.
+
+    ``roi_subset`` is forwarded to TotalSegmentator, which then only runs (and
+    crops the image to) the sub-models holding those classes. ``keep_rois``
+    instead runs the full model, so every class competes for the voxels, and
+    stage 1 zeroes all other classes in the saved output afterwards.
+    """
 
     name: str
     input_suffix: str                # FAT / WATER / ...
     roi_subset: tuple[str, ...] = ()
     output_stem: str | None = None   # stage-1 file stem; defaults to ``name``
+    keep_rois: tuple[str, ...] = ()
 
     @property
     def stem(self) -> str:
@@ -82,16 +83,27 @@ SKELETON_ROIS_MR: tuple[str, ...] = (
 # LEGS mask labels the skeleton is subtracted from.
 SKELETON_SUBTRACT_FROM_LEGS: tuple[str, ...] = ("L_QM_L", "L_QM_R")
 
+# Skeleton classes dilated (radius in voxels) before that subtraction, so the
+# quadriceps keep clear of the femur. The volume mask (LEGS_VOL) uses the raw bones.
+LEGS_SKELETON_DILATE: dict[str, int] = {"femur_left": 3, "femur_right": 3}
 
+# Liver voxels above this T2* (ms) are vessels and are left out of the liver's
+# FF/T2*/R2*/WF statistics; the liver volume (THORAX_VOL) keeps them.
+LIVER_VESSEL_T2STAR_MS: float = 50.0
+
+
+# ``total_mr`` always runs the full model (no roi_subset) so neighbouring organs
+# such as the gallbladder are segmented too and cannot be swallowed by the ones we
+# keep; ``keep_rois`` trims the saved output to the classes stage 2 uses.
 HEAD_TASKS = (
-    MrTask("total_mr", input_suffix="FAT", roi_subset=("autochthon_left", "autochthon_right")),
+    MrTask("total_mr", input_suffix="FAT", keep_rois=("autochthon_left", "autochthon_right")),
 )
 
 THORAX_TASKS = (
     MrTask(
         "total_mr",
         input_suffix="FAT",
-        roi_subset=(
+        keep_rois=(
             "spleen",
             "kidney_right",
             "kidney_left",
@@ -106,7 +118,7 @@ THORAX_TASKS = (
     MrTask(
         "total_mr",
         input_suffix="WATER",
-        roi_subset=THORAX_WATER_ROIS,
+        keep_rois=THORAX_WATER_ROIS,
         output_stem=THORAX_WATER_STEM,
     ),
     MrTask("tissue_types_mr", input_suffix="FAT"),
@@ -116,7 +128,7 @@ THORAX_TASKS = (
 
 LEGS_TASKS = (
     MrTask("thigh_shoulder_muscles_mr", input_suffix="FAT"),
-    MrTask("total_mr", input_suffix="FAT", roi_subset=SKELETON_ROIS_MR),
+    MrTask("total_mr", input_suffix="FAT", keep_rois=SKELETON_ROIS_MR),
     MrTask("tissue_types_mr", input_suffix="FAT"),
     MrTask("body_mr", input_suffix="FAT"),
 )
@@ -131,9 +143,7 @@ REGIONS = {
 REGION_ORDER = ("HEAD", "THORAX", "LEGS")
 
 
-# ---------------------------------------------------------------------------
 # Stage-3 measurement specs
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -193,10 +203,7 @@ def _lr_triplet(
 
 
 MEASURE_SPECS = (
-    # # HEAD: paravertebral (PVM) L, R, LR
-    # *_lr_triplet(
-    #     "DIXON_H_PVM_{side}", "HEAD", "HEAD.nii", HEAD_LABELS, "H_PVM_L", "H_PVM_R",
-    # ),
+    # HEAD paravertebral muscle (H_PVM L/R/LR) is segmented but not measured.
 
     # THORAX: liver (with WF), pancreas, kidneys L/R/LR, paravertebral L/R/LR,
     #         and bone-narrow vertebrae L3/L4.
@@ -261,9 +268,7 @@ WF_REFERENCE_LABELS = (
 )
 
 
-# ---------------------------------------------------------------------------
 # SGE / Singularity defaults
-# ---------------------------------------------------------------------------
 
 SGE_PROJECT     = "GPU"
 SGE_ACCOUNT     = "Prod"
@@ -333,6 +338,8 @@ __all__ = [
     "THORAX_WATER_ROIS",
     "SKELETON_ROIS_MR",
     "SKELETON_SUBTRACT_FROM_LEGS",
+    "LEGS_SKELETON_DILATE",
+    "LIVER_VESSEL_T2STAR_MS",
     "HEAD_TASKS",
     "THORAX_TASKS",
     "LEGS_TASKS",

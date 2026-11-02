@@ -3,8 +3,8 @@
 
 Description
 -----------
-When a 4D-flow acquisition turns out to be unusable — a segmentation that leaked into a
-neighbouring structure, a mis-scaled reconstruction, a failed gating — the subject should drop out
+When a 4D-flow acquisition turns out to be unusable (a segmentation that leaked into a
+neighbouring structure, a mis-scaled reconstruction, a failed gating) the subject should drop out
 of the flow analyses without disappearing from the study. Their clinical variables, cognitive
 scores, morphometrics and imaging assets are all still valid; only the qvtpy-derived measurements
 are not.
@@ -18,7 +18,7 @@ So this deletes exactly two things:
                                      (``qc_ap_share``, ``qc_ap_flag``, ``qc_subject_flag``)
 ===================================  =========================================================
 
-Every other row of that subject, in these tables and all others, is left untouched — including
+Every other row of that subject, in these tables and all others, is left untouched, including
 ``tof_morpho_v1`` morphometrics, which come from a different acquisition and survive a bad 4D-flow
 scan. Nothing is written until ``--write`` is passed.
 
@@ -29,7 +29,7 @@ Examples::
     # See what would go, without touching anything
     python scripts/pesa_brain/db/drop_subject_db.py --subjects PESA5745609
 
-    # Actually remove it
+    # Remove it
     python scripts/pesa_brain/db/drop_subject_db.py --subjects PESA5745609 --write
 
     # Several subjects, explicit dataset
@@ -39,9 +39,7 @@ Examples::
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from pathlib import Path
 from typing import Any
 
@@ -57,7 +55,7 @@ log = Logger()
 
 #: qvtpy writes its measurements under two pipeline ids: stage 6 publishes the hemodynamics as
 #: ``4dflow_v3``, stage 9 publishes the automatic QC variables as ``qvtpy``. Morphometrics
-#: (``tof_morpho_v1``) are deliberately absent — they come from the TOF acquisition, not the 4D
+#: (``tof_morpho_v1``) are deliberately absent: they come from the TOF acquisition, not the 4D
 #: flow, and stay valid when the flow scan does not.
 IMAGE_PIPELINES: tuple[str, ...] = (QVTPY_PIPELINE_ID, "qvtpy")
 
@@ -67,9 +65,7 @@ CLINICAL_VARIABLES: tuple[str, ...] = tuple(
 )
 
 
-# ---------------------------------------------------------------------------
 # Row selection
-# ---------------------------------------------------------------------------
 def rows_to_drop(
     frame: pd.DataFrame, *, subjects: list[str], column: str, values: tuple[str, ...]
 ) -> pd.Series:
@@ -99,9 +95,7 @@ def describe_drop(frame: pd.DataFrame, mask: pd.Series, *, column: str) -> str:
     return f"{int(mask.sum())} row(s) over {len(subjects)} subject(s) [{parts}]"
 
 
-# ---------------------------------------------------------------------------
 # Dataset surgery
-# ---------------------------------------------------------------------------
 def drop_subject_qvtpy(
     repo: Any, *, subjects: list[str], write: bool = False
 ) -> dict[str, int]:
@@ -109,9 +103,9 @@ def drop_subject_qvtpy(
     Delete the qvtpy rows of *subjects* from both measurement tables.
 
     Reads with ``cohort_id=False`` so a subject outside the catalog's default cohort is still
-    reachable — a scan being excluded is exactly the kind of row a cohort filter might already be
+    reachable: a scan being excluded is exactly the kind of row a cohort filter might already be
     hiding. Writes go through :meth:`DataRepo.write_table` with the index rebuild deferred, then the
-    index is rebuilt once for whichever tables actually changed.
+    index is rebuilt once for whichever tables changed.
 
     Returns
     -------
@@ -167,9 +161,7 @@ def drop_subject_qvtpy(
     return removed
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 @click.command("drop-subject-db")
 @click.option(
     "--subjects",

@@ -1,5 +1,5 @@
 """
-Arithmetic *across* regions — combining a measurement's rows into a new quantity.
+Arithmetic *across* regions: combining a measurement's rows into a new quantity.
 
 Description
 -----------
@@ -11,10 +11,10 @@ rows:
 .. code-block:: text
 
     TCBF          = flow(RICA) + flow(LICA) + flow(BASI)
-    basilar gap   = flow(LVA) + flow(RVA) − flow(BASI)
+    basilar gap   = flow(LVA) + flow(RVA) - flow(BASI)
     MCA share     = flow(LMCA) / (flow(LMCA) + flow(LACA))
 
-The analysis frame is long — one row per subject × territory — so all three are combinations of
+The analysis frame is long (one row per subject × territory), so all three are combinations of
 several rows of one subject. This module is that operation: pick a measurement, pick regions, give
 each a coefficient, and get back either a new **column** (the same value on every row of the
 subject, ready to use as a covariate) or a new **row** (a synthetic territory, ready to model
@@ -31,9 +31,7 @@ anatomy; it is the arithmetic, and the anatomy lives in
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Sequence
@@ -82,7 +80,7 @@ class RegionCombination:
     region_column: str = "territory"
     subject_column: str = "subject_uid"
     #: Refuse to produce a value for a subject missing any listed region. Off, a partial sum is
-    #: emitted — which is almost never what you want for a total, and never for a balance.
+    #: emitted, which is almost never what you want for a total, and never for a balance.
     require_all: bool = True
     unit: str = ""
     description: str = ""
@@ -177,7 +175,7 @@ def _matched_regions(
     literal = {key(p): p for p in present}
     # A second index through the vessel resolver, so ``LICA``, ``Left_ICA`` and ``lica`` all reach
     # the same row. Without it a combination written in one spelling silently matches nothing after
-    # a reload that publishes another — an all-NaN column rather than an error.
+    # a reload that publishes another: an all-NaN column rather than an error.
     canonical: dict[str, str] = {}
     for p in present:
         node = canonical_node(p)
@@ -295,7 +293,7 @@ def apply_region_combinations(
 
     ``mode="column"`` merges the per-subject value back onto every row of that subject, so it can be
     used as a covariate beside the per-territory outcome. ``mode="row"`` appends synthetic rows
-    carrying the combination's name as their region, so it can be modelled as another territory —
+    carrying the combination's name as their region, so it can be modelled as another territory:
     note those rows are **not independent** of the ones they were built from, which matters if the
     model treats territories as replicates.
 
@@ -333,8 +331,8 @@ def apply_region_combinations(
             frame = values.reset_index()
             frame = frame.rename(columns={combo.name: combo.value_column})
             # The region label goes into every column that carries it, not just the one the
-            # combination names. The analysis frame holds the region twice — ``territory`` and
-            # ``group_key`` hold identical labels — and a plot or a model grouped by the other one
+            # combination names. The analysis frame holds the region twice (``territory`` and
+            # ``group_key`` hold identical labels), and a plot or a model grouped by the other one
             # sees the synthetic row as missing, so it is silently dropped from exactly the figure
             # it was created for.
             mirrors = mirrored_region_columns(out, combo.region_column)
@@ -365,7 +363,7 @@ def mirrored_region_columns(df: pd.DataFrame, region_column: str) -> list[str]:
     The analysis frame carries the region twice: ``territory`` and ``group_key`` are built from one
     another (see :func:`~nvitk.stats._statmodels_frames.finalize_analysis_frame`), and a model or a
     plot may group by either. A synthetic row that names only one of them is missing in the other,
-    and a ``groupby`` drops it — so the new region disappears from the figure it was made for.
+    and a ``groupby`` drops it, so the new region disappears from the figure it was made for.
 
     Matched on the labels rather than on a list of known aliases, so a renamed or melted column
     keeps working. ``region_id`` is left alone: it holds the published ids a region was collapsed
@@ -391,7 +389,7 @@ def mirrored_region_columns(df: pd.DataFrame, region_column: str) -> list[str]:
 
 
 def _subject_constant_columns(df: pd.DataFrame, subject_column: str) -> list[str]:
-    """Columns that take a single value within every subject — the ones safe to copy onto a new row."""
+    """Columns that take a single value within every subject: the ones safe to copy onto a new row."""
     candidates = [c for c in df.columns if c != subject_column]
     if not candidates:
         return []
@@ -399,9 +397,7 @@ def _subject_constant_columns(df: pd.DataFrame, subject_column: str) -> list[str
     return [c for c in candidates if int(counts[c].max() or 0) <= 1]
 
 
-# ---------------------------------------------------------------------------
 # Ready-made combinations
-# ---------------------------------------------------------------------------
 def conservation_combinations(
     value_column: str = "flow_mean",
     *,
@@ -460,7 +456,7 @@ def composite_combinations(
     """
     The standard whole-brain composites: total inflow, and the anterior/posterior split.
 
-    ``TCBF`` is the one asked for most often — total cerebral blood flow as the sum of both internal
+    ``TCBF`` is the one asked for most often: total cerebral blood flow as the sum of both internal
     carotids and the basilar. It is a *column*, not a territory: it is the subject's total, so it
     belongs beside the per-territory rows rather than among them.
     """

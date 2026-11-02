@@ -90,7 +90,7 @@ def _shrinkable(widget: QWidget) -> QWidget:
 
 
 def _flag_caption(flag: str) -> str:
-    """``--skip-existing`` → ``Skip existing``: a checkbox caption that fits a dock."""
+    """``--skip-existing`` -> ``Skip existing``: a checkbox caption that fits a dock."""
     words = flag.lstrip("-").replace("_", "-").split("-")
     text = " ".join(w for w in words if w)
     return text[:1].upper() + text[1:]

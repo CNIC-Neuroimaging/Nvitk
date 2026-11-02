@@ -6,7 +6,7 @@ shows only the first line, and a per-label metrics table in the log is a wall of
 ``name: value`` that cannot be sorted, aligned or copied as a unit.
 
 This window takes the same payload the log line is built from and renders it as
-a table — one window per viewer, reused across runs, with a history of previous
+a table: one window per viewer, reused across runs, with a history of previous
 results so a second measurement does not destroy the one you were reading. The
 log line is still written; this is an addition, not a replacement.
 
@@ -18,7 +18,7 @@ Two payload shapes are supported, both flowing through :func:`show_results`:
     a matrix, rendered with one row per key and one column per metric.
 
 A result may come with an ``on_select`` callback: selecting a row calls it with
-that row's key (a branch, a frame…) so the viewer can show what the row is
+that row's key (a branch, a frame...) so the viewer can show what the row is
 about, and ``None`` when that should go (*Clear highlight*, another result, the
 window closing).
 
@@ -28,7 +28,27 @@ labels by*: pick a measured column and a colormap, and the layer's labels take
 the colour of their value (the range automatic or typed, a legend beside it;
 labels without a value turn grey), as the Meshlab panel colours a surface by a
 field. *Original colours* puts the label colours back as they were. Each label
-row carries a swatch of its label's colour.
+row carries a swatch of its label's colour. An ``on_colour`` callback colours
+more than the label layer (the surfaces of those labels, say) with the same
+values: it is called with ``(column, label id -> value, colormap, (lo, hi))``, and
+with ``(None, {}, colormap, None)`` when the labels take their own colours back.
+
+A result may also tint its rows (``row_colours``: row key -> colour, e.g. a lesion's confidence
+class) and bring its own controls (``controls``: a factory returning a widget shown above the
+table while that result is on screen, e.g. a filter of what the viewer shows).
+
+Every table has a search bar: *Find rows* keeps the rows whose cells contain every term typed
+(space-separated, case-insensitive) and *Find columns* the columns whose header contains any of the
+comma-separated terms (the key column always stays). Rows and columns are hidden, not removed, so
+sorting, row tints, the viewer highlight and *Colour labels by* keep working; the filter is kept
+when another result is shown.
+
+The window is an nvitk panel (``nvitk:results``) with the panels' title bar: ⧉ docks it in the
+main window with the other panels or pops it out again, ⛶ fills the screen, ✕ closes it, and the
+panel manager moves it into any panel window (:mod:`nvitk.gui.core.workspace`), where it is
+remembered across sessions. It opens as a window of its own; once docked it stays docked while it
+is open. Closed, it comes back (a pop-up again) with the next result or the *Results* button
+(:func:`results_button`, on the Imaging panel's title bar).
 """
 
 from __future__ import annotations
@@ -36,21 +56,23 @@ from __future__ import annotations
 import weakref
 from typing import Any, Callable, Mapping, Sequence
 
-from qtpy.QtCore import Qt
-from qtpy.QtGui import QColor, QIcon, QImage, QPixmap
+from qtpy.QtCore import QEvent, QObject, Qt, QTimer
+from qtpy.QtGui import QBrush, QColor, QIcon, QImage, QPixmap
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QCheckBox,
     QComboBox,
-    QDialog,
+    QDockWidget,
     QDoubleSpinBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -59,13 +81,16 @@ from nvitk.gui.core.design import (
     COLOR_ACCENT,
     COLOR_MUTED,
     SPACE_TIGHT,
-    apply_theme,
+    bar_tool_button,
     fmt_number,
     mono_font,
 )
 
 #: Kept on the viewer so a second measurement re-uses the window.
 _WINDOW_ATTR = "_nvitk_results_window"
+#: The Results panel's dock name: what a saved layout knows it by.
+RESULTS_DOCK_NAME = "nvitk:results"
+RESULTS_TITLE = "Results"
 
 #: How many past results stay in the picker before the oldest is dropped.
 _HISTORY_LIMIT = 25
@@ -151,8 +176,16 @@ class _Result:
         on_select: Callable[[str | None], None] | None = None,
         label_layer: Any = None,
         row_labels: Mapping[Any, int] | None = None,
+        on_colour: Callable[..., None] | None = None,
+        row_colours: Mapping[Any, Any] | None = None,
+        controls: Callable[[], QWidget] | None = None,
     ) -> None:
         self.title = title
+        self.on_colour = on_colour
+        #: Row key -> tint of that row (any colour Qt understands, or RGB(A) floats).
+        self.row_colours = {str(k): v for k, v in dict(row_colours or {}).items()}
+        #: Builds the widget shown above the table while this result is displayed.
+        self.controls = controls
         self.payload = dict(payload)
         self.subtitle = subtitle
         self.row_header = row_header
@@ -187,7 +220,7 @@ class _Result:
         return out
 
     def label_values(self, column: str) -> dict[int, float]:
-        """Label id → its value in *column* (the first row of a label measured twice)."""
+        """Label id -> its value in *column* (the first row of a label measured twice)."""
         out: dict[int, float] = {}
         for key, lid in self.row_labels.items():
             row = self.payload.get(key, self.payload.get(_int_key(key), {}))
@@ -236,19 +269,17 @@ class _Result:
         return columns
 
 
-class ResultsWindow(QDialog):
-    """A reusable table view for measurement output."""
+class ResultsWindow(QWidget):
+    """A reusable table view for measurement output (the Results panel's contents)."""
 
     def __init__(self, parent: Any = None) -> None:
         """Build the table and its toolbar."""
         super().__init__(parent)
-        self.setWindowTitle("Results")
-        self.setMinimumSize(560, 340)
-        # Roomy enough for a per-label overlap table (a handful of rows, a dozen
-        # metric columns) without the user having to resize it on every launch.
-        self.resize(900, 460)
-        # Modeless: results are read while carrying on with the viewer.
-        self.setModal(False)
+        self.setWindowTitle(RESULTS_TITLE)
+        # Small enough to sit in the panel sidebar when docked there; wide tables scroll.
+        self.setMinimumSize(280, 200)
+        #: The dock holding this window (see :func:`results_dock`).
+        self.dock: QDockWidget | None = None
 
         self._results: list[_Result] = []
         self._shown: _Result | None = None
@@ -267,6 +298,15 @@ class ResultsWindow(QDialog):
         copy_button = QPushButton("Copy")
         copy_button.setToolTip("Copy this result to the clipboard as text")
         copy_button.clicked.connect(self._copy)
+
+        export_button = QPushButton("Export…")
+        export_button.setToolTip("Save the displayed table (the rows and columns the filters show, "
+                                 "in their sorted order) as an Excel workbook or a CSV file")
+        export_button.clicked.connect(self._export)
+
+        clear_all_button = QPushButton("Clear all")
+        clear_all_button.setToolTip("Remove every table from the results window (the history empties)")
+        clear_all_button.clicked.connect(self.clear_results)
 
         self._clear_highlight = QPushButton("Clear highlight")
         self._clear_highlight.setToolTip("Stop showing the selected row in the viewer")
@@ -289,6 +329,11 @@ class ResultsWindow(QDialog):
         #: Set by :func:`results_window`: Image masks are turned into Labels to be coloured.
         self._viewer: Any = None
         self._colour_row = self._build_colour_row()
+        # The shown result's own controls (``_Result.controls``), rebuilt on every _show.
+        self._controls_box = QWidget()
+        self._controls_layout = QVBoxLayout(self._controls_box)
+        self._controls_layout.setContentsMargins(0, 0, 0, 0)
+        self._controls_box.setVisible(False)
 
         toolbar = QHBoxLayout()
         toolbar.setSpacing(SPACE_TIGHT)
@@ -296,15 +341,73 @@ class ResultsWindow(QDialog):
         toolbar.addWidget(self._history, stretch=1)
         toolbar.addWidget(self._clear_highlight)
         toolbar.addWidget(copy_button)
+        toolbar.addWidget(export_button)
+        toolbar.addWidget(clear_all_button)
 
         root = QVBoxLayout(self)
         root.setSpacing(SPACE_TIGHT)
         root.addWidget(self._heading)
         root.addWidget(self._subtitle)
         root.addLayout(toolbar)
+        root.addLayout(self._build_filter_row())
         root.addWidget(self._colour_row)
+        root.addWidget(self._controls_box)
         root.addWidget(self._table, stretch=1)
         root.addWidget(self._note)
+
+    def _build_filter_row(self) -> QHBoxLayout:
+        """*Find rows* / *Find columns*: hide what does not match (see the module docstring)."""
+        self._row_filter = QLineEdit()
+        self._row_filter.setPlaceholderText("Find rows…")
+        self._row_filter.setClearButtonEnabled(True)
+        self._row_filter.setToolTip("Keep the rows whose cells contain every term (space-separated).")
+        self._col_filter = QLineEdit()
+        self._col_filter.setPlaceholderText("Find columns… (comma-separated)")
+        self._col_filter.setClearButtonEnabled(True)
+        self._col_filter.setToolTip("Keep the columns whose header contains any of the terms (comma-separated); "
+                                    "the first column always stays.")
+        self._filter_count = QLabel("")
+        self._filter_count.setStyleSheet(f"color: {COLOR_MUTED};")
+        for field in (self._row_filter, self._col_filter):
+            field.textChanged.connect(lambda _t: self._apply_filters())
+        # Sorting reorders the rows under the hidden-row flags: filter again once it is done.
+        self._table.horizontalHeader().sortIndicatorChanged.connect(
+            lambda *_a: QTimer.singleShot(0, self._apply_filters))
+        row = QHBoxLayout()
+        row.setSpacing(SPACE_TIGHT)
+        row.addWidget(self._row_filter, stretch=1)
+        row.addWidget(self._col_filter, stretch=1)
+        row.addWidget(self._filter_count)
+        return row
+
+    def _apply_filters(self) -> None:
+        """Hide the rows and columns that do not match the search fields."""
+        table = self._table
+        n_rows, n_cols = table.rowCount(), table.columnCount()
+        row_terms = [t for t in self._row_filter.text().lower().split() if t]
+        col_terms = [t.strip() for t in self._col_filter.text().lower().split(",") if t.strip()]
+        matrix = self._shown is not None and _is_matrix(self._shown.payload)
+        self._col_filter.setVisible(matrix)
+        if not matrix:
+            col_terms = []
+        shown_cols = 0
+        for c in range(n_cols):
+            header = table.horizontalHeaderItem(c)
+            name = header.text().lower() if header is not None else ""
+            hide = bool(col_terms) and c > 0 and not any(t in name for t in col_terms)
+            table.setColumnHidden(c, hide)
+            shown_cols += not hide
+        shown_rows = 0
+        for r in range(n_rows):
+            text = " ".join(table.item(r, c).text().lower() for c in range(n_cols) if table.item(r, c) is not None)
+            hide = bool(row_terms) and not all(t in text for t in row_terms)
+            table.setRowHidden(r, hide)
+            shown_rows += not hide
+        if row_terms or col_terms:
+            self._filter_count.setText(f"{shown_rows} / {n_rows} rows"
+                                       + (f" · {shown_cols} / {n_cols} columns" if matrix else ""))
+        else:
+            self._filter_count.setText("")
 
     def _build_colour_row(self) -> QWidget:
         """*Colour labels by*: a measured column, a colormap, the range, a legend."""
@@ -446,13 +549,14 @@ class ResultsWindow(QDialog):
                     restore_label_color_state(layer, original)
                     self._colour_status.setText(f"“{layer.name}”: its own label colours again.")
                 self._row_swatches(result)
+                self._colour_others(result, None, {}, colormap, None)
                 return
             values = result.label_values(column)
             if layer not in _ORIGINAL_COLOURS:
                 _ORIGINAL_COLOURS[layer] = label_color_state(layer)
             limits = None if auto else (self._colour_lo.value(), self._colour_hi.value())
             lo, hi = apply_label_value_colors(layer, values, colormap, limits=limits)
-        except Exception as exc:  # noqa: BLE001 — a colouring must never break the window
+        except Exception as exc:  # noqa: BLE001 (a colouring must never break the window)
             self._colour_status.setText(f"Could not colour the labels: {exc}")
             return
         result.colour["limits"] = (lo, hi)
@@ -469,6 +573,17 @@ class ResultsWindow(QDialog):
             + (f"; {missing} without a value in grey." if missing else ".")
         )
         self._row_swatches(result)
+        self._colour_others(result, column, values, colormap, (lo, hi))
+
+    def _colour_others(self, result: _Result, column: str | None, values: dict[int, float], colormap: str,
+                       limits: tuple[float, float] | None) -> None:
+        """Pass the colouring on to the result's ``on_colour`` (surfaces of the same labels...)."""
+        if result.on_colour is None:
+            return
+        try:
+            result.on_colour(column, values, colormap, limits)
+        except Exception as exc:  # noqa: BLE001 (the label colouring already happened)
+            self._colour_status.setText(f"{self._colour_status.text()} (Surfaces not coloured: {exc})")
 
     def _row_swatches(self, result: _Result) -> None:
         """A swatch of each label row's current label colour, beside its key."""
@@ -486,6 +601,44 @@ class ResultsWindow(QDialog):
             except Exception:  # noqa: BLE001
                 continue
 
+    def _tint_rows(self, result: _Result) -> None:
+        """Give each row the tint its result asks for (``row_colours``)."""
+        if not result.row_colours:
+            return
+        for row in range(self._table.rowCount()):
+            key_item = self._table.item(row, 0)
+            colour = result.row_colours.get(key_item.text()) if key_item is not None else None
+            if colour is None:
+                continue
+            brush = QBrush(_tint(colour))
+            for col in range(self._table.columnCount()):
+                item = self._table.item(row, col)
+                if item is not None:
+                    item.setBackground(brush)
+
+    def _drop_controls(self) -> None:
+        """Remove the shown result's own controls."""
+        while self._controls_layout.count():
+            widget = self._controls_layout.takeAt(0).widget()
+            if widget is not None:
+                widget.hide()  # before un-parenting, or Qt shows it as a stray top-level window
+                widget.setParent(None)
+                widget.deleteLater()
+        self._controls_box.setVisible(False)
+
+    def _show_controls(self, result: _Result) -> None:
+        """Swap in the shown result's own controls (or none)."""
+        self._drop_controls()
+        widget = None
+        if result.controls is not None:
+            try:
+                widget = result.controls()
+            except Exception as exc:  # noqa: BLE001 (a broken control must not hide the table)
+                widget = QLabel(f"Controls unavailable: {exc}")
+        if widget is not None:
+            self._controls_layout.addWidget(widget)
+        self._controls_box.setVisible(widget is not None)
+
     def add_result(
         self,
         title: str,
@@ -497,15 +650,20 @@ class ResultsWindow(QDialog):
         on_select: Callable[[str | None], None] | None = None,
         label_layer: Any = None,
         row_labels: Mapping[Any, int] | None = None,
+        on_colour: Callable[..., None] | None = None,
+        row_colours: Mapping[Any, Any] | None = None,
+        controls: Callable[[], QWidget] | None = None,
     ) -> None:
         """Show *payload* and keep the previous results in the history picker.
 
-        With *label_layer* and *row_labels* (row key → label id), the labels can be
-        coloured by any measured column."""
+        With *label_layer* and *row_labels* (row key -> label id), the labels can be
+        coloured by any measured column; *on_colour* passes that colouring on.
+        *row_colours* tints rows; *controls* builds a widget shown above the table."""
         if on_select is not None and not note:
             note = "Click a row to show it in the viewer."
         result = _Result(title, payload, subtitle=subtitle, row_header=row_header, note=note, on_select=on_select,
-                         label_layer=label_layer, row_labels=row_labels)
+                         label_layer=label_layer, row_labels=row_labels, on_colour=on_colour,
+                         row_colours=row_colours, controls=controls)
         self._results.insert(0, result)
         del self._results[_HISTORY_LIMIT:]
         # Repopulating fires currentIndexChanged; suppress it so rebuilding the
@@ -516,6 +674,26 @@ class ResultsWindow(QDialog):
         self._history.setCurrentIndex(0)
         self._history.blockSignals(False)
         self._show(result)
+
+    def clear_results(self) -> None:
+        """Drop every result: the history empties and the window shows no table."""
+        if self._shown is not None:
+            self._notify_row(self._shown, None)  # stop any highlight in the viewer
+        self._results.clear()
+        self._shown = None
+        self._history.blockSignals(True)
+        self._history.clear()
+        self._history.blockSignals(False)
+        self._heading.setText("")
+        self._subtitle.setVisible(False)
+        self._note.setVisible(False)
+        self._clear_highlight.setVisible(False)
+        self._colour_row.setVisible(False)
+        self._table.clear()
+        self._table.setRowCount(0)
+        self._table.setColumnCount(0)
+        self._drop_controls()
+        self._filter_count.setText("")
 
     def current_text(self) -> str:
         """The displayed result as plain text."""
@@ -535,13 +713,27 @@ class ResultsWindow(QDialog):
         if clipboard is not None:
             clipboard.setText(self.current_text())
 
+    def table_frame(self) -> Any:
+        """The displayed table as a DataFrame (:func:`~nvitk.gui.viz.table_export.visible_table_frame`)."""
+        from nvitk.gui.viz.table_export import visible_table_frame
+
+        return visible_table_frame(self._table, self._shown.payload if self._shown is not None else {})
+
+    def _export(self) -> None:
+        """Save the displayed table where the user picks (:func:`~nvitk.gui.viz.table_export.export_dialog`)."""
+        from nvitk.gui.viz.table_export import export_dialog
+
+        if self._shown is not None and (out := export_dialog(self, self.table_frame(), self._shown.title)):
+            self._note.setText(f"Saved to {out}")
+            self._note.setVisible(True)
+
     def _notify_row(self, result: _Result | None, key: str | None) -> None:
         """Tell *result*'s owner which row is selected (``None``: none)."""
         if result is None or result.on_select is None:
             return
         try:
             result.on_select(key)
-        except Exception:  # noqa: BLE001 — a highlight must never break the window
+        except Exception:  # noqa: BLE001 (a highlight must never break the window)
             pass
 
     def _on_row_selected(self) -> None:
@@ -560,10 +752,9 @@ class ResultsWindow(QDialog):
         self._filling = False
         self._notify_row(self._shown, None)
 
-    def hideEvent(self, event: Any) -> None:  # noqa: N802 — Qt naming
-        """A closed window leaves nothing highlighted."""
+    def panel_closed(self) -> None:
+        """A closed window leaves nothing highlighted (tabbed away, it keeps its highlight)."""
         self._notify_row(self._shown, None)
-        super().hideEvent(event)
 
     def _show(self, result: _Result) -> None:
         """Lay *result* out in the table."""
@@ -572,7 +763,6 @@ class ResultsWindow(QDialog):
         self._shown = result
         self._clear_highlight.setVisible(result.on_select is not None)
         self._filling = True
-        self.setWindowTitle(result.title or "Results")
         self._heading.setText(result.title)
         self._subtitle.setText(result.subtitle)
         self._subtitle.setVisible(bool(result.subtitle))
@@ -598,7 +788,9 @@ class ResultsWindow(QDialog):
             for row, (key, value) in enumerate(result.payload.items()):
                 self._table.setItem(row, 0, _item(str(key), align_left=True))
                 self._table.setItem(row, 1, _item(_format_value(value, key)))
+        self._tint_rows(result)
         self._table.setSortingEnabled(True)
+        self._show_controls(result)
 
         # Sized to content, not stretched to fill: a 13-column metrics table
         # divided equally leaves every cell too narrow and elides the digits,
@@ -610,6 +802,18 @@ class ResultsWindow(QDialog):
         self._filling = False
         self._sync_colour_row(result)
         self._row_swatches(result)
+        self._apply_filters()
+
+
+def _tint(colour: Any) -> QColor:
+    """*colour* (a name / hex, or RGB(A) floats) as a translucent row tint."""
+    if isinstance(colour, (tuple, list)):
+        r, g, b = (max(0.0, min(1.0, float(c))) for c in list(colour)[:3])
+        qc = QColor.fromRgbF(r, g, b)
+    else:
+        qc = QColor(str(colour))
+    qc.setAlpha(90)
+    return qc
 
 
 def _item(text: str, *, align_left: bool = False) -> QTableWidgetItem:
@@ -621,35 +825,139 @@ def _item(text: str, *, align_left: bool = False) -> QTableWidgetItem:
     return item
 
 
-def results_window(viewer: Any) -> ResultsWindow | None:
-    """The viewer's results window, created on first use.
+class _PanelCloseWatcher(QObject):
+    """The Results dock being closed (✕, the Panels menu, its window): drop the highlight, and
+    hide the panel window it popped out into when nothing else is open there."""
 
-    ``None`` when no Qt application is running — a headless call site should get
-    the log line and nothing else rather than an exception.
+    def __init__(self, window: ResultsWindow, viewer: Any) -> None:
+        super().__init__(window)
+        self._window = window
+        self._viewer = viewer
+
+    def eventFilter(self, obj: Any, event: Any) -> bool:  # noqa: N802 (Qt naming)
+        if event.type() == QEvent.Type.Close:
+            self._window.panel_closed()
+            QTimer.singleShot(0, self._hide_empty_window)
+        return False
+
+    def _hide_empty_window(self) -> None:
+        manager = _panel_manager(self._viewer)
+        dock = self._window.dock
+        if manager is None or dock is None or not dock.isHidden():
+            return
+        home = manager.window_of(dock)
+        if home is not None and not any(not d.isHidden() for d in manager.docks_in(home)):
+            home.hide()
+
+
+def _panel_manager(viewer: Any) -> Any:
+    return getattr(viewer, "_nvitk_panel_manager", None)
+
+
+def _main_window(viewer: Any) -> Any:
+    try:
+        return viewer.window._qt_window
+    except Exception:  # noqa: BLE001 (a viewer without Qt window)
+        return None
+
+
+def results_dock(viewer: Any) -> QDockWidget | None:
+    """The viewer's Results panel (dock + :class:`ResultsWindow`), created closed on first use.
+
+    It is added, hidden, to the main window's right edge, so the panel manager can move it like
+    any panel and a saved layout can put it back: the app creates it before restoring the layout.
+    ``None`` when no Qt application is running.
     """
     if QApplication.instance() is None:
         return None
     window = getattr(viewer, _WINDOW_ATTR, None)
     if window is not None:
         try:
-            window.isVisible()  # a window closed by Qt leaves a dead wrapper
+            window.isVisible()  # a window deleted by Qt leaves a dead wrapper
+            if window.dock is not None:
+                window.dock.isHidden()
+                return window.dock
         except RuntimeError:
             window = None
-    if window is None:
-        parent = None
-        try:
-            parent = viewer.window._qt_window
-        except Exception:  # noqa: BLE001 — a parentless dialog still works
-            parent = None
-        window = ResultsWindow(parent)
-        window._viewer = viewer
-        apply_theme(window)
-        try:
-            setattr(viewer, _WINDOW_ATTR, window)
-        except Exception:  # noqa: BLE001 — a viewer that rejects attributes just
-            # gets a fresh window each time, which still shows the result.
-            pass
-    return window
+    from nvitk.gui.core.workspace import make_panel_dock
+
+    window = ResultsWindow()
+    window._viewer = viewer
+    dock = make_panel_dock(viewer, window, object_name=RESULTS_DOCK_NAME, title=RESULTS_TITLE)
+    window.dock = dock
+    dock.installEventFilter(_PanelCloseWatcher(window, viewer))
+    # Closing its own pop-up window closes it (it reopens on demand) rather than docking it in
+    # the main window, as other panels' windows do.
+    dock._nvitk_close_with_window = True
+    dock._nvitk_open = lambda: open_results(viewer)
+    main = _main_window(viewer)
+    if main is not None:
+        main.addDockWidget(Qt.RightDockWidgetArea, dock)
+    dock.hide()
+    manager = _panel_manager(viewer)
+    if manager is not None:
+        manager.watch_dock(dock)
+    try:
+        setattr(viewer, _WINDOW_ATTR, window)
+    except Exception:  # noqa: BLE001 (a viewer that rejects attributes just)
+        # gets a fresh window each time, which still shows the result.
+        pass
+    return dock
+
+
+def results_window(viewer: Any) -> ResultsWindow | None:
+    """The viewer's results window (the Results panel's contents), created on first use.
+
+    ``None`` when no Qt application is running: a headless call site should get
+    the log line and nothing else rather than an exception.
+    """
+    dock = results_dock(viewer)
+    return None if dock is None else dock.widget()
+
+
+def open_results(viewer: Any) -> ResultsWindow | None:
+    """Bring the Results panel on screen: where it is when open (docked or in a window), raised;
+    closed, in the window it was closed in, or (docked or never shown) a window of its own."""
+    dock = results_dock(viewer)
+    if dock is None:
+        return None
+    manager = _panel_manager(viewer)
+    home = manager.window_of(dock) if manager is not None else None
+    if home is not None:
+        home.show()
+        dock.show()
+        dock.raise_()
+        home.raise_()
+        manager._tab_timer.start()
+    elif not dock.isHidden():
+        dock.raise_()  # its tab, or its floating window
+    elif manager is not None:
+        manager.pop_out(dock)
+    else:
+        _float_alone(viewer, dock)
+    return dock.widget()
+
+
+def _float_alone(viewer: Any, dock: QDockWidget) -> None:
+    """Without a panel manager: a floating window over the viewer, sized for a metrics table."""
+    dock.setFloating(True)
+    dock.resize(900, 460)
+    main = _main_window(viewer)
+    if main is not None:
+        centre = main.frameGeometry().center()
+        dock.move(centre.x() - 450, centre.y() - 230)
+    dock.show()
+    dock.raise_()
+
+
+def results_button(viewer: Any) -> QToolButton:
+    """A title-bar button that opens the Results window, after it was closed, too."""
+    button = bar_tool_button("nvitkResultsButton", min_width=78)
+    button.setText("▤  Results")
+    button.setToolTip("Show the Results window (the measurement tables): a window of its own, or "
+                      "wherever it was docked while open.")
+    button.clicked.connect(lambda: open_results(viewer))
+    return button
 
 
 def show_results(
@@ -663,15 +971,21 @@ def show_results(
     on_select: Callable[[str | None], None] | None = None,
     label_layer: Any = None,
     row_labels: Mapping[Any, int] | None = None,
+    on_colour: Callable[..., None] | None = None,
+    row_colours: Mapping[Any, Any] | None = None,
+    controls: Callable[[], QWidget] | None = None,
 ) -> str:
     """Show *payload* in the viewer's results window; return it as text.
 
     With *on_select*, selecting a row calls it with the row's key (and ``None``
-    when the highlight should go). With *label_layer* and *row_labels* (row key →
-    label id), the window offers to colour those labels by a measured column.
+    when the highlight should go). With *label_layer* and *row_labels* (row key ->
+    label id), the window offers to colour those labels by a measured column;
+    *on_colour* (see the module docstring) colours other layers along with them.
+    *row_colours* (row key -> colour) tints rows; *controls* builds a widget shown above the
+    table while this result is displayed.
 
     The text is returned rather than logged here so the caller keeps control of
-    the log — every measurement already writes one line, and this must not
+    the log: every measurement already writes one line, and this must not
     duplicate it.
     """
     text = _Result(title, payload, subtitle=subtitle, row_header=row_header, note=note).as_text()
@@ -679,10 +993,20 @@ def show_results(
     if window is None:
         return text
     window.add_result(title, payload, subtitle=subtitle, row_header=row_header, note=note, on_select=on_select,
-                      label_layer=label_layer, row_labels=row_labels)
-    window.show()
-    window.raise_()
+                      label_layer=label_layer, row_labels=row_labels, on_colour=on_colour,
+                      row_colours=row_colours, controls=controls)
+    open_results(viewer)
     return text
 
 
-__all__ = ["COUNT_METRICS", "VALUE_COLORMAPS", "ResultsWindow", "results_window", "show_results"]
+__all__ = [
+    "COUNT_METRICS",
+    "RESULTS_DOCK_NAME",
+    "VALUE_COLORMAPS",
+    "ResultsWindow",
+    "open_results",
+    "results_button",
+    "results_dock",
+    "results_window",
+    "show_results",
+]

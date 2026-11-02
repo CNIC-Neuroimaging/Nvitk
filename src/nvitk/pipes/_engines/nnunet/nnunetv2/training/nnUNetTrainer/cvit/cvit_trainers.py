@@ -1,14 +1,14 @@
 """CViT trainers: Convolutional Vision Transformers on nnU-Net's training engine.
 
 The network is :class:`nvitk.nn.cvit.CViT`, rebuilt from the plans file's ``arch_kwargs`` (a
-serialised ``CViTConfig``), so everything nnU-Net does around it — planning, preprocessing,
-augmentation, deep supervision, validation, sliding-window prediction — is unchanged.
+serialised ``CViTConfig``), so everything nnU-Net does around it (planning, preprocessing,
+augmentation, deep supervision, validation, sliding-window prediction) is unchanged.
 
 What these trainers change
 --------------------------
 Optimiser
     AdamW (betas 0.9/0.98, weight decay on matrices only) with a linear warm-up followed by
-    poly decay, gradient clipping at 1 — the transformer recipe of nnU-Net's Primus trainers.
+    poly decay, gradient clipping at 1: the transformer recipe of nnU-Net's Primus trainers.
     nnU-Net's own warm-up schedulers write one LR into every parameter group, which would erase
     layer-wise LR decay, so :class:`nvitk.nn.schedulers.WarmupPolyLR` multiplies by each
     group's ``lr_scale``.
@@ -64,9 +64,7 @@ from nvitk.segmentation.loss_registry import (
 CVIT_CLASS_NAMES = ("nvitk.nn.cvit.CViT", "nvitk.nn.cvit.model.CViT", "CViT")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Trainer
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class nnUNetTrainerCViT(nnUNetTrainer):
@@ -102,7 +100,7 @@ class nnUNetTrainerCViT(nnUNetTrainer):
         self._probe_batch: torch.Tensor | None = None
         self._tb_writer = None
 
-    # ---- network ---------------------------------------------------------------------------
+    # network
     @staticmethod
     def build_network_architecture(architecture_class_name, arch_init_kwargs, arch_init_kwargs_req_import,
                                    num_input_channels, num_output_channels,
@@ -112,7 +110,7 @@ class nnUNetTrainerCViT(nnUNetTrainer):
         Raises
         ------
         ValueError
-            If the plans file describes another architecture — a CViT trainer silently training
+            If the plans file describes another architecture: a CViT trainer silently training
             a ResEnc U-Net would mislabel every result.
         """
         if architecture_class_name not in CVIT_CLASS_NAMES:
@@ -157,7 +155,7 @@ class nnUNetTrainerCViT(nnUNetTrainer):
         scheduler = WarmupPolyLR(optimizer, self.initial_lr, self.num_epochs, self.warmup_epochs)
         return optimizer, scheduler
 
-    # ---- loss --------------------------------------------------------------------------------
+    # loss
     def _resolve_loss(self) -> tuple[str, dict]:
         return self.loss_name, dict(self.loss_config)
 
@@ -179,7 +177,7 @@ class nnUNetTrainerCViT(nnUNetTrainer):
         weights[-1] = 1e-6 if (self.is_ddp and not self._do_i_compile()) else 0
         return DeepSupervisionWrapper(loss, weights / weights.sum())
 
-    # ---- mirroring -------------------------------------------------------------------------
+    # mirroring
     def configure_rotation_dummyDA_mirroring_and_inital_patch_size(self):
         rotation, dummy_2d, initial_patch_size, mirror_axes = \
             super().configure_rotation_dummyDA_mirroring_and_inital_patch_size()
@@ -188,7 +186,7 @@ class nnUNetTrainerCViT(nnUNetTrainer):
             mirror_axes = None
         return rotation, dummy_2d, initial_patch_size, mirror_axes
 
-    # ---- epoch hooks -----------------------------------------------------------------------
+    # epoch hooks
     def set_deep_supervision_enabled(self, enabled: bool):
         _unwrap(self.network).decoder.deep_supervision = bool(enabled) and self.enable_deep_supervision
 
@@ -236,7 +234,7 @@ class nnUNetTrainerCViT(nnUNetTrainer):
                 self.print_to_log_file(f"Attention probe failed (training continues): {exc!r}")
         super().on_epoch_end()
 
-    # ---- attention probe -------------------------------------------------------------------
+    # attention probe
     def _log_probe(self) -> None:
         if self._probe_batch is None:
             batch = next(self.dataloader_val)

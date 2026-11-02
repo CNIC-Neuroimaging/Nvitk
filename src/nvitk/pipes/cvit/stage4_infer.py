@@ -1,9 +1,9 @@
 """
-CViT stage 4 — predict new cases with a trained (or exported) CViT.
+CViT stage 4: predict new cases with a trained (or exported) CViT.
 
 Description
 -----------
-Inputs are a folder (or files) of volumes. nnU-Net-named inputs (``<case>_0000.nii.gz`` …) are
+Inputs are a folder (or files) of volumes. nnU-Net-named inputs (``<case>_0000.nii.gz`` ...) are
 used as they are; plain single-channel files (``<case>.nii.gz``) are staged as
 ``<case>_0000.nii.gz`` symlinks. Prediction is nnU-Net's: Gaussian-weighted sliding window,
 mirroring test-time augmentation (unless the model disabled it or ``--disable-tta``), fold
@@ -12,7 +12,7 @@ ensembling, and export resampled back onto each input's own grid.
 Geometry checks
 ---------------
 Every output is re-read with :func:`nvitk.io.imread` and compared with its input: same shape and
-same affine (``allclose``), otherwise the run fails — a mask on the wrong grid is worse than no
+same affine (``allclose``), otherwise the run fails; a mask on the wrong grid is worse than no
 mask. Empty predictions are warned about.
 
 Post-processing
@@ -66,9 +66,7 @@ from nvitk.pipes.cvit.util.sge_stage import (
 setup(globals())
 log = Logger()
 
-# ---------------------------------------------------------------------------
 # Input staging
-# ---------------------------------------------------------------------------
 
 
 def stage_inputs(inputs: Sequence[Path], staging: Path, n_channels: int,
@@ -76,7 +74,7 @@ def stage_inputs(inputs: Sequence[Path], staging: Path, n_channels: int,
     """Map input files to ``{case: [channel paths]}``, staged as ``<case>_000N<file_ending>``.
 
     Files already in the model's format are symlinked; others are converted with
-    :func:`nvitk.io.imsave` (voxels and geometry) — nnU-Net silently skips any other extension.
+    :func:`nvitk.io.imsave` (voxels and geometry): nnU-Net silently skips any other extension.
 
     Raises
     ------
@@ -120,9 +118,7 @@ def stage_inputs(inputs: Sequence[Path], staging: Path, n_channels: int,
     return out
 
 
-# ---------------------------------------------------------------------------
 # Post-processing + checks
-# ---------------------------------------------------------------------------
 
 
 def keep_largest_component(seg) -> Any:
@@ -165,9 +161,7 @@ def check_and_postprocess(cases: dict[str, list[Path]], out_dir: Path, *, larges
     return report
 
 
-# ---------------------------------------------------------------------------
 # Library entry point
-# ---------------------------------------------------------------------------
 
 
 def resolve_model_dir(paths: CViTPaths, *, model_dir: Path | None, dataset_id: int, dataset_name: str,
@@ -226,9 +220,7 @@ def run_infer(
     return out
 
 
-# ---------------------------------------------------------------------------
 # SGE + CLI
-# ---------------------------------------------------------------------------
 
 
 def _worker_argv(paths: CViTPaths, **o: Any) -> list[str]:

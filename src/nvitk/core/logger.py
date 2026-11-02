@@ -7,9 +7,7 @@ only (disabled in Jupyter). The :class:`Logger` is a process-wide singleton.
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 
 import logging
 import inspect
@@ -35,9 +33,7 @@ except ImportError:
     get_ipython = None
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Environment & helpers
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def in_notebook() -> bool:
@@ -62,9 +58,7 @@ def _strip_ansi(text: str) -> str:
     return _ANSI_ESCAPE_RE.sub("", text)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Console formatting
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class _AnsiLevelFormatter(logging.Formatter):
@@ -91,9 +85,7 @@ class _AnsiLevelFormatter(logging.Formatter):
         return f"{asctime} | {colored_level} | {msg}"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Logger
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class Logger(metaclass=Singleton):
@@ -298,7 +290,7 @@ class Logger(metaclass=Singleton):
         err_level: str = "ERROR"
     ) -> tuple[logging.FileHandler, logging.FileHandler]:
         """
-        Create ``{script_name}.log`` (all messages ≥ *log_level*) and ``{script_name}.err`` (≥ *err_level*).
+        Create ``{script_name}.log`` (all messages >= *log_level*) and ``{script_name}.err`` (>= *err_level*).
 
         Parameters
         ----------
@@ -553,9 +545,7 @@ class Logger(metaclass=Singleton):
         return self.__repr__()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Pipeline run tracking (subjects × stages, log-only)
-# ──────────────────────────────────────────────────────────────────────────────
 
 _COHORT_STAGES = frozenset({"stage0_d"})
 

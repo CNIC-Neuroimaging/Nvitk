@@ -1,4 +1,4 @@
-"""``nvitk-restore`` CLI — restoration tools (bilateral, N4, MRI super-resolution)."""
+"""``nvitk-restore`` CLI: restoration tools (bilateral, N4, MRI super-resolution)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Publish qvtpy stage-6 measurements into ``image_measurements`` (pipeline ``4dflow_v3``).
+"""Publish qvtpy stage-6 measurements into ``image_measurements`` (pipeline ``4dflow_v4``).
 
 Scans an ``--output-root`` for subjects with stage-6 CSV outputs and upserts them into
 the DB. Use ``--from-sge`` to fetch ``loc_measurements.csv`` over sshfs and

@@ -104,7 +104,7 @@ def fnr(label_true: Any, label_pred: Any) -> float:
 
 
 def volume_similarity(label_true: Any, label_pred: Any) -> float:
-    """Relative volume difference ``|n_pred − n_true| / n_true`` (0 = identical volumes)."""
+    """Relative volume difference ``|n_pred - n_true| / n_true`` (0 = identical volumes)."""
     c = confusion_counts(label_true, label_pred)
     n_true = c["TP"] + c["FN"]
     n_pred = c["TP"] + c["FP"]
@@ -116,7 +116,7 @@ def volsim(label_true: Any, label_pred: Any) -> float:
 
     Bounded in ``[0, 1]``, 1.0 for identical volumes. Distinct from
     :func:`volume_similarity` in this module, which is a relative volume
-    *difference* (0 = identical, unbounded above) — check which one you want.
+    *difference* (0 = identical, unbounded above): check which one you want.
 
     Deliberately blind to overlap: two masks of equal size score 1.0 even when
     disjoint. It answers "is the volume right?", not "is it in the right place",
@@ -133,7 +133,7 @@ def mcc(label_true: Any, label_pred: Any) -> float:
     """Matthews correlation coefficient, in ``[-1, 1]``; 0.0 is chance agreement.
 
     A correlation over the whole confusion matrix, so unlike Dice it also has to
-    get the true negatives right — which is what makes it informative on a mask
+    get the true negatives right, which is what makes it informative on a mask
     that is mostly background. Returns 0.0 where it is undefined (an all-one or
     all-zero mask leaves a row or column of the matrix empty).
     """
@@ -279,7 +279,7 @@ def multilabel_metrics(
         ``{label_id: {metric: value}}``, each label scored one-vs-rest against
         *the same label id* in the other map.
     ``macro``
-        The unweighted mean of each metric across labels — every structure counts
+        The unweighted mean of each metric across labels: every structure counts
         the same regardless of size, which is usually what you want when a few
         large labels would otherwise drown out the small ones.
     ``foreground``

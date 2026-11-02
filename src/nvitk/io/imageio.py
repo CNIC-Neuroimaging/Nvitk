@@ -38,9 +38,7 @@ _WRITERS = {
 }
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Load / save
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def imread(
@@ -61,7 +59,7 @@ def imread(
     axes
         If set, reorder reader output to this axis string (reader-dependent).
     force_type
-        Skip extension sniffing: ``nifti``, ``dicom``, ``tiff``, ``mha``, ``pil``, ``nd2``, ``b2nd``, …
+        Skip extension sniffing: ``nifti``, ``dicom``, ``tiff``, ``mha``, ``pil``, ``nd2``, ``b2nd``, ...
     backend
         ``numpy`` or ``cupy`` for the returned :class:`~nvitk.types.image.Image` array.
     **kwargs
@@ -140,9 +138,7 @@ def imsave(
     writer(str(path), data, axes=axes, metadata=merged_meta, **kwargs)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Axis helpers
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def swapaxes(
@@ -167,9 +163,7 @@ def swapaxes(
     return out, meta
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Visualization (matplotlib)
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _parse_index_token(index: Any, axis: int) -> str | None:
@@ -298,18 +292,17 @@ def imshow(
     from matplotlib.gridspec import GridSpec
     import math
 
-    # 1. Data Prep
     data = image.data if hasattr(image, "data") else image
     arr = to_numpy(data)
 
-    # Handle default axis if None
+    # Default slicing axis: the Z axis when the image names its axes, else axis 2.
     if axis is None:
         if hasattr(image, 'axes') and 'Z' in image.axes:
             axis = image.axes.index('Z')
         else:
             axis = 2
 
-    # 2. Setup Dimensions
+    # Map the display name onto the spatial layout used for the figure.
     spatial_mode = display
     if display is None and arr.ndim == 3: spatial_mode = "orthogonal"
     elif display is None: spatial_mode = "standard"
@@ -326,7 +319,7 @@ def imshow(
         if spatial_mode in ("orth", "orthogonal", "mosaic"):
             spatial_mode = "standard"
 
-    # 3. Temporal vs Spatial separation
+    # For animations the first frame (or the whole 3D stack) sets up the figure.
     if display == "animation":
         if arr.ndim == 4:
             num_frames = arr.shape[t_axis]
@@ -345,15 +338,14 @@ def imshow(
         kwargs["cmap"] = "gray"
 
     def resolve_index(idx, max_len):
-        """Resolve an index token: ``\"mid\"`` → the middle slice, else pass *idx* through unchanged."""
+        """Resolve an index token: ``\"mid\"`` -> the middle slice, else pass *idx* through unchanged."""
         if idx == "mid": return max_len // 2
         return idx
 
     handles = []
     fig = None
 
-    # --- BLOCK: FIGURE SETUP ---    
-    # CASE: MOSAIC
+    # Mosaic: one panel per slice along *axis*.
     if spatial_mode == "mosaic":
         max_slices = spatial_arr.shape[axis]
         start = resolve_index(mosaic_init, max_slices)
@@ -372,7 +364,7 @@ def imshow(
             axes[i].axis("off")
         for j in range(num_slices, len(axes)): axes[j].axis("off")
 
-    # CASE: ORTHOGONAL
+    # Orthogonal: main view plus the two linked views sharing its axes.
     elif spatial_mode in ("orth", "orthogonal"):
         if spatial_arr.ndim != 3:
             if arr.ndim == 4:
@@ -411,7 +403,7 @@ def imshow(
         handles.append(ax_right.imshow(right_v, aspect='auto', **kwargs))
         for a in [ax_main, ax_top, ax_right]: a.axis("off")
 
-    # CASE: STANDARD (2D, slice, projection, or RGB)
+    # Single panel: 2D input, one slice, a projection or an RGB view.
     else:
         vol_work = spatial_arr
         if vol_work.ndim == 4 and display != "animation":
@@ -426,7 +418,7 @@ def imshow(
         handles = [ax.imshow(view, **im_kw)]
         ax.axis("off")
 
-    # --- BLOCK: ANIMATION EXECUTION ---
+    # Animation: redraw the views frame by frame.
     if display == "animation":
         def update(frame):
             """Matplotlib ``FuncAnimation`` callback: redraw the view(s) for the given time *frame*."""
@@ -439,7 +431,7 @@ def imshow(
                 for i, s_idx in enumerate(slice_indices):
                     handles[i].set_data(vol.take(indices=s_idx, axis=axis))
             elif spatial_mode in ("orth", "orthogonal"):
-                # If animating a 3D array, update the current orth slice dynamically
+                # A 3D stack animates through its slices: move the orthogonal cut.
                 if arr.ndim == 3:
                     indices[axis] = frame
                 t_v, m_v, r_v = get_orth_slices(vol)
@@ -447,7 +439,6 @@ def imshow(
                 handles[1].set_data(m_v)
                 handles[2].set_data(r_v)
             else:
-                # Standard update (slice, projection, or RGB per frame)
                 up_view = vol
                 tok = _parse_index_token(index, axis)
                 if vol.ndim == 3 and (_is_projection_token(tok) or tok == "rgb"):
@@ -478,9 +469,7 @@ def imshow(
     return handles
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Format conversion
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def convert_image(

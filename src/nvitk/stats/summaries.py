@@ -5,7 +5,7 @@ Description
 -----------
 The question "what is the mean flow per territory, and how variable is it?" comes up constantly, and
 answering it currently means exporting the whole frame and pivoting it in a spreadsheet. This module
-is that table: one row per group, the statistics a methods section actually reports, computed once
+is that table: one row per group, the statistics a methods section reports, computed once
 and identically whether they are read on screen or written to Excel.
 
 What is reported, and why
@@ -19,7 +19,7 @@ Statistic          Why it is here
 ``median`` / ``q1`` / ``q3`` / ``iqr``  What to report instead when the distribution is skewed.
 ``min`` / ``max``  Where to look for the segmentation failures.
 ``cv``             Scale-free spread, so territories at very different flows stay comparable.
-``skew``           Whether the mean or the median is the honest summary.
+``skew``           Whether the mean or the median is the better summary.
 =================  ============================================================================
 
 Both the parametric and the robust summaries are always produced rather than one being chosen for
@@ -29,9 +29,7 @@ silently reported only the mean would hide exactly that.
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from typing import Any, Sequence
 
 import numpy as np
@@ -128,7 +126,7 @@ def summarize_by_group(
         Grouping column(s). Several are combined into one label (``Left_ICA | male``) rather than a
         MultiIndex, so the sheet stays flat and readable. Empty summarises the column as a whole.
     include_overall : bool
-        Append an :data:`OVERALL_LABEL` row over every group. Worth having in the same table — a
+        Append an :data:`OVERALL_LABEL` row over every group. Worth having in the same table: a
         per-territory mean is usually read against the whole-cohort one.
     sort_by : {"group", "mean", "median", "n"}
         Row order. ``"group"`` sorts naturally, so ``g2`` precedes ``g10``.
@@ -171,7 +169,7 @@ def summarize_by_group(
         rows.append(_describe(values, label=OVERALL_LABEL, ci=ci))
 
     out = pd.DataFrame(rows).reindex(columns=list(SUMMARY_COLUMNS))
-    # The overall row is a footer, not a group — keep it last whatever the sort.
+    # The overall row is a footer, not a group: keep it last whatever the sort.
     overall = out.loc[out["group"] == OVERALL_LABEL]
     groups = out.loc[out["group"] != OVERALL_LABEL]
     if sort_by == "group":
@@ -193,7 +191,7 @@ def summary_provenance(
     Two-column record of what a summary describes, for the export's second sheet.
 
     A table of means with no note of which column, which grouping, which confidence level or how
-    many rows it came from is unreconstructable a month later — including by its author.
+    many rows it came from is unreconstructable a month later, including by its author.
     """
     from datetime import datetime, timezone
 

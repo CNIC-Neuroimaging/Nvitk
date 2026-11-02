@@ -116,7 +116,7 @@ def world_to_canvas(viewer: Any, points: np.ndarray) -> np.ndarray | None:
 
 def in_box(viewer: Any, layer: Any, corner0: Sequence[float], corner1: Sequence[float], *,
            facing_only: bool = True, view_direction: Sequence[float] | None = None) -> np.ndarray:
-    """Boolean per vertex / point: inside the screen rectangle *corner0*–*corner1*
+    """Boolean per vertex / point: inside the screen rectangle *corner0*-*corner1*
     (canvas pixels); with *facing_only*, a surface's vertices whose normal faces away
     from the camera are left out (the side you see)."""
     pts = layer_points(layer)

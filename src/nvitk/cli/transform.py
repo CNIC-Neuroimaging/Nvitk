@@ -1,4 +1,4 @@
-"""``nvitk-transform`` CLI — geometric transforms."""
+"""``nvitk-transform`` CLI: geometric transforms."""
 
 from __future__ import annotations
 

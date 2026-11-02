@@ -1,7 +1,7 @@
 #!/bin/bash
 # Installs every pip-only dependency of nvitk, i.e. everything in pyproject.toml except the
 # conda-native core in recipe.yaml's requirements/run (python, numpy, the R stack + rpy2,
-# freeimage, libstdcxx-ng, and the Qt/GUI stack except PyQt6-WebEngine — see the comment at
+# freeimage, libstdcxx-ng, and the Qt/GUI stack except PyQt6-WebEngine; see the comment at
 # the top of recipe.yaml for why that split exists). Runs once, right after `conda` links
 # nvitk into the target env, and is also run as-is by ../install.sh for development/wheel
 # installs, so the two install routes share one dependency list.
@@ -11,7 +11,7 @@
 # conda passes the caller's environment through to this script, so
 # `NVITK_VARIANT=cpu conda create -n nvitk-cpu nvitk` selects the CPU build there too.
 #
-# Version pins below are copied verbatim from pyproject.toml — do not relax them here even
+# Version pins below are copied verbatim from pyproject.toml: do not relax them here even
 # where a conda package would technically satisfy the constraint.
 set -euo pipefail
 
@@ -81,6 +81,14 @@ log "installing neuroimaging/segmentation tools..."
 "$PIP" install --no-cache-dir \
   "nilearn>=0.11.0" "nipype>=1.11.0" "gudhi>=3.12.0" "antspynet>=0.3.2" \
   "totalsegmentator>=2.11.0" "nnunetv2>=2.6.2" "fireants>=1.5.0" \
+  >>"$LOG" 2>&1
+
+# FastSurfer runs from its own tree with this environment's Python (see fastsurfer/install_fastsurfer.sh);
+# these are the packages it imports beyond the stack above.
+log "installing FastSurfer's Python dependencies..."
+"$PIP" install --no-cache-dir \
+  "monai>=1.4.0" "lapy>=1.5.0" "yacs>=0.1.8" "neuroreg==0.6.2" "meshpy==2025.1.1" \
+  "pyrr==0.10.3" "whippersnappy==2.1.0" \
   >>"$LOG" 2>&1
 
 log "installing ML/statistics (pymer4: --no-deps, its pyarrow pin conflicts with ours above)..."
@@ -171,5 +179,26 @@ fi
 rm -rf "$VMTK_TMP"
 "$PREFIX/bin/python" -c 'import vtk, vmtk; from vmtk import vmtkscripts, vtkvmtk; print("vtk", vtk.vtkVersion.GetVTKVersion(), "| vmtk ok")' \
   | tee -a "$LOG"
+
+# FastSurfer (tree + network checkpoints) into $PREFIX/share/nvitk/fastsurfer. Optional: a failure
+# here (no network, a mirror down) must not fail the whole install: `nvitk-fastsurfer install`
+# retries it later. NVITK_FASTSURFER=0 skips it.
+if [[ "${NVITK_FASTSURFER:-1}" != "0" ]]; then
+  FS_SCRIPT=""
+  for cand in "$PREFIX/share/nvitk/fastsurfer-install/install_fastsurfer.sh" "${RECIPE_DIR:-}/fastsurfer/install_fastsurfer.sh" \
+              "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fastsurfer/install_fastsurfer.sh"; do
+    if [[ -n "$cand" && -f "$cand" ]]; then FS_SCRIPT="$cand"; break; fi
+  done
+  log "installing FastSurfer (tree + checkpoints)..."
+  if [[ -z "$FS_SCRIPT" ]]; then
+    log "WARNING: install_fastsurfer.sh not found; run \`nvitk-fastsurfer install\` later"
+  elif ! PREFIX="$PREFIX" bash "$FS_SCRIPT" >>"$LOG" 2>&1; then
+    log "WARNING: FastSurfer could not be installed now (see $LOG); run \`nvitk-fastsurfer install\` later"
+  fi
+fi
+
+# FSL is not installed here: creating its prefix needs conda, which a post-link script must not
+# call. `nvitk-fsl install` (or the GUI, the first time an FSL tool finds no FSL) does it.
+log "FSL tools: an existing \$FSLDIR is used; otherwise run \`nvitk-fsl install\` for nvitk's own FSL core"
 
 log "done."

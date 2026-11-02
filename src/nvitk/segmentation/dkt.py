@@ -11,13 +11,11 @@ from nvitk.types import Image
 
 log = Logger()
 
-# ---------------------------------------------------------------------------
 # Label tables
-# ---------------------------------------------------------------------------
-#: Desikan–Killiany cortical parcels, in FreeSurfer's ``aparc`` numbering: the offset within a
+#: Desikan-Killiany cortical parcels, in FreeSurfer's ``aparc`` numbering: the offset within a
 #: hemisphere. The published ids are ``1000 + offset`` on the left and ``2000 + offset`` on the
 #: right, which is the convention used by ``aparc+aseg.nii.gz``, by FreeSurfer's colour LUT, **and**
-#: by the label map ANTsPyNet's DKT network emits — so one table serves a generated parcellation and
+#: by the label map ANTsPyNet's DKT network emits, so one table serves a generated parcellation and
 #: a user-supplied FreeSurfer volume alike.
 APARC_PARCEL_OFFSETS: dict[int, str] = {
     1: "bankssts",
@@ -58,7 +56,7 @@ APARC_PARCEL_OFFSETS: dict[int, str] = {
 }
 
 #: Parcels the DKT protocol does not define. DKT merges ``bankssts`` into the neighbouring temporal
-#: parcels and drops both poles, so a DKT label map genuinely has no geometry for them — a
+#: parcels and drops both poles, so a DKT label map has no geometry for them: a
 #: measurement in one of these has to be drawn as absent, never approximated onto a neighbour.
 #: ``corpuscallosum`` is not cortex at all and is absent from both protocols.
 DKT_MISSING_PARCELS: frozenset[str] = frozenset(
@@ -77,10 +75,10 @@ def _aparc_label_table(*, exclude: frozenset[str] = frozenset()) -> dict[int, st
     return table
 
 
-#: Full Desikan–Killiany table, as written by FreeSurfer into ``aparc+aseg``.
+#: Full Desikan-Killiany table, as written by FreeSurfer into ``aparc+aseg``.
 APARC_LABELS: dict[int, str] = _aparc_label_table()
 
-#: The subset a DKT parcellation actually contains — see :data:`DKT_MISSING_PARCELS`.
+#: The subset a DKT parcellation contains; see :data:`DKT_MISSING_PARCELS`.
 DKT_LABELS: dict[int, str] = _aparc_label_table(exclude=DKT_MISSING_PARCELS)
 
 

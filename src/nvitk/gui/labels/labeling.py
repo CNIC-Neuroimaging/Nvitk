@@ -3,20 +3,21 @@
 One panel around the label layer being drawn, from Napari's own tools to the ones
 it lacks:
 
-* **Layer** — the Labels layer edited (a new one fitted to an image, or an Image
+* **Layer**: the Labels layer edited (a new one fitted to an image, or an Image
   mask converted for undo), and the reference image the intensity tools read;
-* **Label** — the active label: id, name (named by hand, or picked from the
+* **Label**: the active label: id, name (named by hand, or picked from the
   layer's vocabulary), colour, a list of every label with its size, go-to;
-* **Draw** — Napari's paint / erase / fill / pick / polygon modes and the magic
-  wand, brush size, preserve-other-labels or its reverse (paint only over picked
-  labels of the layer), 2D or 3D brush, Undo / Redo — on the canvas and in the
-  orthogonal views (:mod:`nvitk.gui.labels.ortho_edit`);
-* **Editable area** — paint only where the reference intensity is in a range
-  and/or inside a mask (brush, bucket and every tool here);
-* **Refine** — grow, shrink, smooth, fill holes, keep the largest piece, drop
-  small islands, threshold fill — on the slice on screen or the whole volume;
-* **Slices** — interpolate between drawn slices, copy a slice to the next one;
-* **Manage** — merge, split into pieces, renumber, delete.
+* **Draw**: Napari's paint / erase / fill / pick / polygon modes and the magic
+  wand, brush size, preserve-other-labels, or a rule on picked labels of the
+  layer (paint only over them, or never over them), 2D or 3D brush, Undo / Redo,
+  on the canvas and in the orthogonal views (:mod:`nvitk.gui.labels.ortho_edit`);
+* **Editable area** (paint only where the reference intensity is in a range
+  and/or only inside), or only outside: picked labels of another layer (brush,
+  bucket and every tool here);
+* **Refine** (grow, shrink, smooth, fill holes, keep the largest piece, drop
+  small islands, threshold fill) on the slice on screen or the whole volume;
+* **Slices**: interpolate between drawn slices, copy a slice to the next one;
+* **Manage**: merge, split into pieces, renumber, delete.
 
 Every edit goes through Napari's history: Ctrl+Z (or Undo here) takes back one
 tool application, like a brush stroke. The operations themselves are in
@@ -114,6 +115,36 @@ _TRACE_PREVIEW = "✎ vessel path (Labeling)"
 #: The key toggling between the tool in use and Pan, and where it is kept.
 _PAN_KEY_DEFAULT = "Q"
 _PAN_KEY_PREF = "labeling_pan_key"
+#: The label rules' modes ("inside" / "outside"), remembered across sessions.
+_OVER_MODE_PREF = "labeling_over_mode"
+_AREA_MODE_PREF = "labeling_area_mode"
+
+
+def _stored_mode(key: str) -> str:
+    try:
+        from nvitk.gui.core.prefs import load_prefs
+
+        mode = str(load_prefs().get(key) or "inside")
+    except Exception:  # noqa: BLE001 (an unreadable config falls back to the default)
+        mode = "inside"
+    return mode if mode in ("inside", "outside") else "inside"
+
+
+def _store_mode(key: str, mode: str) -> None:
+    try:
+        from nvitk.gui.core.prefs import save_prefs
+
+        save_prefs({key: mode})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _mode_combo(items: tuple[tuple[str, str], ...], mode: str) -> QComboBox:
+    combo = QComboBox()
+    for text, value in items:
+        combo.addItem(text, value)
+    combo.setCurrentIndex(max(combo.findData(mode), 0))
+    return combo
 
 
 def _stored_pan_key() -> str:
@@ -219,9 +250,9 @@ def _row(*widgets: Any, stretch_last: bool = False) -> QHBoxLayout:
 class _LayerControlsBox(QWidget):
     """Napari's own layer controls for one layer, folded under a header.
 
-    Built with Napari's ``create_qt_layer_controls`` — the very widget its layer
+    Built with Napari's ``create_qt_layer_controls``: the very widget its layer
     controls dock shows (opacity, blending, colormap, contrast, gamma,
-    interpolation; for labels the modes, brush, contour, colour mode…) — and
+    interpolation; for labels the modes, brush, contour, colour mode...), and
     rebuilt when the layer changes; the previous one is closed (disconnected from
     its layer) first.
     """
@@ -287,7 +318,7 @@ class _LayerControlsBox(QWidget):
 
             controls = create_qt_layer_controls(layer)
             controls.ndisplay = int(self._viewer.dims.ndisplay)
-        except Exception as exc:  # noqa: BLE001 — a layer type without controls
+        except Exception as exc:  # noqa: BLE001 (a layer type without controls)
             self._empty.setText(f"No controls for “{layer.name}”: {exc}")
             self._empty.setVisible(True)
             return
@@ -416,7 +447,7 @@ class LabelingPanel(QWidget):
         self._refresh_layer_combos()
         self._on_active_changed()
 
-    # ── building ──────────────────────────────────────────────────────────────
+    # building
 
     def _build_layer_card(self) -> Card:
         card = Card("Layer")
@@ -622,11 +653,11 @@ class LabelingPanel(QWidget):
         lay = QVBoxLayout(outer)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(2)
-        self._over_on = QCheckBox("Paint only over")
+        self._over_on = QCheckBox("Restrict to this layer's labels")
         self._over_on.setToolTip(
-            "Preserve labels the other way round: brush, bucket and every tool here only write over the "
-            "ticked labels of this layer (and the background, when ticked). Erasing clears only the "
-            "active label."
+            "A rule on the ticked labels of this layer (and the background, when ticked), for the brush, "
+            "the bucket and every tool here. Only over them: preserve labels the other way round, erasing "
+            "clears only the active label. Never over them: they are protected from painting and erasing."
         )
         self._over_on.toggled.connect(self._on_over_toggled)
         self._preserve.toggled.connect(self._on_preserve_toggled)
@@ -639,9 +670,15 @@ class LabelingPanel(QWidget):
         box.setSpacing(2)
         self._over_list = QListWidget()
         self._over_list.setMaximumHeight(130)
-        self._over_list.setToolTip("Tick the labels to paint over; the others, and unticked background, are "
-                                   "left as they are.")
+        self._over_list.setToolTip("Tick the labels the rule is about: the ones to paint over, or the ones "
+                                   "to leave alone.")
         self._over_list.itemChanged.connect(self._on_over_ticked)
+        self._over_mode = _mode_combo(
+            (("Only over the ticked", "inside"), ("Never over the ticked", "outside")), _stored_mode(_OVER_MODE_PREF)
+        )
+        self._over_mode.setToolTip("Paint only over the ticked labels, or anywhere but over them.")
+        self._over_mode.activated.connect(lambda _i: self._on_over_mode())
+        box.addWidget(self._over_mode)
         box.addWidget(self._over_list)
         box.addLayout(_row(
             _button("All labels", "Every label of the layer, now and as new ones are drawn, not the "
@@ -1018,8 +1055,8 @@ class LabelingPanel(QWidget):
         self._range_on.toggled.connect(lambda _v: self._apply_guard())
         card.add(self._range_on)
         card.add_layout(_row(self._range_lo, "–", self._range_hi, from_view))
-        self._inside_on = QCheckBox("Only inside")
-        self._inside_on.setToolTip("Paint only where this mask is non-zero.")
+        self._inside_on = QCheckBox("Restrict to")
+        self._inside_on.setToolTip("Paint only inside — or only outside — the ticked labels of this layer.")
         self._inside_combo = QComboBox()
         self._inside_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._inside_on.toggled.connect(lambda _v: self._on_inside_changed())
@@ -1030,15 +1067,22 @@ class LabelingPanel(QWidget):
         box = QVBoxLayout(self._inside_box)
         box.setContentsMargins(0, 0, 0, 0)
         box.setSpacing(2)
+        self._inside_mode = _mode_combo(
+            (("Only inside the ticked", "inside"), ("Only outside the ticked", "outside")), _stored_mode(_AREA_MODE_PREF)
+        )
+        self._inside_mode.setToolTip("Paint only inside the ticked labels of that layer, or only outside them.")
+        self._inside_mode.activated.connect(lambda _i: self._on_inside_mode())
+        box.addWidget(self._inside_mode)
         self._inside_ids = QListWidget()
         self._inside_ids.setMaximumHeight(130)
-        self._inside_ids.setToolTip("Tick the labels of the mask to paint inside; the others are off limits.")
+        self._inside_ids.setToolTip("Tick the labels of that layer the area is made of (inside) or kept out of "
+                                    "(outside).")
         self._inside_ids.itemChanged.connect(self._on_inside_ticked)
         self._inside_count = QLabel("")
         self._inside_count.setStyleSheet(f"color: {COLOR_MUTED}; font-size: 10px;")
         box.addWidget(self._inside_ids)
         box.addLayout(_row(self._inside_count,
-                           _button("All", "Every label of the mask.", lambda: self._tick_inside(True)),
+                           _button("All", "Every label of that layer.", lambda: self._tick_inside(True)),
                            _button("None", "No label (nothing is editable).", lambda: self._tick_inside(False))))
         card.add(self._inside_box)
         self._inside_box.hide()
@@ -1209,7 +1253,7 @@ class LabelingPanel(QWidget):
         card.add_layout(grid)
         return card
 
-    # ── layers ────────────────────────────────────────────────────────────────
+    # layers
 
     def target(self) -> Any | None:
         """The label layer being edited."""
@@ -1384,7 +1428,7 @@ class LabelingPanel(QWidget):
         self._refresh_label_list()
         self.tool_changed.emit()
 
-    # ── syncing with the layer ───────────────────────────────────────────────
+    # syncing with the layer
 
     def _set_layer(self, attr: str, value: Any) -> None:
         layer = self.target()
@@ -1404,7 +1448,7 @@ class LabelingPanel(QWidget):
             if labels and self._erase_restore is None:  # not mid right-drag: the tool is only lent
                 mode = str(getattr(layer.mode, "value", layer.mode))
                 if mode == "polygon":
-                    # Napari's own polygon (its controls, its key): the tab's instead —
+                    # Napari's own polygon (its controls, its key): the tab's instead;
                     # it places the corners right whatever the view, and works in the
                     # orthogonal views too.
                     QTimer.singleShot(0, lambda: self.set_tool("polygon"))
@@ -1485,7 +1529,7 @@ class LabelingPanel(QWidget):
         layer = self.target()
         try:
             self._counts = E.label_counts(layer) if layer is not None else {}
-        except Exception:  # noqa: BLE001 — a layer mid-removal
+        except Exception:  # noqa: BLE001 (a layer mid-removal)
             self._counts = {}
         self._rebuild_list()
 
@@ -1523,7 +1567,7 @@ class LabelingPanel(QWidget):
         rows = min(max(self._list.count(), lo), hi)
         self._list.setFixedHeight(int(rows * max(row, 18) + 2 * self._list.frameWidth() + 4))
 
-    # ── the active label ─────────────────────────────────────────────────────
+    # the active label
 
     def label_id(self) -> int:
         return int(self._id_spin.value())
@@ -1654,7 +1698,7 @@ class LabelingPanel(QWidget):
         menu.addAction(f"Delete label {lid}", lambda: self._delete(lid))
         menu.exec(self._list.viewport().mapToGlobal(pos))
 
-    # ── drawing ──────────────────────────────────────────────────────────────
+    # drawing
 
     def set_tool(self, mode: str, *, keep_work: bool = False) -> None:
         """Pick a Draw tool: a Napari Labels mode, or one of the tab's own (the wand,
@@ -1707,7 +1751,7 @@ class LabelingPanel(QWidget):
         if changed:
             self.tool_changed.emit()
 
-    # ── the Pan key: Pan while it is held ────────────────────────────────────
+    # the Pan key: Pan while it is held
 
     def pan_held(self) -> bool:
         """True while the Pan key is held (the tool in use waits)."""
@@ -1777,7 +1821,7 @@ class LabelingPanel(QWidget):
             from nvitk.gui.core.prefs import save_prefs
 
             save_prefs({_PAN_KEY_PREF: seq.toString(QKeySequence.SequenceFormat.PortableText)})
-        except Exception:  # noqa: BLE001 — a preference is a convenience
+        except Exception:  # noqa: BLE001 (a preference is a convenience)
             pass
 
     def _update_draw_hint(self) -> None:
@@ -1806,7 +1850,7 @@ class LabelingPanel(QWidget):
             getattr(layer, which)()
             self._count_timer.start()
 
-    # ── the canvas ───────────────────────────────────────────────────────────
+    # the canvas
 
     def _update_camera_lock(self, _event: Any = None) -> None:
         """A drag draws (the region tools in 2D, the smart brush, drawing the box)
@@ -1908,11 +1952,11 @@ class LabelingPanel(QWidget):
         elif self._extra == "tracer" and self._trace is not None and len(self._trace.points) >= 2:
             self.tracer_fill()
 
-    # ── region tools ─────────────────────────────────────────────────────────
+    # region tools
 
     def region_index(self, layer: Any, voxel: Sequence[int], free: Sequence[int]) -> tuple[Any, ...]:
         """Where a region tool works from *voxel*: the axes *free* whole (the plane
-        clicked, or the volume — inside the box when edits are kept in it), the
+        clicked, or the volume; inside the box when edits are kept in it), the
         others fixed at the voxel."""
         free = {int(d) for d in free}
         index = tuple(slice(None) if d in free else int(voxel[d]) for d in range(layer.data.ndim))
@@ -1928,7 +1972,7 @@ class LabelingPanel(QWidget):
     def begin_region(self, layer: Any, voxel: Sequence[int], index: Sequence[Any], *,
                      tool: str | None = None, remove: bool = False) -> RegionStroke | None:
         """Start a stroke of the region tool (default: the one in use) at *voxel*,
-        inside ``layer.data[index]`` — for the canvas and the orthogonal views."""
+        inside ``layer.data[index]``, for the canvas and the orthogonal views."""
         tool = tool or self._extra
         try:
             E.announce_history_loads(layer)
@@ -1937,7 +1981,7 @@ class LabelingPanel(QWidget):
                 raise ValueError("the click is outside the box (Keep edits inside the box is on)."
                                  if self._box_keep.isChecked() else "the click is outside the volume.")
             stroke.add(voxel)
-        except Exception as exc:  # noqa: BLE001 — shown, not raised into Qt
+        except Exception as exc:  # noqa: BLE001 (shown, not raised into Qt)
             self._say(f"{tool.capitalize() if tool else 'Region'}: {exc}", error=True)
             return None
         return stroke
@@ -2026,7 +2070,7 @@ class LabelingPanel(QWidget):
 
     def live_refresh(self, layer: Any, labels: Sequence[int] = ()) -> None:
         """Show voxels written outside the history (a stroke in progress) on the
-        canvas and in the orthogonal views — once per event-loop turn."""
+        canvas and in the orthogonal views, once per event-loop turn."""
         self._live_pending = (weakref.ref(layer), tuple(int(v) for v in labels))
         self._live_timer.start()
 
@@ -2053,7 +2097,7 @@ class LabelingPanel(QWidget):
         self._keep_active_visible()
         self._count_timer.start()
 
-    # ── the smart brush ──────────────────────────────────────────────────────
+    # the smart brush
 
     def _smart_dims(self, layer: Any) -> list[int]:
         if E.is_3d_view(self._viewer) or int(getattr(layer, "n_edit_dimensions", 2)) >= 3:
@@ -2133,7 +2177,7 @@ class LabelingPanel(QWidget):
             self.set_tool(tool)
         self._count_timer.start()
 
-    # ── the polygon on the canvas ────────────────────────────────────────────
+    # the polygon on the canvas
 
     def _polygon_click(self, event: Any) -> None:
         layer = self.target()
@@ -2190,7 +2234,7 @@ class LabelingPanel(QWidget):
                 self._viewer.layers.selection.active = layer
             else:
                 preview.data = [world]
-        except Exception:  # noqa: BLE001 — the preview is a convenience
+        except Exception:  # noqa: BLE001 (the preview is a convenience)
             pass
 
     def finish_polygon(self) -> None:
@@ -2222,7 +2266,7 @@ class LabelingPanel(QWidget):
 
     def fill_polygon(self, index: tuple[Any, ...], rows: list[float], cols: list[float]) -> None:
         """Give the active label to a polygon in the plane ``data[index]`` (its corners
-        *rows* / *cols* along the plane's two axes, in order) — from the canvas or an
+        *rows* / *cols* along the plane's two axes, in order), from the canvas or an
         orthogonal view. Preserve-labels and the editable area apply; one undo step."""
 
         def run() -> str:
@@ -2252,7 +2296,7 @@ class LabelingPanel(QWidget):
     def wand_from(self, seed: tuple[int, ...], index: tuple[Any, ...], *, remove: bool = False,
                   tool: str = "wand") -> None:
         """A region tool (the magic wand by default) from the voxel *seed*, within
-        ``data[index]`` (a plane or a volume) — one click on any view of the layer."""
+        ``data[index]`` (a plane or a volume): one click on any view of the layer."""
         layer = self.target()
         if layer is None:
             return
@@ -2262,7 +2306,7 @@ class LabelingPanel(QWidget):
         self.finish_region(self.begin_region(layer, seed, self._limit_to_box(layer, index), tool=tool,
                                              remove=remove))
 
-    # ── the vessel tracer ────────────────────────────────────────────────────
+    # the vessel tracer
 
     def tracer_add(self, layer: Any, voxel: Sequence[int]) -> None:
         """Another point along the vessel (from the canvas or an orthogonal view)."""
@@ -2357,7 +2401,7 @@ class LabelingPanel(QWidget):
             else:
                 preview.data = world
                 preview.size = sizes
-        except Exception:  # noqa: BLE001 — the preview is a convenience
+        except Exception:  # noqa: BLE001 (the preview is a convenience)
             pass
         if ortho is not None:
             ortho._label_editor.show_trace(layer, trace.points, path)
@@ -2372,7 +2416,7 @@ class LabelingPanel(QWidget):
         preview = self._trace_ref()
         return preview if preview is not None and preview in self._viewer.layers else None
 
-    # ── editable area ────────────────────────────────────────────────────────
+    # editable area
 
     def _apply_guard(self) -> None:
         if self._syncing:
@@ -2398,10 +2442,11 @@ class LabelingPanel(QWidget):
         box = self.box()
         guard.box = box.index(layer) if (self._box_keep.isChecked() and box.applies(layer)) else None
         guard.over = self._over_ids()
+        guard.over_mode = self._over_mode_value()
         if self._range_on.isChecked() and ref is None:
             self._say("The intensity range needs a reference image on the labels' grid.", error=True)
 
-    # ── paint only over: which of the layer's own labels ─────────────────────
+    # paint only over: which of the layer's own labels
 
     def _on_over_toggled(self, on: bool) -> None:
         if on and self._preserve.isChecked():
@@ -2411,6 +2456,14 @@ class LabelingPanel(QWidget):
     def _on_preserve_toggled(self, on: bool) -> None:
         if on and self._over_on.isChecked():
             self._over_on.setChecked(False)
+
+    def _over_mode_value(self) -> str:
+        return str(self._over_mode.currentData() or "inside")
+
+    def _on_over_mode(self) -> None:
+        _store_mode(_OVER_MODE_PREF, self._over_mode_value())
+        self._update_over_count()
+        self._apply_over()
 
     def _over_ids(self) -> tuple[int, ...] | None:
         """The labels painting may cover (``None``: the rule is off)."""
@@ -2424,7 +2477,7 @@ class LabelingPanel(QWidget):
         """Every label of *layer* but the background."""
         try:
             return {int(i) for i in layer_label_ids(layer, max_labels=1_000_000) if int(i) != 0}
-        except Exception:  # noqa: BLE001 — a layer mid-removal
+        except Exception:  # noqa: BLE001 (a layer mid-removal)
             return set()
 
     def _over_set(self, layer: Any) -> set[int]:
@@ -2442,6 +2495,7 @@ class LabelingPanel(QWidget):
         guard = E.paint_guard(layer, create=over is not None)
         if guard is not None:
             guard.over = over
+            guard.over_mode = self._over_mode_value()
 
     def _refresh_over_ids(self) -> None:
         """List the background and the layer's labels, ticked as last left, and hand
@@ -2506,13 +2560,14 @@ class LabelingPanel(QWidget):
         if layer is None or not E.is_labels(layer):
             self._over_count.setText("")
         elif not ids:
-            self._over_count.setText("nothing ticked: nothing can be painted")
+            self._over_count.setText("nothing ticked: nothing can be painted" if self._over_mode_value() == "inside"
+                                     else "nothing ticked: no label protected")
         else:
             names = ["background" if i == 0 else (label_name(layer, i) or f"label {i}") for i in ids]
             shown = ", ".join(names[:4]) + (f" +{len(names) - 4}" if len(names) > 4 else "")
-            self._over_count.setText(shown)
+            self._over_count.setText(("never over: " if self._over_mode_value() == "outside" else "") + shown)
 
-    # ── editable area: which labels of the mask ──────────────────────────────
+    # editable area: which labels of the mask
 
     def _inside_layer(self) -> Any | None:
         name = self._inside_combo.currentData()
@@ -2520,6 +2575,15 @@ class LabelingPanel(QWidget):
 
     def _on_inside_changed(self) -> None:
         self._refresh_inside_ids()
+        self._apply_guard()
+
+    def _inside_mode_value(self) -> str:
+        return str(self._inside_mode.currentData() or "inside")
+
+    def _on_inside_mode(self) -> None:
+        _store_mode(_AREA_MODE_PREF, self._inside_mode_value())
+        self._inside_cache = None
+        self._update_inside_count()
         self._apply_guard()
 
     def _refresh_inside_ids(self) -> None:
@@ -2576,26 +2640,32 @@ class LabelingPanel(QWidget):
     def _update_inside_count(self) -> None:
         n = self._inside_ids.count()
         k = len(self._inside_ticked())
-        self._inside_count.setText(f"{k} of {n} label(s)" if n else "No labels in the mask.")
+        where = "inside" if self._inside_mode_value() == "inside" else "outside"
+        self._inside_count.setText(f"{k} of {n} label(s), paint {where}" if n else "No labels in that layer.")
 
     def _inside_mask(self, other: Any) -> Any:
-        """Where painting is allowed: the mask's ticked labels (any non-zero when all are)."""
+        """Where painting is allowed: inside the layer's ticked labels (any non-zero when all
+        are), or (mode *outside*) everywhere but in them (its background when all are)."""
         data = label_source_data(other)
         n = self._inside_ids.count()
         ticked = self._inside_ticked()
-        if n == 0 or len(ticked) == n:
+        outside = self._inside_mode_value() == "outside"
+        if not outside and (n == 0 or len(ticked) == n):
             return data
-        key = (id(other), id(data), tuple(sorted(ticked)))
+        key = (id(other), id(data), tuple(sorted(ticked)), outside)
         if self._inside_cache is not None and self._inside_cache[0] == key:
             return self._inside_cache[1]
         if not ticked:
-            allowed = np.zeros(data.shape, dtype=bool)
+            allowed = np.ones(data.shape, dtype=bool) if outside else np.zeros(data.shape, dtype=bool)
+        elif outside and (n == 0 or len(ticked) == n):
+            allowed = to_numpy(as_backend_array(data) == 0)
         else:
             # On the backend; the guard checks Napari's (host) history items with it.
             from nvitk.core.backend import get_array_module
 
             ids = as_backend_array([int(x) for x in sorted(ticked)])
-            allowed = to_numpy(get_array_module(ids).isin(as_backend_array(data), ids))
+            inside = get_array_module(ids).isin(as_backend_array(data), ids)
+            allowed = to_numpy(~inside if outside else inside)
         self._inside_cache = (key, allowed)
         return allowed
 
@@ -2613,7 +2683,7 @@ class LabelingPanel(QWidget):
             self._thr_lo.setValue(lo)
             self._thr_hi.setValue(hi)
 
-    # ── the box ──────────────────────────────────────────────────────────────
+    # the box
 
     def box(self) -> RoiBox:
         """The viewer's box (:mod:`nvitk.gui.labels.roi_box`)."""
@@ -2762,7 +2832,7 @@ class LabelingPanel(QWidget):
                     continue
                 d = dims[k]
                 n = int(layer.data.shape[d])
-                # Named axes (X, Y, Z…) by their name; Napari's defaults (-3, -2…) by number.
+                # Named axes (X, Y, Z...) by their name; Napari's defaults (-3, -2...) by number.
                 name = labels[d] if d < len(labels) and labels[d].isalpha() and len(labels[d]) <= 2 else f"Axis {d}"
                 label.setText(f"{name} ({n})")
                 lo.setRange(0, n - 1)
@@ -2791,7 +2861,7 @@ class LabelingPanel(QWidget):
         self._box_intensity_cache = None
 
     def _box_intensity_range(self, image: Any) -> tuple[float, float] | None:
-        """The box's 1–99 % intensity range of *image*, when asked for (Box card)."""
+        """The box's 1-99 % intensity range of *image*, when asked for (Box card)."""
         box = self.box()
         if not self._box_range.isChecked() or not box.applies(image):
             return None
@@ -2835,7 +2905,8 @@ class LabelingPanel(QWidget):
 
     def _allowed(self, layer: Any, index: tuple[Any, ...], work: Any) -> Any:
         """Where the active label may be written in ``data[index]``."""
-        allowed = E.writable(work, self.label_id(), preserve=self._preserve.isChecked(), over=self._over_ids())
+        allowed = E.writable(work, self.label_id(), preserve=self._preserve.isChecked(), over=self._over_ids(),
+                             over_mode=self._over_mode_value())
         guard = E.paint_guard(layer)
         if guard is not None and guard.active:
             extra = guard.allowed(index)
@@ -2843,7 +2914,7 @@ class LabelingPanel(QWidget):
                 allowed = allowed & extra
         return allowed
 
-    # ── tools ────────────────────────────────────────────────────────────────
+    # tools
 
     def _scope(self) -> str:
         return "volume" if self._scope_volume.isChecked() else "slice"
@@ -3036,7 +3107,7 @@ class LabelingPanel(QWidget):
         self._count_timer.start()
         self._say(f"Deleted label {lid}" + (" — Ctrl+Z to undo." if E.is_labels(layer) else "."))
 
-    # ── new / convert ────────────────────────────────────────────────────────
+    # new / convert
 
     def new_layer(self) -> None:
         """A new, empty Labels layer on the reference image's grid (or the active image's)."""
@@ -3081,7 +3152,7 @@ class LabelingPanel(QWidget):
         self.bind(new)
         self._say(f"“{new.name}” is a Labels layer now: brush, tools and undo work on it.")
 
-    # ── feedback ─────────────────────────────────────────────────────────────
+    # feedback
 
     def _run(self, name: str, fn: Callable[[], str]) -> None:
         from nvitk.gui.core.activity import activity
@@ -3089,7 +3160,7 @@ class LabelingPanel(QWidget):
         try:
             with activity(f"Labeling: {name}"):
                 message = fn()
-        except Exception as exc:  # noqa: BLE001 — shown, not raised into Qt
+        except Exception as exc:  # noqa: BLE001 (shown, not raised into Qt)
             self._say(f"{name}: {exc}", error=True)
             return
         self._say(message)
@@ -3108,7 +3179,7 @@ _TEXT_INPUTS = (QLineEdit, QAbstractSpinBox, QTextEdit, QPlainTextEdit, QKeySequ
 
 
 class _PanKeyFilter(QObject):
-    """The Labeling tab's Pan key for the whole application: down — Pan, up — the
+    """The Labeling tab's Pan key for the whole application: down (Pan, up) the
     tool back. An application-wide filter rather than a shortcut, because a
     shortcut cannot see the key come up, and the views it should work in (the
     canvas, the orthogonal views, panel windows) do not all take the focus."""

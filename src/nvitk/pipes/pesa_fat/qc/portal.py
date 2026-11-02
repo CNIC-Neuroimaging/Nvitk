@@ -3,7 +3,7 @@
 Reviews live in the NVITK database: every save upserts the ``pesa_fat_qc_reviews`` audit row
 and, for measurement aspects, stamps ``qc_status`` onto the matching ``image_measurements``
 rows. There is no intermediate workbook -- the database is the record of truth, so a reviewer
-reading a report always sees what was actually stored.
+reading a report always sees what was stored.
 """
 
 from __future__ import annotations
@@ -422,7 +422,7 @@ def _load_review_rows(
     """Review rows from the NVITK database, filtered by whichever keys are given.
 
     A database that is unreachable or has no review table yields no rows: the portal still
-    renders, every structure simply reads as PENDING.
+    renders, every structure reads as PENDING.
     """
     from nvitk.pipes.pesa_fat.common.db_publish import try_fetch_qc_reviews
     from nvitk.pipes.pesa_fat.qc.review_policy import DEFAULT_REVIEW_ASPECT

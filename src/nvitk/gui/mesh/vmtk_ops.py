@@ -43,9 +43,7 @@ def _fmt(v: Any, digits: int = 3) -> str:
     return f"{f:.{digits}g}" if np.isfinite(f) else "–"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Clean, smooth, remesh
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def run_vmtk_smooth(ctx: Any) -> Any:
@@ -104,7 +102,7 @@ def run_vmtk_cap(ctx: Any) -> Any:
     layer = ctx.put_mesh(out, "capped")
     n_caps = int(len(np.unique(entity[entity > 1])))
     if n_caps and layer is not None and len(entity) == out.n_faces:
-        # Faces → per-vertex wall/cap id (max over each vertex's faces) for colouring.
+        # Faces -> per-vertex wall/cap id (max over each vertex's faces) for colouring.
         vid = np.zeros(len(out.vertices), dtype=np.float32)
         np.maximum.at(vid, out.faces.ravel(), np.repeat(entity.astype(np.float32), 3))
         add_field(layer, "cap id", vid, show=False)
@@ -121,9 +119,7 @@ def run_vmtk_kites(ctx: Any) -> Any:
     return OpResult(f"Removed marching-cubes kites from {ctx.name}: {src.n_faces} → {out.n_faces} faces.")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Measure
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def run_vmtk_curvature(ctx: Any) -> Any:
@@ -154,9 +150,7 @@ def run_vmtk_mass(ctx: Any) -> Any:
                     table=table, title=f"VMTK mass properties: {ctx.name}")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Vessels & tubes
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _network(ctx: Any) -> Any:
@@ -334,9 +328,7 @@ def run_expigeo(ctx: Any) -> Any:
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Registration in the Mesh panel
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def vmtk_operations(op_factory: Any, categories: dict[str, str]) -> tuple[Any, ...]:

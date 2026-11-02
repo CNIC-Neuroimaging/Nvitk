@@ -2,7 +2,7 @@
 
 An operation with something to choose gets a compact dialog built from its
 :class:`~nvitk.gui.tools.quick_ops.OpParam` list, rather than running blind on a
-default. Where a live preview is meaningful — thresholding above all — the dialog
+default. Where a live preview is meaningful (thresholding above all), the dialog
 maintains a temporary layer that follows the control, so the cut is chosen by
 looking at it. Cancelling removes the preview and changes nothing.
 """
@@ -80,7 +80,7 @@ class _FloatSlider(QWidget):
     """A slider over a float range, with an editable value box beside it.
 
     The box is what makes an absolute range usable: a CT window is typed as
-    ``-160 … 240`` HU far more precisely than it is dragged across 4000 HU of
+    ``-160 ... 240`` HU far more precisely than it is dragged across 4000 HU of
     slider. Both edit the same value; whichever moves updates the other.
     """
 
@@ -113,13 +113,13 @@ class _FloatSlider(QWidget):
         self.set_value(float(param.default))
 
     def _slider_moved(self, _v: int) -> None:
-        """Slider → box."""
+        """Slider -> box."""
         self._box.blockSignals(True)
         self._box.setValue(self._from_slider())
         self._box.blockSignals(False)
 
     def _box_edited(self, value: float) -> None:
-        """Box → slider (which then reports the change)."""
+        """Box -> slider (which then reports the change)."""
         self._set_slider(float(value))
         # The slider may not move for a sub-step edit; report it anyway.
         for callback in getattr(self, "_callbacks", []):
@@ -136,7 +136,7 @@ class _FloatSlider(QWidget):
         self._slider.blockSignals(False)
 
     def value(self) -> float:
-        """Current value in the parameter's own units — exactly what the box shows."""
+        """Current value in the parameter's own units: exactly what the box shows."""
         return float(self._box.value())
 
     def set_value(self, value: float) -> None:
@@ -299,7 +299,7 @@ class QuickOpDialog(QDialog):
                 out[name] = widget.value()
         return out
 
-    # ── preview ──────────────────────────────────────────────────────────────
+    # preview
 
     def _preview_result(self) -> tuple[np.ndarray, dict[str, Any], bool] | None:
         """``(data, spatial kwargs, is_labels)`` to preview, or ``None`` for no layer.
@@ -422,7 +422,7 @@ class QuickOpDialog(QDialog):
                 pass
 
     def done(self, result: int) -> None:
-        """Drop the preview however the dialog closes — accepted or cancelled."""
+        """Drop the preview however the dialog closes: accepted or cancelled."""
         self._preview_timer.stop()
         self._clear_preview()
         # Restore a contrast preview on cancel; on accept the operation re-applies

@@ -12,14 +12,14 @@ else.
 A Markov random field does. ``s(territory, bs="mrf", xt=list(nb=...))`` penalises differences
 between **neighbouring** vessels, so each territory's estimate borrows strength from the ones it is
 anatomically connected to and not from the rest. The neighbourhood comes from
-:func:`~nvitk.stats.vessel_network.neighbour_list`, and the smoothing parameter — how much
-neighbours are pulled together — is estimated by REML rather than chosen.
+:func:`~nvitk.stats.vessel_network.neighbour_list`, and the smoothing parameter (how much
+neighbours are pulled together) is estimated by REML rather than chosen.
 
 What it does and does not model
 -------------------------------
 The graph is **undirected**. An MRF says "adjacent vessels should resemble one another"; it does not
 say blood flows from the carotid to the middle cerebral. When the direction is the point, that is a
-path model — see :mod:`~nvitk.stats.sem`. The two answer different questions and are worth running
+path model; see :mod:`~nvitk.stats.sem`. The two answer different questions and are worth running
 together: the MRF gives a smoothed spatial field over the tree, the SEM gives the edges.
 
 Requirements
@@ -30,9 +30,7 @@ R with ``mgcv``, which ships with almost every R installation as a recommended p
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import re
 import shutil
 from dataclasses import dataclass, field
@@ -76,7 +74,7 @@ GAM_METHODS: dict[str, str] = {
 
 @dataclass(frozen=True)
 class GamBackendStatus:
-    """What the MRF engine found when it probed rpy2 → R → mgcv."""
+    """What the MRF engine found when it probed rpy2 -> R -> mgcv."""
 
     available: bool
     rpy2_version: str = ""
@@ -101,7 +99,7 @@ class GamBackendStatus:
 
 
 def gam_backend_status(*, check_r_packages: bool = True) -> GamBackendStatus:
-    """Probe rpy2 → R → ``mgcv``. Never raises, and never imports R as an import side effect."""
+    """Probe rpy2 -> R -> ``mgcv``. Never raises, and never imports R as an import side effect."""
     try:
         import rpy2  # noqa: F401
         import rpy2.situation as situation
@@ -148,9 +146,7 @@ def gam_backend_status(*, check_r_packages: bool = True) -> GamBackendStatus:
     )
 
 
-# ---------------------------------------------------------------------------
 # R helpers
-# ---------------------------------------------------------------------------
 _R_HELPERS = """
 .nvitk_mrf_fit <- function(data, formula, nb, region_col, family, method, select) {
   # The MRF basis indexes its penalty by factor level, so the levels must be exactly the names of
@@ -270,9 +266,7 @@ def mrf_formula(
     return f"{outcome} ~ " + " + ".join(terms)
 
 
-# ---------------------------------------------------------------------------
 # Fitting
-# ---------------------------------------------------------------------------
 def fit_mrf(
     *,
     data: pd.DataFrame,
@@ -424,9 +418,7 @@ def _formula_columns(columns: Sequence[str], formula: str) -> list[str]:
     return sorted((tokens - reserved) & available)
 
 
-# ---------------------------------------------------------------------------
 # Reading the fit
-# ---------------------------------------------------------------------------
 def mrf_coef_frame(fit: Any, *, ci_level: float = 0.95) -> pd.DataFrame:
     """Parametric (non-smooth) coefficients, in the shared report shape."""
     from .mixedlm import _z_critical, significance_stars
@@ -462,8 +454,8 @@ def mrf_smooth_frame(fit: Any) -> pd.DataFrame:
     """
     The smooth term's summary: effective degrees of freedom and its test against a flat field.
 
-    ``edf`` is what the MRF actually bought. An edf near 1 means the penalty collapsed the field
-    almost to a constant — neighbouring vessels were pulled together so hard that the graph adds
+    ``edf`` is what the MRF bought. An edf near 1 means the penalty collapsed the field
+    almost to a constant: neighbouring vessels were pulled together so hard that the graph adds
     nothing over a single intercept. An edf near ``k`` means the vessels differ so much that the
     smoothing barely constrained them, which is a fixed effect per territory in all but name.
     """
@@ -485,7 +477,7 @@ def mrf_field_frame(fit: Any, model_df: pd.DataFrame, meta: Mapping[str, Any]) -
     """
     The smoothed spatial field: each vessel's estimated departure from the overall level.
 
-    This is the MRF's actual output — a value per vessel, shrunk toward its *neighbours* rather than
+    This is the MRF's actual output: a value per vessel, shrunk toward its *neighbours* rather than
     toward the grand mean. Comparing it against a plain per-territory fixed effect shows how much
     the anatomy changed the estimate, which is the whole reason for running one.
     """
@@ -619,7 +611,7 @@ def plot_mrf_field(
 
     Vessels are ordered by their estimated effect rather than alphabetically, so the gradient across
     the network is what the eye picks up. The annotation on each row is that vessel's neighbour
-    count — a vessel with one neighbour is shrunk toward that single partner and its interval is
+    count: a vessel with one neighbour is shrunk toward that single partner and its interval is
     correspondingly wide.
     """
     import matplotlib.pyplot as plt
@@ -662,9 +654,9 @@ def plot_mrf_graph(
     """
     The adjacency graph itself, nodes coloured by their fitted effect.
 
-    Shows what the smooth was actually working with: which vessels are connected, and whether the
+    Shows what the smooth was working with: which vessels are connected, and whether the
     fitted field varies smoothly across the graph or jumps between neighbours. A sharp jump between
-    two adjacent vessels is the interesting case — the penalty resisted it, so the data insisted.
+    two adjacent vessels is the interesting case: the penalty resisted it, so the data insisted.
     """
     import matplotlib.pyplot as plt
 

@@ -15,7 +15,7 @@ from nvitk.types import Image
 # Preclinical TurboRARE-style volumes in this lab store anatomy as
 # (axis0=L/R, axis1=S/I, axis2=A/P) even when the NIfTI header claims
 # (L/R, A/P, S/I). The ANTsPy mouse gallery example stores (L/R, A/P, S/I)
-# with LAS polarity (R→L, P→A, I→S).
+# with LAS polarity (R->L, P->A, I->S).
 MOUSE_ANATOMY_PERMUTE: tuple[int, int, int] = (0, 2, 1)
 MOUSE_TARGET_ORIENTATION: str = "LAS"
 
@@ -93,7 +93,7 @@ def canonical_affine_for_axcodes(
     shape: Sequence[int] | None = None,
     origin: Sequence[float] | None = None,
 ) -> _host_np.ndarray:
-    """Build a 4×4 voxel→RAS-world affine for data already stored as *axcodes*."""
+    """Build a 4×4 voxel->RAS-world affine for data already stored as *axcodes*."""
     codes = _validate_axcodes(axcodes)
     sx, sy, sz = (float(spacing[0]), float(spacing[1]), float(spacing[2]))
     direction = _host_np.column_stack(
@@ -180,10 +180,10 @@ def reorient_volume(
     image
         Input :class:`~nvitk.types.Image` (or array coerced via metadata-less Image).
     mode
-        ``manual`` — permute / flip / target codes from arguments.
-        ``reference`` — match *reference* orientation codes (after optional permute/flips).
-        ``mouse`` — preclinical preset: permute ``(0,2,1)`` then canonical ``LAS``
-        (AP moves from Z→Y; SI ends on Z), matching the ANTsPy mouse gallery layout.
+        ``manual``: permute / flip / target codes from arguments.
+        ``reference``: match *reference* orientation codes (after optional permute/flips).
+        ``mouse``: preclinical preset: permute ``(0,2,1)`` then canonical ``LAS``
+        (AP moves from Z->Y; SI ends on Z), matching the ANTsPy mouse gallery layout.
     reference
         Reference image whose orientation codes are the target when ``mode='reference'``.
     target_orientation

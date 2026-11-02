@@ -1,12 +1,12 @@
-"""Index a DICOM folder without loading any pixels: studies → series → files.
+"""Index a DICOM folder without loading any pixels: studies -> series -> files.
 
 :func:`scan_dicom` reads only the headers (``stop_before_pixels``), in parallel,
 and groups the files the way :func:`~nvitk.io.conversors._dicom_conversion.load_dicom_series`
-would split them into volumes: by study, by ``SeriesInstanceUID``, then — when a
-series mixes them — by ``ImageType`` (magnitude / phase, water / fat…). Every
+would split them into volumes: by study, by ``SeriesInstanceUID``, then (when a
+series mixes them) by ``ImageType`` (magnitude / phase, water / fat...). Every
 file says what it is (an image, a waveform, a structured report, a Philips
-spectral base image — read by :mod:`nvitk.io.conversors.philips_sbi`, not as a
-picture…), so a browser can list everything and offer only what can become a volume.
+spectral base image: read by :mod:`nvitk.io.conversors.philips_sbi`, not as a
+picture...), so a browser can list everything and offer only what can become a volume.
 
 Example::
 
@@ -281,9 +281,9 @@ def scan_dicom(
     progress: Callable[[int, int], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
 ) -> list[DicomStudy]:
-    """Studies → series → files under *paths* (folders and / or files), headers only.
+    """Studies -> series -> files under *paths* (folders and / or files), headers only.
 
-    Series that mix ``ImageType`` values (magnitude / phase, Dixon water / fat…)
+    Series that mix ``ImageType`` values (magnitude / phase, Dixon water / fat...)
     are split into parts, as the loader splits them into volumes (with
     *split_image_type*). *progress* is called with ``(files read, files found)``;
     *cancelled* stops the scan early when it returns ``True``.

@@ -7,12 +7,12 @@
 
 **Outputs**
 
-- ``<results_root>/stage5_package/<name>/`` — the assembled build context
+- ``<results_root>/stage5_package/<name>/``: the assembled build context
 - ``.../<name>.tar.gz`` when ``--save`` is given, ready to upload
-- ``.../topbrain_stage5.json`` — provenance
+- ``.../topbrain_stage5.json``: provenance
 
 The build context is assembled and left on disk whether or not Docker is available, so the
-image can be built on a different machine — the analysis host and the machine with a Docker
+image can be built on a different machine: the analysis host and the machine with a Docker
 daemon are frequently not the same one.
 
 One image, both tracks
@@ -22,9 +22,9 @@ either portal. (Both write to the *same* output socket in the 2026 TA36 edition 
 ``docker/inference.py``.) This packs whichever models it is given into a single image and lets
 the entry point pick at run time, so one build covers both tracks:
 
-* two modality-specific models (``ta36_ct`` + ``ta36_mr``) — each socket gets its own;
-* one modality-agnostic model (``ta36``) — registered for both sockets;
-* one modality-specific model — that socket works, the other fails with a clear message rather
+* two modality-specific models (``ta36_ct`` + ``ta36_mr``): each socket gets its own;
+* one modality-agnostic model (``ta36``): registered for both sockets;
+* one modality-specific model: that socket works, the other fails with a clear message rather
   than silently predicting with the wrong network.
 
 What the entry point is told
@@ -32,11 +32,11 @@ What the entry point is told
 ``models.json`` carries, per modality, the model directory, the checkpoint name, how many input
 channels the network expects and **the exact intensity windows stage 0 applied**. None of that
 is recoverable from the weights, and a container that guesses a window produces a confident
-wrong segmentation rather than an error — so the channel count is read back from each model's
+wrong segmentation rather than an error, so the channel count is read back from each model's
 own ``dataset.json`` and cross-checked against the windows given here.
 
 Submission constraints, from the 2026 template (``CoWBenchmark/TopBrain_Algo_Submission``):
-container ≤10 GB, ≤31 GiB DRAM, one ``.mha`` in and one ``.mha`` out with identical shape, no
+container <=10 GB, <=31 GiB DRAM, one ``.mha`` in and one ``.mha`` out with identical shape, no
 network at run time. The entry point also reads NIfTI and NRRD, which the platform never sends
 but local testing often has.
 
@@ -96,8 +96,8 @@ MAX_IMAGE_GIB: float = 10.0
 #: final size and never appears in the context.
 BASE_IMAGE_GIB: float = 7.0
 
-#: Checkpoint keys inference reads. Everything else in a training checkpoint — above all the
-#: optimizer momentum buffer, which is half the file — is dead weight in a submission image.
+#: Checkpoint keys inference reads. Everything else in a training checkpoint (above all the
+#: optimizer momentum buffer, which is half the file) is dead weight in a submission image.
 #: Stripping is what makes a 5-fold ensemble fit under the 10 GiB ceiling.
 CHECKPOINT_KEEP_KEYS: tuple[str, ...] = (
     "network_weights", "trainer_name", "inference_allowed_mirroring_axes",
@@ -136,7 +136,7 @@ class ModelSpec:
     """One trained run destined for the image, and how to feed it."""
 
     modality: str
-    """``ct`` or ``mr`` — which socket this model serves."""
+    """``ct`` or ``mr``: which socket this model serves."""
 
     run_dir: Path
     """Trained nnU-Net run directory."""
@@ -174,7 +174,7 @@ def discover_folds(run_dir: Path) -> list[str]:
     """Every fold on disk in *run_dir* that carries a checkpoint, in order.
 
     ``--folds`` naming an explicit subset is for fitting under the image ceiling; the default is
-    the whole ensemble, because that is what the reported accuracy was measured on and quietly
+    the whole ensemble, because that is what the reported accuracy was measured on and silently
     shipping one fold of five is a silent downgrade. ``fold_all`` -- nnU-Net's single
     all-the-data fold -- is picked up here too when a run has one.
     """
@@ -232,8 +232,8 @@ def strip_checkpoint(source: Path, destination: Path) -> tuple[int, int]:
     """Write an inference-only copy of *source*; returns ``(bytes_before, bytes_after)``.
 
     A training checkpoint is about 820 MB, half of which is the SGD momentum buffer. Inference
-    reads four things — the weights, the trainer name, the allowed mirroring axes and
-    ``init_args['configuration']`` — so everything else goes. ``init_args`` is rebuilt with only
+    reads four things (the weights, the trainer name, the allowed mirroring axes and
+    ``init_args['configuration']``), so everything else goes. ``init_args`` is rebuilt with only
     ``configuration``, because its ``plans`` entry embeds absolute paths from the training
     cluster that have no business in a submitted image.
 
@@ -263,7 +263,7 @@ def collect_model(
 ) -> list[str]:
     """Copy a trained nnU-Net run into an inference-ready model folder.
 
-    nnU-Net's predictor expects ``plans.json`` and ``dataset.json`` beside ``fold_N/`` — note
+    nnU-Net's predictor expects ``plans.json`` and ``dataset.json`` beside ``fold_N/``: note
     it wants them named exactly that, not ``nnUNetResEncUNetLPlans.json``, so the plans file is
     renamed on the way in.
 
@@ -329,7 +329,7 @@ def resolve_run_dir(
 ) -> tuple[Path, dict[str, str]]:
     """Locate the trained run for *label_set*; returns ``(run_dir, identity)``.
 
-    Plans name, architecture and configuration all come from what stage 2 actually trained.
+    Plans name, architecture and configuration all come from what stage 2 trained.
     None of them has a usable default: the plans name embeds a spacing chosen at run time, and
     the architecture decides the trainer family.
     """
@@ -441,14 +441,14 @@ def harmonisation_for(
     """The intensity transform the container must apply, one entry per input channel.
 
     The list is returned under ``channel_transforms``; the plain channel *count* is a separate
-    key, so neither can quietly overwrite the other in the registry.
+    key, so neither can silently overwrite the other in the registry.
 
     Raises
     ------
     ValueError
         When the channel count and the windows disagree. A two-channel network fed one channel
         fails loudly inside nnU-Net, but a two-channel network fed a *wrong* second channel does
-        not fail at all — it just predicts worse. Refusing here is the only place that mismatch
+        not fail at all: it just predicts worse. Refusing here is the only place that mismatch
         is cheap to catch.
     """
     if modality == "ct":
@@ -498,7 +498,7 @@ def harmonisation_for(
 #:
 #: ``split``   one image per modality. The default, because a full fold ensemble of both models
 #:             does not fit under the 10 GiB ceiling, and Grand Challenge has a separate portal
-#:             per track anyway — so nothing is lost by shipping two.
+#:             per track anyway, so nothing is lost by shipping two.
 #: ``mixed``   one image serving both sockets. Convenient, and the only option when a single
 #:             modality-agnostic model covers both, but with two full ensembles it will be
 #:             rejected for size.
@@ -534,14 +534,14 @@ def _assemble_context(
 
     log.info("topbrain stage5 | %d model(s) -> %s", len(specs), context)
 
-    # ---- 1. Docker assets ----------------------------------------------------
+    # 1. Docker assets
     assets = _docker_assets_dir()
     for filename in ("Dockerfile", "inference.py", "requirements.txt"):
         shutil.copyfile(assets / filename, context / filename)
 
-    # ---- 2. The in-tree nnU-Net build ---------------------------------------
+    # 2. The in-tree nnU-Net build
     # Inference must rebuild the network from the trainer class that trained it, and the
-    # ToPBrain loss trainers live inside this build — the released nnunetv2 cannot resolve
+    # ToPBrain loss trainers live inside this build: the released nnunetv2 cannot resolve
     # them. Copying it in (and *not* pip-installing nnunetv2) is what makes the container able
     # to load its own model.
     from nvitk.pipes.topbrain.util.nnunet_env import nnunet_root
@@ -580,7 +580,7 @@ def _assemble_context(
             f"not ship nvitk, so these would fail at run time on the platform."
         )
 
-    # ---- 3. The slim algorithm package -------------------------------------
+    # 3. The slim algorithm package
     # Not nvitk. The image needs the harmonisation, the component clean-up and nothing else;
     # copying the library in to get them dragged 151 MB of unrelated pipelines into an image
     # with a 10 GiB ceiling. topbrain_algo is numpy/scipy only and is kept in step by hand.
@@ -590,9 +590,9 @@ def _assemble_context(
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
 
-    # ---- 3b. The post-processing the container will apply ---------------------
-    # Written as data rather than hard-coded in inference.py: the point is that the selection
-    # stage 3 measured is provably the one that ships.
+    # 3b. The post-processing the container will apply
+    # Written as data rather than hard-coded in inference.py, so the selection stage 3
+    # measured is provably the one that ships.
     spec = postproc.spec_from_options(
         postprocess=postprocess, min_volume_mm3=min_volume_mm3,
         repair_gaps_mm=repair_gaps_mm, repair_close_radius=repair_close_radius,
@@ -600,7 +600,7 @@ def _assemble_context(
     _check_postprocess_supported(spec)
     postproc.write_container_config(context, spec)
 
-    # ---- 4. Trained weights, one folder per model ----------------------------
+    # 4. Trained weights, one folder per model
     # Baked: straight into the context's model/, which the Dockerfile COPYs. Tarball: into a
     # sibling staging tree that becomes the .tar.gz, leaving model/ empty in the image so the
     # weights do not count against the 10 GiB ceiling.
@@ -964,9 +964,7 @@ def _require_docker() -> None:
         )
 
 
-# ---------------------------------------------------------------------------
 # CLI + SGE submission
-# ---------------------------------------------------------------------------
 
 
 def _worker_argv(
@@ -1004,7 +1002,7 @@ def _worker_argv(
         argv.extend(["--plans-identifier", quote_path(plans_identifier)])
     if configuration_name:
         argv.extend(["--configuration", quote_path(configuration_name)])
-    # Omitted so the worker packages every fold each run actually has.
+    # Omitted so the worker packages every fold each run has.
     if folds:
         argv.extend(["--folds", quote_path(",".join(str(f) for f in folds))])
     # Omitted so the worker resolves it per model: a run still training has only

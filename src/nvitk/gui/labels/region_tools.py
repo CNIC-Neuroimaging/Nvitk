@@ -1,14 +1,14 @@
 """The Labeling tab's region tools at work, for the main canvas and the orthogonal views alike.
 
-* :class:`RegionStroke` — one use of the magic wand, the adaptive flood or the
+* :class:`RegionStroke`: one use of the magic wand, the adaptive flood or the
   vessel flood: seeds added along a drag (each new voxel the cursor reaches
   outside the region so far grows another piece), or one seed whose setting is
   tuned with the mouse. The region shows in the layer as it grows and is written
   as one undo step when the button is released.
-* :class:`VesselTrace` — points clicked along a vessel, the cheapest path
+* :class:`VesselTrace`: points clicked along a vessel, the cheapest path
   through them, and what is filled around that path: a tube, or the voxels out
   to the largest vessel radius whose intensity lies in the path's own range.
-* :class:`SmartBrushStroke` — a brush that only paints the voxels under it that
+* :class:`SmartBrushStroke`: a brush that only paints the voxels under it that
   go with the intensity at its centre.
 
 The growing itself is :mod:`nvitk.segmentation.interactive`'s, on the active
@@ -88,7 +88,7 @@ class RegionStroke:
         self.union: Any | None = None
         self.seeds: list[tuple[int, ...]] = []
 
-    # ── seeds ─────────────────────────────────────────────────────────────────
+    # seeds
 
     def local(self, voxel: Sequence[int]) -> tuple[int, ...] | None:
         """*voxel* (an index into the layer) in the region's own coordinates;
@@ -137,7 +137,7 @@ class RegionStroke:
             self.union = self.grow(self.seeds[0])
             self.show()
 
-    # ── the result ────────────────────────────────────────────────────────────
+    # the result
 
     @property
     def size(self) -> int:
@@ -176,7 +176,7 @@ class RegionStroke:
 class SmartBrushStroke:
     """A brush stroke that paints, under the brush, only the voxels that go with
     the intensity at its centre (within a tolerance, or on the centre's side of
-    the brush's Otsu threshold) — one undo step for the drag."""
+    the brush's Otsu threshold): one undo step for the drag."""
 
     def __init__(self, panel: Any, layer: Any, dims: Sequence[int]) -> None:
         ref = panel.reference()
@@ -375,7 +375,7 @@ class VesselTrace:
     def intensity_region(self, allowed: Any | None = None) -> tuple[Any, tuple[float, float], float]:
         """The voxels around the path out to the largest vessel radius whose
         intensity lies in the path's own range (widened by the tracer's *Range ±*),
-        connected to the path — region coordinates, on the backend — with the
+        connected to the path (region coordinates, on the backend) with the
         intensity range and the reach used."""
         o = self.options
         reach = float(max(o["radii_mm"]))
@@ -387,8 +387,8 @@ class VesselTrace:
         return region, bounds, reach
 
     def fill(self) -> tuple[int, str]:
-        """Give the active label to what the tracer fills — the tube, or the voxels
-        of the path's intensity around it (*Fill*) — with preserve labels and the
+        """Give the active label to what the tracer fills, the tube, or the voxels
+        of the path's intensity around it (*Fill*), with preserve labels and the
         editable area applied, as one undo step: the voxels changed and what was
         filled, in words."""
         layer = self.layer

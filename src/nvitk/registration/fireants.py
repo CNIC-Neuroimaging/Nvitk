@@ -3,11 +3,11 @@
 FireANTs is a PyTorch registration library. The pip package ships a Python API
 (``fireants.registration``) but not the ``fireantsRegistration`` command-line
 tool the first version of this wrapper drove, so registration now runs through
-the API: an optional moments initialisation, then any chain of rigid → affine →
+the API: an optional moments initialisation, then any chain of rigid -> affine ->
 greedy / SyN stages, each stage initialised from the one before.
 
 Transforms are written in ANTs format (``.mat`` for rigid/affine, a displacement
-``.nii.gz`` for greedy/SyN — which already *includes* the affine it was
+``.nii.gz`` for greedy/SyN, which already *includes* the affine it was
 initialised with), so :func:`fireants_apply` maps further images with
 ``ants.apply_transforms`` and the files interoperate with every ANTs tool.
 """
@@ -50,14 +50,14 @@ class FireAntsResult:
 
     output_prefix: Path
     warped_moving_path: Path
-    #: ANTs-format transforms mapping MOVING → FIXED, in ``ants.apply_transforms`` order.
+    #: ANTs-format transforms mapping MOVING -> FIXED, in ``ants.apply_transforms`` order.
     transforms: tuple[Path, ...] = field(default_factory=tuple)
     #: Stages that ran, e.g. ``("rigid", "affine", "syn")``.
     stages: tuple[str, ...] = field(default_factory=tuple)
 
 
 def parse_stages(transform: str | Sequence[str]) -> tuple[str, ...]:
-    """``"rigid+affine+syn"`` (or a sequence) → validated stage tuple, in canonical order."""
+    """``"rigid+affine+syn"`` (or a sequence) -> validated stage tuple, in canonical order."""
     if isinstance(transform, str):
         parts = [p.strip().lower() for p in transform.replace(",", "+").split("+")]
     else:
@@ -76,7 +76,7 @@ def parse_stages(transform: str | Sequence[str]) -> tuple[str, ...]:
 
 
 def _int_list(values: Sequence[Any] | str, name: str) -> list[int]:
-    """``"4,2,1"`` / ``[4, 2, 1]`` → ``[4, 2, 1]``."""
+    """``"4,2,1"`` / ``[4, 2, 1]`` -> ``[4, 2, 1]``."""
     if isinstance(values, str):
         values = [v for v in values.replace("x", ",").split(",") if v.strip()]
     out = [int(float(v)) for v in values]
@@ -94,7 +94,7 @@ def _require_fireants() -> dict[str, Any]:
         from fireants.registration.moments import MomentsRegistration
         from fireants.registration.rigid import RigidRegistration
         from fireants.registration.syn import SyNRegistration
-    except Exception as exc:  # noqa: BLE001 — torch / CUDA import problems surface here too
+    except Exception as exc:  # noqa: BLE001 (torch / CUDA import problems surface here too)
         raise BackendUnavailableError(
             f"FireANTs is not usable ({exc}). Install with: pip install fireants"
         ) from exc
@@ -172,7 +172,7 @@ def fireants_register(
 
         if str(device).startswith("cuda") and not torch.cuda.is_available():
             device = "cpu"
-    except Exception:  # noqa: BLE001 — the API import above already needs torch
+    except Exception:  # noqa: BLE001 (the API import above already needs torch)
         pass
 
     out_dir = Path(out_dir)

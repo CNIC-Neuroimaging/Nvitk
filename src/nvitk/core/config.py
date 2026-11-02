@@ -6,16 +6,12 @@ import os
 from dataclasses import dataclass
 from typing import Literal
 
-# -----------------------------------------------------------------------------
 # Types
-# -----------------------------------------------------------------------------
 
 BackendPreference = Literal["auto", "numpy", "cupy", "cupy_required"]
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Environment parsing
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -27,7 +23,7 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 
 def _normalize_backend_preference(raw: str | None) -> BackendPreference:
-    """Map free-form strings (``cpu``, ``gpu``, ``gpu_required``, …) to :data:`BackendPreference`."""
+    """Map free-form strings (``cpu``, ``gpu``, ``gpu_required``, ...) to :data:`BackendPreference`."""
     value = (raw or "auto").strip().lower()
     aliases = {
         "auto": "auto",
@@ -44,9 +40,7 @@ def _normalize_backend_preference(raw: str | None) -> BackendPreference:
     return normalized
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # CoreConfig
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)

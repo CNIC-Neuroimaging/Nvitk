@@ -1,7 +1,7 @@
-"""Connected-component labelling — NumPy/SciPy stand-in for ``nvitk.morphology.components``.
+"""Connected-component labelling: NumPy/SciPy stand-in for ``nvitk.morphology.components``.
 
 Hand-written (not synced). Only :func:`label_connected` is reachable from the
-morphometrics pipeline (``polyline_graph``); it reproduces upstream exactly —
+morphometrics pipeline (``polyline_graph``); it reproduces upstream exactly:
 ``ndi.label`` with a ``generate_binary_structure`` element and *connectivity*
 clamped to ``[1, ndim]``.
 """

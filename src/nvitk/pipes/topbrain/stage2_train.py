@@ -2,14 +2,14 @@
 
 **Inputs**
 
-- ``<nnunet_raw>/DatasetXXX_…/`` from stage 0
+- ``<nnunet_raw>/DatasetXXX_.../`` from stage 0
 - a pre-trained bundle from stage 1
 
 **Outputs**
 
-- ``<nnunet_preprocessed>/DatasetXXX_…/ptPlans__<name>____Spacing…json`` and its preprocessed data
-- ``<nnunet_results>/DatasetXXX_…/<trainer>__<plans>__3d_fullres/fold_N/``
-- ``<results_root>/stage2_train/<dataset>/topbrain_stage2.json`` — provenance
+- ``<nnunet_preprocessed>/DatasetXXX_.../ptPlans__<name>____Spacing...json`` and its preprocessed data
+- ``<nnunet_results>/DatasetXXX_.../<trainer>__<plans>__3d_fullres/fold_N/``
+- ``<results_root>/stage2_train/<dataset>/topbrain_stage2.json``: provenance
 
 Why the in-tree nnU-Net build
 -----------------------------
@@ -18,9 +18,9 @@ Released ``nnunetv2`` cannot consume an nnssl checkpoint. The in-tree build at
 
 ``nnUNetv2_preprocess_like_nnssl``
     Reads the checkpoint's adaptation plan, derives target spacing and normalisation from it,
-    and writes a ``ptPlans__…`` plans file that records where the weights are and how to load
+    and writes a ``ptPlans__...`` plans file that records where the weights are and how to load
     them. It *adapts* an existing plan rather than creating one, so a **baseline plan must
-    exist first** — this stage runs fingerprinting and planning to produce it.
+    exist first**: this stage runs fingerprinting and planning to produce it.
 ``PretrainedTrainer`` / ``PretrainedTrainer_Primus``
     Build the network from those plans, load the pre-trained encoder into it, and fine-tune with
     a warm-up schedule. The Primus variant is what makes the transformer checkpoints usable.
@@ -29,7 +29,7 @@ This is also where the encoder finally becomes a task-specific segmentation mode
 sized for *this* dataset's class count and spacing, which stage 1 could not know.
 
 The build is invoked as a subprocess with ``PYTHONPATH`` pointing at it, so the released
-``nnunetv2`` the rest of nvitk depends on stays untouched — see
+``nnunetv2`` the rest of nvitk depends on stays untouched; see
 :mod:`nvitk.pipes.topbrain.util.nnunet_run`.
 """
 
@@ -87,7 +87,7 @@ def read_training_provenance(results_root: Path, label_set: str) -> dict[str, An
     Stages 3-5 all need these, and none can be derived up front: the plans identifier embeds a
     spacing that ``preprocess_like_nnssl`` only decides at run time, and the trainer family
     depends on the pre-trained checkpoint's architecture. Reading the marker is what keeps
-    inference, evaluation and packaging pointed at the model that was actually trained rather
+    inference, evaluation and packaging pointed at the model that was trained rather
     than at a name assembled from defaults.
 
     Raises
@@ -118,7 +118,7 @@ def resolve_trained_run(
     can be assembled from defaults**:
 
     ``plans_identifier``
-        ``ptPlans__<pretrain_name>____Spacing__<x>_<y>_<z>___Norm__Z`` — the spacing is decided
+        ``ptPlans__<pretrain_name>____Spacing__<x>_<y>_<z>___Norm__Z``: the spacing is decided
         by ``preprocess_like_nnssl`` at run time, so the name is only knowable after the fact.
     ``architecture``
         Decides the trainer family (``PretrainedTrainer`` vs ``PretrainedTrainer_Primus``), and
@@ -241,7 +241,7 @@ def patch_plans_patch_size(
     """Override the patch (and optionally batch) size in a generated ``ptPlans`` file.
 
     ``preprocess_like_nnssl`` copies ``recommended_downstream_patchsize`` from the pre-training
-    plan — 160³ for every OpenMind checkpoint. That is sized for the A100s the checkpoints were
+    plan: 160³ for every OpenMind checkpoint. That is sized for the A100s the checkpoints were
     trained on; a Primus-M transformer at 160³ with 37 output channels does not fit a 16 GB
     card. Patch size is a training-time crop, so lowering it changes what fits in memory without
     invalidating the preprocessed data.
@@ -372,14 +372,14 @@ def run_train(
     plans_from_label_set
         Borrow another label set's ``ptPlans`` instead of deriving one from this dataset's own
         fingerprint. Two datasets must share a plan for a model trained on one to initialise a
-        model on the other — see :func:`~nvitk.pipes.topbrain.util.nnunet_run.move_plans`. Used
+        model on the other; see :func:`~nvitk.pipes.topbrain.util.nnunet_run.move_plans`. Used
         by the binary stage so its network is identical to the multi-class one bar the head.
     pretrained_weights
         Checkpoint of a previous stage 2 run to start from. Everything except the segmentation
         heads is copied, so a binary vessel model can seed the 37-class model.
     sampling
         ``default`` leaves nnU-Net's patch sampling alone. ``rare_aware`` oversamples the cases
-        carrying rare classes and, inside them, the rare class itself — see
+        carrying rare classes and, inside them, the rare class itself; see
         :mod:`nvitk.pipes.topbrain.util.sampling`. It changes what the network sees, not what it
         optimises, so it composes with any ``--loss`` and should be measured against the same one.
     """
@@ -433,7 +433,7 @@ def run_train(
             sampling_util.CASE_CLASSES_FILE, paths.nnunet_raw / dataset_name,
         )
 
-    # ---- 1. Baseline plan ---------------------------------------------------
+    # 1. Baseline plan
     # preprocess_like_nnssl adapts an existing plan; without one it asserts. The baseline also
     # fixes the target spacing that --adaptation-mode default_nnunet inherits.
     existing = nnunet_run.has_baseline_plans(paths.nnunet_preprocessed, dataset_name)
@@ -458,7 +458,7 @@ def run_train(
             num_processes=num_processes, verify_integrity=verify_integrity,
         )
 
-    # ---- 2. Plans + preprocessing derived from the pre-training plan --------
+    # 2. Plans + preprocessing derived from the pre-training plan
     if plans_from_label_set:
         # Borrowed geometry. The source dataset must already have been planned; its plans are
         # copied here unchanged so both networks come out identical, and only then is this
@@ -540,7 +540,7 @@ def run_train(
     # step -- so a job told to skip preprocessing skips it too: under --parallel-folds the
     # preparation job has already done it, and four fold jobs refreshing the same directory
     # over NFS is how one of them trips over a file another is replacing. Completeness is still
-    # checked, so a genuinely missing tree is caught here rather than eight hours later.
+    # checked, so a missing tree is caught here rather than eight hours later.
     gt_dir = paths.nnunet_preprocessed / dataset_name / "gt_segmentations"
     expected = len(list((paths.nnunet_raw / dataset_name / "labelsTr").glob("*.nii.gz")))
     present = len(list(gt_dir.glob("*.nii.gz"))) if gt_dir.is_dir() else 0
@@ -583,7 +583,7 @@ def run_train(
         log.ok(f"stage2: planning and preprocessing complete (--plan-only) -> {results_dir}")
         return results_dir
 
-    # ---- 3. Fine-tune -------------------------------------------------------
+    # 3. Fine-tune
     # The mirror watches the results tree rather than the subprocess, so it picks each fold's
     # directory up as nnU-Net creates it and keeps working across the fold boundary. Wrapping
     # the whole loop (not each fold) means one watcher for the run.
@@ -629,7 +629,7 @@ def _write_marker(marker_dir: Path, payload: dict[str, Any]) -> None:
 
     A run's folds may be trained by separate jobs -- ``--parallel-folds``, or five hand-launched
     ``--folds N`` submissions. Each of those writes this file, and a plain overwrite would leave
-    the marker naming only whichever job finished last, so stage 4 would quietly predict with a
+    the marker naming only whichever job finished last, so stage 4 would silently predict with a
     single model where five were trained. What is recorded here is what was *requested*;
     ``TrainedModel.available_folds`` narrows it to the folds with a finished checkpoint.
     """
@@ -650,7 +650,7 @@ def _write_marker(marker_dir: Path, payload: dict[str, Any]) -> None:
     # A fold with a directory in the run tree belongs to this run whoever launched it. Trusting
     # only the requested list would drop folds trained before this marker existed -- relaunching
     # the remaining folds of a half-finished run would then register fewer folds than are on
-    # disk, and stage 4 would ensemble a subset of the models actually trained.
+    # disk, and stage 4 would ensemble a subset of the models trained.
     run_dir = Path(payload.get("results_dir") or "")
     trained = sorted(
         d.name[len("fold_"):] for d in run_dir.glob("fold_*")
@@ -682,9 +682,7 @@ def parse_folds(spec: str) -> list[int | str]:
     return parsed
 
 
-# ---------------------------------------------------------------------------
 # CLI + SGE submission
-# ---------------------------------------------------------------------------
 
 
 def _worker_argv(**o) -> list[str]:

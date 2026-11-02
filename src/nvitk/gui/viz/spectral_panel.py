@@ -1,7 +1,7 @@
 """The Spectral panel: Philips spectral base images (SBI) turned into spectral results, live.
 
-Load an SBI series (from the DICOM browser — SBI series are listed there as *spectral
-base* — or with *Open SBI series…* here) and the panel keeps its two basis volumes, the
+Load an SBI series (from the DICOM browser (SBI series are listed there as *spectral
+base*), or with *Open SBI series...* here) and the panel keeps its two basis volumes, the
 photoelectric and Compton-scatter parts of the attenuation
 (:mod:`nvitk.io.conversors.philips_sbi`). From them it shows, in one live layer per
 series:
@@ -14,7 +14,7 @@ series:
 *Add a copy* keeps the current result as a layer of its own (to compare 40 and 70 keV
 side by side); *Energy series* stacks monoenergetic images into one 3D+E layer, which the
 time tools scroll and plot. *Curve at the cursor* plots HU against keV for the voxel under
-the mouse, *Curve over a label* the mean of a mask's label — the spectral attenuation
+the mouse, *Curve over a label* the mean of a mask's label: the spectral attenuation
 curve, computed from the basis pair rather than from stored images.
 
 The results are nvitk's derivation (:mod:`nvitk.transform.spectral`), not Philips'
@@ -51,7 +51,7 @@ from nvitk.core.array import to_numpy
 from nvitk.core.backend import get_global_backend, using
 from nvitk.gui.core.design import COLOR_MUTED, SPACE, SPACE_TIGHT, Card
 
-#: Results offered: key → (label, units, colormap, default display range or None for auto).
+#: Results offered: key -> (label, units, colormap, default display range or None for auto).
 RESULTS: dict[str, tuple[str, str, str, tuple[float, float] | None]] = {
     "monoenergetic": ("Virtual monoenergetic", "HU", "gray", None),
     "conventional": ("Conventional", "HU", "gray", None),
@@ -144,7 +144,7 @@ class SpectralPanel(QWidget):
         root.addStretch(1)
         self._sync_enabled()
 
-    # ── cards ────────────────────────────────────────────────────────────────
+    # cards
 
     def _build_data_card(self) -> Card:
         card = Card("Spectral data (Philips SBI)")
@@ -276,7 +276,7 @@ class SpectralPanel(QWidget):
         card.add(reset)
         return card
 
-    # ── state ────────────────────────────────────────────────────────────────
+    # state
 
     def datasets(self) -> list[SpectralDataset]:
         return list(self._datasets)
@@ -325,7 +325,7 @@ class SpectralPanel(QWidget):
         self._schedule()
 
     def set_result(self, key: str, kev: float | None = None) -> None:
-        """Show *key* (and *kev* for the monoenergetic image) — for scripts and tests."""
+        """Show *key* (and *kev* for the monoenergetic image), for scripts and tests."""
         if kev is not None:
             self._kev_spin.setValue(int(round(kev)))
         index = self._result_box.findData(key)
@@ -354,7 +354,7 @@ class SpectralPanel(QWidget):
             box.setValue(value)
         self._on_calibration()
 
-    # ── loading ──────────────────────────────────────────────────────────────
+    # loading
 
     def load_sbi(self, paths: list[str], *, source: str = "") -> SpectralDataset | None:
         """Read an SBI series (its files) and show it, at 70 keV to start with."""
@@ -405,7 +405,7 @@ class SpectralPanel(QWidget):
             pick = labels.index(text)
         return self.load_sbi(list(series[pick].paths), source=folder)
 
-    # ── computing ────────────────────────────────────────────────────────────
+    # computing
 
     def _request(self, ds: SpectralDataset) -> dict[str, Any]:
         self._serial += 1
@@ -434,7 +434,7 @@ class SpectralPanel(QWidget):
 
     @staticmethod
     def _compute(ds: SpectralDataset, request: dict[str, Any]) -> np.ndarray:
-        """The result volume (host, float32) — runs on a worker thread."""
+        """The result volume (host, float32): runs on a worker thread."""
         from nvitk.transform.spectral import spectral_result
 
         sbi = ds.sbi
@@ -451,7 +451,7 @@ class SpectralPanel(QWidget):
         def work() -> None:
             try:
                 result: Any = self._compute(ds, request)
-            except Exception as exc:  # noqa: BLE001 — handed to the GUI thread
+            except Exception as exc:  # noqa: BLE001 (handed to the GUI thread)
                 result = exc
             self._relay.finished.emit(ds, request, result)
 
@@ -500,7 +500,7 @@ class SpectralPanel(QWidget):
         label = RESULTS[request["result"]][0]
         return f"{label} at {request['kev']:g} keV" if request["result"] == "monoenergetic" else label
 
-    # ── layers ───────────────────────────────────────────────────────────────
+    # layers
 
     def _layer_name(self, ds: SpectralDataset, request: dict[str, Any]) -> str:
         return f"{ds.label} · {self._describe(request)}"
@@ -546,7 +546,7 @@ class SpectralPanel(QWidget):
             layer.contrast_limits_range = (min(lo, float(np.nanmin(result))) - span,
                                            max(hi, float(np.nanmax(result))) + span)
             layer.contrast_limits = (lo, hi)
-        except Exception:  # noqa: BLE001 — display defaults are a convenience
+        except Exception:  # noqa: BLE001 (display defaults are a convenience)
             pass
         units = RESULTS[key][1]
         self._status.setText(f"{name}" + (f" ({units})" if units else "") + ".")
@@ -645,7 +645,7 @@ class SpectralPanel(QWidget):
         self._status.setText(f"{name}: {len(kevs)} energies, {stack.nbytes / 1e9:.1f} GB.")
         return layer
 
-    # ── curves ───────────────────────────────────────────────────────────────
+    # curves
 
     def _voxel_at_cursor(self, ds: SpectralDataset) -> tuple[int, int, int] | None:
         """The series' voxel under the mouse; else the ortho views' crosshair when they

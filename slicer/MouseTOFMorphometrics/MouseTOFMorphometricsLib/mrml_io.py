@@ -1,8 +1,8 @@
-"""MRML ↔ NIfTI / VTP marshalling for the morphometrics Slicer module.
+"""MRML <-> NIfTI / VTP marshalling for the morphometrics Slicer module.
 
 The morphometrics pipeline resolves each vessel's proximal end from the image
 affine (see ``nvitk.measure.morpho.anatomy_axes``), so the NIfTI written here
-must carry Slicer's real orientation — a wrong affine silently reverses
+must carry Slicer's real orientation: a wrong affine silently reverses
 centerlines rather than raising.
 """
 
@@ -22,9 +22,9 @@ log = logging.getLogger(__name__)
 
 #: Same tints the Mouse TOF CoW module uses for labels 1/2/3.
 TREE_COLORS_RGB = {
-    1: (51, 153, 255),   # Left ICA — blue
-    2: (255, 89, 89),    # Right ICA — red
-    3: (89, 230, 102),   # Basilar — green
+    1: (51, 153, 255),   # Left ICA: blue
+    2: (255, 89, 89),    # Right ICA: red
+    3: (89, 230, 102),   # Basilar: green
 }
 _FALLBACK_RGB = (200, 200, 90)
 
@@ -36,7 +36,7 @@ def array_from_labelmap(labelNode) -> np.ndarray:
 
 
 def ijk_to_ras_affine(volumeNode) -> np.ndarray:
-    """The node's IJK→RAS 4x4 — the same convention nibabel stores as its affine."""
+    """The node's IJK->RAS 4x4: the same convention nibabel stores as its affine."""
     m = vtk.vtkMatrix4x4()
     volumeNode.GetIJKToRASMatrix(m)
     return np.array([[m.GetElement(i, j) for j in range(4)] for i in range(4)], dtype=float)
@@ -45,7 +45,7 @@ def ijk_to_ras_affine(volumeNode) -> np.ndarray:
 def write_labelmap_nifti(labelNode, path: str, data: Optional[np.ndarray] = None) -> str:
     """Write *labelNode* (or *data* on its grid) to a ``.nii.gz`` with the correct affine.
 
-    Prefers ``slicer.util.saveNode`` — it goes through Slicer's own writer and
+    Prefers ``slicer.util.saveNode``: it goes through Slicer's own writer and
     handles the RAS/LPS convention. Only when *data* differs from the node, or
     that write fails, does it fall back to composing the affine by hand.
     """
@@ -73,7 +73,7 @@ def safe_filename(name: str) -> str:
 
 
 def label_id_from_stem(stem: str) -> Optional[int]:
-    """Leading label id in a morphometrics VTP stem (``3_BASILAR_comp01`` → ``3``)."""
+    """Leading label id in a morphometrics VTP stem (``3_BASILAR_comp01`` -> ``3``)."""
     match = re.match(r"^(\d+)_", os.path.basename(stem))
     return int(match.group(1)) if match else None
 
@@ -94,12 +94,12 @@ def vtp_to_ras_matrix(nifti_path: str) -> Optional[np.ndarray]:
     volume, rotated and offset from the labelmap they describe.
 
     Dividing out the spacing recovers the voxel index, and the NIfTI affine
-    (IJK→RAS, nibabel's convention, which is also Slicer's world) puts it back
+    (IJK->RAS, nibabel's convention, which is also Slicer's world) puts it back
     where the anatomy is::
 
         RAS = affine @ diag(1/sx, 1/sy, 1/sz, 1) @ point_vtp
 
-    The affine is read from the NIfTI that was actually handed to the pipeline,
+    The affine is read from the NIfTI that was handed to the pipeline,
     so this stays correct regardless of how Slicer chose to write the file.
     """
     try:
@@ -153,7 +153,7 @@ def _transformed_polydata(path: str, matrix: Optional[np.ndarray]):
     transform = vtk.vtkTransform()
     transform.SetMatrix(vtk_matrix)
 
-    # Bakes the transform into the points so the models are plain RAS geometry —
+    # Bakes the transform into the points so the models are plain RAS geometry:
     # no transform node left in the scene for the user to trip over.
     filt = vtk.vtkTransformPolyDataFilter()
     filt.SetInputData(poly)
@@ -175,7 +175,7 @@ def load_result_models(
 
     Returns the created nodes, coloured by label id. Vessel surfaces are loaded
     semi-transparent so the centerlines stay visible through them. *matrix* is
-    the VTP→RAS transform from :func:`vtp_to_ras_matrix`; when omitted it is
+    the VTP->RAS transform from :func:`vtp_to_ras_matrix`; when omitted it is
     derived from a NIfTI found in *case_dir*, so the models land on top of the
     segmentation instead of in a corner of the volume.
     """

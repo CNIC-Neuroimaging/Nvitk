@@ -14,7 +14,7 @@ given training patch is centred on a rare class is roughly::
     P(case carries it) x 0.33 x 1 / (classes present in that case)
 
 With 40 training volumes, a class present in three of them and ~28 classes present per case,
-that is well under one patch in a thousand — the network sees it a few times per epoch, against
+that is well under one patch in a thousand: the network sees it a few times per epoch, against
 tens of thousands of views of the ICA.
 
 This module supplies the two weightings that close that gap, leaving nnU-Net's machinery to do
@@ -25,11 +25,11 @@ the actual sampling:
     carrying rare classes come up more often.
 ``class``
     Per-class weights for the choice nnU-Net makes uniformly, so within such a case the rare
-    class is what the patch actually centres on.
+    class is what the patch centres on.
 
 Both are **inverse-frequency with a tunable exponent**, normalised. The exponent matters: at
 ``1.0`` a class in 3 of 40 cases is weighted ~13x a universal one, which trains it at the cost
-of everything else. :data:`DEFAULT_TEMPERATURE` is deliberately below 1 — enough to stop the
+of everything else. :data:`DEFAULT_TEMPERATURE` is deliberately below 1: enough to stop the
 rare classes being invisible, not enough to distort the classes the score mostly rides on.
 
 This is a *sampling* change, not a loss change. It alters which patches the network sees, not
@@ -52,14 +52,14 @@ log = Logger()
 #: loss specification does (see :mod:`nvitk.pipes.topbrain.util.losses`).
 SAMPLING_SPEC_ENV: str = "TOPBRAIN_SAMPLING_SPEC"
 
-#: Written by stage 0 beside the dataset: case id → the foreground labels in its mask.
+#: Written by stage 0 beside the dataset: case id -> the foreground labels in its mask.
 CASE_CLASSES_FILE: str = "case_classes.json"
 
 #: Selectable strategies. ``default`` leaves nnU-Net untouched, and is the control this has to
 #: be measured against.
 SAMPLING_MODES: tuple[str, ...] = ("default", "rare_aware")
 
-#: Inverse-frequency exponent. Below 1 on purpose — see the module docstring.
+#: Inverse-frequency exponent. Below 1 on purpose; see the module docstring.
 DEFAULT_TEMPERATURE: float = 0.5
 
 #: Ceiling on how much more often any one case or class may be drawn than the mean. Without it
@@ -76,7 +76,7 @@ def read_case_classes(dataset_dir: Path) -> dict[str, list[int]]:
     """Read stage 0's ``case_classes.json``; empty when it is absent.
 
     Absent means the dataset predates this sidecar. That is a reason to fall back to nnU-Net's
-    own sampling with a warning, not to fail a training run — the caller decides.
+    own sampling with a warning, not to fail a training run: the caller decides.
     """
     path = Path(dataset_dir) / CASE_CLASSES_FILE
     if not path.is_file():
@@ -94,7 +94,7 @@ def class_frequencies(
     *,
     identifiers: Sequence[str] | None = None,
 ) -> dict[int, int]:
-    """Label → number of cases carrying it.
+    """Label -> number of cases carrying it.
 
     Parameters
     ----------
@@ -164,7 +164,7 @@ def case_weights(
 
     A case is scored by the **rarest** class it carries, not by the sum over its classes. Every
     case here carries the twenty-odd common vessels, so a sum is nearly constant across the
-    cohort and would wash the signal out; the maximum asks the question that matters — is this
+    cohort and would wash the signal out; the maximum asks the question that matters: is this
     volume one of the few that shows the class we are short of?
 
     Cases with no recorded classes get the mean weight rather than zero: an unknown case should

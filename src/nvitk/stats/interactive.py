@@ -5,7 +5,7 @@ Description
 -----------
 The matplotlib versions in :mod:`~nvitk.stats.mixedlm` and friends draw the same geometry, but
 reading a value off them means squinting at an axis. These carry the numbers in the hover box,
-which is what the plots are actually consulted for:
+which is what the plots are consulted for:
 
 =====================  ==========================================================================
 Element                Hover shows
@@ -21,8 +21,8 @@ observed cell mean     the unadjusted mean and how many observations went into i
 Design
 ------
 These functions take **already-computed** geometry rather than a fitted model: a frame of points, a
-frame of lines, a frame of marginal means. The statistics stay where they are — this module only
-renders — which is what keeps one plotting path for every engine instead of one per backend.
+frame of lines, a frame of marginal means. The statistics stay where they are (this module only
+renders), which is what keeps one plotting path for every engine instead of one per backend.
 
 :func:`model_plot` is the entry point the GUI uses; :func:`column_plot` covers the distribution
 views (violin, box, strip, histogram, ECDF) that hang off the dataframe's column menu.
@@ -30,9 +30,7 @@ views (violin, box, strip, histogram, ECDF) that hang off the dataframe's column
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -51,7 +49,7 @@ PALETTE: tuple[str, ...] = (
     "#937860", "#DA8BC3", "#8C8C8C", "#CCB974", "#64B5CD",
 )
 
-#: Colour for observations excluded by a QC filter — present but visibly set aside.
+#: Colour for observations excluded by a QC filter: present but visibly set aside.
 GREYED = "#B0B0B0"
 
 #: Distribution views available from a column's context menu.
@@ -99,7 +97,7 @@ def column_panel_figure(
     One distribution panel per level of *facet_by*, laid out as a grid.
 
     This is the shape a per-territory hemodynamics figure wants: overlaying a sagittal sinus around
-    −1.0 with a carotid around −0.2 on shared axes flattens both, and the per-panel autoscale is the
+    -1.0 with a carotid around -0.2 on shared axes flattens both, and the per-panel autoscale is the
     whole point. Within a panel, *group* still splits into coloured series, so you can facet by
     territory **and** split by sex at the same time.
 
@@ -186,9 +184,7 @@ def _customdata(frame: pd.DataFrame, columns: Sequence[str]) -> np.ndarray:
     return np.column_stack([frame[c].astype(str).to_numpy() for c in columns])
 
 
-# ---------------------------------------------------------------------------
 # Model plots
-# ---------------------------------------------------------------------------
 def model_plot(
     *,
     points: pd.DataFrame | None = None,
@@ -232,7 +228,7 @@ def model_plot(
         lets you see whether a filter removed a coherent cluster or scattered noise.
     errorbar : bool
         Draw the confidence intervals. The marginal-means frame carries ``lower``/``upper`` whether
-        or not they were asked for — they fall out of the same delta-method computation — so this
+        or not they were asked for (they fall out of the same delta-method computation), so this
         has to gate the *drawing*, not the data.
 
     Returns
@@ -476,7 +472,7 @@ def _add_marginal_means(
     x_positions: Mapping[str, int] | None,
     errorbar: bool = True,
 ) -> None:
-    """Estimated marginal means with their intervals — the estimate, SE and bounds on hover."""
+    """Estimated marginal means with their intervals: the estimate, SE and bounds on hover."""
     import plotly.graph_objects as go
 
     key = group if group and group in means.columns else None
@@ -528,7 +524,7 @@ def panel_grid_figure(
 
     The anatomical grouped display builds one figure per panel and hands them here, so the panel
     logic stays in :mod:`~nvitk.stats.region_groups` and this only does layout. Legends are shown
-    for the first panel only — every panel repeats the same series, and eight copies of one legend
+    for the first panel only: every panel repeats the same series, and eight copies of one legend
     is most of the figure.
     """
     from plotly.subplots import make_subplots
@@ -562,9 +558,7 @@ def panel_grid_figure(
     return grid
 
 
-# ---------------------------------------------------------------------------
 # Column distribution plots
-# ---------------------------------------------------------------------------
 def column_plot(
     frame: pd.DataFrame,
     column: str,
@@ -579,14 +573,14 @@ def column_plot(
     height: int = 560,
 ) -> Any:
     """
-    Distribution of one column — violin, box, points, histogram, density or ECDF.
+    Distribution of one column: violin, box, points, histogram, density or ECDF.
 
     Splitting by *group* puts one violin (or box, or histogram trace) per level, which is usually
     the point: a flow distribution pooled over every territory is bimodal for anatomical reasons
     and tells you nothing.
 
     Categorical columns are shown as counts whatever *kind* asks for, since a violin of labels is
-    not defined — the request is honoured in spirit rather than refused.
+    not defined: the request is honoured in spirit rather than refused.
 
     Raises
     ------
@@ -633,10 +627,10 @@ def column_plot(
     )
     colours = palette_for(levels)
     extra = [c for c in hover_columns if c in work.columns]
-    # A trace's name is both its legend entry and, for the categorical kinds, its x tick — so
+    # A trace's name is both its legend entry and, for the categorical kinds, its x tick, so
     # carrying the count there puts it on the figure whichever view is showing, and into the PNG
     # with it. ``work`` is already coerced, dropped and filtered, so the counts are of what will
-    # actually be drawn.
+    # be drawn.
     counted = {
         c.level: c
         for c in displayed_counts(work, column, group=group, excluded=excluded, levels=levels)
@@ -717,7 +711,7 @@ def _add_distribution(
         # An invisible violin rather than a scatter. A violin places itself on the *categorical*
         # axis keyed by its name and jitters its own points; a scatter would need numeric x, and
         # mixing numeric x with the categorical violins of the other kinds makes Plotly treat every
-        # jitter value as its own category — which is what turned the x axis into a wall of floats.
+        # jitter value as its own category, which is what turned the x axis into a wall of floats.
         figure.add_trace(go.Violin(
             y=values, name=name, points="all", pointpos=0, jitter=0.5,
             box_visible=False, meanline_visible=False, width=0.9,
@@ -873,9 +867,7 @@ def _category_counts(
     return figure
 
 
-# ---------------------------------------------------------------------------
 # Forests, matrices and networks
-# ---------------------------------------------------------------------------
 def forest_plot(
     frame: pd.DataFrame,
     *,
@@ -891,7 +883,7 @@ def forest_plot(
     height_per_row: int = 26,
 ) -> Any:
     """
-    Interactive forest — one row per estimate, with its interval and the exact numbers on hover.
+    Interactive forest: one row per estimate, with its interval and the exact numbers on hover.
 
     Used for path coefficients, mediation paths and the MRF field alike: they differ in what the
     estimate *means*, not in how it is read. Rows whose interval excludes *reference* are drawn in
@@ -960,7 +952,7 @@ def matrix_plot(
     value_label: str = "value",
 ) -> Any:
     """
-    Interactive heatmap of a square matrix — the MMRM correlation between levels, say.
+    Interactive heatmap of a square matrix: the MMRM correlation between levels, say.
 
     Hover names both levels and the exact value, which is the thing a static heatmap makes you
     estimate from a colour bar. Long level names get automatic margins rather than being clipped.

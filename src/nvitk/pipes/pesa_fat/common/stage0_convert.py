@@ -14,7 +14,7 @@ Responsibilities (applied to a single ``PESA*`` subject at a time):
       * ``CT_<series>.nii``           -> ``CT.nii``
       * ``PT_<series>.nii``           -> ``PT.nii``
       * ``MR_<series>_<metric>.nii``  -> ``DIXON_<REGION>_<metric>.nii``
-        (region from DICOM slice location: lowest→HEAD, middle→THORAX, highest→LEGS)
+        (region from DICOM slice location: lowest->HEAD, middle->THORAX, highest->LEGS)
 
 The script is idempotent: converted subject folders that already contain
 NIfTI files are skipped; already-renamed targets are kept (``Path.replace`` is
@@ -51,9 +51,7 @@ from nvitk.pipes.pesa_fat.common.dixon_regions import build_series_region_map
 log = Logger()
 
 
-# ---------------------------------------------------------------------------
 # Rename policy
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -152,9 +150,7 @@ def rename_subject_folder(
     return counts
 
 
-# ---------------------------------------------------------------------------
 # Per-subject worker
-# ---------------------------------------------------------------------------
 
 
 def _subject_has_nifti_outputs(folder: Path) -> bool:
@@ -264,9 +260,7 @@ def run_batch(
     return lay
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 
 
 @click.command("stage0-convert")

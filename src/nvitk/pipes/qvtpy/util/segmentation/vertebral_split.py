@@ -12,7 +12,7 @@ Anatomy (array axes ``i=X``, ``j=Y``, ``k=Z``):
 This module detects that Y **only on the centerline branch graph**
 (``compute_centerline_branches``: trunk + side branches that attach to it).
 If the centerline is a single polyline (no bifurcation), VAs are treated as
-absent and the basilar mask is left unchanged — no skeleton-tip / venous-style
+absent and the basilar mask is left unchanged: no skeleton-tip / venous-style
 junction fallbacks that can longitudinally bisect a tube.
 """
 
@@ -41,7 +41,7 @@ setup(globals())
 
 log = Logger()
 
-# Array axis treated as L↔R (matches distal expand / typical RAS i=X).
+# Array axis treated as L<->R (matches distal expand / typical RAS i=X).
 _LR_AXIS = 0
 _Z_AXIS = 2
 # Minimum X separation (voxels) between the two VA centerline arms.
@@ -54,7 +54,7 @@ _MIN_BASILAR_KEEP_FRAC = 0.15
 
 @dataclass(frozen=True)
 class VertebralSplitResult:
-    """Outcome of basilar → LVA/RVA relabeling."""
+    """Outcome of basilar -> LVA/RVA relabeling."""
 
     split_applied: bool
     bifurcation_ijk: tuple[int, int, int] | None
@@ -240,7 +240,7 @@ def _classify_va_bifurcation_at_attach(
         diag["reject"] = "need 3 arms at centerline bifurcation (2 VA + basilar)"
         return None, diag
 
-    # Highest mean-Z → basilar continuation; lowest two → VAs.
+    # Highest mean-Z -> basilar continuation; lowest two -> VAs.
     ranked = sorted(arms, key=lambda a: (_mean_axis(a, _Z_AXIS), -len(a)))
     va_a, va_b = ranked[0], ranked[1]
     bas = ranked[-1]
@@ -281,7 +281,7 @@ def _bifurcation_from_centerline_branches(
     """Find VA confluence from trunk + side-branch centerline polylines only.
 
     ``compute_centerline_branches`` returns trunk first, then each side branch
-    oriented **junction → endpoint**. No skeleton tip / venous junction heuristics.
+    oriented **junction -> endpoint**. No skeleton tip / venous junction heuristics.
     """
     diag: dict[str, Any] = {"n_paths": len(paths)}
     if len(paths) < 2:
@@ -310,7 +310,7 @@ def _bifurcation_from_centerline_branches(
         side_pts = _pts_to_tuples(side_path)
         if len(side_pts) < int(min_arm_points):
             continue
-        # Oriented junction → endpoint by construction.
+        # Oriented junction -> endpoint by construction.
         attach_pt = side_pts[0]
         attach_idx = _nearest_index(trunk, attach_pt)
         # Snap attach to the nearest trunk voxel (handles 1-voxel offset).
@@ -418,7 +418,7 @@ def split_vertebral_from_basilar(
     """Relabel inferior basilar into LVA/RVA when a centerline Y-bifurcation exists.
 
     Detection uses only ``compute_centerline_branches`` (trunk + attaching side
-    branches). A single-polyline centerline means VAs are absent — no tip-based
+    branches). A single-polyline centerline means VAs are absent: no tip-based
     fallback that can longitudinally bisect the basilar tube. The cut is at the
     bifurcation: junction voxel stays basilar; inferior arms flood into LVA/RVA
     on X half-spaces.

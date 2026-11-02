@@ -1,11 +1,11 @@
 """Morphometrics configuration: named, mask-specific parameter profiles.
 
-Every tunable of the TOF Circle-of-Willis morphometrics lives in a **profile** — a mapping from
-the UPPER_CASE parameter names below to values — and :class:`MorphometricsConfig` bundles one
+Every tunable of the TOF Circle-of-Willis morphometrics lives in a **profile** (a mapping from
+the UPPER_CASE parameter names below to values), and :class:`MorphometricsConfig` bundles one
 profile with the per-run settings (Taubin pre-smoothing, workers, species).
 
 The algorithm modules read these parameters as attributes of this module at call time
-(``from nvitk.measure import morphometrics_config as _cfg`` … ``_cfg.STENOSIS_THRESHOLD_PCT``).
+(``from nvitk.measure import morphometrics_config as _cfg`` ... ``_cfg.STENOSIS_THRESHOLD_PCT``).
 :func:`apply_config` / :func:`active_config` install a profile's values here, and
 :mod:`nvitk.measure.morpho.run_case` re-applies it inside every spawned worker, so a run uses
 exactly the profile it was given. The module-level values are the default profile.
@@ -29,9 +29,7 @@ from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any, Iterator, Mapping
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Output schema constants (not tunable; identical for every profile)
-# ──────────────────────────────────────────────────────────────────────────────
 
 TREE_REGION_CODES = {
     "unassigned": 0,
@@ -60,15 +58,35 @@ TREE_REGION_ROLE_CODES = {
 #: voxel-skeleton path re-centred on the lumen (:mod:`nvitk.morphology.centering`); ``raycast`` is
 #: the experimental EXPIGEO ray-probing skeleton (:mod:`nvitk.morphology.raycast_skeleton`).
 CENTERLINE_BACKENDS: tuple[str, ...] = ("vmtk", "native", "raycast")
+#: Radius the enlargement test reads (``ENLARGEMENT_RADIUS_SOURCE``). ``cow`` follows cow_morpho:
+#: the cross-section radius on a path's first measurement, the detection radius on paths
+#: re-measured after trunk pruning and on donut arms. ``cross_section`` and ``detection`` use that
+#: one radius on every path (``detection`` = the stenosis radius, RADIUS_SOURCE_FOR_CALIBER_DETECTION).
+ENLARGEMENT_RADIUS_SOURCES: tuple[str, ...] = ("cow", "cross_section", "detection")
+#: Detection's healthy-calibre (taper) reference (``TAPER_REFERENCE_METHOD``): ``stretch``: per
+#: junction-to-junction stretch, a capped natural decline plus the local envelope, stepping at
+#: junctions; ``envelope``; cow_morpho's one envelope along the whole path.
+TAPER_REFERENCE_METHODS: tuple[str, ...] = ("stretch", "envelope")
+#: Cross-section radius estimators (``CROSS_SECTION_RADIUS_METHOD``): ``ray_median``: the median
+#: in-plane distance from the centerline point to the wall over ``CROSS_SECTION_RAYS`` rays;
+#: ``largest_loop``; cow_morpho's equivalent-circle radius of the largest loop of the cut.
+CROSS_SECTION_RADIUS_METHODS: tuple[str, ...] = ("ray_median", "largest_loop")
+#: Healthy reference of the lesion table's diameter / area % (``LESION_REFERENCE_METHOD``):
+#: ``interpolated``; proximal and distal windows, interpolated to the lesion (QCA-style, taper
+#: corrected); ``proximal``; the upstream window alone (distal fallback), as before 2026-10-21.
+LESION_REFERENCE_METHODS: tuple[str, ...] = ("interpolated", "proximal")
+ENLARGEMENT_RADIUS_SOURCE_LABELS: Mapping[str, str] = MappingProxyType({
+    "cow": "cow_morpho (cross-section; inscribed on re-measured paths)",
+    "cross_section": "cross-section on every path",
+    "detection": "inscribed (detection radius) on every path",
+})
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Profile: eICAB Circle-of-Willis TOF masks (cow_morpho parity)
-# ──────────────────────────────────────────────────────────────────────────────
 
 _EICAB_CW: dict[str, Any] = {
-    # ── Labels / outputs ─────────────────────────────────────────────────────
+    # Labels / outputs
     "LABELS": "auto",                      # "auto" = every label id present in the mask
-    "PROCESS_SELECTED_TAGS_ONLY": False,   # True → only SELECTED_TAGS
+    "PROCESS_SELECTED_TAGS_ONLY": False,   # True -> only SELECTED_TAGS
     "SELECTED_TAGS": (15,),
     "SAVE_CENTERLINES": True,
     "SAVE_CENTERLINE_RADIUS": False,       # extra radius-tube VTPs per path
@@ -77,7 +95,7 @@ _EICAB_CW: dict[str, Any] = {
     "EXPORT_ANATOMIC_SPLIT_CENTERLINES": True,
     "ANATOMIC_BRANCH_Z_LOOKAHEAD_POINTS": 20,
 
-    # ── Centerline extraction ────────────────────────────────────────────────
+    # Centerline extraction
     "CENTERLINE_BACKEND": "vmtk",
     "RESAMPLE_CENTERLINES_BY_ARCLENGTH": True,
     "CENTERLINE_RESAMPLE_STEP_MM": 0.10,
@@ -102,7 +120,24 @@ _EICAB_CW: dict[str, Any] = {
     "NATIVE_CENTERING_ITERATIONS": 3,
     "NATIVE_CENTERING_SMOOTH_MM": 0.75,
 
-    # ── Skeleton / tree / donut-loop handling ────────────────────────────────
+    # ── Cross-section radius (surface cut by the plane normal to the centerline) ─
+    # The plane's normal is the chord from the point this many mm upstream to the one this many mm
+    # downstream (arc length; at least the neighbouring point on each side, one-sided at the ends).
+    # 0.1 = cow_morpho: the immediate neighbours (±1 point) at the 0.1 mm resampling step. A wider
+    # window tilts the plane less with centerline jitter (fewer oblique, oversized cuts) but turns
+    # late in tight bends.
+    "CROSS_SECTION_TANGENT_HALF_WINDOW_MM": 1.0,
+    # How the cut becomes a radius (CROSS_SECTION_RADIUS_METHODS). "ray_median": from the centerline
+    # point, CROSS_SECTION_RAYS rays spread evenly in the plane; each stops at its first wall
+    # crossing, and the radius is the median distance; a circle between the nearest and farthest
+    # wall that a branch opening (a few long rays) does not move, and that never sees the other
+    # vessels the plane also cuts. "largest_loop" (cow_morpho): the largest closed loop's area as an
+    # equivalent circle, which near the siphon or a bifurcation is often another limb, a
+    # neighbouring branch or the merged carina, so the radius spikes and climbs towards junctions.
+    "CROSS_SECTION_RADIUS_METHOD": "ray_median",
+    "CROSS_SECTION_RAYS": 36,
+
+    # Skeleton / tree / donut-loop handling
     "ENABLE_TREE_MODE": True,
     "MIN_TREE_ENDPOINTS_FOR_TREE_MODE": 3,
     # cow parity: keep only the largest component per label and do not bridge fragments.
@@ -126,7 +161,7 @@ _EICAB_CW: dict[str, Any] = {
     "DONUT_ARM_MIN_POINTS_AFTER_MAIN_OVERLAP_TRIM": 3,
     "DISCARD_SHORT_CENTERLINE_PATHS": True,
     "MIN_CENTERLINE_PATH_LENGTH_MM": 7.5,
-    # cow parity: later root→terminal paths drop the trunk they share with earlier ones and their
+    # cow parity: later root->terminal paths drop the trunk they share with earlier ones and their
     # stenosis / enlargement detection is re-run on the remaining branch (its own taper
     # reference); 0 keeps one shared point, as cow_morpho. The exported geometry is unaffected:
     # the non-overlapping segments (nvitk design, docs/pipelines/qvtpy-morphometrics.md) are cut
@@ -152,34 +187,67 @@ _EICAB_CW: dict[str, Any] = {
     "PRUNE_TERMINAL_SPURS": True,
     "PRUNE_SPUR_LENGTH_MM": 2.0,
 
-    # ── Stenosis / enlargement detection (cow_morpho rules) ──────────────────
-    "STENOSIS_THRESHOLD_PCT": 10.0,
-    "ENLARGEMENT_THRESHOLD_PCT": 10.0,
+    # Stenosis / enlargement detection (cow_morpho rules)
+    "STENOSIS_THRESHOLD_PCT": 20.0,
+    "ENLARGEMENT_THRESHOLD_PCT": 20.0,
     "RADIUS_SOURCE_FOR_CALIBER_DETECTION": "maximum_inscribed_sphere",  # or "cross_section"
     "STENOSIS_MIN_LEN_MM": 3.0,
     "STENOSIS_EXCLUDE_END_MM": 2.0,
     # Diagnostic CoreCandidate / SupportCandidate arrays only.
     "STENOSIS_CANDIDATE_EXCLUDE_END_MM": 5.0,
     "STENOSIS_MAX_INTERNAL_GAP_MM": 1.5,
-    # The support tier is min(support, core): with cow's 25 % against a 10 % core the support and
-    # core contours coincide, i.e. a lesion is a ≥10 % run of ≥3 mm (gaps ≤1.5 mm merged).
+    # The support tier is min(support, core): with cow's 25 % against the 20 % core the support and
+    # core contours coincide, i.e. a stenosis is a >=20 % run of >=3 mm (gaps <=1.5 mm merged). A
+    # support below the core would grow lesions into their shoulders (hysteresis).
     "STENOSIS_SUPPORT_THRESHOLD_PCT": 25.0,
     "STENOSIS_SEGMENT_REFERENCE_MARGIN_MM": 5.0,
     "ENLARGEMENT_MIN_LEN_MM": 5.0,
-    # Alternative acceptance: ≥ this many consecutive support points (0.3 mm at 0.1 mm sampling).
-    "ENLARGEMENT_MIN_CONSECUTIVE_SUPPORT_POINTS": 3,
+    # Alternative acceptance, in arc length: a shorter enlargement still counts when its run spans
+    # >= this. It replaces cow_morpho's ">= 3 consecutive points", which at the 0.1 mm step accepted
+    # 0.2 mm runs: single cross-section spikes; the effective minimum is the smaller of the two.
+    # None = ENLARGEMENT_MIN_LEN_MM alone.
+    "ENLARGEMENT_MIN_SUPPORT_LENGTH_MM": 1.5,
     "ENLARGEMENT_EXCLUDE_END_MM": 3.0,
     "ENLARGEMENT_CANDIDATE_EXCLUDE_END_MM": 5.0,
     "ENLARGEMENT_MAX_INTERNAL_GAP_MM": 1.5,
     "ENLARGEMENT_SUPPORT_THRESHOLD_PCT": 25.0,
+    # Which radius enlargements are tested on (ENLARGEMENT_RADIUS_SOURCES). "cow" keeps cow_morpho's
+    # path-dependent choice: cross-section on a first measurement, detection radius on re-measured
+    # (pruned) paths and donut arms, so the same bulge can pass on one path and fail on another.
+    # "cross_section" or "detection" makes it one radius everywhere.
+    "ENLARGEMENT_RADIUS_SOURCE": "cow",
+    # Where enlargements are tested on the cross-section (area-equivalent) radius, it spikes for one or
+    # two 0.1 mm samples wherever a cut catches a branch opening or sits obliquely in a bend. True
+    # tests a running median of it over ENLARGEMENT_CROSS_SECTION_MEDIAN_MM of arc length instead
+    # (a bulge longer than half the window survives); False keeps the raw radius, as cow_morpho.
+    "ENLARGEMENT_SMOOTH_CROSS_SECTION": False,
+    "ENLARGEMENT_CROSS_SECTION_MEDIAN_MM": 1.0,
     "SUPPRESS_ENLARGEMENT_NEAR_CENTERLINE_STARTS": True,
     "ENLARGEMENT_CENTERLINE_START_EXCLUDE_MM": None,
-    # Taper-fit end-zone exclusion (must be ≥ the *_EXCLUDE_END_MM values).
+    # Taper-fit end-zone exclusion (must be >= the *_EXCLUDE_END_MM values).
     "STENOSIS_TAPER_FIT_EXCLUDE_END_MM": 10.0,
     "ENLARGEMENT_TAPER_FIT_EXCLUDE_END_MM": 10.0,
     # Iterative taper reference: refit without the detected lesions until stable.
     "TAPER_TWO_PASS": True,
     "TAPER_TWO_PASS_MAX_ITERATIONS": 5,
+    # How the healthy-calibre (taper) reference is built (TAPER_REFERENCE_METHODS).
+    # "stretch": the path is cut at the junctions it passes through (the component's skeleton branch
+    # points; stretches shorter than TAPER_STRETCH_MIN_LENGTH_MM join a neighbour), and each stretch
+    # gets its own reference: the envelope below made local-linear, at each place the
+    # TAPER_REFERENCE_PERCENTILE line of the stretch's radius within TAPER_REFERENCE_WINDOW_MM, its
+    # decline capped at TAPER_STRETCH_MAX_DECLINE_PCT_PER_MM % of the local calibre per mm, so it
+    # follows the natural taper without lagging. The bifurcation blanking zones (BLANKING_MM) stay
+    # out of the fit and the reference may step at a junction; the distal end continues the local
+    # decline instead of freezing, interior gaps (siphon, lesions) are bridged, and the proximal
+    # end is held (never extrapolated upwards). A vessel shorter than the minimum gets its median.
+    # "envelope" (cow_morpho): one envelope along the whole path, blind to junctions; it smears a
+    # calibre step at a bifurcation over ±10 mm and stays flat over the last 10 mm.
+    "TAPER_REFERENCE_METHOD": "stretch",
+    "TAPER_STRETCH_MAX_DECLINE_PCT_PER_MM": 2.0,
+    "TAPER_STRETCH_MIN_LENGTH_MM": 10.0,
+    # A vessel shorter than this gets its median as the reference, as with "envelope" (whose 10 mm
+    # end exclusions leave it nothing to fit): A1s, PComms and AChAs ramp near their origin.
+    "TAPER_STRETCH_SHORT_VESSEL_MM": 20.0,
     # Healthy-calibre envelope (local high-percentile radius, smoothed, non-increasing).
     "TAPER_FIT_OUTLIER_FRACTION": 0.60,
     "TAPER_FIT_MAX_ITERATIONS": 3,
@@ -189,7 +257,7 @@ _EICAB_CW: dict[str, Any] = {
     "TAPER_REFERENCE_WINDOW_MM": 20.0,
     "TAPER_REFERENCE_SMOOTH_MM": 4.0,
 
-    # ── Siphon (high-curvature) mask: excluded from the taper fit ────────────
+    # Siphon (high-curvature) mask: excluded from the taper fit
     # cow_morpho measured curvature on the 0.1 mm-resampled centerline (7-point smoothing), where
     # sampling noise alone exceeds its 0.10 threshold: the mask covered ~100 % of every vessel, the
     # taper fit had no points left, and the reference collapsed to the vessel's median radius. The
@@ -199,7 +267,7 @@ _EICAB_CW: dict[str, Any] = {
     # Calibrated by scripts/morpho/calibrate_siphon.py on 20 random PESA CW masks (2026-10-16):
     # cow's threshold (0.10 on κ/2 = 0.20 true) and dilation are kept, only the smoothing σ is new;
     # the mask then covers 40 % of the ICAs and 9 % of the other vessels (legacy: 100 % / 100 %).
-    # Curvature alone cannot confine it to the ICA siphon — PCAs and SCAs bend as tightly — so it
+    # Curvature alone cannot confine it to the ICA siphon (PCAs and SCAs bend as tightly), so it
     # marks tight bends wherever they are, which is what the taper fit has to skip.
     "SIPHON_LEGACY_MASK": False,
     "SIPHON_LEGACY_KAPPA_THRESHOLD": 0.10,
@@ -208,7 +276,7 @@ _EICAB_CW: dict[str, Any] = {
     "SIPHON_DILATION_MM": 5.0,
     "SIPHON_SUPPRESSES_ENLARGEMENT_DETECTION": False,
 
-    # ── Shape descriptors ────────────────────────────────────────────────────
+    # Shape descriptors
     "INFLECT_KAPPA_MIN": 0.02,
     "INFLECT_SMOOTH_WIN": 7,
     "BEND_KAPPA_PEAK": 0.05,
@@ -223,17 +291,76 @@ _EICAB_CW: dict[str, Any] = {
     "BLANKING_MM": 2.0,
     "BLANKING_RADIUS_FACTOR": 1.5,
 
-    # ── Circle-of-Willis variants (subject table) ────────────────────────────
+    # Circle-of-Willis variants (subject table)
     # A present A1 / PComm / P1 / AComm thinner than this (median diameter) is "hypoplastic".
     "HYPOPLASIA_DIAMETER_MM": 1.0,
+    # Main vessels whose absence from the mask is a "hypoplasia" lesion (lesions table). On TOF an
+    # absent vessel has no flow signal: aplasia, severe hypoplasia or occlusion. The confidence is
+    # high when a topological neighbour (flow_from / flow_to) is present, low when none is: a
+    # whole region missing suggests a field-of-view or segmentation dropout instead.
+    # The proximal segments only for the split arteries: an A2 / M2 (the distal growth of stage 1's
+    # WB_pp mask) is absent from a CW_pp mask by construction.
+    "HYPOPLASIA_MAIN_VESSELS": ("LICA", "RICA", "BASILAR", "LMCA_M1", "RMCA_M1", "LACA_A1", "RACA_A1",
+                                "LPCA_P1", "RPCA_P1", "LPCA_P2", "RPCA_P2"),
 
-    # ── Lesion severity / confidence (lesions table) ─────────────────────────
-    "LESION_PROXIMAL_REFERENCE_WINDOW_MM": (2.0, 10.0),
+    # Stenosis / enlargement detection (LESION_DETECTION_METHODS). "robust_reference": one robust,
+    # non-increasing healthy reference per junction-to-junction stretch and one signed deviation
+    # profile, so a point is a stenosis or an enlargement, never both
+    # (nvitk.measure.morpho.robust_reference). "taper": cow_morpho's separate q85 stenosis /
+    # enlargement taper fits (caliber.detect_*_segments), as before 2026-10-28.
+    "LESION_DETECTION_METHOD": "robust_reference",
+    # robust_reference: the radius tested ("cross_section": ray_median CS, MIS where missing;
+    # "detection": the inscribed radius), smoothed by a running median over this many mm.
+    "ROBUST_RADIUS_SOURCE": "cross_section",
+    "ROBUST_RADIUS_MEDIAN_MM": 1.0,
+    # Robust LOWESS of log r per stretch: tricube window (mm), bisquare reweighting passes, floor of
+    # the robust residual scale (log units ~ fraction), and the non-increasing projection.
+    "ROBUST_REFERENCE_BANDWIDTH_MM": 20.0,
+    "ROBUST_REFERENCE_ITERATIONS": 4,
+    "ROBUST_MIN_SIGMA": 0.03,
+    "ROBUST_REFERENCE_MONOTONE": True,
+    "ROBUST_MAX_RISE_PER_MM": 0.01,
+    # Core threshold = max(the kind's threshold, this × the path's robust spread of r/ref − 1); the
+    # run extends over this fraction of it; above this spread a path is flagged noisy_path.
+    "ROBUST_SIGMA_FACTOR": 3.0,
+    "ROBUST_SUPPORT_FRACTION": 0.5,
+    "ROBUST_NOISY_SIGMA": 0.10,
+    # No lesion core where the reference radius is under this (mm): ~3 voxels across at 0.5 mm.
+    "ROBUST_MIN_REFERENCE_RADIUS_MM": 0.75,
+
+    # Lesion severity / confidence (lesions table)
+    # Healthy reference radius of the lesion table's diameter / area % (LESION_REFERENCE_METHODS).
+    # "interpolated": the median radius of a proximal window (upstream of the lesion) and of a
+    # distal one (downstream; LESION_REFERENCE_GAP_MM / _WINDOW_LENGTH_MM / _SEARCH_MM below),
+    # interpolated in arc length to the lesion's narrowest (widest) point, so the vessel's natural
+    # taper between them is not counted as stenosis. Windows keep to healthy points (no other
+    # lesions, no bifurcation blanking zone) of the lesion's own junction-to-junction stretch, and
+    # cross the junction only when the stretch has no room (reference_crosses_junction); a distal
+    # median above the proximal one is capped at it; one window only -> that one. With the
+    # robust_reference detection the robust reference replaces both (the windows only check it).
+    # "proximal": the upstream window alone (downstream when there is no room), as before 2026-10-21.
+    "LESION_REFERENCE_METHOD": "interpolated",
+    # Reference windows (2026-10-28): each takes the nearest LESION_REFERENCE_WINDOW_LENGTH_MM of
+    # healthy points from LESION_REFERENCE_GAP_MM to LESION_REFERENCE_SEARCH_MM away from the lesion
+    # (upstream for the proximal window, downstream for the distal one). It stays in the lesion's
+    # stretch when that has room, else it crosses the junction (reference_crosses_junction).
+    "LESION_REFERENCE_GAP_MM": 2.0,
+    "LESION_REFERENCE_WINDOW_LENGTH_MM": 10.0,
+    "LESION_REFERENCE_SEARCH_MM": 30.0,
+    # No reference window reaches into the first / last this many mm of the path: the tips hold
+    # VMTK's seed point on the wall and the end taper.
+    "LESION_REFERENCE_EXCLUDE_END_MM": 5.0,
+    # "interpolated": proximal and distal medians differing by more than this fraction (more than
+    # taper explains: distal collapse, dilatation, an unseen branch) flag reference_inconsistent.
+    "LESION_REFERENCE_DISAGREEMENT_FRACTION": 0.25,
     "LESION_NEAR_BIFURCATION_MM": 3.0,
     "LESION_NEAR_END_MM": 5.0,
     # Cross-section / inscribed radius ratio inside the lesion vs that path's median ratio.
     "LESION_RADIUS_DISAGREEMENT_FRACTION": 0.20,
 }
+
+#: Stenosis / enlargement detection methods (``LESION_DETECTION_METHOD``).
+LESION_DETECTION_METHODS: tuple[str, ...] = ("robust_reference", "taper")
 
 #: Named profiles. Values are plain dicts (configs travel pickled to spawned workers); copy them
 #: through :class:`MorphometricsConfig` / :meth:`MorphometricsConfig.with_params`, never mutate.
@@ -287,6 +414,38 @@ class MorphometricsConfig:
                 f"CENTERLINE_BACKEND must be one of {CENTERLINE_BACKENDS}, "
                 f"got {self.params['CENTERLINE_BACKEND']!r}."
             )
+        if not float(self.params["CROSS_SECTION_TANGENT_HALF_WINDOW_MM"]) >= 0.0:
+            raise ValueError(
+                "CROSS_SECTION_TANGENT_HALF_WINDOW_MM must be ≥ 0 mm, "
+                f"got {self.params['CROSS_SECTION_TANGENT_HALF_WINDOW_MM']!r}."
+            )
+        if str(self.params["TAPER_REFERENCE_METHOD"]).lower() not in TAPER_REFERENCE_METHODS:
+            raise ValueError(
+                f"TAPER_REFERENCE_METHOD must be one of {TAPER_REFERENCE_METHODS}, "
+                f"got {self.params['TAPER_REFERENCE_METHOD']!r}."
+            )
+        if str(self.params["CROSS_SECTION_RADIUS_METHOD"]).lower() not in CROSS_SECTION_RADIUS_METHODS:
+            raise ValueError(
+                f"CROSS_SECTION_RADIUS_METHOD must be one of {CROSS_SECTION_RADIUS_METHODS}, "
+                f"got {self.params['CROSS_SECTION_RADIUS_METHOD']!r}."
+            )
+        if int(self.params["CROSS_SECTION_RAYS"]) < 8:
+            raise ValueError(f"CROSS_SECTION_RAYS must be ≥ 8, got {self.params['CROSS_SECTION_RAYS']!r}.")
+        if str(self.params["LESION_REFERENCE_METHOD"]).lower() not in LESION_REFERENCE_METHODS:
+            raise ValueError(
+                f"LESION_REFERENCE_METHOD must be one of {LESION_REFERENCE_METHODS}, "
+                f"got {self.params['LESION_REFERENCE_METHOD']!r}."
+            )
+        if str(self.params["LESION_DETECTION_METHOD"]).lower() not in LESION_DETECTION_METHODS:
+            raise ValueError(
+                f"LESION_DETECTION_METHOD must be one of {LESION_DETECTION_METHODS}, "
+                f"got {self.params['LESION_DETECTION_METHOD']!r}."
+            )
+        if str(self.params["ENLARGEMENT_RADIUS_SOURCE"]).lower() not in ENLARGEMENT_RADIUS_SOURCES:
+            raise ValueError(
+                f"ENLARGEMENT_RADIUS_SOURCE must be one of {ENLARGEMENT_RADIUS_SOURCES}, "
+                f"got {self.params['ENLARGEMENT_RADIUS_SOURCE']!r}."
+            )
 
     @property
     def centerline_backend(self) -> str:
@@ -337,6 +496,7 @@ def active_config(config: MorphometricsConfig) -> Iterator[MorphometricsConfig]:
 __all__ = [
     "CENTERLINE_BACKENDS",
     "DEFAULT_PROFILE",
+    "LESION_DETECTION_METHODS",
     "PARAMETER_NAMES",
     "PROFILES",
     "TREE_REGION_CODES",

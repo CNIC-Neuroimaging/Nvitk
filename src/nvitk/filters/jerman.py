@@ -9,7 +9,7 @@ Reference
 ---------
 T. Jerman, F. Pernuš, B. Likar, Ž. Špiclin,
 "Enhancement of Vascular Structures in 3D and 2D Angiographic Images",
-IEEE Trans. Med. Imaging, 35(9):2107–2118, 2016.
+IEEE Trans. Med. Imaging, 35(9):2107-2118, 2016.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def _jerman_response(
     *,
     tau: float,
 ) -> np.ndarray:
-    """Vesselness at one scale from Hessian eigenvalues (eq. 13–14).
+    """Vesselness at one scale from Hessian eigenvalues (eq. 13-14).
 
     Expects dark-ridge convention: tubular structures have ``lambda2, lambda3 > 0``.
     ``lambda2`` / ``lambda3`` are the two largest-|eigenvalue| components
@@ -55,7 +55,7 @@ def _jerman_response(
     denom = (lambda2_c + lambda_rho) ** 3
     response = (lambda2_c**2) * (lambda_rho - lambda2_c) * 27.0 / denom
 
-    # Saturate to 1 where λ2 ≥ λρ/2 (ideal tubular geometry).
+    # Saturate to 1 where λ2 >= λρ/2 (ideal tubular geometry).
     response[np.logical_and(lambda2_raw >= lambda_rho / 2.0, lambda_rho > 0)] = 1.0
     response[np.logical_or(lambda2_raw <= 0, lambda_rho <= 0)] = 0.0
     response[~np.isfinite(response)] = 0.0
@@ -80,7 +80,7 @@ def jerman_filter(
     sigmas
         Gaussian scales. Default ``(1, 3, 5, 7, 9)``.
     tau
-        Regularization in ``[0.5, 1]``. Lower → stronger / more intense response.
+        Regularization in ``[0.5, 1]``. Lower -> stronger / more intense response.
     black_ridges
         Detect dark ridges when True; bright ridges when False (e.g. TOF vessels).
     mode, cval
@@ -124,7 +124,7 @@ def jerman_filter(
                 use_gaussian_derivatives=True,
             )
         )
-        # Sort by absolute magnitude: |λ1| ≤ |λ2| ≤ |λ3|.
+        # Sort by absolute magnitude: |λ1| <= |λ2| <= |λ3|.
         eigvals = np.take_along_axis(eigvals, np.abs(eigvals).argsort(0), 0)
         if data.ndim == 2:
             lambda2_raw = eigvals[1]

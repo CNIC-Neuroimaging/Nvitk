@@ -1,4 +1,4 @@
-"""Raster images via Pillow (PNG, JPEG, …): ``YX`` or ``YXC`` arrays."""
+"""Raster images via Pillow (PNG, JPEG, ...): ``YX`` or ``YXC`` arrays."""
 
 from __future__ import annotations
 

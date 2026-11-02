@@ -52,7 +52,7 @@ def mesh_to_mask(
     """Voxelise the solid a closed *mesh* encloses onto a reference image grid.
 
     The grid is *reference*'s (its shape and affine), or *shape* + *affine*. The
-    mesh is taken in that affine's world coordinates — the space meshes from
+    mesh is taken in that affine's world coordinates: the space meshes from
     :func:`~nvitk.meshlab.mesh_from_image` are in. Any affine works, oblique
     ones included: the mesh is mapped into voxel indices before filling.
     """

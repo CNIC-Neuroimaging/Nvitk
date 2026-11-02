@@ -3,7 +3,7 @@ Screen-aware sizing for windows and dialogs.
 
 Description
 -----------
-Every window in this GUI asks for the size it would *like* — ``resize(1700, 1000)`` for the
+Every window in this GUI asks for the size it would *like*: ``resize(1700, 1000)`` for the
 Statmodels explorer, a ``setMinimumSize`` floor for each exploration dialog. On the machine those
 numbers were chosen on they are reasonable; on a 1366×768 laptop, an external monitor that was
 unplugged, or a scaled HiDPI display they are larger than the screen, and the result is a window
@@ -20,9 +20,7 @@ because a layout hint is never worth failing a window over.
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from typing import Any
 
 from nvitk.core.logger import Logger
@@ -34,7 +32,7 @@ log = Logger()
 #: exactly, which on some desktops is indistinguishable from a maximized window that cannot be moved.
 SCREEN_FRACTION: float = 0.92
 
-#: Never shrink a window below this, whatever the screen reports — a 1×1 window is not a recovery.
+#: Never shrink a window below this, whatever the screen reports: a 1×1 window is not a recovery.
 MIN_WINDOW: tuple[int, int] = (640, 480)
 
 
@@ -69,7 +67,7 @@ def fit_to_screen(widget: Any, width: int, height: int) -> tuple[int, int]:
     """
     Resize *widget* to its preferred size, or to the largest that fits on screen.
 
-    Returns the size actually applied, so a caller can log or lay out against it.
+    Returns the size applied, so a caller can log or lay out against it.
 
     Examples
     --------
@@ -96,7 +94,7 @@ def fit_to_screen(widget: Any, width: int, height: int) -> tuple[int, int]:
 
 def cap_minimum_size(widget: Any, width: int, height: int) -> tuple[int, int]:
     """
-    Set a minimum size that the screen can actually accommodate.
+    Set a minimum size that the screen can accommodate.
 
     A floor larger than the display is the one sizing mistake with no user-side recovery: the window
     cannot be shrunk, so whatever falls outside stays unreachable. This clamps the floor and leaves

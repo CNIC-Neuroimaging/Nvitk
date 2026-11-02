@@ -3,7 +3,7 @@
 
 Description
 -----------
-``apoe`` is stored as a genotype string — ``E3/E4``, ``E2/E3``, and so on. That is the right thing
+``apoe`` is stored as a genotype string: ``E3/E4``, ``E2/E3``, and so on. That is the right thing
 to store, but it is the wrong thing to model: six unordered levels spend five degrees of freedom on
 a contrast nobody is asking about, and the two rare homozygotes (``E2/E2``, ``E4/E4``) carry so few
 subjects that their coefficients are noise.
@@ -11,11 +11,11 @@ subjects that their coefficients are noise.
 So this writes two families of derived variables from the same genotype, and which one to use is a
 modelling decision, not a data one:
 
-**Carrier status** (0/1) — ``apoe_e2_carrier``, ``apoe_e4_carrier``, ``apoe_e3e3``. The usual
+**Carrier status** (0/1): ``apoe_e2_carrier``, ``apoe_e4_carrier``, ``apoe_e3e3``. The usual
 epidemiological coding: does this person carry the risk allele at all. One degree of freedom each.
 
-**Allele dose** (0/1/2) — ``apoe_e2_count``, ``apoe_e3_count``, ``apoe_e4_count``. Treats the
-genotype as additive, which is the better-powered choice when the effect really is per-allele —
+**Allele dose** (0/1/2): ``apoe_e2_count``, ``apoe_e3_count``, ``apoe_e4_count``. Treats the
+genotype as additive, which is the better-powered choice when the effect really is per-allele:
 an ``E4/E4`` homozygote carries twice the dose of an ``E3/E4`` heterozygote, and carrier status
 throws that distinction away.
 
@@ -26,7 +26,7 @@ mutually exclusive and must not be summed into one "carrier group" column. It is
 where the protective and risk alleles are thought to partly cancel, which is why it is conventionally
 either excluded or given its own level rather than folded into e4-carrier.
 
-``apoe_e3e3`` is the reference genotype — the complement of "carries e2 or e4". It is written as a
+``apoe_e3e3`` is the reference genotype: the complement of "carries e2 or e4". It is written as a
 convenience for filtering, not so it can be entered into a model alongside the other two, where it
 would be collinear with them.
 
@@ -44,9 +44,7 @@ Examples::
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import re
 from pathlib import Path
 from typing import Any
@@ -79,14 +77,12 @@ DERIVATIONS: dict[str, tuple[str, str]] = {
 }
 
 
-# ---------------------------------------------------------------------------
 # Genotype parsing
-# ---------------------------------------------------------------------------
 def parse_alleles(genotype: Any) -> tuple[int, ...]:
     """
     The two allele numbers in a genotype string, or ``()`` when it cannot be read.
 
-    Accepts the spellings that turn up in practice — ``E3/E4``, ``e3e4``, ``3/4``, ``E3-E4`` — by
+    Accepts the spellings that turn up in practice (``E3/E4``, ``e3e4``, ``3/4``, ``E3-E4``) by
     pulling out the digits rather than matching a fixed format. Anything that does not yield exactly
     two alleles from {2, 3, 4} is refused rather than guessed at.
 
@@ -117,9 +113,7 @@ def derive(alleles: tuple[int, ...], rule: str) -> float | None:
     raise ValueError(f"Unknown derivation rule: {rule!r}")
 
 
-# ---------------------------------------------------------------------------
 # Extraction
-# ---------------------------------------------------------------------------
 def load_genotypes(repo: Any) -> pd.DataFrame:
     """
     ``subject_uid`` / ``visit_id`` / ``genotype`` for every subject with an ``apoe`` value.
@@ -127,7 +121,7 @@ def load_genotypes(repo: Any) -> pd.DataFrame:
     Raises
     ------
     ValueError
-        When ``apoe`` is absent — there is nothing to derive from, and writing empty groupings
+        When ``apoe`` is absent: there is nothing to derive from, and writing empty groupings
         would look like "no carriers" rather than "no data".
     """
     clinical = repo.get("clinical_measurements", cohort_id=False)
@@ -175,7 +169,7 @@ def load_genotypes(repo: Any) -> pd.DataFrame:
 
 
 def build_groupings(frame: pd.DataFrame) -> dict[str, pd.DataFrame]:
-    """``{variable_id: agg frame}`` — one aggregate frame per derived variable."""
+    """``{variable_id: agg frame}``: one aggregate frame per derived variable."""
     out: dict[str, pd.DataFrame] = {}
     for variable, (_label, rule) in DERIVATIONS.items():
         values = frame["alleles"].map(lambda a, r=rule: derive(a, r))
@@ -193,7 +187,7 @@ def repair_source_column_aliases(repo: Any) -> list[str]:
     Un-alias ``apoe`` from the derived variables, for a dataset written before that was fixed.
 
     An earlier version of this script registered ``source_column="apoe"`` on every grouping, and the
-    catalog turns a source column into an alias — so ``apoe`` resolved to a carrier flag and the raw
+    catalog turns a source column into an alias, so ``apoe`` resolved to a carrier flag and the raw
     genotype became unreachable. Rewriting each entry's ``source_column`` to its own id drops the
     bad alias the next time the catalog is read.
 
@@ -269,7 +263,7 @@ def publish_groupings(
                 source_sheet="derived",
                 # NOT ``apoe``. The catalog registers ``source_column`` as a *variable alias*, so
                 # naming the parent here made ``apoe`` resolve to whichever derived variable was
-                # registered last — asking for the genotype returned a carrier flag. The
+                # registered last: asking for the genotype returned a carrier flag. The
                 # provenance belongs in ``extra``, which is metadata only.
                 source_column=variable,
                 extra={"derived_from": SOURCE_VARIABLE},
@@ -283,9 +277,7 @@ def publish_groupings(
     return written
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 @click.command("import-apoe-grouping")
 @click.option(
     "--dataset",

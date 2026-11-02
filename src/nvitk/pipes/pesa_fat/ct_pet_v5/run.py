@@ -3,7 +3,7 @@
 Entry point for the whole CT-PET v5 pipeline (stages 1-3). Dispatches each
 stage either **locally** (in-process loop over subjects) or on **SGE** (one
 array job per subject; tasks = stages with ``-tc 1`` + done-markers). Stage 0
-is *not* part of this master — it is orchestrated by
+is *not* part of this master: it is orchestrated by
 :mod:`nvitk.pipes.pesa_fat.run_batch` and its ``jid`` can be forwarded here via
 ``--base-hold``.
 
@@ -85,9 +85,7 @@ log = Logger()
 INPUT_SOURCE_CHOICES = ("paths", "xnat")
 
 
-# ---------------------------------------------------------------------------
 # Stage registry
-# ---------------------------------------------------------------------------
 
 
 STAGE_MODULES: dict[str, str] = {
@@ -126,9 +124,7 @@ def _stage_resources(stage: str, *, device: str = "gpu") -> SgeResources:
     )
 
 
-# ---------------------------------------------------------------------------
 # Local execution
-# ---------------------------------------------------------------------------
 
 
 def _run_local(
@@ -183,9 +179,7 @@ def _aggregate_stage3(lay: BatchLayout, subjects: list[str]) -> Path | None:
     return aggregate_stage3_summary(lay, subjects, "ct-pet-v5")
 
 
-# ---------------------------------------------------------------------------
 # SGE execution
-# ---------------------------------------------------------------------------
 
 
 def _build_python_cmd(
@@ -207,7 +201,7 @@ def _build_python_cmd(
     * ``--nifti-root``   -> ``binds.data``      (e.g. ``/PESAFat/data/``)
     * ``--results-root`` -> ``binds.output``    (e.g. ``/PESAFat/output/``)
     * ``--model-dir``    -> ``binds.models``    (e.g. ``/models/``)
-    * ``--dicom-root``   is not actually used by stages 1-3, but we still set
+    * ``--dicom-root``   is not used by stages 1-3, but we still set
       it to ``binds.data`` so :class:`BatchLayout` stays consistent.
     """
     module = STAGE_MODULES[stage]
@@ -399,9 +393,7 @@ def _run_sge(
     return all_jids
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 
 
 @click.command("nvitk-pesa-fat-ctpet")

@@ -8,14 +8,14 @@ Two families, matching the two encoder types this pipeline can start from:
     Transformer (Primus-M) encoders, on top of :class:`PretrainedTrainer_Primus`.
 
 Both inherit the pretrained-weight loading, warm-up schedule and learning rates that the two
-base classes configure — this module only replaces the objective and the mirroring policy.
+base classes configure: this module only replaces the objective and the mirroring policy.
 
 Why one class per loss
 ----------------------
 nnU-Net selects a loss by trainer class and names its output folder
 ``{trainer}__{plans}__{configuration}``. One class per loss therefore gives each objective its
-own results directory instead of silently overwriting the previous run, which is the whole point
-of being able to compare them.
+own results directory instead of silently overwriting the previous run, so runs with different
+objectives can be compared.
 
 Sampling
 --------
@@ -27,7 +27,7 @@ measuring against the default, not assuming.
 Mirroring
 ---------
 Every trainer here disables mirroring, in training **and** at inference. TopBrain labels are
-lateralised (``R-ICA`` vs ``L-ICA``, ``R-M1`` vs ``L-M1``, …), so a left-right flip produces an
+lateralised (``R-ICA`` vs ``L-ICA``, ``R-M1`` vs ``L-M1``, ...), so a left-right flip produces an
 image whose correct labels are the mirrored *class ids*, not the mirrored mask. The base class
 sets ``inference_allowed_mirroring_axes`` separately, so both have to be cleared.
 """
@@ -69,15 +69,15 @@ class RareClassAwareDataLoader(nnUNetDataLoader):
     present in that case**. That is fair within a case but blind across the cohort: a class in
     three volumes out of forty is still seen a thousand times less often than the ICA.
 
-    Overriding :meth:`get_bbox` is all it takes — the base implementation already accepts an
+    Overriding :meth:`get_bbox` is all it takes: the base implementation already accepts an
     ``overwrite_class``, so this only has to decide which class that should be and hand the
     rest of the (fiddly, well-tested) bounding-box logic straight back to it.
 
     Parameters
     ----------
     class_weights
-        Label → relative weight, mean-normalised to 1. Labels absent from a given case are
-        never candidates, so the weights are renormalised over what that case actually has.
+        Label -> relative weight, mean-normalised to 1. Labels absent from a given case are
+        never candidates, so the weights are renormalised over what that case has.
     """
 
     def __init__(self, *args, class_weights: dict = None, rng_seed: int = None, **kwargs):
@@ -116,9 +116,9 @@ class _TopBrainSamplingMixin:
 
     Two levers, applied together because either alone is half a fix:
 
-    - **case level** — ``sampling_probabilities`` on the training loader, so volumes carrying
-      rare classes come up more often. nnU-Net already supports this and simply passes ``None``;
-    - **class level** — :class:`RareClassAwareDataLoader`, so inside such a volume the patch
+    - **case level**: ``sampling_probabilities`` on the training loader, so volumes carrying
+      rare classes come up more often. nnU-Net already supports this and passes ``None``;
+    - **class level**: :class:`RareClassAwareDataLoader`, so inside such a volume the patch
       centres on the rare class rather than on whichever of its ~28 classes came up.
 
     The foreground-oversampling fraction is raised at the same time (0.33 -> 0.5 by default):
@@ -136,7 +136,7 @@ class _TopBrainSamplingMixin:
 
         This build's ``nnunetv2.paths`` captures the environment variables at import rather
         than lazily, so binding the name at module scope would freeze whatever was set when
-        this module first loaded — ``None`` if it was imported before the environment was.
+        this module first loaded: ``None`` if it was imported before the environment was.
         """
         import nnunetv2.paths
 
@@ -253,7 +253,7 @@ class _TopBrainSamplingMixin:
 
         Implemented by swapping the ``nnUNetDataLoader`` name that
         ``nnUNetTrainer.get_dataloaders`` resolves at call time, for the duration of that call.
-        The alternative — calling ``super()`` and replacing the training loader afterwards —
+        The alternative, calling ``super()`` and replacing the training loader afterwards,
         does not work: the base method ends by pulling a batch from each loader, which has
         already spawned a ``NonDetMultiThreadedAugmenter`` worker pool, and the discarded pool
         would be left running for the length of the training.
@@ -282,7 +282,7 @@ class _TopBrainSamplingMixin:
                     data, batch_size, patch_size, final_patch_size, label_manager, **kwargs
                 )
             # Probabilities must line up with the loader's own identifier order, so they are
-            # computed here from the dataset it was actually handed.
+            # computed here from the dataset it was handed.
             probabilities = sampling_util.case_weights(
                 case_classes, weights,
                 identifiers=list(data.identifiers),
@@ -426,7 +426,7 @@ class _TopBrainLossMixin(_TopBrainSamplingMixin):
         """Disable mirroring; keep the rotation and patch-size logic untouched.
 
         Clearing ``inference_allowed_mirroring_axes`` matters as much as clearing the training
-        axes — the base implementation sets it from ``mirror_axes`` just before returning, and
+        axes: the base implementation sets it from ``mirror_axes`` just before returning, and
         leaving it populated would keep mirroring in test-time augmentation, producing
         side-confused predictions from a model never trained to be flip-invariant.
         """

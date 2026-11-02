@@ -53,9 +53,7 @@ __all__ = [
 log = Logger()
 
 
-# ---------------------------------------------------------------------------
 # Zeiss CIRRUS "CapeCod" private OCT containers
-# ---------------------------------------------------------------------------
 #
 # A CIRRUS Raw Data Storage object wraps every image stack it carries in its own
 # private 99CZM_CapeCod_OctGeneral (0407) sequence. Each container holds a
@@ -178,9 +176,7 @@ def _shared_frame_origin(
     )
 
 
-# ---------------------------------------------------------------------------
 # Obfuscated payloads (LuraWave-encoded series)
-# ---------------------------------------------------------------------------
 #
 # Some Zeiss scan types (macular, optic-disc and anterior-segment cubes on this export
 # path) store their frames scrambled instead of as a plain JP2: every seventh byte is
@@ -520,7 +516,7 @@ def extract_zeiss_oct_images(ds_list: list[Any], debug_mode: bool = False) -> li
     """Extract the 2-D images (fundus, iris, en-face projection) stored alongside the cubes.
 
     Returns only the containers that are present and decodable, so an acquisition
-    missing one - or carrying an unreadable payload - simply yields fewer images.
+    missing one - or carrying an unreadable payload - yields fewer images.
     """
     images: list[ZeissOctImage] = []
     for ds in ds_list:
@@ -531,9 +527,7 @@ def extract_zeiss_oct_images(ds_list: list[Any], debug_mode: bool = False) -> li
     return images
 
 
-# ---------------------------------------------------------------------------
 # Cross-scan alignment
-# ---------------------------------------------------------------------------
 
 _LSLO_CONTAINER = 0x10A6
 
@@ -1313,9 +1307,7 @@ def _extract_zeiss_raw_oct(
     )
 
 
-# ---------------------------------------------------------------------------
 # Derived analysis series
-# ---------------------------------------------------------------------------
 #
 # Analysis objects (thickness maps, report analyses) carry no cube container. They
 # describe a single en-face grid at the top level of the dataset, reusing the same
@@ -1409,7 +1401,7 @@ def derived_analysis_affine(ds: Any, shape: tuple[int, ...]) -> np.ndarray | Non
 
 
 def is_zeiss_raw_storage(ds: Any) -> bool:
-    """Public alias of :func:`_is_zeiss_raw_storage` — True when *ds* is a Zeiss private raw-OCT storage object."""
+    """Public alias of :func:`_is_zeiss_raw_storage`: True when *ds* is a Zeiss private raw-OCT storage object."""
     return _is_zeiss_raw_storage(ds)
 
 
@@ -1418,5 +1410,5 @@ def extract_zeiss_raw_oct(
     md: dict[str, Any],
     debug_mode: bool = False,
 ):
-    """Public alias of :func:`_extract_zeiss_raw_oct` — decode a Zeiss raw-OCT series into a volume."""
+    """Public alias of :func:`_extract_zeiss_raw_oct`: decode a Zeiss raw-OCT series into a volume."""
     return _extract_zeiss_raw_oct(ds_list, md, debug_mode=debug_mode)

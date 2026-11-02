@@ -22,13 +22,13 @@ def _build_affine(
     origin: tuple[float, ...],
     direction: tuple[float, ...],
 ) -> np.ndarray:
-    """Build a voxel→world affine from MHA/MHD spacing, origin, and (row-major) direction cosines.
+    """Build a voxel->world affine from MHA/MHD spacing, origin, and (row-major) direction cosines.
 
     The result maps ITK's ``(x, y, z)`` index order onto **RAS** millimetres, matching what
     :func:`~nvitk.io.readers.nifti.read_nifti` produces. ITK's own values are LPS, so the world
     axes are flipped on the way out; without that an image read from MetaImage and the same image
     read from NIfTI describe mirrored worlds while both claim to be affines, and anything
-    comparing or overlaying them is quietly wrong about left and right.
+    comparing or overlaying them is silently wrong about left and right.
     """
     dim = len(spacing)
     affine = np.eye(4, dtype=float)

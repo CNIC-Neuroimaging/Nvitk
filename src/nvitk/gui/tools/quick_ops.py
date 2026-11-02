@@ -1,4 +1,4 @@
-"""Quick image operations for the command palette — the ImageJ-style basics.
+"""Quick image operations for the command palette: the ImageJ-style basics.
 
 Adjusting a window, thresholding by eye, projecting, rotating, cropping to a
 mask: things you do constantly while looking at an image, which do not warrant
@@ -68,8 +68,8 @@ def _absolute_window_params(
 ) -> tuple[OpParam, OpParam]:
     """A low/high pair of sliders in the layer's own intensity units.
 
-    Both span the data's full range, so any window — including one tighter than
-    the robust default, or reaching the extremes — is a drag away, and a CT
+    Both span the data's full range, so any window (including one tighter than
+    the robust default, or reaching the extremes) is a drag away, and a CT
     reads in Hounsfield units rather than in percentiles of whatever the volume
     happens to contain.
     """
@@ -162,7 +162,7 @@ def crop_params(_viewer: Any) -> tuple[OpParam, ...]:
 def contrast_params(viewer: Any) -> tuple[OpParam, ...]:
     """Absolute display window (minimum / maximum shown) for brightness/contrast.
 
-    Starts on the robust 1–99 % window — what *auto* means — in intensity units,
+    Starts on the robust 1-99 % window (what *auto* means) in intensity units,
     with the layer's current window quoted in the hint for reference.
     """
     layer, data = _require_array_layer(viewer)
@@ -205,13 +205,13 @@ def _add(viewer: Any, layer: Any, data: np.ndarray, suffix: str, *, labels: bool
     return viewer.add_image(data, **kwargs)
 
 
-# ── contrast ──────────────────────────────────────────────────────────────────
+# contrast
 def auto_contrast(viewer: Any, *, low: float | None = None, high: float | None = None) -> str:
     """Set the active layer's display window to ``[low, high]`` (intensity units).
 
     The equivalent of ImageJ's Brightness/Contrast: it moves the display window
     only, never the data, so it is always safe and always reversible. With no
-    limits given it applies the robust 1–99 % window (ImageJ's *Auto*).
+    limits given it applies the robust 1-99 % window (ImageJ's *Auto*).
     """
     layer, _data = _require_array_layer(viewer)
     if low is None or high is None:
@@ -280,11 +280,11 @@ def ct_window_params(viewer: Any) -> tuple[OpParam, ...]:
         if suggested:
             default = suggested
             lower, upper = get_window(default).limits
-    except Exception:  # noqa: BLE001 — a suggestion is a convenience, not a gate
+    except Exception:  # noqa: BLE001 (a suggestion is a convenience, not a gate)
         pass
     try:
         # Open on the window the layer shows now: its preset, or Custom with its
-        # bounds — unless it still shows its whole range (nothing chosen yet).
+        # bounds, unless it still shows its whole range (nothing chosen yet).
         limits = getattr(layer, "contrast_limits", None)
         if limits is not None:
             lo, hi = (float(v) for v in limits)
@@ -329,12 +329,12 @@ def ct_window_limits(preset: str, lower: float | None = None, upper: float | Non
 
 def ct_window(viewer: Any, *, preset: str = "brain", apply_all: str = "no",
               lower: float | None = None, upper: float | None = None) -> str:
-    """Set the display window to a named CT preset, or to *lower* … *upper* HU
+    """Set the display window to a named CT preset, or to *lower* ... *upper* HU
     (``preset="custom"``).
 
     The same presets the Layers tab's *CT display window* panel offers, reachable
     from the search bar. Like every windowing operation this moves the display
-    range only — the voxels are untouched, so it is always reversible.
+    range only: the voxels are untouched, so it is always reversible.
     """
     from nvitk.viz.ct_windows import get_window
 
@@ -348,7 +348,7 @@ def ct_window(viewer: Any, *, preset: str = "brain", apply_all: str = "no",
     for target in targets:
         try:
             set_display_window(target, lo, hi)
-        except Exception:  # noqa: BLE001 — a layer that will not take a window
+        except Exception:  # noqa: BLE001 (a layer that will not take a window)
             continue
     where = f"{len(targets)} image layer(s)" if len(targets) > 1 else f"“{layer.name}”"
     name = f"Window {lo:g} … {hi:g} HU" if str(preset) == CT_WINDOW_CUSTOM else get_window(preset).label
@@ -365,7 +365,7 @@ def reset_contrast(viewer: Any) -> str:
     return f"Contrast reset to the full range [{lo:.4g}, {hi:.4g}]."
 
 
-# ── thresholding ──────────────────────────────────────────────────────────────
+# thresholding
 def layer_data(layer: Any) -> np.ndarray:
     """*layer*'s data as a host array, raising if it has none."""
     data = getattr(layer, "data", None)
@@ -375,7 +375,7 @@ def layer_data(layer: Any) -> np.ndarray:
 
 
 def threshold_mask(layer: Any, value: float) -> np.ndarray:
-    """The mask *layer* produces at *value* — used for the live preview.
+    """The mask *layer* produces at *value*: used for the live preview.
 
     Takes the layer rather than the viewer on purpose: adding the preview layer
     makes *it* the active one, so resolving the source by "whatever is active"
@@ -416,7 +416,7 @@ def threshold_otsu(viewer: Any) -> str:
     return f"Otsu threshold {cut:.6g} — {int(mask.sum()):,} voxels kept."
 
 
-# ── filters ───────────────────────────────────────────────────────────────────
+# filters
 def gaussian(viewer: Any, sigma: float = 1.0) -> str:
     """Gaussian-blur the active layer into a new layer."""
     from scipy.ndimage import gaussian_filter
@@ -445,7 +445,7 @@ def invert(viewer: Any) -> str:
     return f"Inverted “{layer.name}”."
 
 
-# ── geometry ──────────────────────────────────────────────────────────────────
+# geometry
 def project(viewer: Any, how: str = "max", axis: int = 0) -> str:
     """Project the active layer along *axis* (``max``, ``mean``, ``min``, ``sum``)."""
     layer, data = _require_array_layer(viewer)
@@ -487,7 +487,7 @@ def cropped_spatial(layer: Any, lo: np.ndarray) -> dict[str, Any]:
     Cropping moves the origin, so the source placement alone would put the result
     in the wrong place: :func:`~nvitk.gui.core.spatial.crop_placement` shifts the
     affine by the offset, which keeps the crop registered to the volume it came
-    out of — what lets the preview be shown in place, and the export land there.
+    out of; what lets the preview be shown in place, and the export land there.
     """
     from nvitk.gui.core.spatial import crop_placement
 
@@ -529,7 +529,7 @@ def crop_to_box(viewer: Any, what: str = "layer") -> str:
     return f"Cropped {len(made)} layer(s) to the box: " + ", ".join(ly.name for ly in made) + "."
 
 
-# ── dtype ─────────────────────────────────────────────────────────────────────
+# dtype
 _DTYPES: dict[str, Any] = {
     "uint8": np.uint8, "uint16": np.uint16, "int16": np.int16,
     "int32": np.int32, "float32": np.float32, "float64": np.float64,
@@ -558,10 +558,10 @@ def convert_dtype(viewer: Any, dtype: str = "float32") -> str:
     return f"Converted “{layer.name}” to {dtype}."
 
 
-# ── exposure ──────────────────────────────────────────────────────────────────
+# exposure
 #: How the intensity operations reach scikit-image. ndimage is preferred across
-#: nvitk, but it has no exposure module — no gamma, log, sigmoid or histogram
-#: equalisation — so these are skimage's, moved to host at the boundary.
+#: nvitk, but it has no exposure module (no gamma, log, sigmoid or histogram
+#: equalisation), so these are skimage's, moved to host at the boundary.
 def _as_float01(data: np.ndarray) -> tuple[np.ndarray, float, float]:
     """*data* scaled into ``[0, 1]`` with the window needed to undo it.
 
@@ -595,7 +595,7 @@ def adjust_params(_viewer: Any) -> tuple[OpParam, ...]:
 def adjusted_intensity(
     layer: Any, method: str = "gamma", strength: float = 1.0, cutoff: float = 0.5
 ) -> np.ndarray:
-    """The adjusted image :func:`adjust_intensity` would produce — used for preview."""
+    """The adjusted image :func:`adjust_intensity` would produce: used for preview."""
     from skimage import exposure
 
     scaled, lo, hi = _as_float01(layer_data(layer))
@@ -689,7 +689,7 @@ def rescaled_intensity(
     """The rescaled image :func:`rescale_intensity` would produce.
 
     *low* / *high* are intensities in the layer's own units; omitted, they
-    default to the robust 1–99 % window.
+    default to the robust 1-99 % window.
     """
     from skimage import exposure
 
@@ -750,7 +750,7 @@ def histogram_params(_viewer: Any) -> tuple[OpParam, ...]:
     )
 
 
-# ── segmentation helpers ──────────────────────────────────────────────────────
+# segmentation helpers
 def contour_params(viewer: Any) -> tuple[OpParam, ...]:
     """Options for :func:`find_contours`: an iso-level slider over the data range."""
     _layer, data = _require_array_layer(viewer)
@@ -767,7 +767,7 @@ def find_contours(viewer: Any, *, level: float | None = None, axis: int = 0) -> 
     """Trace iso-intensity contours slice by slice into a Shapes layer.
 
     skimage's marching squares is 2D, so a volume is traced one slice at a time
-    along *axis* — which is also how the result is read back, as planar outlines.
+    along *axis*, which is also how the result is read back, as planar outlines.
     """
     from nvitk.core.backend import using
     from skimage import measure
@@ -841,7 +841,7 @@ def _cursor_index(viewer: Any, layer: Any, shape: tuple[int, ...]) -> tuple[int,
     """The viewer's cursor as a voxel index into *layer*, clipped to *shape*."""
     try:
         position = layer.world_to_data(viewer.cursor.position)
-    except Exception:  # noqa: BLE001 — fall back to the middle of the volume
+    except Exception:  # noqa: BLE001 (fall back to the middle of the volume)
         position = [s / 2.0 for s in shape]
     index = [int(round(float(v))) for v in list(position)[-len(shape):]]
     return tuple(int(np.clip(v, 0, n - 1)) for v, n in zip(index, shape))
@@ -860,7 +860,7 @@ def watershed_params(_viewer: Any) -> tuple[OpParam, ...]:
 def watershed_split(viewer: Any, *, footprint: int = 3, use_gradient: str = "distance") -> str:
     """Split touching objects with a watershed.
 
-    On a mask the distance transform is the surface to flood — the standard recipe
+    On a mask the distance transform is the surface to flood: the standard recipe
     for separating objects that touch. On an intensity image the image itself is,
     which is what you want for basins already visible in the data.
     """

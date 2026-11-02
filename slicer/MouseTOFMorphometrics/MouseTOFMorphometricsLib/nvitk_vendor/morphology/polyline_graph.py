@@ -168,7 +168,7 @@ def _arm_components_from_cluster(
                 if v in outside and v not in visited:
                     visited.add(v)
                     q.append(v)
-        # Only keep components that actually touch the junction cluster.
+        # Only keep components that touch the junction cluster.
         if comp & exits:
             arms.append(comp)
     return arms
@@ -180,7 +180,7 @@ def significant_bifurcation_nodes(
     min_arm_points: int = 5,
     min_degree: int = 3,
 ) -> list[tuple[int, int, int]]:
-    """Multi-way junction reps with ≥3 long arms (Y *or* torcular degree ≥4).
+    """Multi-way junction reps with >=3 long arms (Y *or* torcular degree >=4).
 
     Arms are counted from the whole junction *cluster*, not from a single
     representative's 26-neighbors. Fat torcular blobs often have local degree
@@ -231,7 +231,7 @@ def prune_skeleton_coords_tiny_loops(
 
     Oversegmented blobs often skeletonize into tiny loops. Only **short**
     off-main clusters on each small cycle are deleted so long anatomical
-    branches (e.g. SSSV off an L↔R transverse diameter) are not stripped when
+    branches (e.g. SSSV off an L<->R transverse diameter) are not stripped when
     26-connectivity creates local cycles at a junction.
     """
     if coords_xyz.shape[0] < 4:
@@ -443,8 +443,8 @@ def three_arm_junction_nodes(
 ) -> list[tuple[int, int, int]]:
     """Junction-cluster reps with *exactly* three arms (classic Y/T).
 
-    Unlike :func:`significant_bifurcation_nodes` (needs ≥3 *long* arms, allows
-    4+), this is the no-bifurcation fallback for SSSV↔one-transverse joins even
+    Unlike :func:`significant_bifurcation_nodes` (needs >=3 *long* arms, allows
+    4+), this is the no-bifurcation fallback for SSSV<->one-transverse joins even
     when local skeleton degree is >3 under 26-connectivity.
     """
     if coords_xyz.shape[0] == 0:
@@ -479,7 +479,7 @@ def branch_polylines_from_skeleton(
     """One polyline per chain between skeleton endpoints and junctions.
 
     When *prefer_bifurcations* is True:
-    1. Significant multi-way junctions (≥3 long arms, including torcular deg≥4)
+    1. Significant multi-way junctions (>=3 long arms, including torcular deg>=4)
     2. Else classic 3-arm Y/T (exact deg-3 *or* 3-arm clusters if deg>3)
     3. Else a single longest-path chain (no split points)
     """

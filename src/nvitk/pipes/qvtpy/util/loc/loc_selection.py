@@ -38,9 +38,7 @@ from nvitk.pipes.qvtpy.labels import (
     qvtpy_vessel_name,
 )
 
-# ---------------------------------------------------------------------------
 # Constants
-# ---------------------------------------------------------------------------
 
 _STRV_REF = np.array([0.0, 1.0, 1.0], dtype=np.float64)
 
@@ -52,8 +50,8 @@ QVTPY_MCA_PCA_BIFURCATION_LOC_IDS: frozenset[int] = frozenset(
 )
 # ACA: AComm / CW fallback when named side branches are absent.
 QVTPY_ACA_JUNCTION_LOC_IDS: frozenset[int] = frozenset(QVTPY_ACA_IDS)
-# MCA / ACA / PCA: dual init/fin from trunk ↔ side-branch intersections
-# (M1/A1/P1 then M2/A2/P2) on named stage-4 centerlines.
+# MCA / ACA / PCA (A1 / M1 / P1): one init LOC from the stage-3 trunk or the trunk <-> side-branch
+# intersections; their A2 / M2 / P2 labels get their own mid LOC.
 QVTPY_BRANCH_INTERSECTION_LOC_IDS: frozenset[int] = frozenset(
     QVTPY_MCA_IDS | QVTPY_ACA_IDS | QVTPY_PCA_IDS
 )
@@ -67,9 +65,7 @@ _ACA_PARENT_ICA: dict[int, int] = {
 }
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Types
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -94,9 +90,7 @@ class LocRecord:
     loc_role: str = "mid"
 
 
-# ---------------------------------------------------------------------------
 # Polyline utilities
-# ---------------------------------------------------------------------------
 
 
 def split_into_parts(points: np.ndarray, n_parts: int) -> list[np.ndarray]:
@@ -278,7 +272,7 @@ def _side_branch_attach_index_on_trunk(
 ) -> int | None:
     """Trunk polyline index where a side branch meets the main path.
 
-    Stage-4 side branches are oriented **junction → endpoint**, so the first
+    Stage-4 side branches are oriented **junction -> endpoint**, so the first
     point is preferred; the distal tip is tried only if the junction end is
     farther than *max_dist_vox* from the trunk.
     """
@@ -339,7 +333,7 @@ def pick_x1_init_distal_fin_loc_indices(
     if i_hi <= i_lo:
         i_hi = min(n4 - 1, i_lo + 1)
 
-    # Geometric midpoint of the stage-3 (A1/M1/P1) polyline → nearest stage-4 index.
+    # Geometric midpoint of the stage-3 (A1/M1/P1) polyline -> nearest stage-4 index.
     mid3 = s3[pick_index_at_arc_fraction(s3, 0.5)]
     init_idx = int(np.argmin(np.linalg.norm(s4 - mid3.reshape(1, 3), axis=1)))
     # Keep init inside the mapped proximal span when possible.
@@ -379,13 +373,13 @@ def pick_branch_intersection_loc_indices(
     *,
     max_dist_vox: float = 3.0,
 ) -> tuple[int, int | None, str]:
-    """Init/fin LOCs from trunk ↔ sub-branch intersection points.
+    """Init/fin LOCs from trunk <-> sub-branch intersection points.
 
-    Intersections are the attach points of named side branches (M2/A2/P2, …)
-    onto the main trunk (M1/A1/P1). Along the trunk (proximal → distal):
+    Intersections are the attach points of named side branches (M2/A2/P2, ...)
+    onto the main trunk (M1/A1/P1). Along the trunk (proximal -> distal):
 
-    * **init** — arc midpoint between vessel start and the **first** intersection
-    * **fin** — arc midpoint between the first intersection and the **second**
+    * **init**: arc midpoint between vessel start and the **first** intersection
+    * **fin**: arc midpoint between the first intersection and the **second**
       (or the vessel end when only one intersection exists)
 
     Returns ``(init_idx, fin_idx_or_None, method)``.
@@ -435,10 +429,10 @@ def pick_mca_pca_loc_indices(
     Prefer :func:`pick_branch_intersection_loc_indices` when named stage-4
     side branches are available.
 
-  * ≥1 bifurcation — init at arc midpoint start → first bifurcation; fin at arc
-    midpoint first bifurcation → distal target on the longest downstream branch
+  * >=1 bifurcation: init at arc midpoint start -> first bifurcation; fin at arc
+    midpoint first bifurcation -> distal target on the longest downstream branch
     (first junction on that branch, or branch endpoint).
-  * No bifurcation — init only at ¼ arc length from the vessel start; fin is ``None``.
+  * No bifurcation: init only at ¼ arc length from the vessel start; fin is ``None``.
     """
     pts = to_numpy(points).astype(np.float64)
     n = pts.shape[0]
@@ -568,8 +562,8 @@ def pick_aca_loc_indices(
     Indices are returned in the original polyline order. Init is the proximal
     station (A1 / CW mid); fin is distal of the junction / CW section.
 
-    * Junction present — init = arc midpoint proximal→junction; fin = junction→distal.
-    * No junction — init = arc midpoint of CW eICAB ACA section; fin = mid of distal
+    * Junction present: init = arc midpoint proximal->junction; fin = junction->distal.
+    * No junction: init = arc midpoint of CW eICAB ACA section; fin = mid of distal
       remainder. Falls back to tertiles / single mid.
     """
     pts_orig = to_numpy(points).astype(np.float64)
@@ -840,9 +834,7 @@ def _z_std(points: np.ndarray) -> float:
     return float(np.std(to_numpy(points)[:, 2]))
 
 
-# ---------------------------------------------------------------------------
 # LocRecord construction + cross-section at station
-# ---------------------------------------------------------------------------
 
 
 def _record_from_polyline(
@@ -939,9 +931,7 @@ def select_main_vessel_loc(
     return _record_from_polyline(pts, idx, vessel_id=vessel_id, vessel_name=vessel_name, xs=xs)
 
 
-# ---------------------------------------------------------------------------
 # Venous LOC heuristics (SSSV / STRV / LTSV / RTSV)
-# ---------------------------------------------------------------------------
 
 
 def resolve_sssv_strv(
@@ -1059,9 +1049,7 @@ def select_venous_locs(
     return out
 
 
-# ---------------------------------------------------------------------------
 # Combined arterial / venous LOC selection
-# ---------------------------------------------------------------------------
 
 
 def _arterial_loc_at_index(
@@ -1133,7 +1121,6 @@ def select_arterial_locs(
     arterial_seg: np.ndarray | None = None,
     eicab_qvtpy: np.ndarray | None = None,
     stage3_arterial: dict[int, Any] | None = None,
-    distal_locs: bool = False,
 ) -> tuple[list[LocRecord], dict[str, Any]]:
     """Select arterial LOCs. Returns ``(records, meta_extra)`` for loc_meta.json.
 
@@ -1144,15 +1131,15 @@ def select_arterial_locs(
     LOC policy (``strategy="qvtpy"``):
 
     - ICA / basilar: one shared-z mid LOC on the trunk
-    - MCA / ACA / PCA: init at the midpoint of the stage-3 A1/M1/P1 centerline
-      (pre-RG / pre-distal expansion); when *distal_locs* is true, also place fin
-      distal of that span on the stage-4 trunk (stage-3 coverage forbidden for fin)
+    - MCA / ACA / PCA (the A1 / M1 / P1 labels): one init LOC at the midpoint of the stage-3
+      centerline (before the flood)
+    - A2 / M2 / P2 labels: one mid LOC on the trunk (the longest path from their A1 / M1 / P1)
     - ACOMM: never measured (insufficient resolution)
     - PCOMM: only when present in the arterial set (stage-3 min-points survivors)
     - Other labels: one mid LOC on the trunk
 
     *stage3_arterial* supplies proximal A1/M1/P1 trunks keyed by label id (polyline
-    or named-branch list). When missing for a vessel, falls back to trunk ↔
+    or named-branch list). When missing for a vessel, falls back to trunk <->
     side-branch intersections on stage-4 alone.
     """
     from nvitk.pipes.qvtpy.labels import qvtpy_vessel_name
@@ -1189,7 +1176,6 @@ def select_arterial_locs(
         "branch_intersection_loc_methods": {},
         "skipped_acomm": True,
         "stage3_x1_vessels": [],
-        "distal_locs": bool(distal_locs),
     }
     out: list[LocRecord] = []
     use_dual = strategy == "qvtpy"
@@ -1215,7 +1201,7 @@ def select_arterial_locs(
         # ACOMM: never place LOCs (insufficient resolution for measurement).
         if int(vid) == int(QVTPY_ACOMM):
             continue
-        # PCOMM survivors only — absent labels (stage-3 drop) never appear here.
+        # PCOMM survivors only: absent labels (stage-3 drop) never appear here.
         trunk = to_numpy(branch_list[0][1])
         vname = qvtpy_vessel_name(vid)
         names_here = [str(n) for n, _p in branch_list]
@@ -1311,23 +1297,6 @@ def select_arterial_locs(
                     radius_vox=radius_vox,
                 )
             )
-            # Fin (distal) LOCs are computed above but only emitted when enabled.
-            if distal_locs and fin_idx is not None:
-                out.append(
-                    _arterial_loc_at_index(
-                        trunk,
-                        fin_idx,
-                        vessel_id=vid,
-                        vessel_name=vname,
-                        segment_id=1,
-                        loc_role="fin",
-                        mag=mag,
-                        cd=cd,
-                        vel_mag=vel_mag,
-                        voxel_spacing=voxel_spacing,
-                        radius_vox=radius_vox,
-                    )
-                )
             continue
 
         # LVA / RVA (when present after stage-4 VB split): one mid LOC each.
@@ -1350,7 +1319,7 @@ def select_arterial_locs(
             )
             continue
 
-        # Remaining arteries (surviving PCOMM, …): one mid LOC on the trunk.
+        # Remaining arteries (surviving PCOMM, ...): one mid LOC on the trunk.
         mid_idx = pick_mid_loc_index(trunk.shape[0], trunk)
         out.append(
             _arterial_loc_at_index(
@@ -1371,7 +1340,7 @@ def select_arterial_locs(
     return out, meta_extra
 
 
-# ---- CSV / serialization -----------------------------------------------------
+# CSV / serialization
 
 
 def loc_record_to_dict(rec: LocRecord) -> dict[str, float | int | str]:

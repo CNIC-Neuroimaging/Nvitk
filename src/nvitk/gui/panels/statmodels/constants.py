@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Pipeline kinds and atlases
-# ──────────────────────────────────────────────────────────────────────────────
 PIPELINE_KIND_QVTPY = "qvtpy"
 PIPELINE_KIND_ASL = "asl"
 PIPELINE_KIND_T1 = "t1"
@@ -41,9 +39,7 @@ JOIN_GRAINS: tuple[tuple[str, str], ...] = (
     ("subject — one row per subject, regions become columns", "subject"),
 )
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Analysis types
-# ──────────────────────────────────────────────────────────────────────────────
 ANALYSIS_MIXEDLM = "mixedlm"
 ANALYSIS_LME4 = "lme4"
 ANALYSIS_MMRM = "mmrm"
@@ -177,9 +173,7 @@ ROBUST_COV_ITEMS: tuple[tuple[str, str | None], ...] = (
     ("HC3 — leverage-adjusted, conservative", "HC3"),
 )
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Model formulation defaults
-# ──────────────────────────────────────────────────────────────────────────────
 DEFAULT_FORMULA = (
     "flow_mean ~ C(tacsctot_group, Treatment('None')) "
     "* C(group_key) + age_c + sex + Hematocrit"
@@ -189,12 +183,10 @@ DEFAULT_RE = "0"
 DEFAULT_VC = '{"patient": "0 + C(subject_uid)"}'
 DEFAULT_MODEL_NAME = "mixedlm_model"
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Table / plot behaviour
-# ──────────────────────────────────────────────────────────────────────────────
 # Rows shown in the analysis-dataframe preview. Filters and fits always use the full frame.
 TABLE_ROW_CAP = 2000
-# A column with more distinct values than this gets the numeric/expression tabs only — a checkable
+# A column with more distinct values than this gets the numeric/expression tabs only: a checkable
 # list of thousands of levels is not a usable way to pick anything.
 MAX_CATEGORICAL_LEVELS = 200
 # Levels beyond this get a scrollable list without the per-level colour swatches.
@@ -204,9 +196,7 @@ MAX_PLOT_GROUP_LEVELS = 60
 AXIS_SLIDER_STEPS = 1000
 AXIS_SLIDER_MARGIN = 0.25
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Persistence
-# ──────────────────────────────────────────────────────────────────────────────
 # Bumped when the saved-config schema changes; ``_migrate_config`` upgrades anything older.
 CONFIG_VERSION = 2
 

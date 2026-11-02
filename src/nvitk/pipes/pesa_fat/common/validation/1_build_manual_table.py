@@ -1,5 +1,5 @@
 """
-Paso 1 — Construir tabla de medidas manuales
+Paso 1: Construir tabla de medidas manuales
 ============================================
 Lee los dos ficheros manuales y produce una tabla unificada con una fila
 por participante (pesa_id como índice).
@@ -24,9 +24,7 @@ from config import MANUAL_PATH, MANUAL_PATH2, MANUAL_TABLE_PATH
 
 log = Logger()
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Helpers
-# ─────────────────────────────────────────────────────────────────────────────
 
 def parse_spanish_value(val):
     """Extrae el valor numérico de strings 'X,X±Y,Y' (notación española)."""
@@ -42,9 +40,7 @@ def parse_spanish_value(val):
         return np.nan
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# FILE1 — médula + fat fraction (n≈23)
-# ─────────────────────────────────────────────────────────────────────────────
+# FILE1: médula + fat fraction (n≈23)
 
 def load_manual(path):
     """
@@ -79,9 +75,7 @@ def load_manual(path):
     return pd.DataFrame(rows).set_index("pesa_id")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# FILE2 — RefStd semana 1 (n=6)
-# ─────────────────────────────────────────────────────────────────────────────
+# FILE2: RefStd semana 1 (n=6)
 
 def load_manual2(path):
     """
@@ -137,7 +131,7 @@ def load_manual2(path):
             continue
         r = {"pesa_id": pid}
 
-        # ── DIXON Riñón ────────────────────────────────────────────────────
+        # DIXON Riñón
         r["man2_Rinon_DER_T2"]  = g(row, 3);  r["man2_Rinon_DER_FF"]  = g(row, 4)
         r["man2_Rinon_DER_VOL"] = g(row, 5)
         r["man2_Rinon_IZQ_T2"]  = g(row, 8);  r["man2_Rinon_IZQ_FF"]  = g(row, 9)
@@ -146,12 +140,12 @@ def load_manual2(path):
         r["man2_Rinon_BIL_FF"]  = mean2(row, 4, 9)
         r["man2_Rinon_BIL_VOL"] = sum2(row, 5, 10)
 
-        # ── DIXON Páncreas ─────────────────────────────────────────────────
+        # DIXON Páncreas
         r["man2_Pancreas_T2"]  = g(row, 13)
         r["man2_Pancreas_FF"]  = g(row, 14)
         r["man2_Pancreas_VOL"] = g(row, 15)
 
-        # ── DIXON Cuádriceps ───────────────────────────────────────────────
+        # DIXON Cuádriceps
         r["man2_Cuad_DER_T2"]  = g(row, 18);  r["man2_Cuad_DER_FF"]  = g(row, 19)
         r["man2_Cuad_DER_VOL"] = g(row, 20)
         r["man2_Cuad_IZQ_T2"]  = g(row, 23);  r["man2_Cuad_IZQ_FF"]  = g(row, 24)
@@ -160,7 +154,7 @@ def load_manual2(path):
         r["man2_Cuad_BIL_FF"]  = mean2(row, 19, 24)
         r["man2_Cuad_BIL_VOL"] = sum2(row, 20, 25)
 
-        # ── DIXON Paravertebral ────────────────────────────────────────────
+        # DIXON Paravertebral
         r["man2_Paravert_DER_T2"]  = g(row, 28)
         r["man2_Paravert_DER_FF"]  = g(row, 29)
         r["man2_Paravert_DER_VOL"] = g(row, 30)
@@ -171,13 +165,13 @@ def load_manual2(path):
         r["man2_Paravert_BIL_FF"]  = mean2(row, 29, 34)
         r["man2_Paravert_BIL_VOL"] = sum2(row, 30, 35)
 
-        # ── DIXON Médula L3 / L4 ──────────────────────────────────────────
+        # DIXON Médula L3 / L4
         r["man2_BN_L3_T2"]  = g(row, 38);  r["man2_BN_L3_FF"]  = g(row, 39)
         r["man2_BN_L3_VOL"] = g(row, 40)
         r["man2_BN_L4_T2"]  = g(row, 43);  r["man2_BN_L4_FF"]  = g(row, 44)
         r["man2_BN_L4_VOL"] = g(row, 45)
 
-        # ── PET Paravertebral ─────────────────────────────────────────────
+        # PET Paravertebral
         r["man2_Paravert_DER_SUVmax"] = g(row, 47)
         r["man2_Paravert_DER_SUVmed"] = g(row, 48)
         r["man2_Paravert_IZQ_SUVmax"] = g(row, 51)
@@ -185,7 +179,7 @@ def load_manual2(path):
         r["man2_Paravert_BIL_SUVmax"] = mean2(row, 47, 51)
         r["man2_Paravert_BIL_SUVmed"] = mean2(row, 48, 52)
 
-        # ── PET Riñón (sin equivalente automático actualmente) ────────────
+        # PET Riñón (sin equivalente automático actualmente)
         r["man2_Rinon_DER_SUVmax"] = g(row, 55)
         r["man2_Rinon_DER_SUVmed"] = g(row, 56)
         r["man2_Rinon_IZQ_SUVmax"] = g(row, 59)
@@ -193,7 +187,7 @@ def load_manual2(path):
         r["man2_Rinon_BIL_SUVmax"] = mean2(row, 55, 59)
         r["man2_Rinon_BIL_SUVmed"] = mean2(row, 56, 60)
 
-        # ── PET Cuádriceps ─────────────────────────────────────────────────
+        # PET Cuádriceps
         r["man2_Cuad_DER_SUVmax"] = g(row, 63)
         r["man2_Cuad_DER_SUVmed"] = g(row, 64)
         r["man2_Cuad_IZQ_SUVmax"] = g(row, 67)
@@ -201,15 +195,15 @@ def load_manual2(path):
         r["man2_Cuad_BIL_SUVmax"] = mean2(row, 63, 67)
         r["man2_Cuad_BIL_SUVmed"] = mean2(row, 64, 68)
 
-        # ── PET Hígado ─────────────────────────────────────────────────────
+        # PET Hígado
         r["man2_Higado_SUVmax"] = g(row, 71)
         r["man2_Higado_SUVmed"] = g(row, 72)
 
-        # ── PET Bazo ───────────────────────────────────────────────────────
+        # PET Bazo
         r["man2_Bazo_SUVmax"] = g(row, 75)
         r["man2_Bazo_SUVmed"] = g(row, 76)
 
-        # ── PET Páncreas ───────────────────────────────────────────────────
+        # PET Páncreas
         r["man2_Pancreas_SUVmax"] = g(row, 79)
         r["man2_Pancreas_SUVmed"] = g(row, 80)
 
@@ -218,9 +212,7 @@ def load_manual2(path):
     return pd.DataFrame(rows).set_index("pesa_id")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Main
-# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     log.info("Paso 1 — Construyendo tabla de medidas manuales…")

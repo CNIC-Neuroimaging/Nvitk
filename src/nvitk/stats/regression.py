@@ -1,5 +1,5 @@
 """
-Single-level regression models — OLS, GLM, and non-linear least squares.
+Single-level regression models: OLS, GLM, and non-linear least squares.
 
 Description
 -----------
@@ -15,8 +15,8 @@ structure. Three engines, deliberately sharing as much of the surrounding machin
     parameters, so the formula, the coefficient table and the marginal-means plot all carry over.
 ``nonlinear``
     True non-linear least squares: an explicit parametric curve (exponential decay, sigmoid, power
-    law, …) fitted by iteration. This one does *not* share the formula workflow — it fits one
-    response against one predictor — so it has its own result shape and plot.
+    law, ...) fitted by iteration. This one does *not* share the formula workflow (it fits one
+    response against one predictor), so it has its own result shape and plot.
 
 Curvature *in the predictor* (splines, polynomials) is not an engine: those are patsy terms
 (:data:`SPLINE_TERMS`) that work inside ``ols``, ``glm`` and MixedLM alike, because such a model is
@@ -26,15 +26,13 @@ Result conventions
 ------------------
 ``fit_ols`` and ``fit_glm`` return ``(result, model_df, metadata)`` exactly like
 :func:`~nvitk.stats.mixedlm.fit_or_load_mixedlm`, so callers can treat all three interchangeably.
-:func:`model_info_dict` renders any of them — including a MixedLM — into the structure
+:func:`model_info_dict` renders any of them (including a MixedLM) into the structure
 :func:`~nvitk.stats.mixedlm.render_mixedlm_info` and the GUI report panel already understand.
 """
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
 
@@ -59,9 +57,7 @@ ANALYSIS_GLM = "glm"
 ANALYSIS_NONLINEAR = "nonlinear"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # GLM families
-# ──────────────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class GlmFamily:
     """One GLM family, its available links, and when to reach for it."""
@@ -152,9 +148,7 @@ def _build_family(family: str, link: str | None):
     return family_obj(link=link_obj), spec, link_name
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Spline / polynomial terms
-# ──────────────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class SplineTerm:
     """A patsy term that lets a linear model bend."""
@@ -201,9 +195,7 @@ def spline_term(kind: str, column: str, *, df: int = 4) -> str:
     raise ValueError(f"Unknown spline term {kind!r}.")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Shared frame preparation
-# ──────────────────────────────────────────────────────────────────────────────
 def prepare_model_frame(
     data: pd.DataFrame,
     formula: str,
@@ -259,9 +251,7 @@ def prepare_model_frame(
     return df, meta
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # OLS and GLM
-# ──────────────────────────────────────────────────────────────────────────────
 def fit_ols(
     *,
     data: pd.DataFrame,
@@ -277,7 +267,7 @@ def fit_ols(
     Parameters
     ----------
     robust : str, optional
-        Heteroscedasticity-consistent covariance type (``"HC0"`` … ``"HC3"``). Worth setting when
+        Heteroscedasticity-consistent covariance type (``"HC0"`` ... ``"HC3"``). Worth setting when
         the residual spread grows with the fitted value; it changes the standard errors, not the
         coefficients.
 
@@ -314,7 +304,7 @@ def fit_glm(
 
     The link is where the non-linearity lives: predictors combine linearly on the link scale, and
     the fitted values are mapped back through its inverse. Coefficients are therefore effects *on
-    the link scale* — log-odds for a logit link, log-ratios for a log link.
+    the link scale*: log-odds for a logit link, log-ratios for a log link.
     """
     import statsmodels.formula.api as smf
 
@@ -335,9 +325,7 @@ def fit_glm(
     return result, df, meta
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Non-linear least squares
-# ──────────────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class NonlinearModel:
     """A parametric curve fitted by iterative least squares."""
@@ -410,13 +398,13 @@ def fit_nonlinear(
     Fit an explicit parametric curve of *y* against *x* by non-linear least squares.
 
     Unlike the formula-driven engines this fits one predictor against one response, with no
-    covariate adjustment and no grouping — the parameters are the model.
+    covariate adjustment and no grouping: the parameters are the model.
 
     Returns
     -------
     (result, model_df, metadata)
         *result* is a dict with ``params`` (a coefficient frame), ``predict`` (a callable),
-        ``cov``, ``r_squared``, ``rmse``, ``n_obs`` and the model spec — not a statsmodels object,
+        ``cov``, ``r_squared``, ``rmse``, ``n_obs`` and the model spec, not a statsmodels object,
         so it is handled separately by the reporting and plotting helpers.
     """
     from scipy.optimize import curve_fit
@@ -541,9 +529,7 @@ def nonlinear_confidence_band(
     return fitted, fitted - crit * se, fitted + crit * se
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Reporting
-# ──────────────────────────────────────────────────────────────────────────────
 def _statsmodels_info_dict(result: Any, *, outcome_name: str, meta: Mapping[str, Any]) -> dict[str, Any]:
     """Report structure for an OLS / GLM result, matching the MixedLM one."""
     header: dict[str, Any] = {
@@ -572,7 +558,7 @@ def _statsmodels_info_dict(result: Any, *, outcome_name: str, meta: Mapping[str,
         fit_stats["deviance"] = float(deviance)
         null_dev = getattr(result, "null_deviance", None)
         if null_dev:
-            # Explained deviance — the GLM analogue of R².
+            # Explained deviance: the GLM analogue of R².
             fit_stats["pseudo_r_squared"] = float(1.0 - deviance / null_dev)
     scale = getattr(result, "scale", None)
     if scale is not None and np.isscalar(scale):
@@ -598,7 +584,7 @@ def model_info_dict(
     meta: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
-    Structured report for **any** engine — MixedLM, OLS, GLM or non-linear.
+    Structured report for **any** engine: MixedLM, OLS, GLM or non-linear.
 
     Dispatches on the result type so the GUI report panel and
     :func:`~nvitk.stats.mixedlm.render_mixedlm_info` need to know nothing about which model was run.
@@ -662,9 +648,7 @@ def model_info_dict(
     return mixedlm_info_dict(result, outcome_name=outcome_name, group_name=group_name)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Plotting
-# ──────────────────────────────────────────────────────────────────────────────
 def plot_nonlinear_fit(
     result: Mapping[str, Any],
     data: pd.DataFrame,
@@ -685,14 +669,14 @@ def plot_nonlinear_fit(
 
     The curve is a single fit over all rows: *group* only colours the scatter, it does not fit one
     curve per group. Fitting per group would mean one non-linear fit per level, which the parameter
-    table has no room to report honestly.
+    table has no room for.
 
     Parameters
     ----------
     display : {"overview", "grouped"}
         ``"grouped"`` splits *group*'s levels into a grid of anatomical panels (see
         :mod:`nvitk.stats.region_groups`), each autoscaled to its own range. The fitted curve is the
-        same single fit in every panel — which is exactly what makes the panels comparable: each one
+        same single fit in every panel, which is exactly what makes the panels comparable: each one
         shows how its own regions sit against the common curve.
     """
     import matplotlib.pyplot as plt

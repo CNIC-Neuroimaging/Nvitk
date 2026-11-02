@@ -121,7 +121,7 @@ def build_qvtpy_stage_argv(tool_id: str, params: dict[str, Any]) -> list[str]:
             argv.append("--no-cd-4d-background-correction")
 
     if tool_id == "qvtpy_stage3_centerline":
-        eicab = str(params.get("eicab_mask") or "cw").strip()
+        eicab = str(params.get("eicab_mask") or "wb").strip()
         argv.extend(["--eicab-mask", eicab])
 
     return argv

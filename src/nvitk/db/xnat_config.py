@@ -155,8 +155,8 @@ def resolve_xnat_connection(
     Password resolution when not explicitly provided:
 
     1. ``profile['password']`` (discouraged for shared files)
-    2. ``password_env`` env var name in profile → ``os.environ``
-    3. ``password_keyring: true`` in profile → keyring for ``xnat:{server}``
+    2. ``password_env`` env var name in profile -> ``os.environ``
+    3. ``password_keyring: true`` in profile -> keyring for ``xnat:{server}``
     4. ``XNAT_PASSWORD`` environment variable
     """
     p = dict(profile or {})

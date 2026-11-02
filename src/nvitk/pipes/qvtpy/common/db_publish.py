@@ -1,16 +1,22 @@
 """Publish qvtpy (4D-Flow) stage-6 measurements into the NVITK ``image_measurements`` table.
 
-Long-form rows are upserted under pipeline ``4dflow_v3`` (aliases ``qvtpy`` / ``latest``
-/ ``v3``; see :func:`qvtpy_pipeline_catalog_spec`). Re-runs overwrite existing values
-for the same ``(subject_uid, pipeline_id, variable_id, region_id, frame_index)``.
+Long-form rows are upserted under pipeline ``4dflow_v4`` (aliases ``qvtpy`` / ``latest``
+/ ``v4``; see :func:`qvtpy_pipeline_catalog_spec`), which every publish registers as the default
+4D-flow pipeline of the dataset (``4dflow_v3`` keeps its rows and its ``v3`` alias). Re-runs
+overwrite existing values for the same ``(subject_uid, pipeline_id, variable_id, region_id,
+frame_index)``.
+
+``4dflow_v4`` (2026-10): stage-4 masks with the ICA / basilar region growing, the blood flood for
+the A1 / M1 / P1 and A2 / M2 / P2, the ICA siphon correction, and a mid LOC on every A2 / M2 / P2
+(regions ``LACA_A2`` ... ``RPCA_P2``); the A1 / M1 / P1 are named ``LACA_A1`` ... ``RPCA_P1``.
 
 Sources (written by :mod:`nvitk.pipes.qvtpy.stage6_measure`):
 
-- ``loc_measurements.csv`` — per-LOC ``pi``, ``ri``, ``flow_mean`` (mL/min),
+- ``loc_measurements.csv``: per-LOC ``pi``, ``ri``, ``flow_mean`` (mL/min),
   ``cross_section_area`` (mm2), ``velocity_mean`` (mm/s), and the per-frame
   ``flow_tseries`` (mL/min). Includes surviving PCOMMs (``LPCOMM`` / ``RPCOMM``) when
   stage-5 placed mid-LOCs; ACOMM is never measured.
-- ``vessel_hemodynamics.csv`` — per-root ``pitc_slope`` / ``pitc_intercept`` / ``pwv``
+- ``vessel_hemodynamics.csv``: per-root ``pitc_slope`` / ``pitc_intercept`` / ``pwv``
   (Bjornfoot) / ``pwv_fielding_xcor`` and per-branch ``damping_index``.
 """
 
@@ -30,10 +36,10 @@ from nvitk.db.storage import utc_now_iso
 
 log = Logger()
 
-QVTPY_PIPELINE_ID = "4dflow_v3"
+QVTPY_PIPELINE_ID = "4dflow_v4"
 QVTPY_PIPELINE_NAME = "QVTPy"
 QVTPY_MODALITY = "4dflow"
-QVTPY_PIPELINE_ALIASES = ("qvtpy", "latest", "v3", "3")
+QVTPY_PIPELINE_ALIASES = ("qvtpy", "latest", "current", "last", "v4", "4")
 
 _UPSERT_KEY = ["subject_uid", "pipeline_id", "variable_id", "region_id", "frame_index"]
 _ML_S_TO_ML_MIN = 60.0
@@ -53,7 +59,7 @@ def count_pcomm_rows(rows: pd.DataFrame) -> dict[str, int]:
 
 
 def qvtpy_pipeline_catalog_spec() -> dict[str, Any]:
-    """Dataset catalog entry registering ``4dflow_v3`` as the default 4D-flow pipeline."""
+    """Dataset catalog entry registering ``4dflow_v4`` as the default 4D-flow pipeline."""
     return {
         "pipeline_id": QVTPY_PIPELINE_ID,
         "pipeline_name": QVTPY_PIPELINE_NAME,
@@ -61,6 +67,18 @@ def qvtpy_pipeline_catalog_spec() -> dict[str, Any]:
         "is_default": True,
         "aliases": list(QVTPY_PIPELINE_ALIASES),
     }
+
+
+def register_default_pipeline(repo: DataRepo, spec: dict[str, Any]) -> None:
+    """Register *spec* as its modality's default pipeline in *repo*'s catalog
+    (:meth:`~nvitk.db.catalog.DatasetCatalog.register_default_pipeline`). A read-only manifest
+    only logs a warning: the rows are published all the same, under their ``pipeline_id``."""
+    try:
+        if repo.catalog.register_default_pipeline(spec):
+            log.info("registered %s as the default %s pipeline", spec["pipeline_id"], spec["modality"])
+    except OSError as exc:
+        log.warning("could not register %s as the default %s pipeline (%s); its rows are published, "
+                    "set it in measurement_pipelines.json by hand", spec["pipeline_id"], spec["modality"], exc)
 
 
 def resolve_repo(repo: DataRepo | None = None, *, prefer_sge: bool | None = None) -> DataRepo:
@@ -314,8 +332,10 @@ def publish_stage6(
     build_sqlite_index: bool = True,
     source_batch_id: str | None = None,
 ) -> pd.DataFrame:
-    """Upsert stage-6 measurements into ``image_measurements`` (overwrite semantics)."""
+    """Upsert stage-6 measurements into ``image_measurements`` (overwrite semantics), with
+    ``4dflow_v4`` registered as the dataset's default 4D-flow pipeline."""
     repo = resolve_repo(repo, prefer_sge=prefer_sge)
+    register_default_pipeline(repo, qvtpy_pipeline_catalog_spec())
     rows = build_image_measurement_rows_from_stage6(
         subject_uid=subject_uid, stage6_dir=stage6_dir
     )
@@ -404,6 +424,7 @@ __all__ = [
     "maybe_publish_stage6_on_sge",
     "publish_stage6",
     "qvtpy_pipeline_catalog_spec",
+    "register_default_pipeline",
     "resolve_repo",
     "try_publish_stage6",
 ]

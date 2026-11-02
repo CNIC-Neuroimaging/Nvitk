@@ -2,9 +2,9 @@
 
 Exposes:
 
-* :func:`bilateral` — backend-aware bilateral filter (skimage CPU / CUDA GPU).
-* :func:`n4_bias_field_correction` — ANTsPy N4 bias-field correction.
-* :func:`mri_super_resolution` — ANTsPyNet MRI super-resolution.
+* :func:`bilateral`: backend-aware bilateral filter (skimage CPU / CUDA GPU).
+* :func:`n4_bias_field_correction`: ANTsPy N4 bias-field correction.
+* :func:`mri_super_resolution`: ANTsPyNet MRI super-resolution.
 """
 
 from __future__ import annotations

@@ -63,7 +63,7 @@ class _BoundLabelSelector(QWidget):
         self.selector._btn_refresh.clicked.connect(lambda: self.bind(self.layer(), force=True))
 
     def layer(self) -> Any | None:
-        """The layer the picker filters (after any Image → Labels promotion)."""
+        """The layer the picker filters (after any Image -> Labels promotion)."""
         return self.selector.current_layer()
 
     def bind(self, layer: Any | None, *, force: bool = False) -> None:

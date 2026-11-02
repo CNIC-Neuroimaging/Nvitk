@@ -33,8 +33,11 @@ commands backing the entry points in the table below.
 | `nvitk-totalseg` | TotalSegmentator wrapper (local/SGE, CPU/GPU) |
 | `nvitk-eicab` | eICAB TOF / Circle-of-Willis segmentation |
 | `nvitk-seg` | General segmentation entry point |
+| `nvitk-fastsurfer` | FastSurfer v2.5.4: whole-brain, cerebellum, hypothalamus, corpus callosum, surfaces, longitudinal |
 | **Registration** | |
 | `nvitk-flirt` | FSL FLIRT wrapper |
+| `nvitk-fsl` | FSL suite: BET, FAST, FIRST, fsl_anat, SIENA/X, FNIRT, MCFLIRT, TOPUP, EDDY, DTIFIT, BEDPOSTX, PROBTRACKX2, TBSS, XTRACT, MELODIC, SUSAN, BASIL ASL perfusion (oxford_asl, basil, asl_file, asl_calib), fslmaths/fslstats/cluster, any FSL command |
+| `nvitk-freesurfer` | FreeSurfer topology tools on any mask or surface: `info`, `use`, `pretess`, `mc` (marching cubes), `main-component`, `euler`, `smooth`, `inflate`, `sphere` (`mris_sphere -q` or FastSurfer's spectral projection), `fix-topology` (`mris_fix_topology` / `mris_topo_fixer` chain + `defect-seg`) |
 | `nvitk-ants` | ANTsPy registration |
 | `nvitk-fireants` | FireANTs (GPU) registration |
 | **Image module CLIs** | |

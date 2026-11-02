@@ -171,9 +171,7 @@ def subtract_mean_background_from_temporal(
     )
 
 
-# ---------------------------------------------------------------------------
 # Scalar background on 3D and 3D+t images (any time axis)
-# ---------------------------------------------------------------------------
 
 #: The monomials ``x**a * y**b * z**c`` of the background polynomial, in the
 #: order of :func:`_poly_design_matrix`'s columns.
@@ -228,7 +226,7 @@ def polynomial_background(
 ):
     """The smooth spatial background of a 3D *volume*: a polynomial of *order*
     (2 or 3) in the voxel coordinates (each axis mapped onto [-1, 1]), fitted by
-    least squares on the background voxels — the lowest *static_percentile* % of
+    least squares on the background voxels; the lowest *static_percentile* % of
     the values (of their absolute values when *signed*, as for a phase or
     velocity map), inside *mask* when one is given.
 
@@ -280,7 +278,7 @@ def subtract_polynomial_background(
     return_background: bool = False,
 ):
     """*volume* with its spatial polynomial background (:func:`polynomial_background`)
-    subtracted — the correction qvtpy applies to the complex difference.
+    subtracted: the correction qvtpy applies to the complex difference.
 
     A 3D volume is fitted on itself. A 3D+t image (*time_axis* names its time
     axis, any position) is corrected frame by frame: with *per_frame* each frame

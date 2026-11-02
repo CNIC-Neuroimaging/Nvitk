@@ -1,5 +1,5 @@
 """
-CViT stage 1 — self-supervised pre-training (SimMIM / MAE) on the nnssl engine → encoder bundle.
+CViT stage 1: self-supervised pre-training (SimMIM / MAE) on the nnssl engine -> encoder bundle.
 
 Description
 -----------
@@ -146,7 +146,7 @@ def run_pretrain(
         extract_fingerprints, plan_experiments, preprocess,
     )
 
-    # ---- 1. Plan + preprocess (reused unless --overwrite) -----------------------------
+    # 1. Plan + preprocess (reused unless --overwrite)
     if overwrite or not (dataset_dir / "nnsslPlans.json").is_file():
         log.info("stage1: fingerprinting and planning %s", corpus)
         extract_fingerprints([corpus_id], num_processes=num_processes, clean=True)
@@ -165,7 +165,7 @@ def run_pretrain(
         )
     log.info("stage1: %d preprocessed volume(s) available.", n_volumes)
 
-    # ---- 2. Trainer ---------------------------------------------------------------------
+    # 2. Trainer
     import torch
     from batchgenerators.utilities.file_and_folder_operations import load_json
     from nnssl.experiment_planning.experiment_planners.plan import Plan
@@ -203,7 +203,7 @@ def run_pretrain(
         torch.backends.cudnn.benchmark = True
     trainer.run_training()
 
-    # ---- 3. Bundle ------------------------------------------------------------------------
+    # 3. Bundle
     produced = Path(trainer.output_folder) / BUNDLE_CHECKPOINT
     if not produced.is_file():
         raise FileNotFoundError(f"nnssl finished without writing {produced}.")
@@ -229,9 +229,7 @@ def run_pretrain(
     return target
 
 
-# ---------------------------------------------------------------------------
 # SGE
-# ---------------------------------------------------------------------------
 
 
 def _worker_argv(**o: Any) -> list[str]:
@@ -272,9 +270,7 @@ def submit_sge(*, paths: CViTPaths, container: Path, src_dir: Path | None = None
     )
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 
 
 @click.command("cvit-stage1-pretrain")

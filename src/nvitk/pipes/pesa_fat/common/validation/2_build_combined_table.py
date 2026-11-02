@@ -1,5 +1,5 @@
 """
-Paso 2 — Construir tabla combinada (manual + automático)
+Paso 2: Construir tabla combinada (manual + automático)
 =========================================================
 Lee la tabla de medidas manuales (producida por el paso 1) y los codebooks
 automáticos semanales, los une y añade columnas derivadas.
@@ -9,7 +9,7 @@ Entrada : RESULTS/Manual_Measurements.xlsx
 Salida  : RESULTS/Combined_Measurements.xlsx
 
 Columnas derivadas añadidas:
-  auto_Medula_SUVmax_avg  — media correcta L3+L4 (el pipeline guarda el MAX)
+  auto_Medula_SUVmax_avg; media correcta L3+L4 (el pipeline guarda el MAX)
 """
 
 import sys
@@ -42,7 +42,7 @@ def load_auto_weeks(modality):
 if __name__ == "__main__":
     log.info("Paso 2 — Construyendo tabla combinada…")
 
-    # ── Cargar manual ──────────────────────────────────────────────────────
+    # Cargar manual
     if not os.path.exists(MANUAL_TABLE_PATH):
         sys.exit(f"ERROR: No se encuentra {MANUAL_TABLE_PATH}\n"
                  "Ejecuta primero: python 1_build_manual_table.py")
@@ -50,21 +50,21 @@ if __name__ == "__main__":
     df_man = pd.read_excel(MANUAL_TABLE_PATH, index_col=0)
     log.info(f"  Manual: {df_man.shape[0]} participantes, {df_man.shape[1]} variables")
 
-    # ── Cargar automático ──────────────────────────────────────────────────
+    # Cargar automático
     df_suv = load_auto_weeks("SUV")
     df_dix = load_auto_weeks("DIXON")
     log.info(f"  Auto SUV : {df_suv.shape[0]} participantes, {df_suv.shape[1]} variables")
     log.info(f"  Auto DIXON: {df_dix.shape[0]} participantes, {df_dix.shape[1]} variables")
 
-    # ── Unir ───────────────────────────────────────────────────────────────
+    # Unir
     df = df_man.join(df_suv, how="outer").join(df_dix, how="outer")
 
-    # ── Columnas derivadas ─────────────────────────────────────────────────
+    # Columnas derivadas
     # [NOTA 1] MO_SUVMAX es el MAX sobre la unión L3∪L4; la métrica manual es
     # la media de los dos máximos por vértebra.
     df["auto_Medula_SUVmax_avg"] = (df["L3_SUVMAX"] + df["L4_SUVMAX"]) / 2
 
-    # ── Guardar ────────────────────────────────────────────────────────────
+    # Guardar
     df.index.name = "pesa_id"
     df.to_excel(COMBINED_TABLE_PATH, index=True)
     log.info(f"  Tabla combinada: {df.shape[0]} filas × {df.shape[1]} columnas")

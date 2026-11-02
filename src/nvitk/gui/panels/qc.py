@@ -1,8 +1,8 @@
 """QC subwindow: pipeline/subject selector and Load into Napari.
 
 Supports two QC setups:
-- **XNAT** — catalog subjects + download pipeline resources (existing path).
-- **Local** — NIfTI root + results root on disk (no XNAT password).
+- **XNAT**: catalog subjects + download pipeline resources (existing path).
+- **Local**: NIfTI root + results root on disk (no XNAT password).
 """
 
 from __future__ import annotations
@@ -42,6 +42,7 @@ from nvitk.gui.tools.runner import notify
 from nvitk.gui.viz.qc_loader import (
     download_phase_niftis_for_qc,
     download_pipeline_resource_for_qc,
+    load_eicab_morphometrics,
     load_eicab_qc_layers,
     load_qvtpy_qc_layers,
 )
@@ -122,8 +123,9 @@ class _QcLoadWorker(QThread):
                 )
                 roots.append(primary)
 
-            # Also fetch companion resources useful for phases / CD / TOF.
-            companions = ("4dflows",)
+            # Also fetch companion resources useful for phases / CD / TOF, and for eICAB the qvtpy
+            # resource, which holds its stage-7 morphometrics (results tables, lesions).
+            companions = ("4dflows",) if self._pipeline == PIPELINE_QVTPY else ("4dflows", XNAT_RESOURCE_QVTPY)
             for label in companions:
                 try:
                     self.progress.emit(f"Downloading companion {label}…")
@@ -265,7 +267,7 @@ class QcPanel(QWidget):
 
         self._subjects = QListWidget()
         self._all_subjects: list[dict[str, Any]] = []
-        self._qc_statuses: dict[str, str] = {}  # subject_uid → revised/partial/pending
+        self._qc_statuses: dict[str, str] = {}  # subject_uid -> revised/partial/pending
 
         self._btn_refresh = QPushButton("Refresh subjects")
         self._btn_load = QPushButton("Load")
@@ -297,7 +299,7 @@ class QcPanel(QWidget):
 
         # Page setup only. Reading the subject list means querying the catalog,
         # which on a real dataset dominated GUI start-up (~6.8s of a 9.6s launch)
-        # for a tab most launches never open — so it waits for showEvent.
+        # for a tab most launches never open, so it waits for showEvent.
         self._subjects_loaded = False
         self._sync_source_page()
 
@@ -371,7 +373,7 @@ class QcPanel(QWidget):
         return page
 
     def _path_row(self, edit: QLineEdit) -> QWidget:
-        """Wrap *edit* with a "…" browse button that fills it from a directory picker."""
+        """Wrap *edit* with a "..." browse button that fills it from a directory picker."""
         row = QWidget()
         h = QHBoxLayout()
         h.setContentsMargins(0, 0, 0, 0)
@@ -420,7 +422,7 @@ class QcPanel(QWidget):
         self._reload_subjects()
 
     def showEvent(self, event: Any) -> None:
-        """Load the subject list the first time the tab is actually looked at."""
+        """Load the subject list the first time the tab is looked at."""
         super().showEvent(event)
         if not self._subjects_loaded:
             self._subjects_loaded = True
@@ -788,10 +790,17 @@ class QcPanel(QWidget):
                     )
                 notify(f"QC loaded qvtpy subject {subject_uid}.")
             else:
-                load_eicab_qc_layers(
+                loaded = load_eicab_qc_layers(
                     self._viewer, primary, tof_search_roots=roots
                 )
-                notify(f"QC loaded eicab subject {subject_uid}.")
+                try:
+                    counts = load_eicab_morphometrics(self._viewer, loaded, [primary, *roots])
+                except Exception as morpho_exc:  # noqa: BLE001
+                    counts = {}
+                    notify(f"Morphometrics tables skipped: {morpho_exc}", error=True)
+                shown = (f"; {counts.get('vessels', 0)} vessel(s), {counts.get('lesions', 0)} lesion(s) "
+                         "in the results window") if counts else "; no stage-7 morphometrics found"
+                notify(f"QC loaded eicab subject {subject_uid}{shown}.")
             if self._on_inputs_opened is not None:
                 self._on_inputs_opened([str(primary)])
             self._status.setText(f"Loaded {subject_uid} ({pipeline}).")

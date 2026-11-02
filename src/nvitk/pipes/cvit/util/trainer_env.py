@@ -12,7 +12,7 @@ constructor.
 Torch-free: imported by both the pipeline (to build the environment) and the trainer (to read
 it), and the pipeline must stay importable without torch.
 
-Architecture-level choices (tokenizer, skips, gates, warm-up schedule …) are **not** here — they
+Architecture-level choices (tokenizer, skips, gates, warm-up schedule ...) are **not** here: they
 live in the plans file's ``arch_kwargs`` so a checkpoint always rebuilds the same network.
 """
 
@@ -23,9 +23,7 @@ import os
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Variable names
-# ──────────────────────────────────────────────────────────────────────────────
 
 ENV_EPOCHS = "NVITK_CVIT_NUM_EPOCHS"
 ENV_LR = "NVITK_CVIT_LR"
@@ -42,9 +40,7 @@ ENV_ITERS = "NVITK_CVIT_ITERATIONS_PER_EPOCH"
 TRAINER_PREFIX = "nnUNetTrainerCViT"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Settings
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -114,7 +110,7 @@ def read_settings(environ: Mapping[str, str] | None = None) -> TrainerSettings:
     Raises
     ------
     ValueError
-        On a malformed value, naming the variable — a typo must not silently fall back to a
+        On a malformed value, naming the variable: a typo must not silently fall back to a
         default and train something nobody asked for.
     """
     env = os.environ if environ is None else environ

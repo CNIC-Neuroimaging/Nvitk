@@ -387,7 +387,7 @@ __all__ = [
     "asl_vascular_parcel_to_territory",
     "asl_region_id_to_territory",
     "melt_imaging_territories",
-    # ---- analysis-frame construction ----------------------------------------
+    # analysis-frame construction
     "MeasurementSpec",
     "asl_region_id_to_hemisphere",
     "atlas_for_request",
@@ -397,7 +397,7 @@ __all__ = [
     "collapse_visits_to_subject",
     "finalize_analysis_frame",
     "resolve_covariate_frame",
-    # ---- frame operations (filters / derived columns) ------------------------
+    # frame operations (filters / derived columns)
     "DEFAULT_IQR_K",
     "FILTER_OPS",
     "IDENTIFIER_RE",
@@ -422,7 +422,7 @@ __all__ = [
     "filtered_columns",
     "parse_cut_points",
     "suggest_cut_points",
-    # ---- model reporting ------------------------------------------------------
+    # model reporting
     "mixedlm_coef_frame",
     "mixedlm_info_dict",
     "mixedlm_group_coefficients",
@@ -432,7 +432,7 @@ __all__ = [
     "model_inverse_link",
     "model_params",
     "model_random_effects",
-    # ---- regression engines ---------------------------------------------------
+    # regression engines
     "ANALYSIS_GLM",
     "ANALYSIS_NONLINEAR",
     "ANALYSIS_OLS",
@@ -450,7 +450,7 @@ __all__ = [
     "plot_nonlinear_fit",
     "prepare_model_frame",
     "spline_term",
-    # ---- R / lme4 engine (optional) -------------------------------------------
+    # R / lme4 engine (optional)
     "ANALYSIS_LME4",
     "RBackendStatus",
     "fit_lme4",
@@ -465,7 +465,7 @@ __all__ = [
     "mixedlm_to_lme4_formula",
     "plot_lme4_params",
     "r_backend_status",
-    # ---- R / mmrm engine (optional) -------------------------------------------
+    # R / mmrm engine (optional)
     "ANALYSIS_MMRM",
     "COVARIANCE_STRUCTURES",
     "DF_METHODS",
@@ -491,7 +491,7 @@ __all__ = [
     "plot_mmrm_emmeans",
     "plot_mmrm_params",
     "validate_mmrm_data",
-    # ---- mediation ------------------------------------------------------------
+    # mediation
     "ENGINE_LABELS",
     "MEDIATION_ENGINES",
     "POOLED_OLS_NOTE",

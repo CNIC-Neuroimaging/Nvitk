@@ -377,8 +377,8 @@ def build_connected_skeleton_edge_segments(tree: SkeletonTree, spacing) -> List[
 def superior_axis(axes: Optional[AnatomicalAxes] = None) -> Tuple[int, int]:
     """``(array_axis, sign)`` whose increasing coordinate is *superior*.
 
-    Without *axes* this is the legacy hardcoded ``(2, +1)`` — i.e. array axis 2
-    assumed to run inferior→superior.
+    Without *axes* this is the legacy hardcoded ``(2, +1)``, i.e. array axis 2
+    assumed to run inferior->superior.
     """
     if axes is None:
         return 2, 1
@@ -415,7 +415,7 @@ def branch_suffixes_by_superior_inferior(
     """Assign anatomic suffixes (``i``/``s``/``b01``, ``b02``, ...) to sibling branches by Z ordering.
 
     The most inferior sibling gets ``i``, the most superior gets ``s``, and any
-    in between get numbered ``bNN`` — matching conventional M2 branch naming.
+    in between get numbered ``bNN``: matching conventional M2 branch naming.
     """
     children = [seg for seg in child_segments if seg is not None]
     if not children:
@@ -751,7 +751,7 @@ def centerline_geometry_for_segment(
     """Geometry of one non-overlapping segment, cut from the measured centerline.
 
     The segment's extent comes from the skeleton edge (junction to junction); its points are the
-    part of the root→terminal centerline that runs along that edge — the path with the smallest
+    part of the root->terminal centerline that runs along that edge: the path with the smallest
     mean distance to the skeleton points, between the projections of the edge's two ends. The
     centerline (VMTK, or the re-centred native path) is what was measured; the voxel skeleton is
     a staircase that lengthens the segment and inflates its curvature several-fold.
@@ -803,12 +803,12 @@ def save_anatomic_split_tree_centerlines(
     Returns ``(saved_path_ids, segment_results)``. The segment results are
     path-result-shaped dicts over the **non-overlapping** geometry, so the
     export layer can summarise each piece of vessel exactly once instead of
-    once per root→terminal path that happens to traverse it.
+    once per root->terminal path that happens to traverse it.
 
     Segment *extents* come from the skeleton edges (exact shared junction voxels);
     segment *geometry* is the measured centerline between the junctions
     (:func:`centerline_geometry_for_segment`). Caliber / stenosis attributes are
-    transferred from the measured root→terminal paths by nearest-neighbor lookup so
+    transferred from the measured root->terminal paths by nearest-neighbor lookup so
     junctions are never dropped by overlap pruning or path-assignment gaps.
     """
     if not _cfg.EXPORT_ANATOMIC_SPLIT_CENTERLINES or not centerline_dir or not path_results or not segments:
@@ -841,7 +841,7 @@ def save_anatomic_split_tree_centerlines(
     cloud_pts, cloud_vals = _path_results_attribute_cloud(path_results)
 
     # Export unique skeleton edges as-is. Unary collapse can restitch long
-    # corridors for naming, but never drop an edge that has geometry — missing
+    # corridors for naming, but never drop an edge that has geometry: missing
     # roots previously came from collapsing/skipping unsupported segments.
     export_segments = collapse_unary_supported_anatomic_segments(segments, best_chunks, root_idx, axes=axes)
     if not export_segments:
@@ -870,7 +870,7 @@ def save_anatomic_split_tree_centerlines(
                 part_pts = np.asarray(chunk["points"], dtype=float) if chunk else np.empty((0, 3))
             if len(part_pts) == 0:
                 continue
-            # Skeleton edges share exact junction voxels — drop duplicate endpoint.
+            # Skeleton edges share exact junction voxels: drop duplicate endpoint.
             drop_first = bool(
                 source_parts and np.linalg.norm(source_parts[-1][-1] - part_pts[0]) <= 1e-6
             )
@@ -1059,8 +1059,8 @@ def save_anatomic_fallback_centerlines(
     cyclic skeleton has no tree decomposition). Longest path becomes M1; remaining paths are named
     by superior/inferior ordering.
 
-    Root→terminal paths of one component share their proximal trunk, so they are
-    deduplicated first (:func:`deduplicate_path_results`) — otherwise the shared
+    Root->terminal paths of one component share their proximal trunk, so they are
+    deduplicated first (:func:`deduplicate_path_results`), otherwise the shared
     trunk is exported, and its length counted, once per terminal.
 
     Returns ``(saved_path_ids, exported_results)``.

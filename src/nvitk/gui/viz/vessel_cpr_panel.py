@@ -13,7 +13,7 @@ move a control point, and the reformation re-renders through the moved curve.
 The lumen mask is retouched right on the flat image or on the cross-section
 (*Paint* / *Erase*): every point under the brush there is a point in the volume,
 so a stroke paints (or erases) a ball of the brush's radius, in millimetres,
-around each one — into the lumen layer itself, as one undo step, keeping the
+around each one, into the lumen layer itself, as one undo step, keeping the
 other labels. Napari's own brush on the volume works too; either way the panel
 re-renders when the mask changes, through the centerline it has.
 
@@ -494,7 +494,7 @@ class VesselCprPanel(QWidget):
         station_row.addWidget(self._station_label)
         root.addLayout(station_row)
 
-    # ── layout helpers ───────────────────────────────────────────────────────
+    # layout helpers
 
     def set_contrast_source(self, layer: Any) -> None:
         """Draw with *layer*'s own window, and follow it when it moves."""
@@ -550,7 +550,7 @@ class VesselCprPanel(QWidget):
         caption.setStyleSheet(f"color: {COLOR_MUTED};")
         return caption
 
-    # ── wiring ───────────────────────────────────────────────────────────────
+    # wiring
 
     def set_callbacks(
         self,
@@ -566,7 +566,7 @@ class VesselCprPanel(QWidget):
     ) -> None:
         """Register what to call when the controls move.
 
-        *on_retouch* is called as ``(kind, point_mm, erase, radius_mm)`` — kind
+        *on_retouch* is called as ``(kind, point_mm, erase, radius_mm)``: kind
         ``"press"`` / ``"move"`` / ``"release"``, *point_mm* the stroke's point in
         the volume (millimetres on the reformation's grid, ``None`` on release);
         *on_frame* with a frame index of a 3D+t image.
@@ -647,7 +647,7 @@ class VesselCprPanel(QWidget):
             return
         if self._edit_projection.isChecked() and event.inaxes is self._cpr_ax:
             # The vertical axis is millimetres from the centerline, so where the
-            # press lands *is* the starting offset — no separate reference needed.
+            # press lands *is* the starting offset: no separate reference needed.
             self._drag = (station, float(event.ydata))
             return
         self._station.setValue(station)
@@ -688,7 +688,7 @@ class VesselCprPanel(QWidget):
         here = float(width[station]) if station < width.size else float("nan")
         self._station_label.setText(f"{at:.1f} mm · lumen {here:.1f} mm")
 
-    # ── state read by the installer ──────────────────────────────────────────
+    # state read by the installer
 
     def angle_deg(self) -> float:
         """Current cutting angle."""
@@ -726,7 +726,7 @@ class VesselCprPanel(QWidget):
         """Labels that produced no centerline, mapped to why."""
         return dict(self._failures)
 
-    # ── rendering ────────────────────────────────────────────────────────────
+    # rendering
 
     def show_vessel(self, vessel: VesselCpr | None, *, message: str = "") -> None:
         """Display *vessel*, or clear to *message* when there is none."""
@@ -800,7 +800,7 @@ class VesselCprPanel(QWidget):
                 try:
                     line.set_xdata([at, at])
                     moved = True
-                except Exception:  # noqa: BLE001 — a stale artist just forces a redraw
+                except Exception:  # noqa: BLE001 (a stale artist just forces a redraw)
                     moved = False
                     break
         if not moved:
@@ -1024,7 +1024,7 @@ class VesselCprPanel(QWidget):
     def _ring_radius(self, ray_mm: float, lumen_mm: float) -> float:
         """Radius of the angle ring: clear of the wall, inside the field of view.
 
-        *lumen_mm* is a diameter, so it is halved first — scaling the diameter put
+        *lumen_mm* is a diameter, so it is halved first: scaling the diameter put
         the ring at nearly five lumen radii, far enough out that the angle could
         not be judged against the vessel it belongs to.
         """
@@ -1058,7 +1058,7 @@ class VesselCprPanel(QWidget):
         # The centerline itself: the one point the whole reformation hangs off.
         ax.plot([0.0], [0.0], marker="+", markersize=7, color=CENTERLINE_COLOR, mew=1.2)
 
-    # ── cross-section interaction ────────────────────────────────────────────
+    # cross-section interaction
 
     def _xs_radius_at(self, event: Any) -> float | None:
         """Distance of a cross-section event from the centerline, in millimetres."""
@@ -1121,7 +1121,7 @@ class VesselCprPanel(QWidget):
         """Current cross-section magnification."""
         return float(self._xs_zoom)
 
-    # ── retouching the lumen ─────────────────────────────────────────────────
+    # retouching the lumen
 
     def retouch_mode(self) -> str:
         """``"inspect"``, ``"paint"`` or ``"erase"``."""
@@ -1235,7 +1235,7 @@ class VesselCprPanel(QWidget):
         for patch in self._dabs:
             try:
                 patch.remove()
-            except Exception:  # noqa: BLE001 — gone with an axes clear
+            except Exception:  # noqa: BLE001 (gone with an axes clear)
                 pass
         self._dabs = []
 
@@ -1270,7 +1270,7 @@ class VesselCprPanel(QWidget):
             except Exception:  # noqa: BLE001
                 pass
 
-    # ── frames of a 3D+t image ───────────────────────────────────────────────
+    # frames of a 3D+t image
 
     def set_frames(self, count: int, frame: int = 0) -> None:
         """Show the frame controls for *count* frames (0 hides them)."""
@@ -1371,9 +1371,7 @@ def _float_if_narrow(viewer: Any, dock: Any) -> None:
         pass
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Installer: panel + 3D overlays + editing
-# ──────────────────────────────────────────────────────────────────────────────
 def _control_point_indices(n_stations: int, n_wanted: int = N_CONTROL_POINTS) -> Any:
     """Evenly spaced station indices to expose as draggable handles."""
     with using("cpu"):
@@ -1395,7 +1393,7 @@ def _grid_ratio(layer_data: Any, mask: Any) -> Any:
         )
 
 
-# ── frames of a 3D+t intensity image ─────────────────────────────────────────
+# frames of a 3D+t intensity image
 
 #: Frame images kept (flat images and cross-sections, all frames of the current view).
 _FRAME_CACHE_SIZE = 256
@@ -1449,7 +1447,7 @@ def _sample_frame(state: dict[str, Any], coords: Any, frame: int) -> Any:
 
     image = state["image_layer"]
     # The frames are Napari's (host) arrays and the samples a few thousand: sampled
-    # on the host — sending a whole frame to the GPU would cost more than this.
+    # on the host; sending a whole frame to the GPU would cost more than this.
     with using("cpu"):
         volume = to_numpy(image.data[int(frame)])
         values = map_coordinates(volume, to_numpy(coords), order=1, mode="constant", cval=0.0)
@@ -1546,8 +1544,8 @@ def install_vessel_cpr(
     # show the same greys the canvas does instead of a percentile stretch that
     # disagrees with it the moment the brightness is touched.
     panel.set_contrast_source(image_layer)
-    # A wall the caller did not supply is derived from the lumen — a stand-in for
-    # a segmentation, not a measurement of one — so it starts hidden.
+    # A wall the caller did not supply is derived from the lumen (a stand-in for
+    # a segmentation, not a measurement of one), so it starts hidden.
     panel.set_wall_supplied(wall_mask is not None)
     dock = attach_vessel_cpr_dock(viewer, panel)
 
@@ -1646,7 +1644,7 @@ def install_vessel_cpr(
         panel.set_edited(int(label) in state["edited"])
         samples = state["edited"].get(label, samples)
         # The calibre profile depends on the centerline and the ray, not on the
-        # cutting angle — so turning the angle reuses the one already measured
+        # cutting angle, so turning the angle reuses the one already measured
         # rather than resampling the whole vessel's cross-sections again.
         ray = panel.ray_mm()
         # Hold the samples object itself, not its id: an id alone would let a
@@ -1707,7 +1705,7 @@ def install_vessel_cpr(
         _keep_selection(lambda: _update_station_overlays(vessel, station))
         panel.move_station_marker(station)
 
-    # ── overlays ─────────────────────────────────────────────────────────────
+    # overlays
 
     def _layer_coords(points_vox: Any) -> Any:
         """Fine-grid voxel coordinates as the lumen layer's, for a Napari overlay."""
@@ -1741,7 +1739,7 @@ def install_vessel_cpr(
         The layers are updated in place rather than dropped and re-added. Re-adding
         them costs the user their work twice over: Napari selects a newly added
         layer, so the selection jumps to whichever overlay went in last, and a
-        fresh Points layer comes up in pan/zoom — so the select tool the drag
+        fresh Points layer comes up in pan/zoom, so the select tool the drag
         needs is gone the moment the drag is acted on.
         """
         # Napari layers hold host arrays.
@@ -1843,7 +1841,7 @@ def install_vessel_cpr(
         except Exception:
             pass
 
-    # ── editing ──────────────────────────────────────────────────────────────
+    # editing
 
     def _on_control_points_moved(_event: Any = None) -> None:
         """Re-fit the centerline through the moved handles, then re-render."""
@@ -1858,8 +1856,8 @@ def install_vessel_cpr(
             return
         try:
             # Interpolate the handles, do not smooth them. The default smoothing is
-            # tuned for a raw skeleton — hundreds of staircased voxels that need
-            # it — and applied to two dozen points the user placed deliberately it
+            # tuned for a raw skeleton (hundreds of staircased voxels that need
+            # it), and applied to two dozen points the user placed deliberately it
             # suppresses the edit: a 3-voxel drag comes back as 0.7. The handles
             # are already the intended curve, so pass them through.
             state["edited"][int(label)] = resample_centerline(
@@ -1873,7 +1871,7 @@ def install_vessel_cpr(
         """Pick up an edit of the lumen layer (a stroke here, Napari's brush, an
         undo) and re-render.
 
-        The centerlines are kept — derived or retouched — so the flat image does
+        The centerlines are kept (derived or retouched), so the flat image does
         not jump under a retouch; a vessel that had none is derived now, and
         *Reset centerline* derives one again from the new mask. The calibre is
         measured again.
@@ -1897,7 +1895,7 @@ def install_vessel_cpr(
             state["samples"].update(kept)
         timer.start()
 
-    # ── retouching the lumen from the panel ───────────────────────────────────
+    # retouching the lumen from the panel
 
     def _retouch(kind: str, point_mm: Any, erase: bool, radius_mm: float) -> None:
         layer = state.get("lumen_layer")
@@ -1997,7 +1995,7 @@ def install_vessel_cpr(
         if layer is not None and type(layer).__name__ == "Labels":
             layer.undo()  # fires paint: the mask is read again and re-rendered
 
-    # ── frames of a 3D+t image ───────────────────────────────────────────────
+    # frames of a 3D+t image
 
     def _show_frame(frame: int) -> None:
         vessel = state.get("vessel")
@@ -2039,7 +2037,7 @@ def install_vessel_cpr(
         The station count is the spacing seen from the other side: the vessel's
         length is fixed, so asking for more stations is asking for a finer step.
         Edited centerlines are re-resampled through their own points rather than
-        discarded — a retouch should survive a change of resolution.
+        discarded: a retouch should survive a change of resolution.
         """
         label = panel.selected_label()
         samples = None
@@ -2070,7 +2068,7 @@ def install_vessel_cpr(
 
         The flat image's vertical axis is millimetres along the cut direction, so a
         drag on it is already a displacement in the plane the reformation was cut
-        in — no unprojection needed. The pull falls off along the vessel over
+        in: no unprojection needed. The pull falls off along the vessel over
         :data:`_EDIT_REACH_MM`, because moving one station alone leaves a kink the
         next reformation would cut straight across.
         """

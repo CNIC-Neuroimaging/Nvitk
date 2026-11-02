@@ -2,25 +2,25 @@
 
 What the Labeling tab's region tools compute, from a voxel the user points at:
 
-* :meth:`GrowSession.wand` — the magic wand: the connected region within a
+* :meth:`GrowSession.wand`: the magic wand: the connected region within a
   fixed intensity tolerance of the seed;
-* :meth:`GrowSession.confidence` — an adaptive ("confidence-connected") flood:
+* :meth:`GrowSession.confidence`: an adaptive ("confidence-connected") flood:
   the intensity window starts as the seed neighbourhood's mean ± k·σ and is
   re-estimated from the region grown so far, a few rounds, so it settles on the
   structure's own spread rather than on a guessed tolerance;
-* :meth:`GrowSession.vessel` — a flood through a vesselness map (Frangi's, at
+* :meth:`GrowSession.vessel`: a flood through a vesselness map (Frangi's, at
   the radii of the vessels sought), so it follows a tube and stops where a blob
   or the background touches it;
-* :func:`trace_vessel_path` / :func:`tube_from_path` — the cheapest path between
+* :func:`trace_vessel_path` / :func:`tube_from_path`: the cheapest path between
   points clicked along a vessel (through the vesselness), and a tube around it
   whose radius is measured from the lumen along the way; or
-  :func:`path_intensity_fill` — the voxels around the path, out to a reach, whose
+  :func:`path_intensity_fill`: the voxels around the path, out to a reach, whose
   intensity lies in the path's own range (a segmentation guided by the path);
-* :func:`adaptive_brush_keep` — which voxels under a brush belong with the
+* :func:`adaptive_brush_keep`: which voxels under a brush belong with the
   centre's intensity (the "smart brush").
 
-A :class:`GrowSession` prepares the image once — float, smoothed, on the active
-backend — so a drag that seeds the wand at every step, or a tolerance tuned with
+A :class:`GrowSession` prepares the image once (float, smoothed, on the active
+backend), so a drag that seeds the wand at every step, or a tolerance tuned with
 the mouse, regrows from it without redoing that work. Everything runs on the
 active backend (CuPy when the GPU is on); the vesselness filter and the
 minimal-path search have no CuPy counterpart and run on the host, their results
@@ -86,7 +86,7 @@ class GrowSession:
         self.allowed = None if allowed is None else as_backend_array(allowed).astype(bool, copy=False)
         self._vesselness: dict[tuple, tuple[tuple[slice, ...], Any]] = {}
 
-    # ── pieces ────────────────────────────────────────────────────────────────
+    # pieces
 
     def _seed(self, seed: Sequence[int]) -> tuple[int, ...]:
         out = tuple(int(v) for v in seed)
@@ -142,7 +142,7 @@ class GrowSession:
             region &= self.allowed
         return region
 
-    # ── the region tools ──────────────────────────────────────────────────────
+    # the region tools
 
     def wand(self, seed: Sequence[int], tolerance: float, *, seed_radius: int = 0, max_distance_mm: float = 0.0,
              fill_holes: bool = True, close_radius: int = 0) -> Any:
@@ -176,7 +176,7 @@ class GrowSession:
     def vesselness(self, *, radii_mm: Sequence[float] = DEFAULT_RADII_MM, bright: bool = True,
                    around: Sequence[int] | None = None, half_size_mm: float = 30.0) -> tuple[tuple[slice, ...], Any]:
         """Frangi's vesselness at the vessel radii *radii_mm* (min, max), normalised to
-        0…1: ``(window, values)`` — the whole image, or the window of *half_size_mm*
+        0...1: ``(window, values)``; the whole image, or the window of *half_size_mm*
         around *around* (computed once per window and kept)."""
         win = self.window(around, half_size_mm) if around is not None else tuple(slice(0, n) for n in self.shape)
         r0, r1 = sorted(float(r) for r in radii_mm)
@@ -212,7 +212,7 @@ class GrowSession:
                max_distance_mm: float = 0.0, fill_holes: bool = True, close_radius: int = 0) -> Any:
         """A flood through the vessel at *seed*: voxels whose vesselness is at least
         *fraction* of the seed's (and, with *tolerance*, whose intensity is no
-        further than that below the seed's for a bright vessel — above, for a dark
+        further than that below the seed's for a bright vessel; above, for a dark
         one), connected to the seed. The region is then grown to the vessel wall:
         the neighbours as bright as the lumen's edge."""
         seed = self._seed(seed)
@@ -250,9 +250,7 @@ class GrowSession:
         return self.finish(region, close_radius=close_radius, fill_holes=fill_holes)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Vessel tracing
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def trace_vessel_path(
@@ -364,7 +362,7 @@ def center_path(
     distance to the wall then reads far less than the vessel's radius. The lumen
     is taken as the voxels brighter (darker, for a dark vessel) than half way
     between the path's intensity and the background around it, and each point
-    climbs that lumen's distance-to-the-wall map to its ridge — the centreline —
+    climbs that lumen's distance-to-the-wall map to its ridge (the centreline)
     within *max_radius_mm*. Returns the centred points (``(N, ndim)`` integers,
     consecutive duplicates dropped) and the radius at each, smoothed over *smooth*
     points; both on the backend.
@@ -472,7 +470,7 @@ def path_intensity_fill(
     """A segmentation guided by a traced path and the intensities around it.
 
     The intensity range is the path's own: the *percentiles* of the (smoothed)
-    image on the path's voxels — the lumen the path was drawn along — widened by
+    image on the path's voxels (the lumen the path was drawn along) widened by
     *tolerance* each way. The region is every voxel within *reach_mm* of the path
     whose intensity lies in that range and that connects to the path through
     such voxels (so a neighbouring structure of the same brightness that does
@@ -521,14 +519,12 @@ def path_intensity_fill(
     return region, (lo, hi)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Smart brush
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def adaptive_brush_keep(values: Any, centre_value: float, tolerance: float | None = None) -> Any:
     """Which of the brush's voxel *values* go with the centre's intensity: within
-    *tolerance* of *centre_value*, or — without one — on the centre's side of the
+    *tolerance* of *centre_value*, or (without one) on the centre's side of the
     Otsu threshold between the brush's two populations."""
     values = as_backend_array(values).astype(np.float32, copy=False)
     if tolerance is not None and float(tolerance) > 0:

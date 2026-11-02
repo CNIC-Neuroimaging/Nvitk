@@ -102,7 +102,7 @@ def volumetry_table(case_dir: str) -> tuple[list[str], list[list[str]]]:
 def path_summary_table(case_dir: str, limit: int = 200) -> tuple[list[str], list[list[str]]]:
     """``(headers, rows)`` for the per-segment morphometrics, longest first.
 
-    ``00_Path_Summary`` holds non-overlapping segments — each piece of vessel
+    ``00_Path_Summary`` holds non-overlapping segments: each piece of vessel
     appears once, so summing ``length_mm`` gives the real tree length.
     """
     frame = _read_frame(case_dir, "00_Path_Summary")
@@ -139,7 +139,7 @@ def vessel_table(case_dir: str) -> tuple[list[str], list[list[str]]]:
 
 
 def anatomy_provenance(case_dir: str) -> dict:
-    """What species / orientation / scaling the run actually resolved, for the status line."""
+    """What species / orientation / scaling the run resolved, for the status line."""
     frame = _read_frame(case_dir, "01_Tree_Summary")
     if frame is None or frame.empty:
         return {}

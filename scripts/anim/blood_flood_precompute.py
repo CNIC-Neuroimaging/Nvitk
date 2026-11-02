@@ -1,12 +1,12 @@
 """Precompute the real ``blood_flood`` stages on a synthetic vessel phantom.
 
 The qvtpy distal-expansion animation (``blood_flood_manim.py``) must show what the
-algorithm actually does, not a hand-drawn cartoon. So this script builds a small
+algorithm does, not a hand-drawn cartoon. So this script builds a small
 synthetic 4D-flow-like CD volume containing a vessel tree, then runs the *real*
 :mod:`nvitk.segmentation.blood_flood` primitives over it stage by stage and dumps
 every intermediate array to an ``.npz``.
 
-The Manim scene only loads that ``.npz`` — it never re-implements the algorithm.
+The Manim scene only loads that ``.npz``: it never re-implements the algorithm.
 Keeping the two apart also means the renderer needs nothing but numpy, so it can
 live in a separate (manim) environment from nvitk.
 
@@ -112,7 +112,7 @@ def _stamp_blob(
     _stamp_tube(field, [center, center], radius, radius, amplitude=amplitude, n=2)
 
 
-# --- Phantom definition -------------------------------------------------------
+# Phantom definition
 # Named so the animation can caption each structure with what it stands for.
 
 ICA_TRUNK = [(4.8, 13.0, 5.5), (5.4, 12.8, 7.5), (6.0, 12.5, 9.6)]
@@ -155,12 +155,12 @@ def build_phantom(seed: int = 7) -> dict[str, np.ndarray]:
     vessel = np.zeros(GRID, dtype=np.float64)
     _stamp_vessels(vessel)
 
-    # ICA/basilar: bright and thick — the structure distal expansion must never claim.
+    # ICA/basilar: bright and thick; the structure distal expansion must never claim.
     ica = np.zeros(GRID, dtype=np.float64)
     _stamp_tube(ica, _o(ICA_TRUNK), 2.15, 2.00)
 
-    # A venous segment that is genuinely tubular (so Frangi + hysteresis keep it),
-    # but touches no seed — this is what the marker-connected-CC step exists to drop.
+    # A venous segment that is tubular (so Frangi + hysteresis keep it),
+    # but touches no seed: this is what the marker-connected-CC step exists to drop.
     vein = np.zeros(GRID, dtype=np.float64)
     _stamp_tube(vein, _o(VEIN), 1.10, 0.95, amplitude=0.86)
 
@@ -193,7 +193,7 @@ def build_phantom(seed: int = 7) -> dict[str, np.ndarray]:
 def _markers(phantom: dict[str, np.ndarray]) -> np.ndarray:
     """Stage-3 proximal seeds: the short trunks that already carry a qvtpy label.
 
-    Deliberately short — everything past them is what the distal pass must win back.
+    Deliberately short: everything past them is what the distal pass must win back.
     """
     grid = phantom["intensity"].shape
     marks = np.zeros(grid, dtype=np.int32)
@@ -211,7 +211,7 @@ def _markers(phantom: dict[str, np.ndarray]) -> np.ndarray:
 
 
 def _geodesic_order(tree: np.ndarray, markers: np.ndarray) -> np.ndarray:
-    """26-connected BFS depth from the seeds — the visual order of the flood front."""
+    """26-connected BFS depth from the seeds: the visual order of the flood front."""
     order = np.full(tree.shape, -1, dtype=np.int32)
     q: deque[tuple[int, int, int]] = deque()
     seeds = np.argwhere((markers != 0) & tree)
@@ -333,7 +333,7 @@ def compute_stages() -> tuple[dict[str, np.ndarray], dict[str, object]]:
     order = _geodesic_order(tree_final, markers)
     dist = ndi.distance_transform_edt(tree_final)
 
-    # Voxels the animation actually draws: the bright CD ghost plus anything any
+    # Voxels the animation draws: the bright CD ghost plus anything any
     # stage ever touches, so no state has to materialize a cube out of nothing.
     display = (cd > DISPLAY_THRESHOLD) | tree_hyst | (markers != 0) | barrier
 

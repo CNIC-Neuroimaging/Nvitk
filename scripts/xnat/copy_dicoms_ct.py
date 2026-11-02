@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Copy each subject's main CT — found among its PET2 DICOM files — into ``<output>/<subject_uid>/CT``.
+"""Copy each subject's main CT (found among its PET2 DICOM files) into ``<output>/<subject_uid>/CT``.
 
 Description
 -----------
@@ -7,14 +7,14 @@ The input is the output of ``copy_dicoms_ctpet.py``: one ``<subject_uid>`` folde
 ``CT``, ``PET`` and ``PET2`` inside. The CT wanted here is not the one in ``CT``: it is the CT of
 the second PET study, stored in ``PET2`` next to the PET series, the localizers (projections) and
 the dose reports. Only that CT is copied; everything else is left aside. A subject with no
-``PET2`` folder — a single PET study — is searched in ``PET`` instead (``--source-folder`` sets
+``PET2`` folder (a single PET study) is searched in ``PET`` instead (``--source-folder`` sets
 the folders and their order; the first one that exists is used, a later one is not tried when an
 earlier one exists but holds no iDose CT).
 
 Selection
 ---------
-Every file of the source folder has its header read — only up to the series tags, never the pixel
-data (well under 1 KB per file) — and the file is kept when:
+Every file of the source folder has its header read, only up to the series tags, never the pixel
+data (well under 1 KB per file), and the file is kept when:
 
 * its ``SeriesDescription`` contains ``iDose`` (any case; ``--series-pattern`` changes it),
 * its ``Modality`` is ``CT``, and
@@ -29,8 +29,8 @@ on the description tried in order, case-insensitive:
 2. ``*Head-Low Dose CT, iDose*``
 3. ``*FUSION, iDose*``
 
-The first pattern that matches exactly one series picks it. When none matches — or the first that
-matches fits several series — ``--on-multiple`` decides among those: ``largest`` takes the series
+The first pattern that matches exactly one series picks it. When none matches (or the first that
+matches fits several series), ``--on-multiple`` decides among those: ``largest`` takes the series
 with the most files (skipping on a tie), ``skip`` skips the subject. A subject with no source
 folder, or no iDose CT in it, is skipped. Skipped subjects are listed with their candidates.
 
@@ -40,7 +40,7 @@ Off by default. ``--target-slices`` alone means 82; ``--target-slices N`` sets a
 
 * A subject whose output ``CT`` already holds between 1 and N slices is skipped without being read.
 * When the selected CT has more than N slices, an iDose CT of exactly N slices is looked for in the
-  source folders in order — ``PET2``, then ``PET`` — and taken instead (preferences break ties
+  source folders in order (``PET2``, then ``PET``), and taken instead (preferences break ties
   within a folder). If neither has one, the originally selected CT is copied.
 * If the output ``CT`` holds the bigger CT from an earlier run, it is replaced by the N-slice one:
   its files are removed once the new CT is fully in place.
@@ -49,7 +49,7 @@ Report
 ------
 With ``--write``, ``<output>/ct_scans.csv`` (``--report``) gets one row per subject: the source
 folder, the series copied (number, description, UID), its number of slices, why it was chosen, the
-other candidates, the copy counts and the status — or why the subject was skipped. A re-run updates
+other candidates, the copy counts and the status, or why the subject was skipped. A re-run updates
 the rows of the subjects it processed and keeps the others.
 
 Copy semantics
@@ -64,7 +64,7 @@ permissions are not.
 A ``CT`` that already holds the chosen series is topped up: files with the same name and size are
 left alone, a same-named file with a different size is a conflict unless ``--overwrite``. A ``CT``
 that holds another series (told by the SeriesInstanceUID of its first file) is never mixed with the
-new one: it is a conflict unless ``--overwrite`` — or the ``--target-slices`` switch — replaces it,
+new one: it is a conflict unless ``--overwrite`` (or the ``--target-slices`` switch) replaces it,
 in which case the new CT is staged in full before the old folder is removed.
 
 Subject by subject
@@ -129,9 +129,7 @@ HEADER_BUFFER = 16 * 1024
 _LAST_TAG = Tag(0x0020, 0x0011)
 
 
-# ---------------------------------------------------------------------------
 # Headers
-# ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class Header:
     """The tags the selection needs from one file."""
@@ -152,7 +150,7 @@ def read_header(path: str) -> Header | None:
     try:
         with open(path, "rb", buffering=HEADER_BUFFER) as handle:
             ds = read_partial(handle, stop_when=_past_series_tags, force=True)
-    except Exception:  # not DICOM, truncated, permission — reported as unreadable
+    except Exception:  # not DICOM, truncated, permission: reported as unreadable
         return None
     image_type = ds.get("ImageType", ())
     if isinstance(image_type, str):
@@ -188,9 +186,7 @@ def classify(header: Header | None, pattern: str) -> str:
     return "match"
 
 
-# ---------------------------------------------------------------------------
 # Selection
-# ---------------------------------------------------------------------------
 def _natural_key(name: str) -> list[Any]:
     """Sort key comparing digit runs as numbers: ``IM_9`` before ``IM_10``."""
     return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", name)]
@@ -241,7 +237,7 @@ def choose_series(
     series: dict[str, Series], preferences: tuple[str, ...], on_multiple: str
 ) -> tuple[Series | None, str]:
     """
-    ``(series, reason)`` — the series to copy and why it was chosen, or ``None`` and why not.
+    ``(series, reason)``: the series to copy and why it was chosen, or ``None`` and why not.
 
     >>> ac, head = Series("1", "201", "CT-AC Image, iDose (4)"), Series("2", "401", "Body-Low Dose CT, iDose (4)")
     >>> choose_series({"1": ac, "2": head}, PREFERENCES, "skip")
@@ -302,16 +298,14 @@ def find_target_series(
     return None
 
 
-# ---------------------------------------------------------------------------
 # Copy
-# ---------------------------------------------------------------------------
 def _copy_file(job: tuple[str, Path]) -> None:
     """Copy one file under a temporary name and rename it into place."""
     source, target = job
     partial = target.with_name(target.name + PARTIAL_SUFFIX)
     try:
         # Plain streams rather than shutil.copyfile, whose same-file and special-file checks cost
-        # four stats per file — four network round trips on a share.
+        # four stats per file: four network round trips on a share.
         with open(source, "rb") as src, open(partial, "wb") as dst:
             shutil.copyfileobj(src, dst, COPY_BUFFER)
         os.replace(partial, target)
@@ -405,7 +399,7 @@ def install_series(
     Put *series* in *ct_dir*; returns the copy counts plus ``replaced`` (files of a previous CT removed).
 
     * *ct_dir* already holds this series: top it up in place.
-    * *ct_dir* holds another series: a conflict, unless *replace_other* — then the new series is
+    * *ct_dir* holds another series: a conflict, unless *replace_other*, then the new series is
       staged in full in ``CT.partial`` and swapped in, and only then is the old folder removed.
     * *ct_dir* is empty or missing: staged and swapped in the same way, so it appears complete.
     """
@@ -432,9 +426,7 @@ def install_series(
     return {**counts, "replaced": len(existing)}
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 REPORT_COLUMNS = (
     "subject_uid", "source_folder", "series_number", "series_description", "series_uid", "slices",
     "chosen_by", "other_candidates", "copied", "already_present", "conflicts", "replaced", "status",

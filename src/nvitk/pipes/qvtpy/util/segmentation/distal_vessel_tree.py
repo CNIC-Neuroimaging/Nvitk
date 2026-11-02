@@ -1,4 +1,4 @@
-"""eICAB-inspired distal vessel tree — thin re-export of :mod:`nvitk.segmentation.blood_flood`.
+"""eICAB-inspired distal vessel tree: thin re-export of :mod:`nvitk.segmentation.blood_flood`.
 
 Kept for qvtpy import stability. New code should import from
 ``nvitk.segmentation.blood_flood`` directly.

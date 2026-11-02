@@ -1,7 +1,7 @@
 """Manim animation of the qvtpy distal vessel expansion (``blood_flood``).
 
 Renders a voxelised vessel segment and walks through every stage of
-:func:`nvitk.segmentation.blood_flood.blood_flood` — Frangi vesselness, the
+:func:`nvitk.segmentation.blood_flood.blood_flood`: Frangi vesselness, the
 GMM/hysteresis tree, marker-connected components, the ICA/basilar barrier,
 vesselness thinning, and finally the watershed flood that grows the stage-3
 proximal seeds out into the distal branches.
@@ -27,7 +27,7 @@ from pathlib import Path
 import numpy as np
 from manim import *
 
-# --- Configuration ------------------------------------------------------------
+# Configuration
 
 DATA_PATH = Path(
     os.environ.get("BF_STAGES", str(Path(__file__).with_name("blood_flood_stages.npz")))
@@ -79,7 +79,7 @@ class VoxelField:
 
     Manim re-rasterises the whole scene whenever any mobject changes, so the only
     thing worth optimising is how much work the per-frame updater does. States are
-    therefore quantised and only cubes whose quantised style actually moved get
+    therefore quantised and only cubes whose quantised style moved get
     touched, and colours are cached by hex string.
     """
 
@@ -174,7 +174,7 @@ class VoxelField:
 class BloodFloodDistalExpansion(ThreeDScene):
     """The full stage-by-stage walkthrough."""
 
-    # -- helpers ---------------------------------------------------------------
+    # helpers
 
     def fixed(self, *mobs: Mobject) -> None:
         """Pin mobjects to the camera frame without showing them yet."""
@@ -202,7 +202,7 @@ class BloodFloodDistalExpansion(ThreeDScene):
         self.fixed(block)
         return block
 
-    # -- the mini vesselness histogram ----------------------------------------
+    # the mini vesselness histogram
 
     def histogram_panel(self, meta: dict) -> VGroup:
         counts = np.asarray(meta["hist_counts"], dtype=float)
@@ -257,7 +257,7 @@ class BloodFloodDistalExpansion(ThreeDScene):
         self.fixed(panel)
         return panel
 
-    # -- main ------------------------------------------------------------------
+    # main
 
     def construct(self) -> None:
         data = np.load(DATA_PATH)
@@ -302,7 +302,7 @@ class BloodFloodDistalExpansion(ThreeDScene):
         def blend(c0: str, c1: str, t: np.ndarray) -> np.ndarray:
             return _rgb(c0) + (_rgb(c1) - _rgb(c0)) * t[:, None]
 
-        # ---------------------------------------------------------------- style
+        # style
         # Every stage is one (rgb, opacity, stroke-opacity) triple over the field.
 
         ghost_rgb = const(GHOST)
@@ -321,7 +321,7 @@ class BloodFloodDistalExpansion(ThreeDScene):
 
         T = (lambda x: max(0.5, x * 0.28)) if FAST else (lambda x: x)
 
-        # -------------------------------------------------------------- 0 title
+        # 0 title
         title = Text("Distal vessel expansion", font=FONT, weight=BOLD,
                      color=INK, font_size=34)
         subtitle = Text("nvitk.segmentation.blood_flood   ·   qvtpy stage 4",
@@ -335,7 +335,7 @@ class BloodFloodDistalExpansion(ThreeDScene):
                          run_time=T(2.6), delay=coords[:, 0].astype(float), lag=0.75)
         self.wait(T(1.0))
 
-        # ------------------------------------------------------------ 1 CD volume
+        # 1 CD volume
         cap = self.caption(
             "1 · Bright-blood volume",
             [
@@ -347,7 +347,7 @@ class BloodFloodDistalExpansion(ThreeDScene):
         self.swap(card, cap)
         self.wait(T(2.4))
 
-        # ----------------------------------------------------- 2 Frangi vesselness
+        # 2 Frangi vesselness
         cap2 = self.caption(
             "2 · Frangi vesselness",
             [
@@ -360,7 +360,7 @@ class BloodFloodDistalExpansion(ThreeDScene):
         field.transition(self, vess_rgb, vess_op, vess_sop, run_time=T(3.0))
         self.wait(T(2.0))
 
-        # -------------------------------------------- 3 GMM + hysteresis tree
+        # 3 GMM + hysteresis tree
         hist = self.histogram_panel(meta)
         cap3 = self.caption(
             "3 · GMM + hysteresis tree",
@@ -389,7 +389,7 @@ class BloodFloodDistalExpansion(ThreeDScene):
                          delay=-v_norm, lag=0.6, glow=HIGH_SEED, glow_strength=0.55)
         self.wait(T(1.6))
 
-        # --------------------------------------------- 4 marker-connected CCs
+        # 4 marker-connected CCs
         cap4 = self.caption(
             "4 · Keep marker-connected components",
             [
@@ -415,7 +415,7 @@ class BloodFloodDistalExpansion(ThreeDScene):
                          delay=np.where(dropped, 1.0, 0.0), lag=0.35)
         self.wait(T(1.4))
 
-        # ------------------------------------------------------- 5 hard barrier
+        # 5 hard barrier
         cap5 = self.caption(
             "5 · Hard barrier",
             [
@@ -442,7 +442,7 @@ class BloodFloodDistalExpansion(ThreeDScene):
         field.transition(self, tb_rgb, tb_op, tb_sop, run_time=T(1.6))
         self.wait(T(1.2))
 
-        # --------------------------------------------------- 6 vesselness thinning
+        # 6 vesselness thinning
         cap6 = self.caption(
             "6 · Vesselness thinning",
             [
@@ -464,7 +464,7 @@ class BloodFloodDistalExpansion(ThreeDScene):
                          delay=np.where(removed_thin, 1.0, 0.0), lag=0.35)
         self.wait(T(1.4))
 
-        # ------------------------------------------------------ 7 watershed flood
+        # 7 watershed flood
         self.play(FadeOut(hist), run_time=T(0.6))
         cap7 = self.caption(
             "7 · Watershed flood",
@@ -518,7 +518,7 @@ class BloodFloodDistalExpansion(ThreeDScene):
         self.add_fixed_in_frame_mobjects(counter)
         self.wait(T(1.6))
 
-        # ------------------------------------------------------------- 8 result
+        # 8 result
         cap8 = self.caption(
             "Distal expansion complete",
             [

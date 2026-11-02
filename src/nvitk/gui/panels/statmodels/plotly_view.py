@@ -1,11 +1,11 @@
 """
-Interactive plot surface — a Plotly figure embedded in a Qt web view.
+Interactive plot surface: a Plotly figure embedded in a Qt web view.
 
 Description
 -----------
 Matplotlib renders a picture; reading a value off it means squinting at an axis. These plots are
 about *which subject* and *what number*, so the figure has to answer questions on hover: this point
-is subject ``sub-0142``'s left MCA at 146 mL/min, this line has slope −0.31 per year, this marginal
+is subject ``sub-0142``'s left MCA at 146 mL/min, this line has slope -0.31 per year, this marginal
 mean is 0.82 ± 0.04.
 
 Embedding
@@ -20,9 +20,7 @@ Static export still goes through Kaleido, so *Export PNG* produces the same figu
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import tempfile
 import uuid
 from pathlib import Path
@@ -46,7 +44,7 @@ def prepare_webengine() -> bool:
     Make Qt ready to host a web view. **Call before constructing the QApplication.**
 
     Qt refuses to import ``QtWebEngineWidgets`` once a ``QCoreApplication`` exists unless
-    ``AA_ShareOpenGLContexts`` was set first — the web engine needs a shared GL context, and that
+    ``AA_ShareOpenGLContexts`` was set first: the web engine needs a shared GL context, and that
     can only be arranged before the application object is built. Since the Statmodels window is
     created long after the app starts, the flag has to be set in the entry point rather than here.
 
@@ -59,7 +57,7 @@ def prepare_webengine() -> bool:
 
         if QApplication.instance() is None:
             QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
-        # Importing before the application exists is what actually registers the engine.
+        # Importing before the application exists is what registers the engine.
         import qtpy.QtWebEngineWidgets  # noqa: F401
 
         return True
@@ -93,8 +91,8 @@ class PlotlyView(QWidget):
     """
     Host for one interactive figure.
 
-    Mirrors the matplotlib canvas host it replaces — :meth:`show_figure`, :meth:`show_error`,
-    :meth:`clear`, :meth:`save_figure` — so the plot pane does not need to know which backend drew
+    Mirrors the matplotlib canvas host it replaces (:meth:`show_figure`, :meth:`show_error`,
+    :meth:`clear`, :meth:`save_figure`), so the plot pane does not need to know which backend drew
     what. Plotly owns zoom, pan and the mode bar, which is why this has no axis-limit sliders.
     """
 
@@ -112,9 +110,9 @@ class PlotlyView(QWidget):
         self._placeholder.setStyleSheet(muted_label_style())
         self._layout.addWidget(self._placeholder)
 
-    # ---- construction ---------------------------------------------------------
+    # construction
     def _ensure_view(self) -> Any:
-        """Create the web view on first use — it is expensive, and many sessions never plot."""
+        """Create the web view on first use: it is expensive, and many sessions never plot."""
         if self._view is not None:
             return self._view
         try:
@@ -129,7 +127,7 @@ class PlotlyView(QWidget):
         self._layout.addWidget(self._view, stretch=1)
         return self._view
 
-    # ---- figure ---------------------------------------------------------------
+    # figure
     def show_figure(self, figure: Any) -> None:
         """Render *figure* (a ``plotly.graph_objects.Figure``) into the view."""
         import plotly.io as pio
@@ -161,7 +159,7 @@ class PlotlyView(QWidget):
         """Render a self-contained HTML document into the view.
 
         Nilearn's interactive views (``view_img_on_surf``, ``view_img``) are ``HTMLDocument``
-        objects, not Plotly figures — they carry their own bundled JS and are handed here as a
+        objects, not Plotly figures: they carry their own bundled JS and are handed here as a
         finished document. Everything else about hosting them is identical to a Plotly figure, so
         this shares the uuid-per-redraw discipline: the web view caches aggressively and reusing
         one path leaves the previous figure on screen.
@@ -216,7 +214,7 @@ class PlotlyView(QWidget):
         """
         Write the displayed figure to an image file, through Kaleido.
 
-        The interactive state a user set in the browser — a zoom, a hidden trace — lives in the web
+        The interactive state a user set in the browser (a zoom, a hidden trace) lives in the web
         view, not in the Python figure, so the export is the figure **as drawn**, not as currently
         panned. Use the mode bar's own camera button to capture the on-screen state instead.
 

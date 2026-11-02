@@ -1,12 +1,12 @@
 """Surface types: :class:`Mesh` (triangles), :class:`PointCloud`, and :class:`MeshSeries` (3D+t).
 
 Coordinates are physical (mm, world) whenever they come from an image with an
-affine — :func:`nvitk.meshlab.mesh_from_image` produces world-space meshes by
-default — and voxel indices otherwise; ``metadata["space"]`` says which
+affine (:func:`nvitk.meshlab.mesh_from_image` produces world-space meshes by
+default), and voxel indices otherwise; ``metadata["space"]`` says which
 (``"world"`` / ``"voxel"``) when known.
 
 Per-element arrays travel with the geometry: ``point_data`` holds one value (or
-vector) per vertex / point — curvature, a distance map, normals — and
+vector) per vertex / point (curvature, a distance map, normals), and
 ``cell_data`` one per face. Operations that keep the vertices keep them; ones
 that rebuild the mesh drop them.
 """
@@ -58,7 +58,7 @@ class Mesh:
         self.point_data = _validated(self.point_data, len(self.vertices), "point_data")
         self.cell_data = _validated(self.cell_data, len(self.faces), "cell_data")
 
-    # -- sizes and geometry ----------------------------------------------------
+    # sizes and geometry
 
     @property
     def n_vertices(self) -> int:
@@ -104,7 +104,7 @@ class Mesh:
         norm = np.linalg.norm(acc, axis=1, keepdims=True)
         return np.divide(acc, norm, out=np.zeros_like(acc), where=norm > 0)
 
-    # -- metadata -----------------------------------------------------------------
+    # metadata
 
     @property
     def affine(self) -> np.ndarray | None:
@@ -131,7 +131,7 @@ class Mesh:
         """Human-readable mesh name (defaults to ``\"mesh\"``)."""
         return str(self.metadata.get("name", "mesh"))
 
-    # -- copies -----------------------------------------------------------------
+    # copies
 
     def copy(self) -> Mesh:
         """Deep copy (arrays and metadata dict)."""
@@ -159,7 +159,7 @@ class Mesh:
         out.point_data.update(_validated(arrays, self.n_vertices, "point_data"))
         return out
 
-    # -- interop ------------------------------------------------------------------
+    # interop
 
     def to_napari_surface(self) -> dict[str, Any]:
         """Dict suitable for ``napari.layers.Surface``."""
@@ -186,7 +186,7 @@ class Mesh:
 
 @dataclass
 class PointCloud:
-    """Unstructured points with per-point data (normals, intensities, labels…)."""
+    """Unstructured points with per-point data (normals, intensities, labels...)."""
 
     points: np.ndarray
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -244,7 +244,7 @@ class MeshSeries:
     """A mesh over time (3D+t): one :class:`Mesh` per frame, with frame times.
 
     Frames may share one topology (a tracked surface: same faces, moved
-    vertices — what displacement, temporal smoothing and frame interpolation
+    vertices; what displacement, temporal smoothing and frame interpolation
     need) or each have their own (marching cubes per frame).
     """
 

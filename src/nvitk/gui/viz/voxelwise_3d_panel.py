@@ -1,13 +1,13 @@
 """
 Configuration window for the 3-D voxelwise scene.
 
-The scene has a dozen knobs — which map, which contrasts, the threshold window, surfaces or
-points, the shell and its opacity — and they interact: the sensible threshold for a 1−p map is
+The scene has a dozen knobs (which map, which contrasts, the threshold window, surfaces or
+points, the shell and its opacity), and they interact: the sensible threshold for a 1-p map is
 nothing like the one for a t-statistic, and the range a slider should span comes from the data.
 That is more than a couple of buttons on the analysis dialog can carry, so it gets its own window.
 
 One button does everything. Choosing a folder loads it, fills the map and contrast pickers from
-what is actually in it, and picks a defensible threshold from the data; **Show** draws the scene.
+what is in it, and picks a defensible threshold from the data; **Show** draws the scene.
 There is no separate load step to get out of step with the display.
 """
 
@@ -78,7 +78,7 @@ class Voxelwise3DPanel(QDialog):
         outer.addWidget(self._status)
         outer.addLayout(self._build_buttons())
 
-    # -- construction ---------------------------------------------------------
+    # construction
     def _build_source_group(self) -> QGroupBox:
         """Results folder, map kind and contrast selection."""
         box = QGroupBox("Result")
@@ -218,9 +218,9 @@ class Voxelwise3DPanel(QDialog):
         row.addWidget(close)
         return row
 
-    # -- state ----------------------------------------------------------------
+    # state
     def _pick_dir(self) -> None:
-        """Choose a folder and load it immediately — one action, not two."""
+        """Choose a folder and load it immediately: one action, not two."""
         chosen = QFileDialog.getExistingDirectory(
             self, "Select a voxelwise results folder", self._dir.text()
         )
@@ -234,7 +234,7 @@ class Voxelwise3DPanel(QDialog):
         self._reload()
 
     def _reload(self) -> None:
-        """Read the folder and repopulate the pickers from what is actually in it."""
+        """Read the folder and repopulate the pickers from what is in it."""
         directory = self._dir.text().strip()
         if not directory:
             return
@@ -355,7 +355,7 @@ class Voxelwise3DPanel(QDialog):
             cluster_opacity=float(self._cluster_opacity.value()),
         )
 
-    # -- actions --------------------------------------------------------------
+    # actions
     def _show(self) -> None:
         """Build the scene."""
         try:

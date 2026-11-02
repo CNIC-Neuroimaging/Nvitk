@@ -3,21 +3,19 @@ Mediation formulation panel and its background worker.
 
 Description
 -----------
-Mediation asks a different question from a MixedLM — "how much of X's effect on Y goes through M?" —
+Mediation asks a different question from a MixedLM ("how much of X's effect on Y goes through M?")
 so it gets its own form rather than a free-text formula: pick X, M and Y, tick the covariates, choose
 the engine, and run.
 
 Three engines are offered (see :mod:`nvitk.stats.mediation`). The MixedLM cluster bootstrap is the
 one that respects the subject × territory nesting, and it is also the slow one: ``2 × n_boot`` model
 fits. It therefore runs on :class:`MediationWorker` with a progress bar, a live ETA and a working
-Cancel — a cancelled run still summarizes the draws that completed.
+Cancel: a cancelled run still summarizes the draws that completed.
 """
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import threading
 import time
 
@@ -204,12 +202,12 @@ class MediationFormPanel(QGroupBox):
         lay.addStretch(1)
         self._on_engine_changed()
 
-    # ---- columns --------------------------------------------------------------
+    # columns
     def set_columns(self, df: pd.DataFrame | None) -> None:
         """
         Repopulate every selector from *df*, preserving choices that are still valid.
 
-        X / M / Y offer numeric columns only — the engines read coefficients back by name, which a
+        X / M / Y offer numeric columns only: the engines read coefficients back by name, which a
         categorical expansion (``C(x)[T.b]``) makes impossible. Transform a categorical into a
         derived numeric column first if it really is the exposure.
         """
@@ -273,7 +271,7 @@ class MediationFormPanel(QGroupBox):
             and self._covariates.item(i).text() not in roles
         )
 
-    # ---- engine-dependent fields ----------------------------------------------
+    # engine-dependent fields
     def _on_engine_changed(self) -> None:
         """Enable only the fields the selected engine uses, and update the hint."""
         engine = str(self._engine.currentData() or MEDIATION_ENGINES[0])
@@ -296,7 +294,7 @@ class MediationFormPanel(QGroupBox):
 
         self._hint.setText(ENGINE_HINTS.get(engine, ""))
 
-    # ---- spec round-trip ------------------------------------------------------
+    # spec round-trip
     def spec(self) -> MediationSpec:
         """The mediation currently described by the form."""
         return MediationSpec(
@@ -335,7 +333,7 @@ class MediationFormPanel(QGroupBox):
             item = self._covariates.item(i)
             item.setCheckState(Qt.Checked if item.text() in wanted else Qt.Unchecked)
 
-    # ---- run lifecycle --------------------------------------------------------
+    # run lifecycle
     def _on_run(self) -> None:
         """Validate and emit the run request."""
         spec = self.spec()

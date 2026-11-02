@@ -6,13 +6,13 @@ Description
 A network trained with a voxelwise loss produces plausible-looking masks that are often
 fragmented: a class appears as its true branch plus a handful of stray islands elsewhere in the
 volume. Those islands cost almost nothing in Dice but wreck the connected-component and
-centerline metrics that vessel benchmarks score, and they are trivially removable — a vessel
+centerline metrics that vessel benchmarks score, and they are trivially removable: a vessel
 class is one connected structure by construction.
 
 Two cheap, order-dependent operations do most of the work:
 
-1. :func:`remove_small_islands` — drop components below an absolute or relative size.
-2. :func:`keep_largest_per_class` — reduce each class to its *n* largest components.
+1. :func:`remove_small_islands`: drop components below an absolute or relative size.
+2. :func:`keep_largest_per_class`: reduce each class to its *n* largest components.
 
 Both operate per class on a multi-class label map and never move a voxel between classes; a
 voxel is either kept or returned to background.
@@ -83,7 +83,7 @@ def remove_small_islands(
     Parameters
     ----------
     min_voxels, min_volume_mm3
-        Give one. ``min_volume_mm3`` is preferred when *spacing* is known — a fixed voxel count
+        Give one. ``min_volume_mm3`` is preferred when *spacing* is known: a fixed voxel count
         means different things on 0.3 mm and 0.6 mm data, and this cohort spans both.
 
     Returns
@@ -132,7 +132,7 @@ def keep_largest_per_class(
 
     ``n=1`` encodes "each vessel class is one structure", which holds for most TopBrain classes.
     It is deliberately **not** the default in :func:`postprocess_labelmap`: a few classes are
-    genuinely multi-component in a given field of view (a vessel leaving and re-entering the
+    multi-component in a given field of view (a vessel leaving and re-entering the
     volume), and silently deleting the second piece would trade a fragmentation error for a
     missing-structure error, which scores worse.
     """
@@ -156,7 +156,7 @@ def postprocess_labelmap(
 ) -> Any:
     """Run the standard clean-up: drop small islands, optionally keep only the largest component.
 
-    Ordering matters — islands are removed first, so a class whose largest component is itself
+    Ordering matters: islands are removed first, so a class whose largest component is itself
     spurious noise is not preserved by :func:`keep_largest_per_class`.
 
     Parameters
@@ -166,7 +166,7 @@ def postprocess_labelmap(
         resolution: small enough to keep the thinnest genuine branches, large enough to remove
         isolated speckle.
     largest_only
-        Also reduce each class to a single component. Off by default — see
+        Also reduce each class to a single component. Off by default; see
         :func:`keep_largest_per_class`.
     """
     result = labelmap

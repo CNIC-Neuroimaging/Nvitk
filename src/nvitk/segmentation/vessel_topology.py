@@ -15,7 +15,7 @@ benchmarks score directly:
 :func:`resolve_invalid_adjacencies`
     Two lateral neighbours bleed into each other and a strip of one class ends up embedded in
     the other, touching labels the anatomy does not permit. Reassigned to the label it is most
-    in contact with, which is nearly always what it actually was.
+    in contact with, which is nearly always what it was.
 :func:`enforce_lateral_consistency`
     A component of ``R-M2`` sitting in the left hemisphere. Relabelled to its mirror class.
 
@@ -29,7 +29,7 @@ Which array axis is lateral comes from the **affine** (the axis whose world dire
 left-right). Which *end* of it is the patient's right comes from the **labels themselves**: the
 mean lateral coordinate of the ``R-`` classes is compared with the ``L-`` classes and the
 convention read off. Nothing assumes LPS, RAS, or an axis order, and when the two families do
-not separate cleanly the step declines to act rather than mirroring labels on a guess — a
+not separate cleanly the step declines to act rather than mirroring labels on a guess: a
 left-right flip is the one post-processing error that is worse than doing nothing.
 
 Array / axis conventions
@@ -66,7 +66,7 @@ log = Logger()
 #: occlusion or an edge of the field of view than a segmentation failure.
 DEFAULT_MAX_GAP_MM: float = 3.0
 
-#: Radius of the bridging tube, in voxels. One is a hairline — enough to restore connectivity
+#: Radius of the bridging tube, in voxels. One is a hairline: enough to restore connectivity
 #: for the β0 and centerline metrics without inventing calibre.
 DEFAULT_BRIDGE_RADIUS: int = 1
 
@@ -111,9 +111,7 @@ def _labels_present(data: Any, labels: Sequence[int] | None) -> list[int]:
     return [int(v) for v in to_numpy(np.unique(data)) if int(v) != 0]
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # 1. Gap bridging
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def bridge_class_gaps(
@@ -139,7 +137,7 @@ def bridge_class_gaps(
     Parameters
     ----------
     close_radius
-        Morphological closing applied per class before bridging. ``0`` by default — closing
+        Morphological closing applied per class before bridging. ``0`` by default: closing
         thickens thin vessels, which helps β0 but costs Dice and clDice precision.
 
     Returns
@@ -186,9 +184,7 @@ def bridge_class_gaps(
     return source.with_data(out) if source is not None else out
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # 2. Invalid adjacency
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def resolve_invalid_adjacencies(
@@ -209,19 +205,19 @@ def resolve_invalid_adjacencies(
     is buried in is the one it belongs to.
 
     A component is eligible only when it is small **relative to the label it would be merged
-    into** — at most *max_fragment_fraction* of it. That is the measure that matches the
+    into**, at most *max_fragment_fraction* of it. That is the measure that matches the
     premise: "a fragment embedded in something bigger". Measuring against the component's own
     class would not work, because a class the network hallucinated in exactly one place is 100 %
     of itself and would never qualify, which is precisely the case worth fixing.
 
     Components whose invalid contacts cannot be resolved by any single reassignment are left
-    alone — deleting them would trade an adjacency error for a missing-structure error, which
+    alone: deleting them would trade an adjacency error for a missing-structure error, which
     scores worse on every other metric.
 
     Parameters
     ----------
     valid_neighbours
-        Label → labels it may legitimately touch, as in
+        Label -> labels it may legitimately touch, as in
         :func:`~nvitk.measure.segmentation_metrics.invalid_neighbour_error`. Treated
         symmetrically: a pair listed in either direction is permitted.
     max_fragment_fraction
@@ -256,7 +252,7 @@ def resolve_invalid_adjacencies(
                 fragment = components == index
                 size = int(fragment.sum())
 
-                # Which labels does this fragment actually touch, and how much of each?
+                # Which labels does this fragment touch, and how much of each?
                 halo = binary_dilation(fragment, structure=structure) & ~fragment
                 touched = to_numpy(np.unique(host[halo]))
                 contacts = {
@@ -270,7 +266,7 @@ def resolve_invalid_adjacencies(
                     continue
 
                 # Reassign to the label it is most embedded in, but only if that label is big
-                # enough for "embedded" to be true, and only if the move actually resolves the
+                # enough for "embedded" to be true, and only if the move resolves the
                 # violations rather than relocating them.
                 candidate = max(contacts, key=lambda o: (contacts[o], -o))
                 if size > max_fragment_fraction * sizes.get(candidate, 0):
@@ -293,9 +289,7 @@ def resolve_invalid_adjacencies(
     return source.with_data(result) if source is not None else result
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # 3. Left / right consistency
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def lateral_axis_from_affine(affine: Any, ndim: int = 3) -> int | None:
@@ -323,7 +317,7 @@ def lateral_convention(
 
     Determined from the data: the mean lateral coordinate of every right-side label is compared
     with that of its left-side partner and the majority wins. This sidesteps orientation
-    conventions entirely — no assumption about LPS vs RAS, or which way the affine points.
+    conventions entirely: no assumption about LPS vs RAS, or which way the affine points.
 
     Returns ``None`` when the two families do not separate by at least
     *min_separation_voxels*, which means the prediction is too poor (or too sparse) to read a
@@ -374,14 +368,14 @@ def enforce_lateral_consistency(
     Parameters
     ----------
     pairs
-        Right label → left label, e.g. ``{4: 6, 5: 7}``. Used in both directions.
+        Right label -> left label, e.g. ``{4: 6, 5: 7}``. Used in both directions.
     affine
         Used to find the lateral axis when *axis* is not given.
 
     Returns
     -------
     Image or array
-        Unchanged when the left/right convention cannot be established — see
+        Unchanged when the left/right convention cannot be established; see
         :func:`lateral_convention`.
     """
     data, source = _unwrap(labelmap)
@@ -461,9 +455,7 @@ def enforce_lateral_consistency(
     return source.with_data(result) if source is not None else result
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Orchestration
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def repair_topology(

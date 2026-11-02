@@ -7,9 +7,7 @@ from typing import Any
 _PROXY_GLOBAL_KEYS = ("np", "scipy", "ndi")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # BackendProxy
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class BackendProxy:
@@ -58,17 +56,17 @@ class BackendProxy:
 
     @property
     def np(self) -> Any:
-        """Active array module — NumPy on the CPU backend, CuPy on the GPU backend."""
+        """Active array module: NumPy on the CPU backend, CuPy on the GPU backend."""
         return self._resolve_modules()[0]
 
     @property
     def scipy(self) -> Any:
-        """Active SciPy module — ``scipy`` or ``cupyx.scipy``."""
+        """Active SciPy module: ``scipy`` or ``cupyx.scipy``."""
         return self._resolve_modules()[1]
 
     @property
     def ndi(self) -> Any:
-        """Active n-d image module — ``scipy.ndimage`` or ``cupyx.scipy.ndimage``."""
+        """Active n-d image module: ``scipy.ndimage`` or ``cupyx.scipy.ndimage``."""
         return self._resolve_modules()[2]
 
     def __getattr__(self, name: str) -> Any:
@@ -76,9 +74,7 @@ class BackendProxy:
         return getattr(self.np, name)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Registry
-# ──────────────────────────────────────────────────────────────────────────────
 
 _proxies: dict[str, BackendProxy] = {}
 

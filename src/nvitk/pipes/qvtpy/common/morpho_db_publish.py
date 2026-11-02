@@ -1,8 +1,15 @@
 """Publish qvtpy stage-7 TOF morphometrics into the NVITK ``image_measurements`` table.
 
-Long-form rows are upserted under pipeline ``tof_morpho_v1``. Per-vessel scalars come from
-``vessel_summary.csv`` (one row per vessel, written since the compact tables were added) plus the
-subject-level ``subject_summary.csv`` (region ``subject``); older runs without them fall back to
+Long-form rows go under pipeline ``tof_morpho_v2`` (registered on every publish as the dataset's
+default TOF pipeline; ``tof_morpho_v1`` keeps its rows), one region per vessel, and are exactly the
+stage-7 report (:mod:`nvitk.measure.morpho.export_utils.report`): the report features of every
+present vessel, and its lesion flags from high-confidence lesions only (``has_stenosis`` /
+``stenosis_diameter_percent_max``, ``has_enlargement`` / ``enlargement_diameter_percent_max``,
+``has_hypoplasia`` for the main vessels, absent ones included, and ``has_fetal_pca`` on the P2s;
+flags are 1/0, unit ``boolean``).
+``morphometrics_report.csv`` is read when present and built from the run's tables otherwise. A
+publish replaces all of the subject's ``tof_morpho_v2`` rows, so variables earlier runs published
+and the report no longer has do not linger. Runs older than ``vessel_summary.csv`` fall back to
 aggregating the ``00_Path_Summary`` sheet of ``case_metrics_donut_tree.xlsx``.
 
 When ``stenosis_percent_max`` / length totals are absent (older Excel exports),
@@ -22,14 +29,14 @@ from nvitk.core.logger import Logger
 from nvitk.db.exceptions import SettingsError, TableNotFoundError
 from nvitk.db.repo import DataRepo
 from nvitk.db.storage import utc_now_iso
-from nvitk.pipes.qvtpy.common.db_publish import _UPSERT_KEY, _finite, resolve_repo
+from nvitk.pipes.qvtpy.common.db_publish import _finite, register_default_pipeline, resolve_repo
 
 log = Logger()
 
-TOF_MORPHO_PIPELINE_ID = "tof_morpho_v1"
+TOF_MORPHO_PIPELINE_ID = "tof_morpho_v2"
 TOF_MORPHO_PIPELINE_NAME = "TOF Morphometrics"
 TOF_MORPHO_MODALITY = "tof"
-TOF_MORPHO_PIPELINE_ALIASES = ("tof_morpho", "morpho", "tof_morpho_v1")
+TOF_MORPHO_PIPELINE_ALIASES = ("tof_morpho", "morpho", "latest", "current", "last", "v2", "2")
 
 # variable_id -> unit
 _SCALAR_VARS: dict[str, str] = {
@@ -78,6 +85,7 @@ def _measurement_row(
     source_file: str,
     updated_at: str,
     source_sheet: str = "00_Path_Summary",
+    value_kind: str = "float",
 ) -> dict[str, Any]:
     """Build one ``image_measurements`` row dict for a TOF-morphometrics scalar value."""
     return {
@@ -91,7 +99,7 @@ def _measurement_row(
         "value_num": float(value),
         "value_text": pd.NA,
         "unit": unit,
-        "value_kind": "float",
+        "value_kind": value_kind,
         "pipeline_id": TOF_MORPHO_PIPELINE_ID,
         "pipeline_name": TOF_MORPHO_PIPELINE_NAME,
         "qc_status": pd.NA,
@@ -263,13 +271,6 @@ def _aggregate_vessel_metrics(path_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-#: Identity / text columns of the compact tables (never published as measurements).
-_COMPACT_NON_NUMERIC = {
-    "case_id", "label", "vessel_name", "full_name", "side", "pair", "territory", "present",
-    "component_id", "segment", "path_id",
-}
-
-
 def unit_for_column(name: str) -> str:
     """Unit of a compact-table column, from its suffix."""
     n = str(name)
@@ -285,42 +286,46 @@ def unit_for_column(name: str) -> str:
     return "dimensionless"
 
 
-def _rows_from_compact_tables(subject_uid: str, stage7_dir: Path, updated_at: str) -> list[dict[str, Any]]:
-    """``image_measurements`` rows from ``vessel_summary.csv`` and ``subject_summary.csv``."""
+def _rows_from_report(subject_uid: str, stage7_dir: Path, updated_at: str) -> list[dict[str, Any]]:
+    """``image_measurements`` rows of the stage-7 report (module docstring)."""
+    from nvitk.measure import morphometrics_config as _cfg
+    from nvitk.measure.morpho.export_utils.report import (
+        REPORT_CSV,
+        REPORT_FEATURES,
+        morphometrics_report,
+    )
+
+    path = stage7_dir / REPORT_CSV
+    report = pd.read_csv(path) if path.is_file() else morphometrics_report(stage7_dir)
+    source = REPORT_CSV
+    main = {str(v) for v in _cfg.HYPOPLASIA_MAIN_VESSELS}
+    # Runs before the A1 / M1 split named those vessels LACA / RACA / LMCA / RMCA.
+    main |= {v.rsplit("_", 1)[0] for v in main if v.endswith(("ACA_A1", "MCA_M1"))}
     rows: list[dict[str, Any]] = []
-    vs = stage7_dir / "vessel_summary.csv"
-    df = pd.read_csv(vs)
-    for _, r in df.iterrows():
-        if not bool(r.get("present", True)):
-            continue
+
+    def add(variable: str, value: Any, region: str, unit: str, kind: str = "float") -> None:
+        val = _finite(value)
+        if val is not None:
+            rows.append(_measurement_row(
+                subject_uid=subject_uid, variable_id=variable, value=val, region_id=region, unit=unit,
+                source_file=source, updated_at=updated_at, source_sheet="Report", value_kind=kind,
+            ))
+
+    for _, r in report.iterrows():
         region = str(r.get("vessel_name") or "").strip()
         if not region:
             continue
-        for col in df.columns:
-            if col in _COMPACT_NON_NUMERIC or df[col].dtype == object:
-                continue
-            val = _finite(r.get(col))
-            if val is None:
-                continue
-            rows.append(_measurement_row(
-                subject_uid=subject_uid, variable_id=str(col), value=val, region_id=region,
-                unit=unit_for_column(col), source_file=vs.name, updated_at=updated_at,
-                source_sheet="Vessel_Summary",
-            ))
-    ss = stage7_dir / "subject_summary.csv"
-    if ss.is_file():
-        sdf = pd.read_csv(ss)
-        for col in sdf.columns:
-            if col in _COMPACT_NON_NUMERIC or sdf[col].dtype == object:
-                continue
-            val = _finite(sdf[col].iloc[0]) if len(sdf) else None
-            if val is None:
-                continue
-            rows.append(_measurement_row(
-                subject_uid=subject_uid, variable_id=str(col), value=val, region_id="subject",
-                unit=unit_for_column(col), source_file=ss.name, updated_at=updated_at,
-                source_sheet="Subject",
-            ))
+        present = bool(r.get("present", True))
+        if present:
+            for col in REPORT_FEATURES:
+                add(col, r.get(col), region, unit_for_column(col))
+            for kind in ("stenosis", "enlargement"):
+                add(f"has_{kind}", float(bool(r.get(f"has_{kind}", False))), region, "boolean", "bool")
+                add(f"{kind}_diameter_percent_max", r.get(f"{kind}_diameter_percent_max"), region, "%")
+        if region in main:
+            add("has_hypoplasia", float(bool(r.get("has_hypoplasia", False))), region, "boolean", "bool")
+        if region.endswith("PCA_P2") and "has_fetal_pca" in r:
+            add("has_fetal_pca", float(bool(r.get("has_fetal_pca", False))), region, "boolean", "bool")
     return rows
 
 
@@ -333,9 +338,9 @@ def build_image_measurement_rows_from_stage7(
     stage7_dir = Path(stage7_dir)
     if (stage7_dir / "vessel_summary.csv").is_file():
         try:
-            return pd.DataFrame(_rows_from_compact_tables(subject_uid, stage7_dir, utc_now_iso()))
+            return pd.DataFrame(_rows_from_report(subject_uid, stage7_dir, utc_now_iso()))
         except Exception as exc:  # noqa: BLE001
-            log.warning("Failed reading compact tables in %s: %s", stage7_dir, exc)
+            log.warning("Failed building the stage-7 report rows in %s: %s", stage7_dir, exc)
             return pd.DataFrame()
     excel_path = stage7_dir / "case_metrics_donut_tree.xlsx"
     if not excel_path.is_file():
@@ -385,8 +390,10 @@ def publish_stage7(
     build_sqlite_index: bool = True,
     source_batch_id: str | None = None,
 ) -> pd.DataFrame:
-    """Upsert stage-7 TOF morphometrics into ``image_measurements``."""
+    """Upsert stage-7 TOF morphometrics into ``image_measurements``, with ``tof_morpho_v2``
+    registered as the dataset's default TOF pipeline."""
     repo = resolve_repo(repo, prefer_sge=prefer_sge)
+    register_default_pipeline(repo, tof_morpho_pipeline_catalog_spec())
     rows = build_image_measurement_rows_from_stage7(
         subject_uid=subject_uid, stage7_dir=stage7_dir
     )
@@ -396,10 +403,11 @@ def publish_stage7(
     if source_batch_id and "source_batch_id" in rows.columns:
         rows = rows.copy()
         rows["source_batch_id"] = str(source_batch_id).strip()
-    return repo.upsert_table(
+    # The subject's earlier tof_morpho rows go: the report's variable set replaces them all.
+    return repo.replace_rows(
         "image_measurements",
         rows,
-        key_columns=_UPSERT_KEY,
+        scope={"subject_uid": str(subject_uid), "pipeline_id": TOF_MORPHO_PIPELINE_ID},
         provenance={
             "importer": "qvtpy_stage7_publish",
             "pipeline": TOF_MORPHO_PIPELINE_ID,

@@ -29,9 +29,7 @@ def _suffix(path: Path) -> str:
     return path.suffix.lower()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # STL
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _read_stl(path: Path) -> Mesh:
@@ -75,9 +73,7 @@ def _write_stl(path: Path, mesh: Mesh, *, binary: bool = True) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="ascii")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # OBJ / OFF
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _read_obj(path: Path) -> Mesh | PointCloud:
@@ -128,9 +124,7 @@ def _write_off(path: Path, mesh: Mesh) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="ascii")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Point lists
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _read_points_text(path: Path) -> PointCloud:
@@ -201,9 +195,7 @@ def _write_points_text(path: Path, cloud: PointCloud) -> None:
     np.savetxt(path, table, delimiter=sep, header=sep.join(cols), comments="", fmt="%.8g")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Public API
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def read_surface(path: str | Path) -> Mesh | PointCloud:
@@ -312,7 +304,7 @@ def read_mesh_series(paths: Sequence[str | Path], *, t_res: float = 1.0) -> Mesh
 
 
 def write_mesh_series(series: MeshSeries, directory: str | Path, *, ext: str = ".vtp") -> list[Path]:
-    """Write one file per frame (``name_000.vtp``…) plus a ParaView ``.pvd`` index."""
+    """Write one file per frame (``name_000.vtp``...) plus a ParaView ``.pvd`` index."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     ext = ext if ext.startswith(".") else f".{ext}"

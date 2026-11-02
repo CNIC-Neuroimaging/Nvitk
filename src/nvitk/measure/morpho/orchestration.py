@@ -10,6 +10,7 @@ import pandas as pd
 
 from nvitk.measure.morpho.anatomy import choose_root_endpoint, make_path_id
 from nvitk.measure.morpho.anatomy_axes import MorphoContext, default_morpho_context
+from nvitk.measure.morpho.caliber import set_detection_junctions
 from nvitk.measure.morpho.centerlines import (
     analyze_centerline_poly,
     centerline_poly_length_mm,
@@ -61,7 +62,17 @@ from nvitk.measure.morpho.tree_segments import (
     save_recursive_labeled_tree_path_centerlines,
 )
 
-def process_component_tree_vmtk(
+def process_component_tree_vmtk(*args, **kwargs):
+    """Full per-component morphometrics pipeline; see :func:`_process_component_tree_vmtk`. The
+    component's junctions are installed for detection (stretch-wise taper reference) only for the
+    duration of the call."""
+    try:
+        return _process_component_tree_vmtk(*args, **kwargs)
+    finally:
+        set_detection_junctions(None)
+
+
+def _process_component_tree_vmtk(
     label: int,
     component_id: int,
     mask_cc: np.ndarray,
@@ -78,7 +89,7 @@ def process_component_tree_vmtk(
     List[dict], Dict[str, pd.DataFrame], dict, pd.DataFrame, List[dict],
     Dict[str, pd.DataFrame], List[dict], pd.DataFrame, List[dict],
 ]:
-    """Full per-component morphometrics pipeline: skeletonize → VMTK centerlines → metrics/export.
+    """Full per-component morphometrics pipeline: skeletonize -> VMTK centerlines -> metrics/export.
 
     Drives, for one connected component of one label: skeleton extraction and
     root selection, surface reconstruction, VMTK centerline generation between
@@ -90,9 +101,9 @@ def process_component_tree_vmtk(
     -------
     tuple
         ``(path_results, point_sheets, tree_summary, branch_df, region_summaries,
-        region_sheets, recursive_segments, donut_loop_df, split_results)`` — see the
+        region_sheets, recursive_segments, donut_loop_df, split_results)``; see the
         call sites in :mod:`run_case` for how each piece feeds the exported workbook.
-        ``path_results`` are the measured root→terminal paths, which overlap on
+        ``path_results`` are the measured root->terminal paths, which overlap on
         shared trunks; ``split_results`` is the non-overlapping representation the
         workbook summarises.
     """
@@ -111,6 +122,11 @@ def process_component_tree_vmtk(
         raise RuntimeError("Skeleton too short.")
 
     print(f"    Skeleton: {len(tree.pts_vox)} voxels, {len(tree.endpoints)} endpoints, {len(tree.branchpoints)} branchpoints")
+    # Junctions of this component (as 02_Branchpoints): where the stretch-wise taper reference
+    # lets the healthy calibre step down.
+    set_detection_junctions(
+        np.asarray([tree.pts_vox[bp] for bp in tree.branchpoints], dtype=float).reshape(-1, 3) * spacing
+    )
 
     base_tree_name = safe_filename(f"{label}_{vessel_info.name}_comp{component_id:02d}")
     pre_refined_surface_path = (
@@ -350,7 +366,7 @@ def process_component_tree_vmtk(
         tree_summary["n_centerline_paths_discarded_overlap"] = 0
     tree_summary["n_centerline_paths_overlap_trimmed"] = int(n_overlap_trimmed)
 
-    # Keyed by the full path id; the workbook writer assigns unique ≤31-character sheet names.
+    # Keyed by the full path id; the workbook writer assigns unique <=31-character sheet names.
     point_sheets = {
         str(res["path_id"]): build_vessel_points_dataframe("", label, vessel_info, res)
         for res in path_results
@@ -399,8 +415,8 @@ def process_component_tree_vmtk(
     if _cfg.EXPORT_ANATOMIC_SPLIT_CENTERLINES and use_tree_mode:
         expected_anatomic = int(len(path_results))
         saved_anatomic = list(dict.fromkeys(saved_anatomic))
-        # Only fall back to full root→terminal exports when anatomic split wrote
-        # nothing — stacking fallbacks on partial splits reintroduces overlapping trunks.
+        # Only fall back to full root->terminal exports when anatomic split wrote
+        # nothing: stacking fallbacks on partial splits reintroduces overlapping trunks.
         if not saved_anatomic:
             print(
                 "    [anatomic sanity] Anatomical export wrote no centerline VTP(s). "

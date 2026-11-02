@@ -1,5 +1,5 @@
 """
-Model → plot geometry, so every engine renders through one interactive path.
+Model -> plot geometry, so every engine renders through one interactive path.
 
 Description
 -----------
@@ -12,16 +12,14 @@ display, the QC grey-out and the hover payloads work identically whichever engin
 
 Why not reuse the matplotlib plotters
 -------------------------------------
-Those compute and draw in one pass — the numbers only ever exist inside a drawing call. Splitting
+Those compute and draw in one pass: the numbers only ever exist inside a drawing call. Splitting
 the computation out is what lets the same fit feed an interactive figure, a static one, or a table,
 and it is why the geometry is returned rather than rendered.
 """
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
@@ -66,7 +64,7 @@ def _x_grid(values: pd.Series, n: int = LINE_RESOLUTION) -> np.ndarray:
 
 
 def _categorical_order(df: pd.DataFrame, x: str, order: Sequence[str] | None) -> list[str]:
-    """Categorical x order — an explicit one, an ordered dtype's own, else a natural sort."""
+    """Categorical x order: an explicit one, an ordered dtype's own, else a natural sort."""
     from .region_groups import natural_level_key
 
     if order is not None:
@@ -93,9 +91,7 @@ def _reference_row(df: pd.DataFrame, exclude: Sequence[str]) -> dict[str, Any]:
     return out
 
 
-# ---------------------------------------------------------------------------
 # statsmodels: MixedLM / OLS / GLM
-# ---------------------------------------------------------------------------
 def statsmodels_geometry(
     result: Any,
     df: pd.DataFrame,
@@ -111,14 +107,14 @@ def statsmodels_geometry(
     errorbar: bool = False,
 ) -> PlotGeometry:
     """
-    Geometry for a statsmodels fit — MixedLM, OLS or GLM.
+    Geometry for a statsmodels fit: MixedLM, OLS or GLM.
 
     Continuous mode gives one line per group (fixed effects plus that group's random offset, or its
     own fixed-effects prediction when the model has no random part) and the dashed population line.
     Categorical mode gives estimated marginal means from a patsy grid at *covariate_refs*.
 
     The slope and intercept of each line are carried alongside it so the renderer can put them in
-    the hover box — reading a slope off a plot is otherwise guesswork.
+    the hover box: reading a slope off a plot is otherwise guesswork.
     """
     from .mixedlm import (
         _prediction_standard_errors,
@@ -154,7 +150,7 @@ def statsmodels_geometry(
         )
         return geometry
 
-    # ---- continuous ---------------------------------------------------------------
+    # continuous
     grid = _x_grid(df[x])
     fixed = model_params(result)
     random = model_random_effects(result)
@@ -296,9 +292,7 @@ def _statsmodels_emm(
         return None, str(exc)
 
 
-# ---------------------------------------------------------------------------
 # R engines: lme4 and lmrob, which predict through R
-# ---------------------------------------------------------------------------
 def r_model_geometry(
     model: Any,
     df: pd.DataFrame,
@@ -412,9 +406,7 @@ def _bands_from_emmeans(
     return pd.concat(rows, ignore_index=True) if rows else None
 
 
-# ---------------------------------------------------------------------------
 # MMRM and non-linear, which already produce their geometry
-# ---------------------------------------------------------------------------
 def mmrm_geometry(
     emmeans_frame: pd.DataFrame, *, x: str, hue: str = ""
 ) -> PlotGeometry:
@@ -464,7 +456,7 @@ def nonlinear_geometry(
     Geometry for a non-linear fit: one curve over all rows, with the group only colouring points.
 
     Fitting per group would mean one non-linear fit per level, which the parameter table has no room
-    to report honestly — so the single curve repeats and the points carry the grouping.
+    for, so the single curve repeats and the points carry the grouping.
     """
     from .regression import nonlinear_confidence_band
 
@@ -484,9 +476,7 @@ def nonlinear_geometry(
     return geometry
 
 
-# ---------------------------------------------------------------------------
 # Rendering
-# ---------------------------------------------------------------------------
 def render(
     geometry: PlotGeometry,
     *,
@@ -506,7 +496,7 @@ def render(
     Render a :class:`PlotGeometry` as one figure, overview or anatomically panelled.
 
     The grouped display subsets every frame to each panel's levels and lays the panels out as
-    subplots. The population line has a blank group, so it is kept in every panel — it is the same
+    subplots. The population line has a blank group, so it is kept in every panel: it is the same
     all-level estimate and repeating it is what makes the panels comparable.
     """
     from .interactive import model_plot, panel_grid_figure

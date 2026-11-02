@@ -99,6 +99,16 @@ def _resolve_layer(viewer: Any, name: str) -> Any:
     raise ValueError(f"Layer not found: {name}")
 
 
+def _napari_data_to_world(layer: Any) -> np.ndarray | None:
+    """*layer*'s full data->world matrix as Napari composes it (scale, translate, affine...),
+    or ``None`` for a layer without Napari transforms (the headless stand-ins)."""
+    import numpy as numpy_host  # module ``np`` may be a CuPy proxy via ``setup(globals())``
+
+    transform = getattr(layer, "_data_to_world", None)
+    matrix = getattr(transform, "affine_matrix", None)
+    return None if matrix is None else numpy_host.asarray(matrix, dtype=float)
+
+
 def _layer_param(params: dict[str, Any], key: str) -> str:
     """Layer dropdown value; treats ``(none)`` and empty as unset."""
     raw = str(params.get(key) or "").strip()
@@ -133,19 +143,34 @@ def _layer_source_path(layer: Any) -> Path | None:
     return path if path.is_file() else None
 
 
+#: Temp dirs written by :func:`_ensure_nifti_path`, removed by the tool run that made them.
+_TEMP_INPUT_DIRS: list[Path] = []
+
+
 def _ensure_nifti_path(layer: Any, *, prefix: str) -> Path:
-    """Return on-disk NIfTI for *layer*, exporting a temp file when needed."""
-    src = _layer_source_path(layer)
-    if src is not None:
-        name = src.name.lower()
-        if name.endswith(".nii") or name.endswith(".nii.gz"):
-            return src
+    """On-disk NIfTI of *layer* as it is now, for tools that read files (registration).
+
+    Always the layer's current data, written the way saving the layer would (the
+    file's axis order and affine). Its ``source`` file cannot stand in for it: a crop
+    or a tool output inherits its source's metadata, so a cropped layer used to be
+    registered as the whole image it came from. An untouched layer writes the very
+    grid of its file, so a transform estimated on it still applies to that file.
+    Uncompressed (it is read once), and removed by :func:`_remove_temp_inputs`.
+    """
+    from nvitk.gui.io.export import layer_to_image as export_image
     from nvitk.io import imsave
 
     tmp_dir = Path(tempfile.mkdtemp(prefix=f"nvitk_{prefix}_"))
-    path = tmp_dir / "volume.nii.gz"
-    imsave(path, layer_to_image(layer))
+    _TEMP_INPUT_DIRS.append(tmp_dir)
+    path = tmp_dir / "volume.nii"
+    imsave(path, export_image(layer))
     return path
+
+
+def _remove_temp_inputs(since: int) -> None:
+    """Delete the :func:`_ensure_nifti_path` temp dirs created after the first *since*."""
+    while len(_TEMP_INPUT_DIRS) > since:
+        shutil.rmtree(_TEMP_INPUT_DIRS.pop(), ignore_errors=True)
 
 
 def _export_layer_nifti(layer: Any, *, prefix: str, filename: str = "volume.nii.gz") -> Path:
@@ -165,7 +190,7 @@ def _bridge_same_label_components(seg: Any, *, max_gap: int = 24) -> Any:
     from scipy import ndimage as ndi
 
     # Force host arrays: scipy.ndimage / MST bridge are CPU-only.
-    # Use stock NumPy — module ``np`` may be a CuPy proxy via ``setup(globals())``.
+    # Use stock NumPy: module ``np`` may be a CuPy proxy via ``setup(globals())``.
     out = numpy.asarray(to_numpy(seg), dtype=numpy.int32).copy()
     labels = [int(x) for x in numpy.unique(out) if int(x) != 0]
     for lab in labels:
@@ -288,7 +313,7 @@ def multilabel_selection(
     Label ids a per-label run should iterate, or ``[]`` when the ordinary binary path applies.
 
     Per-label routing is only *different* from the ordinary path when there is more than one label
-    in play — with a single label the two agree exactly, and taking the plain path there keeps the
+    in play, with a single label the two agree exactly, and taking the plain path there keeps the
     long-standing behaviour of every binary tool byte-identical.
 
     Shared with :mod:`nvitk.gui.sge.submit`, which stages the same decision for the cluster.
@@ -321,12 +346,12 @@ def _run_multilabel(
     Run *tool_id* once per label and recombine, keeping the original ids.
 
     The per-label run is a plain single-label invocation of the same dispatcher, so the operation a
-    label sees here is *exactly* the one it would see if it were the only label selected — there is
+    label sees here is *exactly* the one it would see if it were the only label selected: there is
     no second implementation of any tool to keep in step with the first.
 
     Ordering: earlier ids in *label_ids* win where two results overlap, matching
     :func:`~nvitk.segmentation.labels.apply_per_label`'s ``overlap="first"``. Inputs are disjoint by
-    construction; outputs need not be — a dilation of two adjacent labels overlaps by design.
+    construction; outputs need not be: a dilation of two adjacent labels overlaps by design.
     """
     from nvitk.gui.labels.visibility import label_source_data
 
@@ -359,7 +384,7 @@ def _run_multilabel(
 
 
 def _multilabel_dtype(source: np.ndarray, label_ids: list[int]) -> Any:
-    """Integer dtype for a recombined per-label output — the input's own, else the smallest that fits."""
+    """Integer dtype for a recombined per-label output: the input's own, else the smallest that fits."""
     import numpy as numpy_host  # module ``np`` may be a CuPy proxy via ``setup(globals())``
 
     if numpy_host.issubdtype(source.dtype, numpy_host.integer):
@@ -376,7 +401,7 @@ def prepare_layer_data(
     target_mode: str,
     label_ids: list[int] | None,
 ) -> tuple[np.ndarray, str]:
-    """Reduce layer *data* to the array a tool should actually operate on given *target_mode*
+    """Reduce layer *data* to the array a tool should operate on given *target_mode*
     (``"raw"``, ``"binary_mask"``, ``"label"``, or ``"all_labels"``), returning ``(array, mode_tag)``;
     raises ``ValueError`` for missing label ids or an unknown mode."""
     mode = target_mode.strip().lower()
@@ -414,13 +439,25 @@ def prepare_layer_data(
 
 
 def coerce_tool_output(out: Any) -> np.ndarray:
-    """Napari-safe NumPy output (never implicit CuPy → NumPy conversion)."""
+    """Napari-safe NumPy output (never implicit CuPy -> NumPy conversion)."""
     return napari_array(out)
 
 
 def coerce_label_output(out: Any) -> np.ndarray:
-    """Napari-safe output for a **label map** — keeps the integer dtype the ids live in."""
+    """Napari-safe output for a **label map**: keeps the integer dtype the ids live in."""
     return napari_label_array(out)
+
+
+def _order_param(params: dict[str, Any], default: int = 1) -> int:
+    """The ``order`` (interpolation) parameter; an explicit 0 (nearest) is kept, not defaulted."""
+    order = params.get("order")
+    return default if order is None or order == "" else int(order)
+
+
+def _geometric_output(out: Any, label_map: bool) -> np.ndarray:
+    """Napari-safe output of a geometric tool: integer ids kept for a label map."""
+    data = getattr(out, "data", out)
+    return coerce_label_output(data) if label_map else coerce_tool_output(data)
 
 
 def _morph_common(img: Image, op: str, params: dict[str, Any]) -> np.ndarray:
@@ -460,7 +497,28 @@ def run_gui_tool(
     """Central GUI tool dispatcher: resolve *tool_id* in the registry and route to its implementation
     (pipeline CLI subprocess, a dedicated viz/measure handler, or a generic array-in/array-out tool
     call on *layer*'s prepared data). Returns the new layer data, or ``None`` for tools that manage
-    their own output (pipelines, viewer overlays, notifications)."""
+    their own output (pipelines, viewer overlays, notifications).
+
+    Runs with every layer in its real placement: with resampling off on the main canvas the
+    layers are drawn on their own voxel grids, and tools read and write real geometry
+    (:func:`nvitk.gui.viz.main_canvas.world_geometry`)."""
+    from nvitk.gui.viz.main_canvas import world_geometry
+
+    with world_geometry(viewer):
+        return _run_gui_tool(tool_id, layer, viewer, target_mode=target_mode, label_ids=label_ids,
+                             params=params)
+
+
+def _run_gui_tool(
+    tool_id: str,
+    layer: Any,
+    viewer: Any,
+    *,
+    target_mode: str,
+    label_ids: list[int] | None,
+    params = None,
+) -> np.ndarray | None:
+    """:func:`run_gui_tool`'s body (layers already in their real placement)."""
     from nvitk.gui.tools.registry import TOOL_ID_ALIASES
 
     params = dict(params or {})
@@ -486,6 +544,10 @@ def run_gui_tool(
 
     if tool_id == "centerline_to_polyline":
         _run_centerline_to_polyline(viewer, layer, label_ids, params)
+        return None
+
+    if tool_id == "polyline_to_centerline":
+        _run_polyline_to_centerline(viewer, layer, params)
         return None
 
     if tool_id == "viz_cross_sections_generic":
@@ -514,6 +576,24 @@ def run_gui_tool(
         from nvitk.gui.tools.interpolation_tools import run_interpolation_tool
 
         run_interpolation_tool(tool_id, viewer, layer, params, label_ids=label_ids)
+        return None
+
+    if tool_id.startswith("fastsurfer_"):
+        from nvitk.gui.tools.fastsurfer_tools import run_fastsurfer_tool
+
+        run_fastsurfer_tool(tool_id, viewer, layer, params)
+        return None
+
+    if tool_id.startswith("freesurfer_"):
+        from nvitk.gui.tools.freesurfer_tools import run_freesurfer_tool
+
+        run_freesurfer_tool(tool_id, viewer, layer, params)
+        return None
+
+    if tool_id.startswith("fsl_"):
+        from nvitk.gui.tools.fsl_tools import run_fsl_tool
+
+        run_fsl_tool(tool_id, viewer, layer, params)
         return None
 
     from nvitk.gui.tools.reconstruction_tools import RECONSTRUCTION_TOOL_IDS
@@ -786,7 +866,7 @@ def run_gui_tool(
                 )
             )
 
-    # ---- Per-label routing --------------------------------------------------------------------
+    # Per-label routing
     # A multi-label selection on a per-label tool runs the tool once on each label and recombines,
     # so the output carries the same parcellation the input did. Placed here so it is decided before
     # ``prepare_layer_data`` collapses the selection into its binary union.
@@ -801,7 +881,7 @@ def run_gui_tool(
         #
         # "All labels" deliberately does *not* seed the list from the active
         # layer. A structure the reference has and the prediction missed
-        # entirely would then never appear in the report — the one result you
+        # entirely would then never appear in the report: the one result you
         # most need to see. _run_mask_comparison takes the union of both maps.
         ids = list(label_ids or []) if target_mode == "label" else []
         _run_mask_comparison(tool_id, layer, viewer, data, ids, params=params)
@@ -827,6 +907,19 @@ def run_gui_tool(
     if not gpu_enabled():
         proc_data = as_backend_array(to_numpy(proc_data))
     img = layer_to_image(layer, proc_data)
+
+    # A geometric transform moves a label map's ids (only the selected ones when labels
+    # are picked), not the binary union the label target modes reduce it to.
+    geo_labels = False
+    if spec.geometric:
+        from nvitk.gui.labels.visibility import is_label_like_layer
+
+        geo_labels = is_label_like_layer(layer)
+        if geo_labels:
+            ids_data = as_backend_array(data)
+            if target_mode == "label" and label_ids:
+                ids_data = np.where(np.isin(ids_data, _label_ids_array(label_ids)), ids_data, 0)
+            img = layer_to_image(layer, ids_data)
 
     if spec.needs_3d and img.ndim != 3:
         raise ValueError(f"{spec.label} requires a 3D layer.")
@@ -1045,14 +1138,13 @@ def run_gui_tool(
 
         axis = int(params.get("axis", -1))
         factor = float(params.get("factor") or 0)
-        order = int(params.get("order") or 1)
-        kw = {"order": order}
+        kw = {"order": 0 if geo_labels else _order_param(params)}
         if axis >= 0:
             kw["axis"] = axis
         if factor > 0:
             kw["factor"] = factor
         with using(bk):
-            return coerce_tool_output(isotropy(img, **kw))
+            return _geometric_output(isotropy(img, **kw), geo_labels)
 
     if tool_id == "rotate_volume":
         from nvitk.transform.rotate import rotate_volume
@@ -1062,10 +1154,10 @@ def run_gui_tool(
                 img,
                 float(params.get("angle_degrees") if params.get("angle_degrees") is not None else 90.0),
                 axis=int(params.get("axis") if params.get("axis") is not None else 2),
-                order=int(params.get("order") if params.get("order") is not None else 1),
+                order=0 if geo_labels else _order_param(params),
                 reshape=bool(params.get("reshape")),
             )
-            return coerce_tool_output(getattr(out, "data", out))
+            return _geometric_output(out, geo_labels)
 
     if tool_id == "swap_axes":
         from nvitk.transform.swap_axes import swap_axes
@@ -1074,22 +1166,32 @@ def run_gui_tool(
         a1 = int(params.get("swap_axis1") if params.get("swap_axis1") is not None else 1)
         with using(bk):
             out = swap_axes(img, a0, a1)
-            return coerce_tool_output(getattr(out, "data", out))
+            return _geometric_output(out, geo_labels)
 
     if tool_id == "resample_to":
         from nvitk.transform.resampling import resample_to
 
         ref_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
         target = layer_to_image(ref_layer)
+        # Map both grids with the data->world transform Napari draws them with (affine
+        # *and* scale/translate), so the result matches what the viewer shows aligned.
+        # Headless stand-in layers have no such transform and keep their file affine.
+        # The output layer is placed on the reference by the Tools panel
+        # (``output_on_reference_grid``).
+        for image, source_layer in ((img, layer), (target, ref_layer)):
+            world = _napari_data_to_world(source_layer)
+            if world is not None and world.shape == (4, 4):
+                image.metadata["affine"] = world
         with using(bk):
-            return coerce_tool_output(
-                resample_to(img, target, order=int(params.get("order") or 0))
-            )
+            out = resample_to(img, target, order=0 if geo_labels else _order_param(params))
+            return _geometric_output(out, geo_labels)
 
     if tool_id == "oblique_slice":
         from nvitk.transform.oblique import oblique_slice
 
-        arr = as_backend_array(img.data).astype(np.float64)
+        arr = as_backend_array(img.data)
+        if not geo_labels:
+            arr = arr.astype(np.float64)
         cx, cy, cz = [s / 2.0 for s in arr.shape]
         center = (cx, cy, cz)
         u = (0.0, 1.0, 0.0)
@@ -1102,9 +1204,9 @@ def run_gui_tool(
                 v_xyz=v,
                 radius_vox=float(params.get("radius_vox") or 40),
                 res=int(params.get("res") or 256),
-                order=int(params.get("order") or 1),
+                order=0 if geo_labels else _order_param(params),
             )
-            return coerce_tool_output(slc)
+            return _geometric_output(slc, geo_labels)
 
     if tool_id == "volume_mm3":
         from nvitk.measure.volume import volume_mm3
@@ -1201,16 +1303,23 @@ def run_gui_tool(
         if not ids:
             ids = [1, 2]
         out_dir = str(params.get("output_dir") or "").strip() or None
-        notify("Running ICA siphon correction (CPU, may take a while)…")
+        notify("Running ICA siphon correction (minimum cut, CPU)…")
         result = correct_siphon_centerlines(
             tof_img,
             img,
             correction_ids=ids,
             out_dir=out_dir,
             save_qc=bool(out_dir),
+            pretess=bool(params.get("siphon_pretess", True)),
+            resegment=str(params.get("siphon_resegment") or "none"),
+            max_cut_mm3=float(params.get("siphon_max_cut_mm3") or 20.0),
         )
-        n_cl = len(result.get("centerlines", {}))
-        notify(f"Siphon correction done. Centerline sets: {n_cl}. Outputs: {out_dir or '(none)'}")
+        _add_siphon_layers(viewer, layer, result, ids)
+        _notify_results(
+            viewer, _tool_label(tool_id), _siphon_rows(result, ids),
+            subtitle=getattr(layer, "name", ""), row_header="label",
+            note=f"Outputs: {out_dir}" if out_dir else "",
+        )
         return None
 
     if tool_id == "mask_genus":
@@ -1673,13 +1782,17 @@ def run_gui_tool(
         )
         return None
 
+    if tool_id == "seg_eicab_postprocess":
+        _run_eicab_postprocess(viewer, layer, params)
+        return None
+
     if tool_id.startswith("reg_"):
         return _run_registration_tool(tool_id, viewer, layer, params)
 
     raise NotImplementedError(f"Tool '{tool_id}' is not implemented in the GUI runner.")
 
 
-# ── registration ─────────────────────────────────────────────────────────────
+# registration
 
 
 def _transform_list(params: dict[str, Any]) -> list[Path]:
@@ -1742,6 +1855,44 @@ def _add_volume_file(viewer: Any, path: Path, name: str, *, labels: bool = False
     return viewer.add_image(coerce_tool_output(data), **kwargs)
 
 
+def _label_on_moving_grid(layer: Any, moving_path: Path, *, prefix: str) -> Path:
+    """*layer* (a label map in the moving image's space) as a temp NIfTI on that image's grid.
+
+    A registration transform is defined on the moving image's own grid (an FSL ``.mat``
+    on its voxel grid), so a label map stored on another grid is first resampled onto
+    it, nearest neighbour; one already on that grid is written unchanged.
+    """
+    import nibabel as nib
+    import numpy as numpy_host  # module ``np`` may be a CuPy proxy via ``setup(globals())``
+
+    from nvitk.io import imread, imsave
+    from nvitk.transform.resampling import resample_to
+
+    label_img = layer_to_image(layer)
+    world = _napari_data_to_world(layer)
+    if world is not None and world.shape == (4, 4):
+        label_img.metadata["affine"] = world
+    header = nib.load(str(moving_path))
+    label_aff = label_img.affine
+    same_grid = (
+        tuple(int(v) for v in label_img.shape[:3]) == tuple(int(v) for v in header.shape[:3])
+        and label_aff is not None
+        and numpy_host.allclose(to_numpy(label_aff), header.affine, atol=1e-3)
+    )
+    if not same_grid:
+        notify(
+            f"“{layer.name}” is not on the moving image's grid: resampling it onto that grid "
+            "(nearest neighbour) before warping."
+        )
+        moving = imread(moving_path, backend="numpy")
+        moving = moving[0] if isinstance(moving, list) else moving
+        with using("numpy"):
+            label_img = resample_to(label_img, moving, order=0)
+    path = Path(tempfile.mkdtemp(prefix=f"nvitk_{prefix}_")) / "volume.nii.gz"
+    imsave(path, label_img)
+    return path
+
+
 def _also_warp(
     viewer: Any,
     params: dict[str, Any],
@@ -1749,17 +1900,37 @@ def _also_warp(
     apply: Any,
     *,
     tag: str,
+    moving_path: Path,
 ) -> list[str]:
-    """Map every layer named in ``reg_also_warp`` with *apply*; returns the new layer names.
+    """Map the label layer (``reg_label_layer``) and every layer named in ``reg_also_warp``
+    with *apply*; returns the new layer names.
 
-    *apply(moving_path, out_path, is_label)* reslices one file into the reference
-    space. Masks keep their ids: they go through the label interpolator.
+    *apply(src_path, out_path, mode)* reslices one file into the reference space;
+    *mode* is ``"nearest"`` for the label layer (nearest neighbour, on the moving
+    image's grid *moving_path*), ``"label"`` for the masks in 'Also warp' (the
+    tool's label interpolator) and ``"intensity"`` otherwise.
     """
     from nvitk.gui.labels.visibility import is_label_like_layer
 
-    raw = str(params.get("reg_also_warp") or "").strip()
     added: list[str] = []
+    label_name = _layer_param(params, "reg_label_layer")
+    if label_name:
+        try:
+            label_layer = _resolve_layer(viewer, label_name)
+        except ValueError as exc:
+            notify(str(exc), error=True)
+        else:
+            src = _label_on_moving_grid(label_layer, moving_path, prefix=f"{tag}_label")
+            out = src.parent / "warped.nii.gz"
+            apply(src, out, "nearest")
+            new_name = f"{label_layer.name}_{tag}_warped"
+            _add_volume_file(viewer, out, new_name, labels=True)
+            added.append(new_name)
+
+    raw = str(params.get("reg_also_warp") or "").strip()
     for name in [n.strip() for n in raw.split(",") if n.strip()]:
+        if name == label_name:
+            continue  # already warped as the label layer
         try:
             other = _resolve_layer(viewer, name)
         except ValueError as exc:
@@ -1768,15 +1939,32 @@ def _also_warp(
         is_label = type(other).__name__ == "Labels" or is_label_like_layer(other)
         src = _export_layer_nifti(other, prefix=f"{tag}_also")
         out = src.parent / "warped.nii.gz"
-        apply(src, out, is_label)
+        apply(src, out, "label" if is_label else "intensity")
         new_name = f"{other.name}_{tag}_warped"
         _add_volume_file(viewer, out, new_name, labels=is_label)
         added.append(new_name)
     return added
 
 
+#: ANTs interpolator per :func:`_also_warp` mode.
+_ANTS_WARP_INTERPOLATORS: dict[str, str] = {
+    "intensity": "linear",
+    "label": "genericLabel",
+    "nearest": "nearestNeighbor",
+}
+
+
 def _run_registration_tool(tool_id: str, viewer: Any, layer: Any, params: dict[str, Any]) -> None:
     """FLIRT / ANTsPy / FireANTs registration and transform application."""
+    since = len(_TEMP_INPUT_DIRS)
+    try:
+        _run_registration(tool_id, viewer, layer, params)
+    finally:
+        _remove_temp_inputs(since)
+
+
+def _run_registration(tool_id: str, viewer: Any, layer: Any, params: dict[str, Any]) -> None:
+    """Body of :func:`_run_registration_tool` (the inputs it exports are removed afterwards)."""
     ref_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
 
     if tool_id == "reg_flirt_rigid":
@@ -1809,13 +1997,13 @@ def _run_registration_tool(tool_id: str, viewer: Any, layer: Any, params: dict[s
         if res.warped_path is not None:
             _add_volume_file(viewer, res.warped_path, f"{layer.name}_flirt_warped")
 
-        def _apply(src: Path, out: Path, is_label: bool) -> None:
+        def _apply(src: Path, out: Path, mode: str) -> None:
             flirt_apply_rigid(
                 src, fixed_path, res.matrix_path, out,
-                interp="nearestneighbour" if is_label else interp,
+                interp=interp if mode == "intensity" else "nearestneighbour",
             )
 
-        _also_warp(viewer, params, ref_layer, _apply, tag="flirt")
+        _also_warp(viewer, params, ref_layer, _apply, tag="flirt", moving_path=moving_path)
         return None
 
     if tool_id == "reg_flirt_apply":
@@ -1871,16 +2059,16 @@ def _run_registration_tool(tool_id: str, viewer: Any, layer: Any, params: dict[s
         notify(f"ANTs ({tot}) done. Forward transforms: {fwd}")
         gui_log(f"ANTs inverse transforms: {', '.join(str(p) for p in res.inv_transforms)}")
 
-        def _apply(src: Path, out: Path, is_label: bool) -> None:
+        def _apply(src: Path, out: Path, mode: str) -> None:
             ants_apply(
                 fixed_path=fixed_path,
                 moving_path=src,
                 out_path=out,
                 transforms=list(res.fwd_transforms),
-                interpolator="genericLabel" if is_label else "linear",
+                interpolator=_ANTS_WARP_INTERPOLATORS[mode],
             )
 
-        _also_warp(viewer, params, ref_layer, _apply, tag="ants")
+        _also_warp(viewer, params, ref_layer, _apply, tag="ants", moving_path=moving_path)
         return None
 
     if tool_id == "reg_ants_apply":
@@ -1948,16 +2136,16 @@ def _run_registration_tool(tool_id: str, viewer: Any, layer: Any, params: dict[s
             + ", ".join(str(p) for p in res.transforms)
         )
 
-        def _apply(src: Path, out: Path, is_label: bool) -> None:
+        def _apply(src: Path, out: Path, mode: str) -> None:
             fireants_apply(
                 fixed_path=fixed_path,
                 moving_path=src,
                 out_path=out,
                 transforms=list(res.transforms),
-                interpolator="genericLabel" if is_label else "linear",
+                interpolator=_ANTS_WARP_INTERPOLATORS[mode],
             )
 
-        _also_warp(viewer, params, ref_layer, _apply, tag="fireants")
+        _also_warp(viewer, params, ref_layer, _apply, tag="fireants", moving_path=moving_path)
         return None
 
     if tool_id == "reg_fireants_apply":
@@ -2087,7 +2275,7 @@ def _phase_arrays_from_layers_or_disk(
         from nvitk.gui.core.spatial import layer_source_order
 
         # In the file's axis order (time last), which velocity_mm_s_from_phases
-        # expects — a 3D+t layer is shown time-first, its .data is TXYZ.
+        # expects: a 3D+t layer is shown time-first, its .data is TXYZ.
         def _phase(name: str):
             layer_ = _resolve_layer(viewer, name)
             return as_backend_array(layer_source_order(layer_)).astype(np.float64)
@@ -2276,6 +2464,50 @@ def _run_centerline_detect_junctions(
     notify(f"Marked {junctions.shape[0]} junction(s) on '{JUNCTION_POINTS_LAYER}'.")
 
 
+
+
+def _polyline_centerline_on(viewer: Any, params: dict[str, Any], grid_layer: Any, *,
+                            label_volume: Any = None) -> Any:
+    """The centerline image, on *grid_layer*'s grid, of the polyline layer picked as
+    ``centerline_layer`` (:func:`~nvitk.gui.viz.centerline_centering.is_polyline_layer`); ``None``
+    when none is picked or it is a centerline image (the caller aligns that one)."""
+    from nvitk.gui.viz.centerline_centering import is_polyline_layer, polylines_to_centerline_image
+
+    name = _layer_param(params, "centerline_layer")
+    if not name or not is_polyline_layer(_resolve_layer(viewer, name)):
+        return None
+    image, _counts = polylines_to_centerline_image(grid_layer, _resolve_layer(viewer, name), label_volume=label_volume)
+    return image
+
+
+def _run_polyline_to_centerline(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
+    """Draw a polyline layer back into a centerline (Labels) image on the active layer's grid."""
+    from nvitk.gui.core.spatial import layer_spatial_kwargs
+
+    src_name = _layer_param(params, "polyline_layer")
+    if not src_name:
+        raise ValueError("Pick the polyline layer (Shapes paths, mesh-panel polylines or ordered Points).")
+    src = _resolve_layer(viewer, src_name)
+    if src is layer:
+        raise ValueError("Make the image or label map whose grid the centerline goes on the active layer.")
+    from nvitk.gui.viz.centerline_centering import polylines_to_centerline_image
+
+    image, counts = polylines_to_centerline_image(layer, src, label_id=int(params.get("label_id") or 0))
+    if not image.any():
+        raise ValueError(f"The polylines of '{src.name}' fall outside '{layer.name}'.")
+    out = viewer.add_labels(image, name=f"{src.name} centerline", **layer_spatial_kwargs(layer))
+    try:  # keep the source's label names when the grid layer has them
+        from nvitk.gui.labels.catalog import LABEL_NAMES_KEY
+
+        names = (getattr(layer, "metadata", {}) or {}).get(LABEL_NAMES_KEY)
+        if names:
+            out.metadata = {**dict(out.metadata or {}), LABEL_NAMES_KEY: dict(names)}
+    except Exception:  # noqa: BLE001 (names are cosmetic)
+        pass
+    notify(f"Centerline image of {sum(counts.values())} path(s) on '{layer.name}': "
+           + ", ".join(f"label {k}: {v}" for k, v in sorted(counts.items())))
+
+
 def _run_centerline_to_polyline(
     viewer: Any,
     layer: Any,
@@ -2307,7 +2539,7 @@ def _run_centerline_to_polyline(
         min_bp = int(raw_min) if raw_min is not None else 0
     except (TypeError, ValueError):
         min_bp = 0
-    # 0 / negative → keep all edges (None semantics).
+    # 0 / negative -> keep all edges (None semantics).
     min_branch_points = None if min_bp <= 0 else min_bp
 
     from nvitk.gui.viz.centerline import mask_is_thin
@@ -2911,7 +3143,7 @@ def _run_totalsegmentator(
     """Run TotalSegmentator on *img* and return the multilabel mask.
 
     Returns the array rather than adding a layer, which is what lets the same code
-    serve the local run and the headless SGE worker — the worker's contract is one
+    serve the local run and the headless SGE worker: the worker's contract is one
     array in, one array out. Always ``--ml``: a single multilabel mask is what the
     label picker, the SGE retrieval and the Labels layer all expect.
     """
@@ -2976,7 +3208,7 @@ def _run_totalsegmentator(
 def _run_skimage_filter(tool_id: str, img: Image, params: dict[str, Any]) -> np.ndarray:
     """Run one of the ``skimage.filters`` wrappers and hand back its array.
 
-    scikit-image is host-only, so every branch runs under ``using("numpy")`` —
+    scikit-image is host-only, so every branch runs under ``using("numpy")``:
     the same contract the Hessian, Jerman and snakes filters follow.
     """
     from nvitk.filters import skimage_filters as skfilters
@@ -3066,7 +3298,7 @@ def _label_schema_for(layer: Any, params: dict[str, Any]) -> str:
     """The label vocabulary to name ids with: the picker's, or a guess from *layer*.
 
     The picker sits on "generic" until someone chooses or guesses, and generic
-    names nothing — so fall back to the same guess its own button makes, rather
+    names nothing, so fall back to the same guess its own button makes, rather
     than reporting every vessel as a bare number.
     """
     key = str(params.get("label_schema") or "").strip()
@@ -3115,7 +3347,7 @@ def _stage_topbrain_channels(
     """Write one harmonised channel per input the model wants; returns the directory.
 
     Each channel is the same volume under a different intensity window, which is
-    what stage 0 produced for training. Only CT is built this way — an MR model
+    what stage 0 produced for training. Only CT is built this way: an MR model
     with several channels would be some other recipe, and windowing TOF by
     Hounsfield units is meaningless.
     """
@@ -3150,7 +3382,7 @@ def _run_topbrain(img: Image, params: dict[str, Any]) -> np.ndarray:
     """Segment *img* with a trained ToPBrain nnU-Net and return the multilabel mask.
 
     Returns the array rather than adding a layer, which is what lets the same code
-    serve the local run and the headless SGE worker — the worker's contract is one
+    serve the local run and the headless SGE worker: the worker's contract is one
     array in, one array out, the same shape TotalSegmentator's branch has.
 
     Roots come from :func:`layout_auto`, which prefers the cluster ones when they
@@ -3329,8 +3561,10 @@ def _run_viz_vessel_cpr(
                 "labels selected on the lumen."
             )
 
-    _cl_layer, cl_img = _aligned("centerline_layer", order=0, what="Centerline layer")
-    centerlines = None if cl_img is None else coerce_label_output(cl_img).data
+    centerlines = _polyline_centerline_on(viewer, params, layer)  # Shapes / mesh polylines / Points
+    if centerlines is None:
+        _cl_layer, cl_img = _aligned("centerline_layer", order=0, what="Centerline layer")
+        centerlines = None if cl_img is None else coerce_label_output(cl_img).data
 
     lumen_data = lumen.data
     spacing = None
@@ -3497,22 +3731,40 @@ def _run_viz_tof_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
         point_size=float(params.get("point_size") or 2.0),
         edge_width=float(params.get("edge_width") or 0.35),
     )
+    from nvitk.gui.viz.morpho_results import default_key_of, show_morphometrics_results
+
+    labels = ref_layer if type(ref_layer).__name__ == "Labels" else None
+    counts = show_morphometrics_results(
+        viewer, stage7_path, label_layer=labels, surface_layer=info.get("surface_layer"),
+        lesion_layer=info.get("lesion_layer"), key_of=default_key_of(ref_layer),
+    )
     notify(
         f"TOF morphometrics: loaded {info['n_paths']} centerline path(s) "
-        f"(color_by={info['color_by']}) from {stage7_path}."
+        f"(color_by={info['color_by']}), {counts.get('vessels', 0)} vessel(s) and "
+        f"{counts.get('lesions', 0)} lesion(s) in the results window, from {stage7_path}."
     )
 
 
 def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
     """Run morphometrics on the selected multilabel Labels / Image layer.
 
-    Empty ``output_dir``: write to a temp folder (not kept as a user result) and
-    display centerlines / surfaces via the morphometrics viz dock.
+    Shows the centerlines, surfaces and lesions, and the results as the other measurements do:
+    the vessel table (every compact-table column plus the earlier path / volumetry / tortuosity
+    measures), lesions (severity, confidence), segments and the subject summary, with *Colour
+    labels by* colouring the measured labels and the vessel surfaces (nvitk.gui.viz.morpho_results).
+    Empty ``output_dir``: write to a temp folder (not kept as a user result).
     """
     from nvitk.gui.core.spatial import layer_spatial_kwargs
+    from nvitk.gui.viz.morpho_results import default_key_of, show_morphometrics_results
     from nvitk.gui.viz.morpho_viz import DEFAULT_MORPHO_POINT_SIZE, install_morphometrics_viz
     from nvitk.io import imsave
     from nvitk.measure.morphometrics import run_morphometrics_case
+    from nvitk.measure.morphometrics_config import (
+        DEFAULT_PROFILE,
+        ENLARGEMENT_RADIUS_SOURCE_LABELS,
+        LESION_DETECTION_METHODS,
+        morphometrics_config,
+    )
     from nvitk.measure.morpho.anatomy_axes import SPECIES_AUTO
     from nvitk.measure.morpho.topology_io import TOPOLOGY_NONE
     from nvitk.morphology.skeleton_methods import normalize_skeleton_method
@@ -3550,7 +3802,20 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
     species = str(params.get("species") or SPECIES_AUTO).strip() or SPECIES_AUTO
     n_workers = int(params.get("n_workers") or 1)
     skip_existing = bool(params.get("skip_existing")) and persist
-    already_smoothed = bool(params.get("input_already_smoothed"))
+    already_smoothed = not bool(params.get("taubin"))
+    config = morphometrics_config(str(params.get("profile") or "") or DEFAULT_PROFILE, n_workers=n_workers)
+    if bool(params.get("siphon_legacy")):
+        config = config.with_params(SIPHON_LEGACY_MASK=True)
+    enl_label = str(params.get("enlargement_radius") or "").strip()
+    enl_source = next((k for k, v in ENLARGEMENT_RADIUS_SOURCE_LABELS.items() if v == enl_label), None)
+    if enl_source is not None:
+        config = config.with_params(ENLARGEMENT_RADIUS_SOURCE=enl_source)
+    if bool(params.get("smooth_cross_section")):
+        config = config.with_params(ENLARGEMENT_SMOOTH_CROSS_SECTION=True)
+    detection = str(params.get("lesion_detection") or "").strip().lower()
+    if detection in LESION_DETECTION_METHODS:
+        config = config.with_params(LESION_DETECTION_METHOD=detection)
+    case_id = re.sub(r"[^\w.-]+", "_", str(params.get("case_id") or "").strip() or str(layer.name)).strip("_")
 
     if persist:
         notify(f"Morphometrics running (topology={topology!r}, species={species!r}) → {out_dir} …")
@@ -3562,7 +3827,8 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
     excel = run_morphometrics_case(
         seg_path,
         out_dir,
-        profile=str(params.get("profile") or "") or None,
+        config=config,
+        case_id=case_id or None,
         centerline_backend=normalize_skeleton_method(params.get("centerline_backend"), default="vmtk"),
         mapping_json=topology,
         case_out_dir_override=out_dir,
@@ -3570,25 +3836,42 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
         input_already_smoothed=already_smoothed,
         skip_if_excel_exists=skip_existing,
         species=species,
+        verbose=bool(params.get("verbose")),
     )
 
     # Show the (bridged) vessel mask used for computation as a Labels layer.
     spatial = layer_spatial_kwargs(layer)
     mask_name = f"{getattr(layer, 'name', 'seg')}_morpho_input"
+    mask_layer = None
+    # The source's own label colours and names, so the result rows, their swatches and the
+    # surfaces read the same as the layer the user picked.
+    from nvitk.gui.labels.catalog import LABEL_NAMES_KEY, layer_schema_key, remember_layer_schema
+
+    same_look: dict[str, Any] = {}
+    if type(layer).__name__ == "Labels":
+        same_look = {"colormap": layer.colormap}
+        names = (getattr(layer, "metadata", {}) or {}).get(LABEL_NAMES_KEY)
+        if names:
+            same_look["metadata"] = {LABEL_NAMES_KEY: dict(names)}
     try:
-        mask_layer = viewer.add_labels(
-            bridged.astype(numpy.int32, copy=False),
-            name=mask_name,
-            opacity=0.45,
-            **spatial,
-        )
+        try:
+            mask_layer = viewer.add_labels(
+                bridged.astype(numpy.int32, copy=False), name=mask_name, opacity=0.45, **same_look, **spatial,
+            )
+        except Exception:  # noqa: BLE001 (a colormap Napari will not copy: its default colours)
+            mask_layer = viewer.add_labels(
+                bridged.astype(numpy.int32, copy=False), name=mask_name, opacity=0.45, **spatial,
+            )
         try:
             mask_layer._nvitk_label_like = True
         except Exception:
             pass
+        remember_layer_schema(mask_layer, layer_schema_key(layer))
     except Exception as mask_exc:  # noqa: BLE001
         notify(f"Could not add morpho input mask layer: {mask_exc}", error=True)
 
+    label_layer = mask_layer if mask_layer is not None else layer
+    info: dict[str, Any] = {}
     try:
         info = install_morphometrics_viz(
             viewer,
@@ -3597,24 +3880,30 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
             color_by="radius",
             point_size=DEFAULT_MORPHO_POINT_SIZE,
             show_surfaces=True,
+            show_lesions=bool(params.get("show_lesions", True)),
+            label_layer=label_layer if type(label_layer).__name__ == "Labels" else None,
         )
-        n_paths = int(info.get("n_paths") or 0)
-        n_surf = int(info.get("n_surfaces") or 0)
     except Exception as viz_exc:  # noqa: BLE001
-        n_paths = 0
-        n_surf = 0
         notify(f"Morphometrics viz skipped: {viz_exc}", error=True)
+    n_paths = int(info.get("n_paths") or 0)
+    n_surf = int(info.get("n_surfaces") or 0)
+    counts: dict[str, int] = {}
+    try:
+        counts = show_morphometrics_results(
+            viewer, out_dir, label_layer=label_layer, surface_layer=info.get("surface_layer"),
+            lesion_layer=info.get("lesion_layer"), key_of=default_key_of(layer),
+            subtitle=f"{layer.name}" + (f" → {out_dir}" if persist else ""),
+        )
+    except Exception as res_exc:  # noqa: BLE001
+        notify(f"Morphometrics tables not shown: {res_exc}", error=True)
 
+    shown = (f"{counts.get('vessels', 0)} vessel(s), {counts.get('segments', 0)} segment(s), "
+             f"{counts.get('lesions', 0)} lesion(s) in the results window; {n_paths} path(s), "
+             f"{n_surf} vessel surface(s) shown")
     if persist:
-        notify(
-            f"Morphometrics done: {excel} "
-            f"({n_paths} path(s), {n_surf} surface layer(s) shown)."
-        )
+        notify(f"Morphometrics done: {excel} ({shown}).")
     else:
-        notify(
-            f"Morphometrics done ({n_paths} path(s), {n_surf} surface(s) in GUI; "
-            "nothing saved — set Output directory to persist)."
-        )
+        notify(f"Morphometrics done ({shown}; nothing saved — set Output directory to persist).")
 
 
 def _run_intensity_similarity(
@@ -3706,9 +3995,9 @@ def _run_viz_pet_hotspots(
 def _run_cross_sections_generic(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
     """Cross-sections for any segmentation, without the 4D-flow apparatus.
 
-    The active layer is the mask. Everything the 4D-flow tool insists on — a
+    The active layer is the mask. Everything the 4D-flow tool insists on: a
     complex-difference volume, the AP/RL/FH phase triple, and a qvtpy stage
-    directory to read named branches and venous vocabulary out of — is either
+    directory to read named branches and venous vocabulary out of: is either
     optional here or absent, because none of it exists for a segmentation that
     did not come from that pipeline. What remains is the part that was always
     generic: skeletonise, pick a point, cut the perpendicular plane, measure it.
@@ -3745,7 +4034,11 @@ def _run_cross_sections_generic(viewer: Any, layer: Any, params: dict[str, Any])
     # Centerlines: supplied, or skeletonised from the mask by the engine's own
     # generic path.
     cl_name = _layer_param(params, "centerline_layer")
-    if cl_name:
+    # A polyline centerline is drawn on the intensity grid, labelled from the mask under it.
+    centerline_arr = _polyline_centerline_on(viewer, params, intensity_layer, label_volume=seg_arr)
+    if centerline_arr is not None:
+        centerline_arr = to_numpy(centerline_arr).astype(np.int32, copy=False)
+    elif cl_name:
         cl_layer = _resolve_layer(viewer, cl_name)
         _ref, cl_img, _ = align_mask_to_reference_layer(cl_layer, intensity_layer, order=0)
         centerline_arr = to_numpy(coerce_label_output(cl_img).data).astype(np.int32, copy=False)
@@ -4357,7 +4650,7 @@ def _run_mask_image(
     """Keep or remove an image's voxels by a mask's labels (tool ``seg_mask_image``).
 
     The image and the mask are the two layer parameters, either left on “none”
-    for the active layer. The labels: the ids typed, else — with the mask active —
+    for the active layer. The labels: the ids typed, else (with the mask active)
     the picker's, else the ones the mask shows (its live filter), else every one.
     The result is a new image layer placed like the image (or replaces its data),
     optionally cropped to the kept region. Returns the layer written.
@@ -4457,7 +4750,7 @@ def _run_mask_image(
             lo[d] = lo_sp[k]
         out = out[tuple(index)].copy()  # host array: a contiguous copy of the crop
         # The crop moves the origin: the affine (and the file's affine) shift by it,
-        # so it shows — and is saved — where it came from.
+        # so it shows (and is saved), where it came from.
         spatial_kwargs, cropped_meta = crop_placement(image_layer, lo)
         out_metadata = copy_layer_metadata_for_output(cropped_meta)
     elif keep is False and bool(params.get("crop")):
@@ -4501,14 +4794,14 @@ def _run_mask_image(
 
 
 def _label_display(viewer: Any, layer: Any, label_id: int) -> str:
-    """``"3 — Left ICA"`` when the label has a name (given by hand, or the schema's), ``"3"`` when not."""
+    """``"3: Left ICA"`` when the label has a name (given by hand, or the schema's), ``"3"`` when not."""
     try:
         from nvitk.gui.labels.catalog import label_name
 
         name = label_name(layer, int(label_id))
         if name:
             return f"{int(label_id)} — {name}"
-    except Exception:  # noqa: BLE001 — an unnamed label is still a usable row
+    except Exception:  # noqa: BLE001 (an unnamed label is still a usable row)
         pass
     return str(int(label_id))
 
@@ -4631,9 +4924,141 @@ def _notify_results(
             viewer, title, payload, subtitle=subtitle, row_header=row_header, note=note,
             label_layer=label_layer if row_labels else None, row_labels=row_labels,
         )
-    except Exception:  # noqa: BLE001 — a window failure must not lose the numbers
+    except Exception:  # noqa: BLE001 (a window failure must not lose the numbers)
         text = _format_metrics(payload) if isinstance(payload, dict) else str(payload)
     notify(text)
+
+
+def _run_eicab_postprocess(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
+    """Stage 1's eICAB post-process on *layer* (a label map) against the reference TOF layer: the CW
+    pp layer, and with the distal growth also the WB pp layer (A2 / M2 split off), as in stage 1."""
+    import json
+
+    import numpy as numpy_host  # module ``np`` may be a CuPy proxy via ``setup(globals())``
+
+    from nvitk.gui.core.spatial import layer_spatial_kwargs
+    from nvitk.pipes.qvtpy.util.eicab.eicab_postprocess import postprocess_eicab_variants
+
+    tof_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
+    tof_img = layer_to_image(tof_layer)
+    lab_img = layer_to_image(layer)
+    labels = numpy_host.rint(to_numpy(lab_img.data)).astype(numpy_host.int32)
+    intensity = to_numpy(tof_img.data).astype(numpy_host.float64, copy=False)
+    if labels.shape != intensity.shape:
+        raise ValueError(f"Label layer {labels.shape} and TOF layer {intensity.shape} are not on one grid.")
+    ids = lambda key, default: parse_label_ids(str(params.get(key) or default)) or parse_label_ids(default)  # noqa: E731
+    notify("Running the eICAB post-process…")
+    masks, summary = postprocess_eicab_variants(
+        intensity, labels, affine=lab_img.affine if lab_img.affine is not None else tof_img.affine,
+        remove_ids=(17, 18) if bool(params.get("eicab_pp_remove_acha", True)) else (),
+        resegment=bool(params.get("eicab_pp_resegment", True)), extend=bool(params.get("eicab_pp_extend", True)),
+        loop_fill=bool(params.get("eicab_pp_loop_fill", True)),
+        distal=bool(params.get("eicab_pp_distal", True)),
+        aca_guard=bool(params.get("eicab_pp_aca_guard", True)), siphon=bool(params.get("eicab_pp_siphon", True)),
+        distal_ids=ids("eicab_pp_distal_ids", "5,6,7,8,13,14,15,16"),
+        ica_ids=ids("eicab_pp_icas", "1,2"),
+    )
+    masks = {k: to_numpy(v).astype(numpy_host.int32) for k, v in masks.items()}
+    kw = layer_spatial_kwargs(layer)
+    base = getattr(layer, "name", "labels")
+    for kind in ("cw", "wb"):
+        if kind not in masks:
+            continue
+        pp_layer = viewer.add_labels(masks[kind], name=f"{base} {kind.upper()}_pp", opacity=0.7,
+                                     visible=kind == ("wb" if "wb" in masks else "cw"), **kw)
+        try:  # name the post-process's own labels (A2 / M2) like the eICAB ones
+            from nvitk.gui.labels.catalog import LABEL_NAMES_KEY
+            from nvitk.pipes.qvtpy.labels import EICAB_ID_TO_NAME
+
+            meta = dict(pp_layer.metadata or {})
+            meta[LABEL_NAMES_KEY] = {int(k): v for k, v in EICAB_ID_TO_NAME.items() if int(k) > 0}
+            pp_layer.metadata = meta
+        except Exception:  # noqa: BLE001 (names are cosmetic)
+            pass
+    ext = (summary.get("extension") or {}).get("labels", {})
+    dist = ((summary.get("wb") or {}).get("distal_growth") or {}).get("labels", {})
+    sip = (summary.get("cw") or {}).get("siphon_correction") or {}
+    rows: dict[str, dict[str, Any]] = {}
+    present = {int(v) for v in numpy_host.unique(labels) if v > 0}
+    for m in masks.values():
+        present |= {int(v) for v in numpy_host.unique(m) if v > 0}
+    for lid in sorted(present):
+        n0 = int((labels == lid).sum())
+        row: dict[str, Any] = {"voxels before": n0}
+        for kind, m in masks.items():
+            n1 = int((m == lid).sum())
+            row[f"{kind.upper()}_pp voxels"] = n1
+            row[f"{kind.upper()}_pp change %"] = round(100.0 * (n1 - n0) / n0, 1) if n0 else None
+        e = ext.get(str(lid))
+        if e:
+            row.update({"extension mm": e.get("length_mm"), "extension stop": e.get("stop"),
+                        "reached floor": e.get("reached_floor")})
+        dg = dist.get(str(lid))
+        if dg:
+            row["distal growth mm³"] = dg.get("volume_added_mm3", 0)
+        sp_ = sip.get(str(lid))
+        if sp_:
+            row.update({"β₁ before siphon": sp_["genus_before"]["beta1"], "β₁ after": sp_["genus_after"]["beta1"],
+                        "siphon cuts": sp_.get("loops_cut"), "cut mm³": sp_.get("cut_mm3")})
+        rows[f"label {lid}"] = row
+    out_dir = str(params.get("output_dir") or "").strip()
+    note = ""
+    if out_dir:
+        from nvitk.io import imsave
+
+        out = Path(out_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        for kind, m in masks.items():
+            imsave(out / f"eicab_{kind.upper()}_pp.nii.gz", m, metadata=dict(lab_img.metadata or {}))
+        (out / "eicab_postprocess.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+        note = f"Written to {out}"
+    _notify_results(viewer, _tool_label("seg_eicab_postprocess"), rows, subtitle=getattr(layer, "name", ""),
+                    row_header="label", note=note)
+
+
+def _add_siphon_layers(viewer: Any, layer: Any, result: dict[str, Any], ids: list[int]) -> None:
+    """The siphon correction's outputs as layers on *layer*'s grid: the corrected label map, every
+    voxel the correction removed (pretess and cuts) and the corrected centerlines."""
+    import numpy as numpy_host  # module ``np`` may be a CuPy proxy via ``setup(globals())``
+
+    from nvitk.gui.core.spatial import layer_spatial_kwargs
+
+    kw = layer_spatial_kwargs(layer)
+    base = getattr(layer, "name", "vessels")
+    corrected = to_numpy(result["vessel_mask_corrected"]).astype(numpy_host.int32)
+    viewer.add_labels(corrected, name=f"{base} siphon-corrected", opacity=0.7, **kw)
+    removed = to_numpy(result.get("cleared_bridge_region_mask"))
+    if removed.size and removed.any():
+        viewer.add_labels(removed.astype(numpy_host.int32), name=f"{base} siphon removed voxels", opacity=0.9, **kw)
+    paths = [to_numpy(result["centerlines"][lid]).astype(numpy_host.float32)
+             for lid in ids if lid in result.get("centerlines", {})]
+    paths = [p for p in paths if len(p) >= 2]
+    if paths:
+        viewer.add_shapes(paths, shape_type="path", name=f"{base} siphon centerlines", edge_width=0.4,
+                          edge_color="#ffd34d", opacity=0.95, **kw)
+
+
+def _siphon_rows(result: dict[str, Any], ids: list[int]) -> dict[str, dict[str, Any]]:
+    """One results-window row per corrected label."""
+    rows: dict[str, dict[str, Any]] = {}
+    for lid in ids:
+        d = (result.get("details") or {}).get(lid)
+        if not d:
+            continue
+        rep = d.get("repair") or {}
+        g0, g1 = d.get("genus_before") or {}, d.get("genus_after") or {}
+        rows[f"label {lid}"] = {
+            "β₁ before": g0.get("beta1"), "β₁ after": g1.get("beta1"),
+            "loops cut": rep.get("n_cut_loops"), "loops left": rep.get("unresolved"),
+            "pretess voxels": (d.get("pretess") or {}).get("n_removed"),
+            "cut mm³": d.get("cut_mm3"), "removed mm³": d.get("removed_mm3"),
+            "volume change %": d.get("volume_change_vs_input_pct"),
+            "centerline mm": (d.get("centerline") or {}).get("length_mm"),
+        }
+    summary = result.get("summary") or {}
+    if summary.get("asymmetry_change_pct") is not None:
+        rows["|ΔL − ΔR| volume %"] = {"volume change %": summary["asymmetry_change_pct"]}
+    return rows
 
 
 def _run_measure_per_label(

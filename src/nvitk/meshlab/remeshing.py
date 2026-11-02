@@ -25,7 +25,7 @@ def decimate(
     method: str = "quadric",
     preserve_topology: bool = True,
 ) -> Mesh:
-    """Remove *reduction* (0–1) of the faces while keeping the shape.
+    """Remove *reduction* (0-1) of the faces while keeping the shape.
 
     ``"pro"`` with *preserve_topology* never opens holes or splits the surface,
     at the cost of sometimes stopping short of the target.

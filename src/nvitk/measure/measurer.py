@@ -42,9 +42,7 @@ class Measurer:
     image: Image
     mask: Image
 
-    # -----------------------------------------------------------------
     # Aligners
-    # -----------------------------------------------------------------
     def align(
         self,
         direction: str = "mask_to_raw",
@@ -84,9 +82,7 @@ class Measurer:
         """Return a new :class:`Measurer` with *image* swapped in (same mask)."""
         return Measurer(image=image, mask=self.mask)
 
-    # -----------------------------------------------------------------
     # Measurements
-    # -----------------------------------------------------------------
     def volume(self) -> dict[str, float]:
         """Physical volume of the mask in mm³ and cc."""
         return {
@@ -128,11 +124,11 @@ class Measurer:
         return integrated_intensity(self.image, self.mask)
 
     def voxel_metrics(self, reference: Image, *, metrics: Iterable[str] | None = None) -> dict[str, float]:
-        """Overlap metrics (dice/jaccard/…) of this mask against a *reference* mask."""
+        """Overlap metrics (dice/jaccard/...) of this mask against a *reference* mask."""
         return voxel_metrics(reference, self.mask, metrics=metrics)
 
     def surface_metrics(self, reference: Image, *, metrics: Iterable[str] | None = None) -> dict[str, float]:
-        """Surface-distance metrics (hausdorff/msd/…) of this mask against a *reference* mask."""
+        """Surface-distance metrics (hausdorff/msd/...) of this mask against a *reference* mask."""
         return surface_metrics(reference, self.mask, metrics=metrics)
 
     def radiomics(self, *, feature_classes: Iterable[str] | None = None) -> dict[str, float]:

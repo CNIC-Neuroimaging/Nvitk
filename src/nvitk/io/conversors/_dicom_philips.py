@@ -9,11 +9,11 @@ generic path gets wrong:
 1. **Spectral Base Images (SBI).** Series described ``SBI(V5.1)_CB_0.67_C|IMR, 78%`` are
    Secondary Captures with ``ImageType = DERIVED\\SECONDARY\\SBI\\SBI_CSPN``: one instance per
    axial position of the reconstruction they belong to, every one with a *different* ``Rows``
-   (100 … 940 x 512). They are not pictures. The "pixels" are Philips' compressed spectral
-   base data — byte entropy ~5.9 bits against ~0.6 for a real CT slice, and the row count
+   (100 ... 940 x 512). They are not pictures. The "pixels" are Philips' compressed spectral
+   base data: byte entropy ~5.9 bits against ~0.6 for a real CT slice, and the row count
    tracks how much there was to compress (short at the scan ends, longest through the body).
-   Converting them as images yields noise — and, with per-geometry splitting, dozens of noise
-   files per series — so the converter recognises them and records or copies them instead
+   Converting them as images yields noise (and, with per-geometry splitting, dozens of noise
+   files per series), so the converter recognises them and records or copies them instead
    (``--sbi``). :mod:`nvitk.io.conversors.philips_sbi` decodes them (conventional,
    photoelectric and Compton-scatter components) and :mod:`nvitk.transform.spectral` derives
    monoenergetic, iodine, VNC, Z-effective and electron-density images; the GUI's Spectral
@@ -33,7 +33,7 @@ import os
 import re
 from typing import Any, Sequence
 
-#: Private (01F1,1045) — Philips CT "Initial Heart Rate" (bpm).
+#: Private (01F1,1045): Philips CT "Initial Heart Rate" (bpm).
 _PHILIPS_INITIAL_HR_TAG = (0x01F1, 0x1045)
 
 
@@ -49,7 +49,7 @@ def is_philips_spectral_base_image(ds: Any) -> bool:
     """True for a Philips Spectral Base Image instance (compressed spectral payload).
 
     Recognised by ``ImageType`` carrying ``SBI`` (``DERIVED\\SECONDARY\\SBI\\SBI_CSPN``), or by
-    an ``SBI(…)`` image comment / series description on a Philips Secondary Capture.
+    an ``SBI(...)`` image comment / series description on a Philips Secondary Capture.
     """
     tokens = _image_type_tokens(ds)
     if "SBI" in tokens or any(t.startswith("SBI_") for t in tokens):
@@ -110,11 +110,9 @@ def apply_heart_rate_alias(md: dict[str, Any], ds: Any = None) -> dict[str, Any]
     return md
 
 
-# ---------------------------------------------------------------------------
 # Keeping the SBI data: manifest and copy
-# ---------------------------------------------------------------------------
 
-#: ``SBI(V5.1)_CB_0.67_C|IMR, 78%`` → version, kernel, thickness, reference description.
+#: ``SBI(V5.1)_CB_0.67_C|IMR, 78%`` -> version, kernel, thickness, reference description.
 _SBI_COMMENT = re.compile(
     r"SBI\((?P<version>[^)]*)\)_(?P<kernel>[^_|]+)_(?P<thickness>[\d.]+)[^|]*\|(?P<reference>.*)$",
     re.IGNORECASE,

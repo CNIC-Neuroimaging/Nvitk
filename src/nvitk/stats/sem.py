@@ -4,8 +4,8 @@ Structural equation / path modelling over the cerebral vascular network.
 Description
 -----------
 A stacked territory model asks "does flow differ between vessels?". A path model asks the question
-the anatomy actually poses: **given how much arrives upstream, what determines how much leaves
-downstream?** Writing the vasculature as a system of regressions —
+the anatomy poses: **given how much arrives upstream, what determines how much leaves
+downstream?** Writing the vasculature as a system of regressions;
 
 .. code-block:: text
 
@@ -13,7 +13,7 @@ downstream?** Writing the vasculature as a system of regressions —
     lpca ~ basi + lpcomm + age_c + sex
     lmca ~ lica + age_c + sex
 
-— fits every junction simultaneously, respects that ``basi`` is both an outcome and a predictor, and
+fits every junction simultaneously, respects that ``basi`` is both an outcome and a predictor, and
 decomposes any exogenous effect into the part that travels *through* the network (indirect) and the
 part that does not (direct). The mediation analysis already in this toolkit is the three-node
 special case of exactly this.
@@ -26,7 +26,7 @@ Two, probed independently and interchangeable at the call site:
 ``lavaan``   through ``rpy2``, for parity with the R workflow and for the estimators and fit
              indices ``lavaan`` reports that ``semopy`` does not.
 
-Both accept the same model syntax, which is what makes them swappable — that syntax is what
+Both accept the same model syntax, which is what makes them swappable: that syntax is what
 :func:`~nvitk.stats.vessel_network.sem_model_syntax` emits.
 
 What a path coefficient means here
@@ -34,15 +34,13 @@ What a path coefficient means here
 These are cross-sectional measurements taken in one acquisition, so "upstream causes downstream" is
 a hemodynamic assumption written into the model, not something the data establishes. The estimates
 are associations *conditional on the assumed direction*. Reversing an edge will usually fit about as
-well, so the topology has to come from anatomy — which is precisely why it is hard-coded in
+well, so the topology has to come from anatomy, which is precisely why it is hard-coded in
 :mod:`~nvitk.stats.vessel_network` rather than learned.
 """
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import re
 import shutil
 from dataclasses import dataclass, field
@@ -96,7 +94,7 @@ class SemBackendStatus:
         return INSTALL_HINT
 
     def preferred(self) -> str:
-        """The backend to use when the caller does not care — semopy needs no R."""
+        """The backend to use when the caller does not care: semopy needs no R."""
         return self.backends[0] if self.backends else ""
 
 
@@ -134,21 +132,19 @@ def sem_backend_status() -> SemBackendStatus:
     return SemBackendStatus(available=True, backends=tuple(backends), versions=versions)
 
 
-# ---------------------------------------------------------------------------
 # Specification
-# ---------------------------------------------------------------------------
 def resolve_network_syntax(syntax: str, columns: Sequence[str]) -> tuple[str, dict[str, str]]:
     """
-    Rewrite vessel names in *syntax* onto the columns a network frame actually carries.
+    Rewrite vessel names in *syntax* onto the columns a network frame carries.
 
     A path model is typed by hand, and the published labels have several spellings for the same
-    vessel — ``BASILAR``, ``BASI`` and ``basi`` are one artery, and a single model often mixes them.
+    vessel: ``BASILAR``, ``BASI`` and ``basi`` are one artery, and a single model often mixes them.
     The network frame names its columns by canonical node, so every vessel token that is not already
     a column is resolved through :func:`~nvitk.stats.vessel_network.canonical_node` and rewritten
     when that lands on one.
 
     Tokens that are not vessels (``age_c``, ``sex``, the operators) are left untouched, as is any
-    token that already matches a column — a real column always wins over a rename.
+    token that already matches a column: a real column always wins over a rename.
 
     Returns
     -------
@@ -198,7 +194,7 @@ class SemSpec:
     standardize: bool = True
     #: Drop rows missing any modelled variable. ``False`` asks the backend for FIML instead.
     listwise: bool = True
-    #: Grouping column for a multi-group fit — the same model estimated separately in each group,
+    #: Grouping column for a multi-group fit: the same model estimated separately in each group,
     #: which is how you ask whether a path *differs* between them rather than assuming it does not.
     #: ``lavaan`` only; ``semopy`` has no multi-group support and the fit is refused rather than
     #: silently pooled, since a pooled estimate is not the question that was asked.
@@ -225,7 +221,7 @@ class SemSpec:
 
     def latent(self) -> list[str]:
         """
-        Latent variables — the left-hand sides of ``=~`` measurement lines.
+        Latent variables: the left-hand sides of ``=~`` measurement lines.
 
         A latent is defined *by* the model, not measured: ``f1 =~ x1 + x2 + x3`` says the three
         indicators share a common cause called ``f1``. It is therefore not a column of the data, and
@@ -251,7 +247,7 @@ class SemSpec:
 
     def observed(self) -> list[str]:
         """
-        Variables that must exist as columns — every token that is not a latent.
+        Variables that must exist as columns: every token that is not a latent.
 
         This is what the frame has to supply. A latent appears in the syntax and *not* here, which
         is the whole reason the two are separated: validating a CFA against the columns would
@@ -262,7 +258,7 @@ class SemSpec:
 
     def variables(self) -> list[str]:
         """
-        Observed variables the syntax mentions — the columns the model needs.
+        Observed variables the syntax mentions: the columns the model needs.
 
         Kept as the historical name for :meth:`observed`; the path models that predate latent
         support call it, and for them the two are identical because there are no latents.
@@ -271,7 +267,7 @@ class SemSpec:
 
     def endogenous(self) -> list[str]:
         """
-        Variables the model gives an equation to — the left-hand sides of ``~``.
+        Variables the model gives an equation to: the left-hand sides of ``~``.
 
         A latent with indicators counts too: ``f1 =~ x1 + x2`` gives ``f1`` a measurement equation,
         so a residual covariance on it is a *residual* like any other and must not be reported as
@@ -292,7 +288,7 @@ class SemSpec:
         ]
 
     def indicators(self) -> dict[str, list[str]]:
-        """``{latent: [indicator, …]}`` from the ``=~`` measurement lines."""
+        """``{latent: [indicator, ...]}`` from the ``=~`` measurement lines."""
         out: dict[str, list[str]] = {}
         for lhs, operator, rhs in self._statements():
             if operator != "=~" or not lhs:
@@ -342,7 +338,7 @@ class SemSpec:
 
         # Separate the two reasons a name can be absent, because the fixes are different: a vessel
         # that is missing was never measured (or the frame is still long), whereas anything else is
-        # a covariate that is simply not in this analysis frame.
+        # a covariate that is not in this analysis frame.
         from nvitk.stats.vessel_network import canonical_node
 
         vessels = [v for v in missing if canonical_node(v)]
@@ -373,7 +369,7 @@ def prepare_sem_frame(
     more than two levels is refused, because which contrast it should get is a modelling decision,
     not something to guess.
 
-    Latent variables are *not* included — they are estimated, not supplied — and a multi-group
+    Latent variables are *not* included (they are estimated, not supplied), and a multi-group
     column rides along untouched: it labels the rows rather than entering the covariance matrix, so
     dummy-coding or standardizing it would destroy the very grouping it is there to provide.
     """
@@ -467,9 +463,7 @@ def prepare_sem_frame(
     return frame, meta
 
 
-# ---------------------------------------------------------------------------
 # Fitting
-# ---------------------------------------------------------------------------
 def fit_sem(
     *, data: pd.DataFrame, spec: SemSpec
 ) -> tuple[Any, pd.DataFrame, dict[str, Any]]:
@@ -479,7 +473,7 @@ def fit_sem(
     Returns
     -------
     (fit, model_df, metadata)
-        *fit* is the backend's own object — a ``semopy.Model`` or an R ``lavaan`` fit — and
+        *fit* is the backend's own object (a ``semopy.Model`` or an R ``lavaan`` fit), and
         *metadata* carries ``engine``, ``backend`` and the row accounting the other engines report.
     """
     status = sem_backend_status()
@@ -609,9 +603,7 @@ def _ensure_lavaan_helpers() -> None:
     _LAVAAN_HELPERS_LOADED = True
 
 
-# ---------------------------------------------------------------------------
 # Reading the fit
-# ---------------------------------------------------------------------------
 def sem_paths_frame(
     fit: Any, *, backend: str = "", latent: Sequence[str] = ()
 ) -> pd.DataFrame:
@@ -624,7 +616,7 @@ def sem_paths_frame(
         Names of the model's latent variables. Needed only for ``semopy``, which reports a
         measurement line as an ordinary regression of the indicator on the factor (``x1 ~ f1``)
         and so loses the distinction lavaan keeps. Passing the latents lets those rows be restored
-        to ``f1 =~ x1``, which is what makes the two backends' tables genuinely interchangeable —
+        to ``f1 =~ x1``, which is what makes the two backends' tables interchangeable,
         without it a CFA fitted through semopy reports no loadings at all.
 
     Returns
@@ -646,7 +638,7 @@ def sem_paths_frame(
     factors = {str(name) for name in (latent or ())}
     if factors and backend != "lavaan":
         # A measurement line has a latent on the right and an *observed* indicator on the left.
-        # ``f2 ~ f1`` has latents on both sides — that is a structural path between two factors, and
+        # ``f2 ~ f1`` has latents on both sides: that is a structural path between two factors, and
         # tagging it as a loading would claim f1 is measured by f2.
         is_loading = (
             (raw["op"].astype(str) == "~")
@@ -717,8 +709,8 @@ def sem_modification_indices(
     zero, with the χ² drop expected from letting it go free (``mi``) and the value it would take
     (``epc``, and ``sepc_all`` standardized).
 
-    Read them as *hypotheses*, not fixes. ``minimum`` defaults to 3.84 — the 5% χ²(1) critical
-    value — so the table only lists modifications that would be individually significant, but a
+    Read them as *hypotheses*, not fixes. ``minimum`` defaults to 3.84, the 5% χ²(1) critical
+    value, so the table only lists modifications that would be individually significant, but a
     model rebuilt by chasing this list is fitted to its own residuals and its p-values mean nothing.
     The useful reading is anatomical: a large index on a path the anatomy predicts is evidence the
     topology is missing an edge; one on an implausible path is evidence of nothing.
@@ -793,11 +785,11 @@ def sem_standardized_solution(fit: Any, *, backend: str = "") -> pd.DataFrame:
 
 def sem_fit_measures(fit: Any, *, backend: str = "") -> dict[str, float]:
     """
-    Global fit indices — how well the assumed topology reproduces the observed covariances.
+    Global fit indices: how well the assumed topology reproduces the observed covariances.
 
     The conventional reading: ``CFI`` and ``TLI`` above 0.95, ``RMSEA`` below 0.06 and ``SRMR``
     below 0.08 describe a model consistent with the data. A poor fit here does not say which edge is
-    wrong, only that the network as specified cannot reproduce what was measured — the modification
+    wrong, only that the network as specified cannot reproduce what was measured: the modification
     indices are what point at the missing path.
     """
     backend = backend or ("lavaan" if _looks_like_lavaan(fit) else "semopy")
@@ -899,8 +891,8 @@ def sem_info_dict(
         })
 
     # The structural table is what the report leads with. When the model is a pure CFA there are no
-    # structural paths at all, and leading with an empty table would read as a failed fit — so the
-    # loadings take that slot instead, which is the thing that model actually estimated.
+    # structural paths at all, and leading with an empty table would read as a failed fit, so the
+    # loadings take that slot instead, which is the thing that model estimated.
     fixed_effects = regressions if len(regressions) or loadings.empty else loadings
 
     return {
@@ -918,7 +910,7 @@ def sem_info_dict(
 
 
 def _safe_modification_indices(fit: Any, backend: str) -> pd.DataFrame:
-    """Modification indices, or an empty frame — a diagnostic must never break the report."""
+    """Modification indices, or an empty frame: a diagnostic must never break the report."""
     try:
         return sem_modification_indices(fit, backend=backend)
     except Exception as exc:
@@ -926,17 +918,15 @@ def _safe_modification_indices(fit: Any, backend: str) -> pd.DataFrame:
         return pd.DataFrame(columns=["lhs", "op", "rhs", "parameter", "mi", "epc", "sepc_all"])
 
 
-# ---------------------------------------------------------------------------
 # Effects along the network
-# ---------------------------------------------------------------------------
 def path_effects(
     paths: pd.DataFrame, *, source: str, target: str, max_depth: int = 6
 ) -> pd.DataFrame:
     """
     Decompose the effect of *source* on *target* into every route the fitted network provides.
 
-    An indirect effect along a route is the product of its edge coefficients — the standard
-    path-tracing rule — so an age effect that reaches the MCA only via the carotid shows up as one
+    An indirect effect along a route is the product of its edge coefficients (the standard
+    path-tracing rule), so an age effect that reaches the MCA only via the carotid shows up as one
     two-edge route, while a direct ``lmca ~ age_c`` term shows up as a route of length one.
 
     Only regression paths are traced; residual covariances are associations without a direction and
@@ -954,7 +944,7 @@ def path_effects(
     if edges.empty:
         return pd.DataFrame(columns=["route", "n_edges", "effect"])
 
-    # lhs ~ rhs means rhs → lhs, so successors of a node are the equations it appears in.
+    # lhs ~ rhs means rhs -> lhs, so successors of a node are the equations it appears in.
     successors: dict[str, list[tuple[str, float]]] = {}
     for _, row in edges.iterrows():
         successors.setdefault(str(row["rhs"]), []).append(
@@ -1004,13 +994,13 @@ def plot_sem_paths(
     Forest plot of the structural paths, strongest first.
 
     Reading it: a path whose interval excludes zero is an edge the data supports at the assumed
-    direction. Edge magnitudes are comparable to each other only when the fit was standardized —
+    direction. Edge magnitudes are comparable to each other only when the fit was standardized,
     otherwise a path in mL/min per mL/min sits beside one in mL/min per year.
 
     Parameters
     ----------
     op : str
-        Which kind of parameter to draw — ``"~"`` for structural paths, ``"=~"`` for factor
+        Which kind of parameter to draw; ``"~"`` for structural paths, ``"=~"`` for factor
         loadings. Empty draws whatever the frame contains, which is what makes this reusable for a
         table that has already been filtered.
     """
@@ -1058,8 +1048,8 @@ def plot_sem_network(
     """
     The fitted network as a diagram: nodes laid out by depth, edges weighted by their coefficient.
 
-    Edge width is the magnitude of the standardized path, colour its sign — blue for a positive
-    relation, red for a negative one — and a dashed edge is one whose interval covers zero. It is a
+    Edge width is the magnitude of the standardized path, colour its sign (blue for a positive
+    relation, red for a negative one), and a dashed edge is one whose interval covers zero. It is a
     reading aid for the topology, not a substitute for the coefficient table.
     """
     import matplotlib.pyplot as plt
@@ -1071,9 +1061,9 @@ def plot_sem_network(
     else:
         structural, loadings = paths, paths.iloc[0:0]
 
-    # A loading points from the factor to its indicator — the factor is the common cause, and
-    # drawing it the other way round (indicator → factor) inverts the model's whole claim. lavaan
-    # writes it as ``factor =~ indicator``, i.e. lhs → rhs, which is the opposite orientation from a
+    # A loading points from the factor to its indicator: the factor is the common cause, and
+    # drawing it the other way round (indicator -> factor) inverts the model's whole claim. lavaan
+    # writes it as ``factor =~ indicator``, i.e. lhs -> rhs, which is the opposite orientation from a
     # regression's ``outcome ~ predictor``, so the two are flipped into one convention here.
     latents = sorted(set(loadings["lhs"].astype(str))) if len(loadings) else []
     if len(loadings):
@@ -1136,7 +1126,7 @@ def plot_sem_network(
     labels = dict(node_labels or {})
     for node, (x, y) in positions.items():
         # The path-diagram convention: a latent variable is an ellipse, an observed one a box. It
-        # is not decoration — the shape is what tells the reader which nodes were measured and which
+        # is not decoration: the shape is what tells the reader which nodes were measured and which
         # the model invented.
         latent = node in latents
         ax.annotate(
@@ -1169,11 +1159,11 @@ def plot_sem_loadings(
     paths: pd.DataFrame, *, max_paths: int = 40, title: str = "Factor loadings"
 ) -> Any:
     """
-    Forest plot of the measurement model — how strongly each indicator loads on its factor.
+    Forest plot of the measurement model: how strongly each indicator loads on its factor.
 
     Reading it: a loading whose interval excludes zero is an indicator the factor accounts for. A
-    factor whose loadings are all small is one the indicators do not actually share, whatever the
-    global fit indices say — which is the check a CFA exists to make.
+    factor whose loadings are all small is one the indicators do not share, whatever the
+    global fit indices say, which is the check a CFA exists to make.
     """
     loadings = paths.loc[paths["op"] == "=~"] if "op" in paths.columns else paths
     if loadings.empty:
@@ -1190,7 +1180,7 @@ def plot_sem_modification_indices(
     """
     Bar chart of the parameters that would most improve fit if freed, largest first.
 
-    A reading aid for *where the model misfits*, not a to-do list — see
+    A reading aid for *where the model misfits*, not a to-do list; see
     :func:`sem_modification_indices` for why rebuilding a model from this table invalidates its
     own p-values.
     """

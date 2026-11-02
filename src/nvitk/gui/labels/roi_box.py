@@ -1,4 +1,4 @@
-"""A box on a volume — drawn on the canvas or in the orthogonal views, or typed —
+"""A box on a volume (drawn on the canvas or in the orthogonal views, or typed)
 to crop to, to read intensity ranges in, and to keep edits inside.
 
 One box per viewer (:func:`roi_box`), on one voxel grid: it applies to every
@@ -9,7 +9,7 @@ outline (a rectangle on the slice in 2D, the twelve edges in 3D), the
 orthogonal views as a rectangle in each plane.
 
 Cropping (:func:`crop_layers`) adds a copy of each layer cut to the box, placed
-where it came from: its affine — and the file affine export writes — shift by
+where it came from: its affine (and the file affine export writes) shift by
 the box's corner (:func:`~nvitk.gui.core.spatial.crop_placement`).
 """
 
@@ -61,7 +61,7 @@ class RoiBox(QObject):
         except Exception:  # noqa: BLE001
             pass
 
-    # ── state ────────────────────────────────────────────────────────────────
+    # state
 
     @property
     def active(self) -> bool:
@@ -77,7 +77,7 @@ class RoiBox(QObject):
         """True when the box is on *layer*'s voxel grid."""
         try:
             return self.active and spatial_shape(layer) == self.shape
-        except Exception:  # noqa: BLE001 — a layer without a voxel array
+        except Exception:  # noqa: BLE001 (a layer without a voxel array)
             return False
 
     def set(self, layer: Any, lo: Sequence[int], hi: Sequence[int], *, emit: bool = True) -> None:
@@ -96,7 +96,7 @@ class RoiBox(QObject):
 
     def set_axes(self, layer: Any, ranges: dict[int, tuple[int, int]], *, emit: bool = True) -> None:
         """Change the box along some of *layer*'s axes (``{axis: (lo, hi)}``, data
-        axes); the others keep their range — the whole volume when the box was
+        axes); the others keep their range: the whole volume when the box was
         not on this grid yet."""
         dims = spatial_dims(layer)
         shape = spatial_shape(layer)
@@ -145,7 +145,7 @@ class RoiBox(QObject):
         return all(self.lo[k] <= int(voxel[d]) < self.hi[k] for k, d in enumerate(spatial_dims(layer)))
 
     def intensity_range(self, image: Any, low: float = 1.0, high: float = 99.0) -> tuple[float, float] | None:
-        """The *low*–*high* percentiles of *image*'s voxels in the box (``None``
+        """The *low*-*high* percentiles of *image*'s voxels in the box (``None``
         when the box is not on its grid or holds nothing finite)."""
         if not self.applies(image):
             return None
@@ -176,7 +176,7 @@ class RoiBox(QObject):
                 text += " (" + " × ".join(f"{v * abs(float(spacing[d])):.1f}" for v, d in zip(n, dims)) + " mm)"
         return text
 
-    # ── the outline on the canvas ────────────────────────────────────────────
+    # the outline on the canvas
 
     def _on_dims(self, _event: Any = None) -> None:
         if self.active:
@@ -238,7 +238,7 @@ class RoiBox(QObject):
             return
         try:
             shapes, kind, colours = self._outline_shapes(layer)
-        except Exception:  # noqa: BLE001 — a layer mid-change: next time
+        except Exception:  # noqa: BLE001 (a layer mid-change: next time)
             return
         from nvitk.gui.core.spatial import layer_spacing
 
@@ -259,7 +259,7 @@ class RoiBox(QObject):
                 outline.selected_data = set()
                 outline.data = []
                 outline.add(shapes, shape_type=kind, edge_color=colours, face_color="transparent", edge_width=width)
-        except Exception:  # noqa: BLE001 — the outline is a convenience
+        except Exception:  # noqa: BLE001 (the outline is a convenience)
             pass
 
 

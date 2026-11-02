@@ -17,8 +17,14 @@
 docs/_build/
 .config/
 .config/*
+audit/
+audit/*
 # .nvitk/xnat.json
 # .nvitk/xnat-dev.json
+dataset/
+dataset/*
+notebooks/
+notebooks/*
 notebooks/exploration/pesabrain-anatomy/checkpoints/
 notebooks/exploration/pesabrain-anatomy/checkpoints/*
 notebooks/exploration/pesabrain-anatomy/checkpoints_nocut/

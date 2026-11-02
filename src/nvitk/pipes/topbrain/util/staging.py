@@ -15,7 +15,7 @@ Deleting on the far side
 ------------------------
 Every removal is confined to a directory this module created, named with its own prefix and a
 random suffix, under a staging root the pipeline owns. :func:`assert_removable` enforces that,
-and it is checked immediately before the deletion rather than at construction -- the point is to
+and it is checked immediately before the deletion rather than at construction, to
 make "delete a path built from a user-supplied string" impossible to reach, not merely unlikely.
 On failure nothing is deleted: the inputs and the job's output are what you need to diagnose it.
 """
@@ -89,7 +89,7 @@ def wait_for_jobs(
 
     ``qstat`` lists queued and running jobs and says nothing about how a finished one ended, so
     this reports "no longer queued", not "succeeded". The caller decides success from what the
-    job actually produced -- which for inference is the only evidence that matters.
+    job produced -- which for inference is the only evidence that matters.
     """
     from nvitk.cluster.remote_transfer import ssh_exec
 

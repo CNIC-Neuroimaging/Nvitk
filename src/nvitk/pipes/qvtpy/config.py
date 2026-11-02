@@ -7,13 +7,13 @@
 
 **Outputs (constants consumed by stages)**
 
-- ``STAGE*_DIR`` — subdirectory names under ``<results>/<subject>/qvtpy/``.
-- ``SGE_*`` — project, queue, log/err dirs, and ``CONTAINER_PATH`` for cluster jobs.
+- ``STAGE*_DIR``: subdirectory names under ``<results>/<subject>/qvtpy/``.
+- ``SGE_*``: project, queue, log/err dirs, and ``CONTAINER_PATH`` for cluster jobs.
 
 Stage 0 conversion and stage 1 eICAB use these paths; later stages read/write under
 ``DEFAULT_RESULTS_ROOT`` / ``DEFAULT_NIFTI_ROOT`` unless overridden on the CLI.
 
-Every value here is read from ``sge.json`` on first use — there are no installation paths
+Every value here is read from ``sge.json`` on first use: there are no installation paths
 in this file, and nothing is resolved at import time.
 """
 
@@ -28,24 +28,18 @@ from nvitk.core import lazy_config
 from nvitk.pipes.qvtpy.util.io import paths as _paths_mod
 
 
-# ---------------------------------------------------------------------------
 # Pipeline identity
-# ---------------------------------------------------------------------------
 
 PIPELINE_NAME: str = "qvtpy"
 SGE_JOB_PREFIX: str = "QVTPY"
 
 
-# ---------------------------------------------------------------------------
 # Roots (cluster defaults; see util.paths for local vs cluster layout)
-# ---------------------------------------------------------------------------
 
 from nvitk.pipes.qvtpy.util.io.paths import resolve_totalseg_model_dir  # noqa: E402
 
 
-# ---------------------------------------------------------------------------
 # Stage directory fragments
-# ---------------------------------------------------------------------------
 
 STAGE0_DIR: str = "res_convert_qvtpy"
 STAGE1_EICAB_DIR: str = "eicab"
@@ -59,11 +53,9 @@ STAGE6_MEASURE_DIR: str = "stage6_measure"
 STAGE7_MORPHOMETRICS_DIR: str = "stage7_morphometrics"
 
 
-# ---------------------------------------------------------------------------
 # SGE defaults (overridable via .nvitk/sge.json `pipelines.qvtpy`)
-# ---------------------------------------------------------------------------
 
-#: Portable fallbacks for scratch locations. Everything else must come from ``sge.json`` —
+#: Portable fallbacks for scratch locations. Everything else must come from ``sge.json``:
 #: an unset value resolves to ``None`` rather than to somebody else's filesystem.
 _FALLBACK_SGE_ROOT = Path(tempfile.gettempdir()) / "nvitk-sge"
 

@@ -1,8 +1,8 @@
 """qvtpy 4DFlow viewer CLI.
 
 Loads AP/RL/FH phase NIfTI volumes from the stage-0 NIfTI layout produced by
-:mod:`nvitk.pipes.qvtpy.stage0_convert` — namely ``<nifti_root>/<subject>/``
-with a ``4DFlow/`` folder containing direction subfolders (AP, RL, FH) — using
+:mod:`nvitk.pipes.qvtpy.stage0_convert`, namely ``<nifti_root>/<subject>/``
+with a ``4DFlow/`` folder containing direction subfolders (AP, RL, FH), using
 :func:`nvitk.io.conversors.phase2volume.discover_phase_inputs`.
 
 It then opens :func:`nvitk.viz.flowshow.flowshow` with a multilabel vessel mask
@@ -55,9 +55,7 @@ from nvitk.core.click_config import config_dir_click_option
 
 log = Logger()
 
-# ---------------------------------------------------------------------------
 # Default vessel mask search names
-# ---------------------------------------------------------------------------
 
 _DEFAULT_VESSEL_REL_NAMES: tuple[str, ...] = (
     "vessels.nii.gz",
@@ -67,9 +65,7 @@ _DEFAULT_VESSEL_REL_NAMES: tuple[str, ...] = (
 )
 
 
-# ---------------------------------------------------------------------------
 # Subject / mask path resolution
-# ---------------------------------------------------------------------------
 
 
 def _patient_dir(
@@ -239,9 +235,7 @@ def _resolve_nii_optional(folder: Path, stem: str) -> Path | None:
     return None
 
 
-# ---------------------------------------------------------------------------
 # CLI (flowshow viewer)
-# ---------------------------------------------------------------------------
 
 
 @click.command("nvitk-qvtpy-flowshow")

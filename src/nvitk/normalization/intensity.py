@@ -5,16 +5,16 @@ Description
 -----------
 Segmentation frameworks pick an intensity-normalisation scheme **per input channel**, not per
 case. A dataset that mixes CTA and MRA in one channel therefore cannot be normalised correctly
-downstream: CT is calibrated (Hounsfield units, air at −1000) while TOF-MRA is uncalibrated
+downstream: CT is calibrated (Hounsfield units, air at -1000) while TOF-MRA is uncalibrated
 with a hard floor at 0, and a single scheme is wrong for one of them.
 
 These helpers harmonise the two *before* the framework sees them, mapping both onto a common
 intensity range so that one channel is legitimately modality-agnostic:
 
-- CT — clip to a fixed diagnostic window in HU, then rescale the window to the target range.
+- CT: clip to a fixed diagnostic window in HU, then rescale the window to the target range.
   Fixed rather than percentile-based, because HU are physically meaningful and a percentile
   window would drift with field of view.
-- MR — rescale a robust percentile range to the target range. Percentile-based because TOF has
+- MR: rescale a robust percentile range to the target range. Percentile-based because TOF has
   no standardised scale; the same vessel is a different number on a different scanner.
 
 Array / axis conventions
@@ -40,9 +40,7 @@ setup(globals())
 
 log = Logger()
 
-# ---------------------------------------------------------------------------
 # Defaults
-# ---------------------------------------------------------------------------
 
 #: Angiographic CT window in Hounsfield units. Keeps contrast-filled lumen and calcified
 #: plaque separable while discarding the air and dense-bone extremes.
@@ -71,7 +69,7 @@ def _rescale(data: Any, lo: float, hi: float, target: Sequence[float]) -> Any:
     """Affine-map ``[lo, hi]`` onto *target*, clipping outside it.
 
     A degenerate window (``hi <= lo``) yields a constant image at the bottom of the target
-    range rather than dividing by zero — that happens for genuinely empty or constant volumes,
+    range rather than dividing by zero: that happens for empty or constant volumes,
     and a NaN volume propagating into training is far worse than an obviously blank one.
     """
     t_lo, t_hi = float(target[0]), float(target[1])
@@ -94,7 +92,7 @@ def window_ct(
     Parameters
     ----------
     window
-        ``(low_hu, high_hu)``. Values outside are clamped, not discarded — a clamped
+        ``(low_hu, high_hu)``. Values outside are clamped, not discarded: a clamped
         calcification is still a calcification, and dropping it would punch a hole in the mask.
 
     Returns

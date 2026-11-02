@@ -4,8 +4,8 @@ Analysis-dataframe table with column-anchored filtering.
 Description
 -----------
 The analysis frame is where filtering belongs: you look at a ``territory`` column, see ``RPComm``
-and ``LPComm``, and want them gone. This module makes that a two-click operation — right-click the
-column header, uncheck the levels — instead of typing a column name, an operator and a value into a
+and ``LPComm``, and want them gone. This module makes that a two-click operation (right-click the
+column header, uncheck the levels) instead of typing a column name, an operator and a value into a
 detached form.
 
 Widgets
@@ -21,9 +21,7 @@ The rules themselves live in :mod:`nvitk.stats.frame_ops` so notebooks can apply
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -86,9 +84,7 @@ from .theme import (
 )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Table model
-# ──────────────────────────────────────────────────────────────────────────────
 class PandasFrameModel(QAbstractTableModel):
     """
     Read-only Qt model over a pandas frame.
@@ -106,7 +102,7 @@ class PandasFrameModel(QAbstractTableModel):
         self._df = pd.DataFrame()
         self._filtered: set[str] = set()
 
-    # ---- population -----------------------------------------------------------
+    # population
     def set_frame(self, df: pd.DataFrame | None, *, filtered_columns: set[str] = frozenset()) -> None:
         """Show *df* (capped at :data:`TABLE_ROW_CAP` rows) and badge *filtered_columns* in the header."""
         self.beginResetModel()
@@ -118,7 +114,7 @@ class PandasFrameModel(QAbstractTableModel):
         """The (capped) frame currently displayed."""
         return self._df
 
-    # ---- QAbstractTableModel --------------------------------------------------
+    # QAbstractTableModel
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         """Number of displayed rows (0 while a parent index is given, as Qt requires for tables)."""
         return 0 if parent.isValid() else len(self._df)
@@ -170,14 +166,12 @@ class PandasFrameModel(QAbstractTableModel):
         return None
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Per-column filter dialog
-# ──────────────────────────────────────────────────────────────────────────────
 class ColumnFilterDialog(QDialog):
     """
     Build the filter rules for one column.
 
-    Three tabs, each producing at most one rule: **Levels** (checkable list, keep or exclude — the
+    Three tabs, each producing at most one rule: **Levels** (checkable list, keep or exclude; the
     vessel-exclusion case), **Numeric** (a range kept from the inside or the outside, and/or an
     operator comparison), and **IQR** (Tukey fences, optionally computed within each level of a
     scope column).
@@ -233,7 +227,7 @@ class ColumnFilterDialog(QDialog):
             parts.append(f"range {self._numeric.min():.6g} … {self._numeric.max():.6g}")
         return "  ·  ".join(parts)
 
-    # ---- tabs -----------------------------------------------------------------
+    # tabs
     def _build_levels_tab(self) -> None:
         """Checkable list of the column's distinct values, with a keep/exclude switch."""
         page = QWidget()
@@ -295,7 +289,7 @@ class ColumnFilterDialog(QDialog):
         page = QWidget()
         lay = QVBoxLayout(page)
 
-        # ---- range ------------------------------------------------------------
+        # range
         self._range_enabled = QCheckBox("Filter by range")
         lay.addWidget(self._range_enabled)
         range_form = QFormLayout()
@@ -326,7 +320,7 @@ class ColumnFilterDialog(QDialog):
         )
         lay.addWidget(self._range_keep_na)
 
-        # ---- comparison -------------------------------------------------------
+        # comparison
         self._compare_enabled = QCheckBox("Compare against a value")
         lay.addWidget(self._compare_enabled)
         compare_row = QHBoxLayout()
@@ -346,7 +340,7 @@ class ColumnFilterDialog(QDialog):
         compare_row.addWidget(self._compare_value, stretch=1)
         lay.addLayout(compare_row)
 
-        # ---- IQR --------------------------------------------------------------
+        # IQR
         self._iqr_enabled = QCheckBox("Drop IQR outliers")
         self._iqr_enabled.setToolTip(
             "Drop values outside [Q1 - k·IQR, Q3 + k·IQR].\n"
@@ -378,7 +372,7 @@ class ColumnFilterDialog(QDialog):
             lay.addWidget(note)
         self._tabs.addTab(page, "Numeric")
 
-    # ---- level list helpers ---------------------------------------------------
+    # level list helpers
     def _on_level_search(self, text: str) -> None:
         """Hide level items that do not contain *text*."""
         if self._level_list is None:
@@ -438,9 +432,9 @@ class ColumnFilterDialog(QDialog):
                     self._iqr_scope.setCurrentIndex(scope_idx)
                 self._tabs.setCurrentIndex(1)
 
-    # ---- result ---------------------------------------------------------------
+    # result
     def rules(self) -> list[FilterRule]:
-        """The rules the user configured, in application order (levels → range → compare → IQR)."""
+        """The rules the user configured, in application order (levels -> range -> compare -> IQR)."""
         out: list[FilterRule] = []
 
         if self._level_list is not None and self._levels_enabled.isChecked():
@@ -507,15 +501,13 @@ def _parse_float(text: str) -> float | None:
         return None
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Active-filter chips
-# ──────────────────────────────────────────────────────────────────────────────
 class FilterChipBar(QWidget):
     """
     Horizontal strip of the active filter rules, each removable, plus the running row count.
 
     Rules that could not be applied (their column left the frame after a reload) are shown greyed
-    with the reason, rather than dropped — a filter you cannot see is a filter you cannot fix.
+    with the reason, rather than dropped: a filter you cannot see is a filter you cannot fix.
     """
 
     rulesChanged = Signal()
@@ -629,9 +621,7 @@ class FilterChipBar(QWidget):
         self._btn_clear.setEnabled(bool(self._rules))
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Table view
-# ──────────────────────────────────────────────────────────────────────────────
 class AnalysisFrameView(QWidget):
     """
     The analysis-dataframe table and its column header menu.
@@ -649,7 +639,7 @@ class AnalysisFrameView(QWidget):
     summaryRequested(column, by)    export per-group descriptive statistics for a column
     dropRequested(column)            remove a column from the analysis frame
     restoreRequested()               put every dropped column back
-    typeChangeRequested(column, kind) recast a column (numeric / factor / …)
+    typeChangeRequested(column, kind) recast a column (numeric / factor / ...)
     referenceRequested(column, level) make a level the model's reference
     subjectPlotRequested(subject_uid) open the per-subject viewer for one subject
     fileDropped(path)                a spreadsheet was dragged onto the table
@@ -693,7 +683,7 @@ class AnalysisFrameView(QWidget):
         self._table.horizontalHeader().setContextMenuPolicy(Qt.CustomContextMenu)
         self._table.horizontalHeader().customContextMenuRequested.connect(self._on_header_menu)
         # A cell menu as well as a header one: the header answers "what about this variable", the
-        # cell answers "what about this row" — and for the subject column that is a different and
+        # cell answers "what about this row", and for the subject column that is a different and
         # frequently-wanted question.
         self._table.setContextMenuPolicy(Qt.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._on_cell_menu)
@@ -704,8 +694,8 @@ class AnalysisFrameView(QWidget):
         lay.addWidget(self._table)
 
         # Dropping a spreadsheet here loads it as the analysis frame. The table view is where the
-        # pointer actually is, and a child that does not accept drops swallows the event before it
-        # reaches this widget — so the filter below forwards the table's drag events up.
+        # pointer is, and a child that does not accept drops swallows the event before it
+        # reaches this widget, so the filter below forwards the table's drag events up.
         self.setAcceptDrops(True)
         self._table.setAcceptDrops(True)
         self._table.viewport().setAcceptDrops(True)
@@ -715,7 +705,7 @@ class AnalysisFrameView(QWidget):
         self._filtered: set[str] = set()
         self._derived: set[str] = set()
 
-    # ---- drag and drop --------------------------------------------------------
+    # drag and drop
     @staticmethod
     def _dropped_table_path(event: Any) -> str:
         """
@@ -798,7 +788,7 @@ class AnalysisFrameView(QWidget):
         """
         Columns worth grouping a summary by: discrete, and not one row per level.
 
-        A continuous measurement has as many levels as rows, and ``subject_uid`` nearly so — a
+        A continuous measurement has as many levels as rows, and ``subject_uid`` nearly so: a
         summary keyed on either is the raw data with extra columns.
         """
         out = grouping_columns(
@@ -819,7 +809,7 @@ class AnalysisFrameView(QWidget):
         Per-row menu, offered only where a row identifies something worth viewing on its own.
 
         Today that is ``subject_uid``: one row of the analysis frame is one subject × region, and
-        the interesting question about a subject is what *all* their regions look like together —
+        the interesting question about a subject is what *all* their regions look like together,
         which is a picture of anatomy, not a cell value. Right-clicking anywhere else falls through
         to the header menu's territory and does nothing here, rather than offering an action that
         would not mean anything for that column.
@@ -864,9 +854,9 @@ class AnalysisFrameView(QWidget):
         frame = self._model.frame()
         numeric = column in frame.columns and pd.api.types.is_numeric_dtype(frame[column])
 
-        # Centering is the transform reached for most often — it is what makes an
-        # intercept, and any lower-order term under an interaction, interpretable
-        # — so it gets its own entry instead of living inside the submenu.
+        # Centering is the transform reached for most often: it is what makes an
+        # intercept, and any lower-order term under an interaction, interpretable,
+        # so it gets its own entry instead of living inside the submenu.
         centered_name = default_derived_name(column, "center")
         center = menu.addAction(
             f"Centre “{column}” → {centered_name}",
@@ -970,7 +960,7 @@ class AnalysisFrameView(QWidget):
             type_menu.setToolTip(f"Currently {frame[column].dtype}")
 
         # Reference level: only meaningful for a column with a manageable number of levels, and
-        # only for the categorical ones — a continuous predictor has a slope, not contrasts.
+        # only for the categorical ones; a continuous predictor has a slope, not contrasts.
         ref_menu = menu.addMenu("Reference level")
         levels = self._column_levels(column)
         ref_menu.setEnabled(bool(levels))

@@ -52,7 +52,7 @@ def species_choices() -> tuple[str, ...]:
 
 
 def default_topology() -> str:
-    """``mouse_root_topology.json`` when present — this module's primary use case."""
+    """``mouse_root_topology.json`` when present: this module's primary use case."""
     api = _api()
     return api["MOUSE_ROOT_TOPOLOGY_NAME"] if api["MOUSE_ROOT_TOPOLOGY_NAME"] in topology_choices() else api["TOPOLOGY_NONE"]
 

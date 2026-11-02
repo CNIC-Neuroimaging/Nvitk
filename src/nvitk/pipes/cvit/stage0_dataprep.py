@@ -1,9 +1,9 @@
 """
-CViT stage 0 — labelled data → validated nnU-Net raw dataset (+ optional nnssl corpus).
+CViT stage 0: labelled data -> validated nnU-Net raw dataset (+ optional nnssl corpus).
 
 Description
 -----------
-Accepts either an existing nnU-Net-style folder (``imagesTr/<case>_0000.nii.gz`` …,
+Accepts either an existing nnU-Net-style folder (``imagesTr/<case>_0000.nii.gz`` ...,
 ``labelsTr/<case>.nii.gz``) or a plain pair of folders (``images/<case>.nii.gz``,
 ``labels/<case>.nii.gz``), validates every case, and writes
 ``<nnunet_raw>/Dataset<ID>_<Name>/{imagesTr,labelsTr,dataset.json}`` plus a patient-grouped
@@ -12,7 +12,7 @@ Accepts either an existing nnU-Net-style folder (``imagesTr/<case>_0000.nii.gz``
 Validation (per case, fail loudly)
 ----------------------------------
 - every channel and the label have the same **shape** and the same **affine** (``allclose``,
-  ``atol=1e-3`` mm) — a mismatched grid trains on misregistered pairs without any error;
+  ``atol=1e-3`` mm): a mismatched grid trains on misregistered pairs without any error;
 - images are finite (no NaN / Inf);
 - labels hold integers only and only declared label values; a float label with integral values
   is rewritten as an integer volume (warned), a non-integral one is an error;
@@ -80,9 +80,7 @@ IMAGE_SUFFIXES: tuple[str, ...] = (".nii.gz", ".nii", ".mha", ".mhd", ".nrrd", "
 _CHANNEL_RE = re.compile(r"^(?P<case>.+)_(?P<ch>\d{4})$")
 STAGE0_MARKER = "cvit_stage0.json"
 
-# ---------------------------------------------------------------------------
 # Case discovery
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -165,9 +163,7 @@ def discover_cases(images_dir: Path, labels_dir: Path) -> list[Case]:
     return cases
 
 
-# ---------------------------------------------------------------------------
 # Validation + writing
-# ---------------------------------------------------------------------------
 
 
 def _affine_close(a, b, atol: float = 1e-3) -> bool:
@@ -204,7 +200,7 @@ def validate_case(case: Case, *, declared: set[int] | None, allow_empty: bool) -
         if ch == 0:
             record["spacing"] = [float(s) for s in (img.spacing or ())]
 
-    # ---- labels: integral, declared, non-empty --------------------------------------------
+    # labels: integral, declared, non-empty
     values = to_numpy(np.unique(lab))
     if values.dtype.kind == "f":
         if not bool((values == values.round()).all()):
@@ -248,9 +244,7 @@ def _write_case(case: Case, dataset_dir: Path, record: dict[str, Any], overwrite
         shutil.copyfile(case.label, dst)
 
 
-# ---------------------------------------------------------------------------
 # Folds
-# ---------------------------------------------------------------------------
 
 
 def grouped_splits(case_ids: Sequence[str], *, num_folds: int, seed: int,
@@ -290,9 +284,7 @@ def grouped_splits(case_ids: Sequence[str], *, num_folds: int, seed: int,
     return splits
 
 
-# ---------------------------------------------------------------------------
 # Corpus
-# ---------------------------------------------------------------------------
 
 
 def corpus_folder_name(corpus_id: int, dataset_name: str) -> str:
@@ -333,9 +325,7 @@ def build_corpus(
             "harmonized": harmonize}
 
 
-# ---------------------------------------------------------------------------
 # Library entry point
-# ---------------------------------------------------------------------------
 
 
 def run_dataprep(
@@ -400,13 +390,13 @@ def run_dataprep(
         log.info("stage0 | %s: %d case(s), %d channel(s) %s from %s", dataset, len(cases),
                  n_channels, names, img_dir)
 
-        # ---- 1. Validate every case (parallel, fail on the first bad one) ----------------
+        # 1. Validate every case (parallel, fail on the first bad one)
         records = map_in_thread_pool(
             lambda c: validate_case(c, declared=declared, allow_empty=allow_empty),
             cases, max_workers=int(workers),
         )
 
-        # ---- 2. Write the nnU-Net raw dataset ------------------------------------------
+        # 2. Write the nnU-Net raw dataset
         if overwrite and raw_dir.exists():
             shutil.rmtree(raw_dir)
         (raw_dir / "imagesTr").mkdir(parents=True, exist_ok=True)
@@ -426,7 +416,7 @@ def run_dataprep(
         }
         (raw_dir / "dataset.json").write_text(json.dumps(dataset_json, indent=2) + "\n", encoding="utf-8")
 
-        # ---- 3. Folds (into nnUNet_preprocessed, where nnU-Net reads them) ---------------
+        # 3. Folds (into nnUNet_preprocessed, where nnU-Net reads them)
         splits = grouped_splits([c.case_id for c in cases], num_folds=num_folds, seed=seed,
                                 group_regex=group_regex)
         pre_dir = paths.nnunet_preprocessed / dataset
@@ -445,7 +435,7 @@ def run_dataprep(
         })
         log.ok(f"stage0: {len(cases)} validated case(s) -> {raw_dir}")
 
-    # ---- 4. Optional nnssl corpus ------------------------------------------------------
+    # 4. Optional nnssl corpus
     if corpus_sources or corpus_from_train:
         provenance["corpus"] = build_corpus(
             paths, corpus_id=corpus_id, dataset_name=dataset_name, sources=corpus_sources,
@@ -460,7 +450,7 @@ def run_dataprep(
 
 
 def parse_labels(text: str | None) -> dict[str, int] | None:
-    """``"background=0,vessel=1"`` (or a JSON object / file) → ``{name: value}``."""
+    """``"background=0,vessel=1"`` (or a JSON object / file) -> ``{name: value}``."""
     if not text:
         return None
     candidate = Path(text)
@@ -478,9 +468,7 @@ def parse_labels(text: str | None) -> dict[str, int] | None:
     return out
 
 
-# ---------------------------------------------------------------------------
 # SGE
-# ---------------------------------------------------------------------------
 
 
 def _worker_argv(paths: CViTPaths, **o: Any) -> list[str]:
@@ -531,9 +519,7 @@ def submit_sge(*, paths: CViTPaths, container: Path, src_dir: Path | None = None
     )
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 
 
 @click.command("cvit-stage0-dataprep")

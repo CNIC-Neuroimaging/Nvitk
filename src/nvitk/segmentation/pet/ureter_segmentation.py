@@ -1,15 +1,15 @@
 """
-Ureter exclusion mask for CT-PET (PESA-Fat ct-pet-v5 conventions) — v2.
+Ureter exclusion mask for CT-PET (PESA-Fat ct-pet-v5 conventions): v2.
 
 Key changes versus v1
 ---------------------
-* ``anchor_bladder_entry_per_side`` — each ureter now ends at the ipsilateral
+* ``anchor_bladder_entry_per_side``: each ureter now ends at the ipsilateral
   trigone corner (superior bladder face, same lateral hemisphere as its
   kidney), rather than both sharing a single posterior mid-bladder point.
-* ``build_cost_volume`` — PET-primary cost; CT hard barriers removed.
+* ``build_cost_volume``: PET-primary cost; CT hard barriers removed.
   Three components:
     - inverse of a *gap-filled* SUV envelope (dark spots healed by smoothing);
-    - an anatomical *corridor prior* (distance to the straight kidney→bladder
+    - an anatomical *corridor prior* (distance to the straight kidney->bladder
       line) that keeps the path in the expected para-spinal region;
     - a soft *lateral hemisphere* constraint that prevents the path from
       crossing to the contralateral side.
@@ -48,12 +48,10 @@ from nvitk.core.logger import Logger
 log = Logger()
 
 
-# ---------------------------------------------------------------------------
 # Shared helper
-# ---------------------------------------------------------------------------
 
 def _convex_hull_slicewise_z(vol_uint8: np.ndarray) -> np.ndarray:
-    """Hull each axial (IS) slice along the last axis — same as stage2."""
+    """Hull each axial (IS) slice along the last axis: same as stage2."""
     from nvitk.segmentation.hull_edt import convex_hull_slicewise
 
     out = convex_hull_slicewise(vol_uint8, axis=-1)
@@ -61,9 +59,7 @@ def _convex_hull_slicewise_z(vol_uint8: np.ndarray) -> np.ndarray:
     return as_backend_array(data)
 
 
-# ---------------------------------------------------------------------------
 # Anchors
-# ---------------------------------------------------------------------------
 
 def anchor_kidney_pelvis_concavity(
     kidney_mask: np.ndarray,
@@ -74,8 +70,8 @@ def anchor_kidney_pelvis_concavity(
     structure: np.ndarray | None = None,
 ) -> tuple[float, float, float]:
     """
-    Anchor in (hull − kidney) per axial slice → 3D largest CC → centroid.
-    Unchanged from v1 — starting points are already correct.
+    Anchor in (hull - kidney) per axial slice -> 3D largest CC -> centroid.
+    Unchanged from v1: starting points are already correct.
 
     ``midline_x_index`` / ``medial_half_width_vox``: restrict the cavity to
     the medial half of the kidney (lateral axis = axis 0).
@@ -113,7 +109,7 @@ def anchor_bladder_entry_per_side(
     Anatomy
     -------
     Each ureter enters the bladder at the *ureteral orifice*, located at the
-    lateral corners of the trigone — superior face of the bladder, on the same
+    lateral corners of the trigone: superior face of the bladder, on the same
     lateral side as its kidney.  Both orifices are separated by ~5 cm in an
     adult.  Using a shared mid-bladder point for both ureters causes the MCP
     to route both paths into the midline well before the actual entry point.
@@ -124,21 +120,21 @@ def anchor_bladder_entry_per_side(
        the volume it occupies.
     2. Restrict bladder voxels to the same lateral hemisphere (ipsilateral).
     3. Keep only the top ``superior_fraction`` of those voxels in the IS
-       direction — the trigone is at the superior–posterior face.
+       direction: the trigone is at the superior-posterior face.
     4. Return the centroid of the largest connected component.
 
     Parameters
     ----------
     axis_x : int
         Array axis for the Lateral (L-R) direction.
-        Default 0 — matches ``anchor_kidney_pelvis_concavity`` convention
+        Default 0: matches ``anchor_kidney_pelvis_concavity`` convention
         where ``midline_x_index`` is applied along axis 0.
     axis_z : int
         Array axis for the IS direction.
-        Default -1 (last axis) — matches ``_convex_hull_slicewise_z`` and
+        Default -1 (last axis): matches ``_convex_hull_slicewise_z`` and
         ``anchor_bladder_mid_posterior`` conventions.
     superior_fraction : float
-        Fraction of IS extent to keep from the top; 0.35 → top 35 %.
+        Fraction of IS extent to keep from the top; 0.35 -> top 35 %.
     """
     m  = as_backend_array(bladder_mask).astype(bool)
     km = as_backend_array(kidney_mask).astype(bool)
@@ -152,12 +148,12 @@ def anchor_bladder_entry_per_side(
     if axis_z < 0:
         axis_z = m.ndim + axis_z
 
-    # ---- 1. Lateral centroid of kidney → which side of the volume it occupies ----
+    # 1. Lateral centroid of kidney -> which side of the volume it occupies
     k_coords  = np.argwhere(km)
     k_x_mean  = float(k_coords[:, axis_x].mean())
     vol_x_mid = m.shape[axis_x] / 2.0
 
-    # ---- 2. Build an ipsilateral lateral mask for the bladder --------------------
+    # 2. Build an ipsilateral lateral mask for the bladder
     x_arr     = np.arange(m.shape[axis_x], dtype=np.float64)
     x_in_side = (x_arr >= vol_x_mid) if (k_x_mean >= vol_x_mid) else (x_arr < vol_x_mid)
 
@@ -175,7 +171,7 @@ def anchor_bladder_entry_per_side(
         )
         cand = m.copy()
 
-    # ---- 3. Top ``superior_fraction`` in IS direction (trigone corners are superior) ----
+    # 3. Top ``superior_fraction`` in IS direction (trigone corners are superior)
     other_axes = tuple(i for i in range(m.ndim) if i != axis_z)
     z_present  = np.where(cand.any(axis=other_axes))[0]
     z_min_c, z_max_c = int(z_present.min()), int(z_present.max())
@@ -195,7 +191,7 @@ def anchor_bladder_entry_per_side(
         )
         region = cand
 
-    # ---- 4. Largest CC centroid (base tool; 26-conn default) --------------------
+    # 4. Largest CC centroid (base tool; 26-conn default)
     largest = keep_largest_components(region, n=1, connectivity=3, structure=structure)
     largest = as_backend_array(largest).astype(bool)
     if not np.any(largest):
@@ -204,16 +200,14 @@ def anchor_bladder_entry_per_side(
     return coords.mean(axis=0)
 
 
-# ---------------------------------------------------------------------------
 # Cost maps
-# ---------------------------------------------------------------------------
 
 def build_cost_volume(
     suv: Any,
     spacing_xyz_mm: Tuple[float, float, float],
     body: "Image",
     *,
-    # ---- PET / gap-filling ----------------------------------------
+    # PET / gap-filling
     w_pet: float = 1.0,
     suv_clip_l: float = 1e-2,
     suv_clip_h: float = 15.0,
@@ -222,11 +216,11 @@ def build_cost_volume(
     eps: float = 1e-3,
 ) -> Any:
     """
-    PET-primary cost volume for ureter MCP routing — v2.1.
+    PET-primary cost volume for ureter MCP routing: v2.1.
 
     What changed from v2
     --------------------
-    The corridor prior (distance to the straight kidney→bladder segment) has
+    The corridor prior (distance to the straight kidney->bladder segment) has
     been **removed**.  It was structurally wrong: because it is zero on the
     straight line and grows everywhere else, the MCP minimised it by routing
     straight, producing a linear cylindrical mask regardless of the PET signal.
@@ -235,7 +229,7 @@ def build_cost_volume(
     Components
     ----------
     pet_term
-        Inverse of a gap-filled SUV envelope — the primary and dominant cost.
+        Inverse of a gap-filled SUV envelope: the primary and dominant cost.
         High uptake = low cost = preferred.  Dark spots are healed by blending
         the raw map with a smoothed version (element-wise maximum), so short
         low-uptake gaps along the ureter do not reroute the path.
@@ -245,7 +239,7 @@ def build_cost_volume(
     w_lateral : float
         Maximum penalty added by the lateral guardrail (plateau value).
         In the same units as pet_term.  Default 1.5 ≈ cost of a near-zero
-        SUV voxel — enough to block, not enough to reshape the path.
+        SUV voxel: enough to block, not enough to reshape the path.
     lateral_free_mm : float
         Half-width of the zero-penalty lateral band around the kidney x.
     lateral_slope_mm : float
@@ -256,7 +250,7 @@ def build_cost_volume(
     """
     s0, s1, s2 = spacing_xyz_mm
 
-    # ---- gap-filled SUV ---------------------------------------------------
+    # gap-filled SUV
     # 1) Body mask
     body_mask = as_backend_array(body.data) > 0
 
@@ -295,9 +289,7 @@ def build_cost_volume(
     return cost
 
 
-# ---------------------------------------------------------------------------
 # Path + spline + tube  (unchanged from v1)
-# ---------------------------------------------------------------------------
 
 def minimum_cost_path_zyx(
     cost: Any,
@@ -365,9 +357,7 @@ def edt_tube_mm(
     return (dist_mm <= radius_mm).astype(np.uint8)
 
 
-# ---------------------------------------------------------------------------
 # Main entry point
-# ---------------------------------------------------------------------------
 
 def segment_ureter(
     pet_suv: "Image",
@@ -376,16 +366,16 @@ def segment_ureter(
     bladder: "Image",
     body: "Image",
     *,
-    # ---- Tube geometry -------------------------------------------------
+    # Tube geometry
     radius_mm: float = 6.0,
-    # ---- Cost weights --------------------------------------------------
+    # Cost weights
     w_pet: float = 5.0,
-    # ---- Gap-filling ---------------------------------------------------
+    # Gap-filling
     suv_fill_sigma_vox: float = 0.5,
     suv_fill_blend: float = 0.05,
-    # ---- Spline --------------------------------------------------------
+    # Spline
     spline_s: float = 1.5,
-    # ---- Axis conventions — adjust if your resampled grid differs -------
+    # Axis conventions: adjust if your resampled grid differs
     axis_x: int = 0,   # lateral (L-R) axis in the array
     axis_z: int = -1,  # IS axis in the array
 ) -> Tuple[Any, Dict[str, Any], Dict[str, Any]]:
@@ -428,7 +418,7 @@ def segment_ureter(
 
     for side, km in [("R", kidney_r.data), ("L", kidney_l.data)]:
 
-        # ---- anchors -------------------------------------------------------
+        # anchors
         p_start = anchor_kidney_pelvis_concavity(km, spacing=spacing_xyz)
         p_end   = anchor_bladder_entry_per_side(
             bm, km,
@@ -441,7 +431,7 @@ def segment_ureter(
 
         log.info("Ureter-%s: start_vox=%s  end_vox=%s", side, start, end)
 
-        # ---- PET-primary cost volume ---------------------------------------
+        # PET-primary cost volume
         cost = build_cost_volume(
             suv, spacing_xyz, body,
             w_pet=w_pet,
@@ -449,11 +439,11 @@ def segment_ureter(
             suv_fill_blend=suv_fill_blend,
         )
 
-        # ---- MCP routing ---------------------------------------------------
+        # MCP routing
         path = minimum_cost_path_zyx(cost, start, end)
         log.info("Ureter-%s: MCP path length = %d voxels", side, int(path.shape[0]))
 
-        # ---- B-spline smoothing --------------------------------------------
+        # B-spline smoothing
         n_pts   = max(2 * int(path.shape[0]), 64)
         lo      = np.array([0, 0, 0], dtype=np.float64)
         hi      = np.array(
@@ -462,7 +452,7 @@ def segment_ureter(
         )
         path_sp = spline_resample_zyx(path, n_pts, spline_s, lo, hi)
 
-        # ---- EDT tube mask -------------------------------------------------
+        # EDT tube mask
         line         = line_mask_from_path(suv.shape, path_sp)
         tube         = edt_tube_mm(line, spacing_xyz, radius_mm)
         ureter_data  = np.where(tube > 0, tube, ureter_data)

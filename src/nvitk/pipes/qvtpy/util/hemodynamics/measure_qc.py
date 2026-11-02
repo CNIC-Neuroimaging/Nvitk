@@ -1,7 +1,7 @@
 """QC figures for stage-6 LOC cross-section measurements.
 
 Writes a five-panel PNG (centerline indices loc±2) with complex-difference background,
-in-plane mask contours, and the active LOC marked — for visual review of
+in-plane mask contours, and the active LOC marked, for visual review of
 :func:`~nvitk.measure.cross_section.cross_section_at_loc` placement.
 """
 
@@ -77,7 +77,7 @@ def save_loc_cross_section_qc_png(
     volume_seg: np.ndarray | None = None,
     volume_label_id: int = 0,
 ) -> None:
-    """Five-panel row: CL indices loc-2 … loc+2 with CD and mask contour each."""
+    """Five-panel row: CL indices loc-2 ... loc+2 with CD and mask contour each."""
     pts = as_backend_array(centerline_pts).astype(np.float64)
     if pts.shape[0] < 1:
         return

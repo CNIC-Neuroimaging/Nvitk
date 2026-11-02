@@ -3,9 +3,9 @@ NumPy vs CuPy selection, global and context-scoped switching, and array conversi
 
 Environment variables:
 
-- ``NVITK_BACKEND`` — ``auto``, ``numpy``, ``cupy``, ``cupy_required``, or aliases (``cpu``, ``gpu``, …).
-- ``NVITK_CUDA_DEVICE`` — optional integer device index.
-- ``NVITK_WARN_ON_FALLBACK`` — warn when falling back from CuPy to NumPy.
+- ``NVITK_BACKEND``: ``auto``, ``numpy``, ``cupy``, ``cupy_required``, or aliases (``cpu``, ``gpu``, ...).
+- ``NVITK_CUDA_DEVICE``: optional integer device index.
+- ``NVITK_WARN_ON_FALLBACK``: warn when falling back from CuPy to NumPy.
 
 Use :class:`using` or :func:`using_backend` for temporary switches; :func:`set_global_backend`
 for process-wide default. Modules can call :func:`setup` once to inject dynamic ``np``/``scipy``/``ndi``.
@@ -36,9 +36,7 @@ except Exception:
     _cp_ndi = None
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Types
-# ──────────────────────────────────────────────────────────────────────────────
 
 BackendName = Literal["numpy", "cupy"]
 
@@ -52,9 +50,7 @@ class BackendModules:
     ndi: Any
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # CuPy availability
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _cupy_runtime_available() -> bool:
@@ -154,9 +150,7 @@ def _update_backend_proxies() -> None:
         pass
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Global & context backend
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def get_global_backend() -> BackendName:
@@ -183,7 +177,7 @@ def set_global_backend(name: str, allow_fallback: bool = False) -> BackendName:
     Returns
     -------
     BackendName
-        The resolved backend actually in effect.
+        The resolved backend in effect.
     """
     global _global_backend
     resolved = _resolve_backend(name, allow_fallback=allow_fallback)

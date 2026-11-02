@@ -1,11 +1,11 @@
-"""Registry of integer label id → human name maps for GUI label selection."""
+"""Registry of integer label id -> human name maps for GUI label selection."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-# ── Schema entry ─────────────────────────────────────────────────────────────
+# Schema entry
 
 
 @dataclass(frozen=True)
@@ -135,7 +135,7 @@ def _build_pipeline_schemas() -> dict[str, LabelSchema]:
             _invert(LEGS_LABELS),
             "LEGS.nii from dixon-v5.",
         ),
-        # ── TopBrain ────────────────────────────────────────────────────────
+        # TopBrain
         # Three vocabularies that share the value range 1-34 and diverge above it. Keeping them
         # as separate schemas is what stops label 35 being shown as "VoG" on a mask where it
         # means "R-ICA-C1-C5"; :func:`guess_schema_from_layer` picks between them.
@@ -184,6 +184,59 @@ def _build_totalsegmentator_schemas() -> dict[str, LabelSchema]:
     return out
 
 
+def _build_fastsurfer_schemas() -> dict[str, LabelSchema]:
+    """FastSurfer's label sets, named from the lookup tables in the installed FastSurfer tree.
+
+    Without a tree the whole-brain sets fall back to nvitk's own Desikan-Killiany table
+    (cortex only); the sub-module sets are left out.
+    """
+    try:
+        from nvitk.segmentation.fastsurfer.outputs import lut_for
+
+        freesurfer = {k: v[0] for k, v in lut_for("freesurfer").items()}
+        fastsurfer = {k: v[0] for k, v in lut_for("fastsurfer").items()}
+    except Exception:  # noqa: BLE001 (no tree, no pyyaml: the fallback below)
+        freesurfer = fastsurfer = {}
+    if not freesurfer:
+        from nvitk.segmentation.dkt import _aparc_label_table
+
+        freesurfer = _aparc_label_table()
+    # CerebNet and HypVINN write FreeSurfer's ids (601-631 with the cerebellar white
+    # matter 7/46; 961-984), not their own LUTs' indices.
+    cerebnet = {k: v for k, v in freesurfer.items() if 601 <= k <= 631 or k in (7, 46)}
+    hypvinn = {k: v for k, v in freesurfer.items() if 961 <= k <= 984}
+    callosum = {k: freesurfer.get(k, f"CC {k}") for k in range(250, 256)}
+    aparc = {k: freesurfer.get(k, name) for k, name in (fastsurfer or freesurfer).items()}
+    aparc.update(callosum)
+    aseg = {k: v for k, v in aparc.items() if k < 1000}
+    out = {
+        "fastsurfer_aparc_aseg": LabelSchema(
+            "fastsurfer_aparc_aseg", "FastSurfer — aparc.DKTatlas+aseg", "FastSurfer", aparc,
+            "Whole-brain segmentation: subcortical structures and DKT cortical parcels "
+            "(FreeSurfer numbering).",
+        ),
+        "fastsurfer_aseg": LabelSchema(
+            "fastsurfer_aseg", "FastSurfer — aseg", "FastSurfer", aseg,
+            "aparc+aseg reduced to aseg (cortex as one label per hemisphere).",
+        ),
+        "fastsurfer_cc": LabelSchema(
+            "fastsurfer_cc", "FastSurfer — corpus callosum", "FastSurfer", callosum,
+            "Corpus callosum segments, posterior to anterior.",
+        ),
+    }
+    if cerebnet:
+        out["cerebnet"] = LabelSchema(
+            "cerebnet", "FastSurfer — cerebellum (CerebNet)", "FastSurfer", cerebnet,
+            "Cerebellar lobules, vermis and white matter.",
+        )
+    if hypvinn:
+        out["hypvinn"] = LabelSchema(
+            "hypvinn", "FastSurfer — hypothalamus (HypVINN)", "FastSurfer", hypvinn,
+            "Hypothalamic sub-structures and adjacent regions.",
+        )
+    return out
+
+
 #: The three TopBrain schema keys, in the order the challenge introduced them.
 TOPBRAIN_SCHEMA_KEYS: tuple[str, ...] = ("topbrain-ta36", "topbrain-v1-ct", "topbrain-v1-mr")
 
@@ -196,6 +249,10 @@ def all_schemas() -> dict[str, LabelSchema]:
     if _SCHEMAS is None:
         merged = _build_pipeline_schemas()
         merged.update(_build_totalsegmentator_schemas())
+        try:
+            merged.update(_build_fastsurfer_schemas())
+        except Exception:  # noqa: BLE001 (naming is cosmetic)
+            pass
         _SCHEMAS = merged
     return _SCHEMAS
 
@@ -210,7 +267,7 @@ def schema_keys() -> list[str]:
         order = {"General": 0, "Segmentation / vessels": 1, "Pipelines / QVTpy": 2,
                  "Pipelines / TopBrain": 3,
                  "Pipelines / PESA-FAT": 4, "Pipelines / PESA-FAT Dixon": 5,
-                 "TotalSegmentator": 6}
+                 "TotalSegmentator": 6, "FastSurfer": 7}
         return (order.get(s.group, 99), s.title)
 
     return sorted(schemas.keys(), key=_sort_key)
@@ -232,7 +289,7 @@ def schema_for_totalsegmentator_task(task: str) -> str:
     return "generic"
 
 
-# Filename / layer-name hints → schema key (first match wins).
+# Filename / layer-name hints -> schema key (first match wins).
 _GUESS_RULES: tuple[tuple[str, str], ...] = (
     # TopBrain first: its release directory names are unambiguous, and the three label sets
     # collide above value 34, so a wrong guess renames real anatomy rather than just failing.
@@ -245,6 +302,13 @@ _GUESS_RULES: tuple[tuple[str, str], ...] = (
     ("topbrain_v1_mr", "topbrain-v1-mr"),
     ("topbrainv1mr", "topbrain-v1-mr"),
     ("dataset503", "topbrain-v1-mr"),
+    # FastSurfer / FreeSurfer output names.
+    ("aparc.dktatlas+aseg", "fastsurfer_aparc_aseg"),
+    ("aparc+aseg", "fastsurfer_aparc_aseg"),
+    ("aseg.auto", "fastsurfer_aseg"),
+    ("cerebellum.cerebnet", "cerebnet"),
+    ("hypothalamus.hypvinn", "hypvinn"),
+    ("callosum.cc", "fastsurfer_cc"),
     ("eicab", "eicab"),
     ("seg_4dflow", "qvtpy-4dflow"),
     ("centerlines_mask", "qvtpy-4dflow"),
@@ -262,7 +326,7 @@ _GUESS_RULES: tuple[tuple[str, str], ...] = (
 )
 
 
-#: Substrings marking a mask as TopBrain when the label set itself is not named in the path —
+#: Substrings marking a mask as TopBrain when the label set itself is not named in the path:
 #: predictions, for instance, live under a trainer-named directory.
 _TOPBRAIN_HINTS: tuple[str, ...] = ("topbrain", "topcow", "topaneu")
 
@@ -296,13 +360,13 @@ def _guess_topbrain_schema(layer: Any, blob: str) -> str | None:
     own predictions land in a directory named after the trainer, so the label set often cannot
     be recovered from the path at all. Two independent signals settle it:
 
-    * **modality**, from the ``topcow_{ct|mr}_`` filename convention — ``v1_ct`` masks only
+    * **modality**, from the ``topcow_{ct|mr}_`` filename convention: ``v1_ct`` masks only
       exist for CTA and ``v1_mr`` only for MRA;
     * **the largest label value present**, since the sets top out at 36, 40 and 42.
 
     A maximum of 36 or below is reported as TA36: that is this pipeline's own output, and it is
     also the safe answer, because every value it names means the same thing in all three sets
-    except 35/36 — which is exactly the range a higher maximum resolves.
+    except 35/36, which is exactly the range a higher maximum resolves.
     """
     if not any(hint in blob for hint in _TOPBRAIN_HINTS):
         return None
@@ -353,7 +417,7 @@ def layer_schema_key(layer: Any | None) -> str | None:
 
     Kept per layer, so a picker that moves between two segmentations names each
     with its own vocabulary instead of carrying the last one across. The guess is
-    cached too — on TopBrain masks it inspects the data — including a failed one.
+    cached too (on TopBrain masks it inspects the data), including a failed one.
     """
     if layer is None:
         return None
@@ -378,7 +442,7 @@ def remember_layer_schema(layer: Any | None, key: str | None) -> None:
         pass
 
 
-# ── Names given by hand ──────────────────────────────────────────────────────
+# Names given by hand
 
 #: Metadata key of the names given to a layer's labels by hand, ``{id: name}``.
 #: They win over the vocabulary's. In the metadata, unlike the vocabulary choice:
@@ -410,7 +474,7 @@ def label_name(layer: Any | None, label_id: int) -> str | None:
         return name
     try:
         key = layer_schema_key(layer)
-    except Exception:  # noqa: BLE001 — naming is cosmetic
+    except Exception:  # noqa: BLE001 (naming is cosmetic)
         key = None
     schema = get_schema(key) if key else None
     return schema.name_for(label_id) if schema else None

@@ -188,7 +188,7 @@ def stream_subjects_xnat_to_cluster(
     delete_local_after_upload: bool = True,
     port: int = 22,
 ) -> dict[str, dict[str, list[Path]]]:
-    """Per subject: XNAT download → cluster upload over sshfs → delete local DICOM staging.
+    """Per subject: XNAT download -> cluster upload over sshfs -> delete local DICOM staging.
 
     SSH is verified before any XNAT download. A single cluster session -- so a single sshfs
     mount -- is reused for the full subject loop.

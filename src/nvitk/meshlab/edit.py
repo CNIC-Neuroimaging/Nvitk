@@ -39,7 +39,7 @@ def piece_at(mesh: Mesh, point: Sequence[float]) -> np.ndarray:
 
 
 def keep_piece(mesh: Mesh, point: Sequence[float], *, delete: bool = False) -> Mesh:
-    """Keep only the piece under *point* — or delete it, with *delete*."""
+    """Keep only the piece under *point*: or delete it, with *delete*."""
     sel = piece_at(mesh, point)
     keep = ~sel if delete else sel
     idx = np.flatnonzero(keep)
@@ -56,7 +56,7 @@ def sculpt(mesh: Mesh, centre: Sequence[float], radius: float, amount: float) ->
     """Push (*amount* > 0, outward) or pull (< 0) the surface around *centre*.
 
     Vertices move along their normals by ``amount × falloff(distance)``, a smooth
-    bump that is zero at *radius* — so the edit blends into the rest.
+    bump that is zero at *radius*, so the edit blends into the rest.
     """
     d = np.linalg.norm(mesh.vertices - np.asarray(centre, dtype=float), axis=1)
     w = _falloff(d, radius) * float(amount)

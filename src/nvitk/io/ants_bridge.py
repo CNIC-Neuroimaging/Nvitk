@@ -1,4 +1,4 @@
-"""Convert nvitk :class:`~nvitk.types.Image` / arrays ↔ ANTsPy images."""
+"""Convert nvitk :class:`~nvitk.types.Image` / arrays <-> ANTsPy images."""
 
 from __future__ import annotations
 
@@ -72,7 +72,7 @@ def _spacing_origin_direction(image: Any, ndim: int) -> tuple[
         if meta.get("direction") is not None:
             direction = np.asarray(meta["direction"], dtype=float)
 
-    # Derive missing / inconsistent geometry from the voxel→world affine
+    # Derive missing / inconsistent geometry from the voxel->world affine
     # (critical for ANTsPyNet template registration / center-of-mass alignment).
     aff = _affine_matrix(image)
     if aff is not None:
@@ -88,7 +88,7 @@ def _spacing_origin_direction(image: Any, ndim: int) -> tuple[
             and any(abs(a - 1.0) > 1e-3 for a in aff_spacing)
         ):
             # Napari often leaves scale at (1,1,1) while the affine still encodes
-            # real mm spacing — prefer the affine.
+            # real mm spacing: prefer the affine.
             spacing = aff_spacing + (tuple(spacing[n:]) if len(spacing) > n else ())
             if ndim > len(spacing):
                 spacing = spacing + tuple(1.0 for _ in range(ndim - len(spacing)))

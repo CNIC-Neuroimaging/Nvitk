@@ -7,7 +7,7 @@
   not be broadcast), and 3D value picks read the wrong voxel. The points are
   brought back to the layer's own dimensions.
 * **Painting on the 3D canvas into empty space.** Napari paints where the ray
-  meets the first existing label and does nothing when there is none — so an
+  meets the first existing label and does nothing when there is none, so an
   empty label layer cannot be painted in 3D at all. A registered fallback (the
   Labeling tab's: the voxel the reference image shows there) gives the brush a
   place to land. Only the brush uses it: a bucket fill landing on background
@@ -19,6 +19,12 @@
   visual, which makes every later addition fail too. A hidden layer now gets
   the empty slice of the current display (2D or 3D); it is sliced for real
   when it is shown, as before.
+* **Hiding a layer on the main canvas only.** Napari has one visibility per
+  layer, shared by the layer list, the canvas and everything nvitk draws from
+  it (the orthogonal views). A layer carrying ``_nvitk_canvas_hidden = True``
+  keeps ``visible`` as it is but its canvas node stays hidden: through every
+  path Napari writes ``node.visible``: the visibility event, ``reset()`` (a 2D/3D
+  switch builds a new node) and each new slice of an image or labels layer.
 """
 
 from __future__ import annotations
@@ -63,7 +69,7 @@ def _fix_ray_intersections() -> None:
         if len(start) == nd:
             return start, end
         # The displayed entries are right (data coordinates, at the layer's own
-        # displayed dims); the rest came from the world position — take them
+        # displayed dims); the rest came from the world position: take them
         # from the position mapped into the layer instead.
         base = np.asarray(self.world_to_data(np.asarray(position, dtype=float)), dtype=float)
         dims = [int(d) for d in dims_displayed]
@@ -95,7 +101,7 @@ def _fix_labels_3d_brush() -> None:
         for fallback in list(_LABELS_3D_FALLBACKS):
             try:
                 hit = fallback(layer, event)
-            except Exception:  # noqa: BLE001 — a fallback must never break the brush
+            except Exception:  # noqa: BLE001 (a fallback must never break the brush)
                 hit = None
             if hit is not None:
                 # Napari's _draw skips background voxels in 3D (it paints on labels
@@ -150,13 +156,58 @@ def _fix_hidden_layer_slices() -> None:
     ScalarFieldSlicingState.set_slice_input = set_slice_input
 
 
+#: Attribute a layer carries while it is hidden on the main canvas only.
+CANVAS_HIDDEN_ATTR = "_nvitk_canvas_hidden"
+
+
+def canvas_hidden(layer: Any) -> bool:
+    """Whether *layer* is kept off the main canvas (its ``visible`` notwithstanding)."""
+    return bool(getattr(layer, CANVAS_HIDDEN_ATTR, False))
+
+
+def _fix_canvas_only_visibility() -> None:
+    from napari._vispy.layers.base import VispyBaseLayer
+    from napari._vispy.layers.scalar_field import VispyScalarFieldBaseLayer
+
+    if getattr(VispyBaseLayer._on_visible_change, "_nvitk_fixed", False):
+        return
+    original_visible = VispyBaseLayer._on_visible_change
+    original_data = VispyScalarFieldBaseLayer._on_data_change
+
+    def _on_visible_change(self: Any) -> None:
+        original_visible(self)
+        if canvas_hidden(self.layer):
+            self.node.visible = False
+
+    def _on_data_change(self: Any) -> None:
+        # A new slice sets ``node.visible`` from ``layer.visible`` directly.
+        original_data(self)
+        if canvas_hidden(self.layer):
+            self.node.visible = False
+
+    _on_visible_change._nvitk_fixed = True  # type: ignore[attr-defined]
+    VispyBaseLayer._on_visible_change = _on_visible_change
+    VispyScalarFieldBaseLayer._on_data_change = _on_data_change
+
+
 def install_napari_fixes() -> None:
     """Install every fix above (idempotent; a missing Napari internal skips its fix)."""
-    for fix in (_fix_ray_intersections, _fix_labels_3d_brush, _fix_hidden_layer_slices):
+    for fix in (
+        _fix_ray_intersections,
+        _fix_labels_3d_brush,
+        _fix_hidden_layer_slices,
+        _fix_canvas_only_visibility,
+    ):
         try:
             fix()
-        except Exception:  # noqa: BLE001 — another Napari version: leave it as it is
+        except Exception:  # noqa: BLE001 (another Napari version: leave it as it is)
             pass
 
 
-__all__ = ["install_napari_fixes", "register_labels_3d_fallback", "unregister_labels_3d_fallback"]
+__all__ = [
+    "CANVAS_HIDDEN_ATTR",
+    "canvas_hidden",
+    "install_napari_fixes",
+    "register_labels_3d_fallback",
+    "unregister_labels_3d_fallback",
+]

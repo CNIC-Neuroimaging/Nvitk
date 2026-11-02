@@ -1,7 +1,7 @@
 """Dixon anatomical region assignment from DICOM slice locations.
 
 Regions (HEAD, THORAX, LEGS) are ordered by ascending slice coordinate:
-lowest centroid → HEAD, middle → THORAX, highest → LEGS.
+lowest centroid -> HEAD, middle -> THORAX, highest -> LEGS.
 """
 
 from __future__ import annotations
@@ -233,7 +233,7 @@ def build_series_region_map(
     dicom_dir: Path | str,
     series_numbers: set[str],
 ) -> dict[str, str]:
-    """Compute series_number → region from DICOM slice locations."""
+    """Compute series_number -> region from DICOM slice locations."""
     centroids = series_centroids_from_dicom_dir(dicom_dir, series_numbers)
     missing = series_numbers - set(centroids)
     for sn in sorted(missing):
@@ -264,7 +264,7 @@ def _is_dicom_zip_member(name: str) -> bool:
 
 def peek_scan_slice_centroid(scan: Any) -> float | None:
     """Download an XNAT scan DICOM zip to temp and return median slice centroid."""
-    # Lazy import avoids db.xnat ↔ dixon_regions circular dependency at import time.
+    # Lazy import avoids db.xnat <-> dixon_regions circular dependency at import time.
     from nvitk.db.xnat import _download_scan_bundle
 
     datasets: list[Any] = []

@@ -29,9 +29,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Operator lookup
-# ──────────────────────────────────────────────────────────────────────────────
 
 _CONV = {1: nn.Conv1d, 2: nn.Conv2d, 3: nn.Conv3d}
 _CONV_T = {1: nn.ConvTranspose1d, 2: nn.ConvTranspose2d, 3: nn.ConvTranspose3d}
@@ -62,9 +60,7 @@ def as_tuple(value: int | Sequence[int], ndim: int) -> tuple[int, ...]:
     return out
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Normalisation
-# ──────────────────────────────────────────────────────────────────────────────
 
 class LayerNormNd(nn.Module):
     """LayerNorm over the channel axis of a channels-first tensor, per spatial location.
@@ -96,12 +92,10 @@ def make_norm(kind: str, num_channels: int, ndim: int) -> nn.Module:
     raise ValueError(f"Unknown norm {kind!r}; expected 'instance' or 'layer'.")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Convolutional blocks
-# ──────────────────────────────────────────────────────────────────────────────
 
 class ConvNormAct(nn.Module):
-    """``Conv → Norm → LeakyReLU(0.01)`` with 'same' padding for odd kernels.
+    """``Conv -> Norm -> LeakyReLU(0.01)`` with 'same' padding for odd kernels.
 
     Parameters
     ----------
@@ -199,9 +193,7 @@ class ConvBlock(nn.Sequential):
         super().__init__(*layers)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Transformer helpers
-# ──────────────────────────────────────────────────────────────────────────────
 
 class DropPath(nn.Module):
     """Stochastic depth: drop the whole residual branch per sample with probability ``p``."""
@@ -243,15 +235,13 @@ class SwiGLU(nn.Module):
         return self.drop(self.fc2(self.drop(F.silu(a) * b)))
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Initialisation
-# ──────────────────────────────────────────────────────────────────────────────
 
 def init_weights(module: nn.Module, neg_slope: float = 1e-2) -> None:
     """Initialise one module in place (use with ``Module.apply``).
 
-    Conv / ConvTranspose → He-normal (``a=neg_slope``), zero bias. Linear → truncated normal
-    (std 0.02), zero bias. Affine norms → weight 1, bias 0. Everything else is left alone.
+    Conv / ConvTranspose -> He-normal (``a=neg_slope``), zero bias. Linear -> truncated normal
+    (std 0.02), zero bias. Affine norms -> weight 1, bias 0. Everything else is left alone.
     """
     if isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d,
                            nn.ConvTranspose1d, nn.ConvTranspose2d, nn.ConvTranspose3d)):

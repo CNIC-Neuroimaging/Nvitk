@@ -7,7 +7,7 @@ from typing import Any, Callable
 import numpy as np
 from magicgui import magicgui
 
-from nvitk.gui.labels.visibility import infer_target_mode
+from nvitk.gui.labels.visibility import infer_target_mode, is_label_like_layer
 from nvitk.gui.tools.presets import apply_preset_to_panel, preset_key_from_title
 from nvitk.gui.tools.runner import log_tool_failure, notify, parse_label_ids, run_gui_tool
 from nvitk.gui.tools.registry import (
@@ -53,7 +53,7 @@ def _registry_param_names() -> tuple[str, ...]:
 
 
 def _set_param_visibility(widget: Any, tool_id: str) -> None:
-    """Show only the parameter widgets on *widget* that *tool_id* actually uses; hide the rest of the
+    """Show only the parameter widgets on *widget* that *tool_id* uses; hide the rest of the
     shared parameter pool."""
     visible = {p.name for p in params_for_tool(tool_id)}
     # The registry's own names as well as the form's: a parameter a tool declares
@@ -132,7 +132,7 @@ def _set_param_visibility(widget: Any, tool_id: str) -> None:
         "topology",
         "species",
         "n_workers",
-        "input_already_smoothed",
+        "taubin",
         "working_dir",
         "task",
         "topbrain_model",
@@ -300,9 +300,9 @@ def _sync_param_specs(widget: Any, tool_id: str) -> None:
 
     A widget is built once, with the caption and bounds of whichever tool (or
     hand-written option) declared it first, and shared by every tool that uses the
-    name. Without this a tool showed another's caption for its field — the mask
-    picker read "Brain mask layer" everywhere — and could not take a value outside
-    another tool's range (a fill of −1024 against a 0…999 spin box).
+    name. Without this a tool showed another's caption for its field (the mask
+    picker read "Brain mask layer" everywhere), and could not take a value outside
+    another tool's range (a fill of -1024 against a 0...999 spin box).
     """
     for spec in params_for_tool(tool_id):
         sub = getattr(widget, spec.name, None)
@@ -311,7 +311,7 @@ def _sync_param_specs(widget: Any, tool_id: str) -> None:
         if spec.label and getattr(sub, "label", None) != spec.label:
             try:
                 sub.label = spec.label
-            except Exception:  # noqa: BLE001 — a widget without a settable caption
+            except Exception:  # noqa: BLE001 (a widget without a settable caption)
                 pass
         if spec.kind in ("float", "int"):
             # Min, max, then min again: a new minimum above the old maximum only
@@ -358,8 +358,8 @@ def _layer_param_names() -> tuple[str, ...]:
 def _update_choice_params(widget: Any, tool_id: str) -> None:
     """Point every choice widget at the options *tool_id* declares for it.
 
-    Parameter names are shared across tools — several filters ask for a
-    ``method`` — so a picker built with one tool's options would otherwise keep
+    Parameter names are shared across tools (several filters ask for a
+    ``method``), so a picker built with one tool's options would otherwise keep
     them when another is selected, and offer choices that tool cannot honour.
     """
     from nvitk.gui.tools.registry import params_for_tool
@@ -431,7 +431,7 @@ def _update_phase_layers(widget: Any, viewer: Any) -> None:
     _update_reference_layers(widget, viewer)
 
 
-#: Bounds for spin boxes whose :class:`ParamSpec` leaves them open — magicgui's own
+#: Bounds for spin boxes whose :class:`ParamSpec` leaves them open: magicgui's own
 #: defaults (0..999) would silently clamp a seed or an iteration count.
 _INT_BOUND = 2**31 - 1
 _FLOAT_BOUND = 1e12
@@ -721,7 +721,7 @@ def build_tool_panel(
             "value": SPECIES_AUTO,
         },
         n_workers={"label": "Workers", "min": 1, "max": 64, "value": 1},
-        input_already_smoothed={"label": "Input already Taubin-smoothed", "value": False},
+        taubin={"label": "Taubin-smooth the labels", "value": False},
         working_dir={"label": "Working directory", "value": "."},
         task={
             "choices": list(AVAILABLE_TASKS),
@@ -1174,7 +1174,7 @@ def build_tool_panel(
         topology: str,
         species: str,
         n_workers: int,
-        input_already_smoothed: bool,
+        taubin: bool,
         working_dir: str,
         task: str,
         topbrain_model: str,
@@ -1366,7 +1366,7 @@ def build_tool_panel(
         if get_label_schema is not None:
             try:
                 params["label_schema"] = str(get_label_schema() or "")
-            except Exception:  # noqa: BLE001 — naming is cosmetic
+            except Exception:  # noqa: BLE001 (naming is cosmetic)
                 params["label_schema"] = ""
         if ids and tool_id in ("seg_combine_labels", "seg_remove_labels"):
             params["label_ids"] = ",".join(str(i) for i in ids)
@@ -1415,18 +1415,30 @@ def build_tool_panel(
             return
 
         name = f"{layer.name}_{tool_id}"
-        try:
-            out_kwargs = layer_display_kwargs(layer, name=name, ndim=int(np.ndim(result)))
-        except TypeError:  # a caller-supplied builder without the ndim keyword
-            out_kwargs = layer_display_kwargs(layer, name=name)
+        # A result on the reference layer's grid (resample to reference) is placed (and
+        # saved) like the reference, never like the active layer it was computed from.
+        grid_ref = None
+        if spec is not None and spec.output_on_reference_grid:
+            ref_name = str(params.get("reference_layer") or "").strip()
+            grid_ref = next((ly for ly in viewer.layers if ly.name == ref_name), None)
+        if grid_ref is not None:
+            from nvitk.gui.core.spatial import reference_grid_kwargs
+
+            out_kwargs = reference_grid_kwargs(layer, grid_ref, name=name)
+        else:
+            try:
+                out_kwargs = layer_display_kwargs(layer, name=name, ndim=int(np.ndim(result)))
+            except TypeError:  # a caller-supplied builder without the ndim keyword
+                out_kwargs = layer_display_kwargs(layer, name=name)
         can_replace = (
             overlay_mode == "replace_active"
+            and grid_ref is None
             and tuple(result.shape) == tuple(layer.data.shape)
         )
         result_arr = np.asarray(result)
         # A parcellation belongs in a Labels layer, not an Image one: an Image layer renders label
         # ids as intensities and gives no per-label colour, visibility or picking. The runtime test
-        # stays — a per-label tool run on a single label legitimately returns a binary mask, which
+        # stays: a per-label tool run on a single label legitimately returns a binary mask, which
         # is an Image result like any other.
         label_output = tool_id == "seg_blood_flood" or bool(spec and spec.multilabel)
         as_labels = label_output and (
@@ -1439,6 +1451,12 @@ def build_tool_panel(
                 layer.name = name
             except Exception:
                 viewer.add_image(result, **out_kwargs)
+        elif spec is not None and spec.geometric and is_label_like_layer(layer):
+            # A label map moved by a geometric tool is still a label map.
+            lab = viewer.add_labels(
+                result_arr.astype(np.int32, copy=False), opacity=0.7, **out_kwargs
+            )
+            lab._nvitk_label_like = True
         elif as_labels:
             from nvitk.gui.core.spatial import layer_spatial_kwargs
 

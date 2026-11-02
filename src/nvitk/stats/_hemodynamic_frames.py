@@ -80,7 +80,7 @@ def aggregate_territory_measurements(
 
 #: Suffix template for a per-frame column. Matches the wide-key convention
 #: :func:`~nvitk.db.repo._compose_image_wide_keys` writes and
-#: :func:`~nvitk.stats._vessel_territory_map.parse_wide_image_column` reads back — including its
+#: :func:`~nvitk.stats._vessel_territory_map.parse_wide_image_column` reads back, including its
 #: quirk that **frame 0 carries no suffix at all**.
 FRAME_SUFFIX = "_f{index}"
 
@@ -90,7 +90,7 @@ def frame_column_name(variable_id: str, frame_index: int) -> str:
     Column name for one cardiac frame of a time-resolved variable.
 
     Frame 0 gets the bare variable name, every later frame a ``_fN`` suffix. That asymmetry is not
-    a choice made here — it is what the database's own wide pivot produces, and diverging from it
+    a choice made here: it is what the database's own wide pivot produces, and diverging from it
     would leave two spellings of the same column in circulation.
 
     Examples
@@ -114,13 +114,13 @@ def aggregate_territory_frames(
     Why not just aggregate
     ----------------------
     :func:`aggregate_territory_measurements` groups on ``(subject_uid, territory)`` alone, so a
-    variable with a ``frame_index`` — ``flow_tseries`` is the only one today — would have its whole
+    variable with a ``frame_index`` (``flow_tseries`` is the only one today) would have its whole
     cardiac cycle averaged into a single number. That number already exists and is called
     ``flow_mean``; collapsing the waveform to recompute it discards the only thing the timeseries
     adds.
 
     So the frame index joins the grouping key and the result is pivoted: one row per
-    ``(subject_uid, territory)`` still, but ``flow_tseries``, ``flow_tseries_f1`` … one per frame.
+    ``(subject_uid, territory)`` still, but ``flow_tseries``, ``flow_tseries_f1`` ... one per frame.
     The frame stays rectangular and numeric, so every model, filter and export keeps working, and a
     caller that wants the waveform reads the columns back with :func:`frame_columns`.
 
@@ -144,7 +144,7 @@ def aggregate_territory_frames(
 
     sub["value"] = pd.to_numeric(sub["value"], errors="coerce")
     sub["frame_index"] = pd.to_numeric(sub["frame_index"], errors="coerce")
-    # Rows without a frame index are not part of the waveform — a scalar published under the same
+    # Rows without a frame index are not part of the waveform: a scalar published under the same
     # variable id would otherwise land in an arbitrary frame column.
     sub = sub.loc[sub["frame_index"].notna()]
     if sub.empty:
@@ -173,7 +173,7 @@ def frame_columns(frame: pd.DataFrame, variable_id: str) -> list[str]:
     """
     The per-frame columns of *variable_id* in *frame*, in cardiac order.
 
-    Sorted by frame index rather than by name, so frame 10 follows frame 9 instead of frame 1 — a
+    Sorted by frame index rather than by name, so frame 10 follows frame 9 instead of frame 1: a
     lexical sort would reorder the waveform and animate a cardiac cycle out of sequence.
     """
     import re
@@ -288,7 +288,7 @@ def build_analysis_df_from_territory_definitions(
     the same ASL ``region_id`` (e.g. ``ctx-whole-brain``) may contribute to **more
     than one** analysis territory (e.g. ``ICA-WB`` and ``Venous-WB``) with
     different flow region groupings, because territories are not derived from a
-    single inverted ``region → territory`` map.
+    single inverted ``region -> territory`` map.
 
     Parameters
     ----------
@@ -353,7 +353,7 @@ def build_analysis_df_from_repo_frames(
 ) -> pd.DataFrame:
     """
     One row per ``(subject_uid, territory)`` with aggregated imaging measures and
-    merged covariates — same grain as ``cacs.ipynb`` after melt (long format).
+    merged covariates: same grain as ``cacs.ipynb`` after melt (long format).
 
     Parameters
     ----------
@@ -365,7 +365,7 @@ def build_analysis_df_from_repo_frames(
         ``variable_id`` values to aggregate (e.g. ``(\"mean_cbf\", \"pi\")``).
     covariate_cols
         Columns to copy from ``clinical_wide`` (must exist; typically ``tacsctot_group``,
-        ``age_at_mri``, ``sex``, …).
+        ``age_at_mri``, ``sex``, ...).
     """
     wide = aggregate_territory_measurements(territory_df, imaging_variable_ids, agg=agg)
     return merge_subject_covariates(

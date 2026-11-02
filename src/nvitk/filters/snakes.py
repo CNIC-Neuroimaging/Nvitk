@@ -9,7 +9,7 @@ Reference
 ---------
 M. Kass, A. Witkin, D. Terzopoulos,
 "Snakes: Active Contour Models",
-International Journal of Computer Vision, 1(4):321–331, 1988.
+International Journal of Computer Vision, 1(4):321-331, 1988.
 """
 
 from __future__ import annotations
@@ -189,13 +189,13 @@ def snakes_filter(
     init_mask
         Binary or label mask whose contour seeds the snake (required).
     alpha
-        Tension (length) weight — higher contracts faster.
+        Tension (length) weight: higher contracts faster.
     beta
-        Rigidity (smoothness) weight — higher → smoother snake.
+        Rigidity (smoothness) weight: higher -> smoother snake.
     w_line
-        Attraction to intensity (negative → dark regions).
+        Attraction to intensity (negative -> dark regions).
     w_edge
-        Attraction to edges (negative → repel from edges).
+        Attraction to edges (negative -> repel from edges).
     gamma
         Explicit time-step size.
     max_num_iter, convergence

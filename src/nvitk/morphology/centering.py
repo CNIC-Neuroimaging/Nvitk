@@ -2,13 +2,13 @@
 
 A voxel skeleton is medial only to within a voxel and walks the grid as a staircase; on TOF masks
 (0.5 mm) that over-estimates length by ~5 %, multiplies curvature several-fold, and puts the path
-off-centre so that the distance to the wall under-estimates the inscribed radius by 12–16 %
+off-centre so that the distance to the wall under-estimates the inscribed radius by 12-16 %
 (PESA17808400 against VMTK). :func:`center_polyline` fixes the geometry by moving each point to
 the centroid of the lumen cross-section cut by the plane normal to the path, alternated with
 arc-length smoothing, then climbs in-plane to the maximum inscribed-sphere radius;
 :func:`inscribed_radius` measures that radius as the distance to the nearest surface vertex, which
 is how VMTK's ``MaximumInscribedSphereRadius`` is defined. On PESA17808400 (ICA, ACA, PCA, PComm,
-SCA) the result is within 0.7–3.0 % of VMTK's MIS and −1 to +3 % of its length.
+SCA) the result is within 0.7-3.0 % of VMTK's MIS and -1 to +3 % of its length.
 
 VTK + NumPy only (vendored into the Slicer module).
 """
@@ -212,7 +212,7 @@ def _ascend_inscribed_radius(
 
 
 def inscribed_radius(surface: Any, points: np.ndarray) -> np.ndarray:
-    """Distance from each point to the nearest *surface* vertex — VMTK's maximum-inscribed-sphere
+    """Distance from each point to the nearest *surface* vertex: VMTK's maximum-inscribed-sphere
     radius (its Voronoi spheres touch surface vertices), evaluated on a centred path."""
     pts = np.asarray(points, dtype=float).reshape(-1, 3)
     d, _ = _surface_vertex_tree(surface).query(pts)

@@ -8,15 +8,13 @@ question is "which subject is that outlier". This module draws the same eight vi
 which is what you want when the answer goes into a paper: vector output, a familiar style, and no
 browser engine between the figure and the page.
 
-The two share an API — same *kind* keys, same grouping, same excluded-mask handling — so the GUI
+The two share an API (same *kind* keys, same grouping, same excluded-mask handling), so the GUI
 toggles between them without knowing which is which.
 """
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -28,7 +26,7 @@ from .group_counts import displayed_counts, level_strings, ordered_levels
 
 log = Logger()
 
-#: Grey for observations a filter excluded — present but visibly set aside.
+#: Grey for observations a filter excluded: present but visibly set aside.
 GREYED = "#B0B0B0"
 
 
@@ -115,7 +113,7 @@ def column_plot_static(
     grouped = bool(group) and group in work.columns
     if grouped:
         # The level order, the palette keys and the counts are all built as strings, but seaborn
-        # keys its palette on the column's own values — so a numerically coded factor raised
+        # keys its palette on the column's own values, so a numerically coded factor raised
         # "The palette dictionary is missing keys: {0.0, 1.0}". Casting once here is what keeps
         # every one of them talking about the same levels.
         work[group] = level_strings(work[group])
@@ -125,8 +123,8 @@ def column_plot_static(
     )
     colours = _palette(order)
     hue = group if grouped else None
-    # Counted from ``work``, which is already coerced, dropped and filtered — so these are the
-    # observations the axes below will actually carry, not the rows the frame started with.
+    # Counted from ``work``, which is already coerced, dropped and filtered, so these are the
+    # observations the axes below will carry, not the rows the frame started with.
     counted = {
         c.level: c
         for c in displayed_counts(
@@ -293,7 +291,7 @@ def column_panels_static(
 
 def base_levels(series: pd.Series) -> list[str]:
     """
-    A column's levels in their own order — its categories when it has them, else as they appear.
+    A column's levels in their own order: its categories when it has them, else as they appear.
 
     The base a chosen order is applied on top of. A binned column carries the order it was cut in,
     which is the one to fall back to; anything else has only the order the rows arrived in.
@@ -321,10 +319,10 @@ def _counts(
     work = frame.copy()
     hue = group if group and group in work.columns else None
     # One order applied to both axes: ``ordered_levels`` keeps whatever it does not name, so
-    # ordering the split column is a no-op on an x axis of different levels — and orders both
+    # ordering the split column is a no-op on an x axis of different levels, and orders both
     # when, as on a counts plot of the split column itself, they are the same levels.
     # Both base orders read before either cast: on a counts plot of the split column itself the
-    # hue *is* the x column, and reading its order after the cast loses the categories — which
+    # hue *is* the x column, and reading its order after the cast loses the categories, which
     # is how the bars came out in the binned order and the legend in first-appearance order.
     x_levels = ordered_levels(base_levels(work[column]), level_order)
     hue_levels = ordered_levels(base_levels(work[hue]), level_order) if hue else None

@@ -12,6 +12,7 @@ import json
 import os
 import traceback
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -23,7 +24,7 @@ from nvitk.measure.morpho.preprocess_taubin import (
     preprocess_segmentation,
     save_segmentation,
 )
-from nvitk.measure.morpho.run_case import N_WORKERS, run_case
+from nvitk.measure.morpho.run_case import N_WORKERS, quiet_stdout, run_case
 from nvitk.measure.morpho.topology_io import (
     TOPOLOGY_NONE,
     TopologyMeta,
@@ -173,7 +174,7 @@ def _write_provenance(case_dir: Path, *, seg_path: Path, pipeline_seg: Path, cfg
         "input_mask": str(seg_path),
         "pipeline_input": str(pipeline_seg),
         "input_already_smoothed": bool(input_already_smoothed),
-        "taubin": {"iters": cfg.taubin_iters, "lambda": cfg.taubin_lambda, "mu": cfg.taubin_mu,
+        "taubin": {"applied": not bool(input_already_smoothed), "iters": cfg.taubin_iters, "lambda": cfg.taubin_lambda, "mu": cfg.taubin_mu,
                    "keep_largest_component": cfg.keep_largest_component_taubin},
         "topology": topology_json,
         "species": species,
@@ -184,7 +185,15 @@ def _write_provenance(case_dir: Path, *, seg_path: Path, pipeline_seg: Path, cfg
     (case_dir / PROVENANCE_FILE).write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
 
 
-def run_morphometrics_case(
+def run_morphometrics_case(seg_path: str | Path, out_dir: str | Path, *, verbose: bool = False, **kwargs: Any) -> Path:
+    """Run full TOF morphometrics for one multilabel segmentation NIfTI
+    (:func:`_run_morphometrics_case`, the parameters). With *verbose* False (default) it prints
+    nothing but the failures (on stderr); True prints every step's progress."""
+    with quiet_stdout(not verbose):
+        return _run_morphometrics_case(seg_path, out_dir, verbose=verbose, **kwargs)
+
+
+def _run_morphometrics_case(
     seg_path: str | Path,
     out_dir: str | Path,
     *,
@@ -201,6 +210,7 @@ def run_morphometrics_case(
     axes_override: str | None = None,
     length_scale: float | None = None,
     case_id: str | None = None,
+    verbose: bool = False,
 ) -> Path:
     """Run full TOF morphometrics for one multilabel segmentation NIfTI.
 
@@ -212,11 +222,11 @@ def run_morphometrics_case(
     Topology resolution order:
     1. Explicit ``mapping`` dict
     2. ``mapping_json`` path / basename under ``measure/morpho/topology/``
-    3. ``mapping_json="none"`` → vessel-wise only (no topology)
+    3. ``mapping_json="none"`` -> vessel-wise only (no topology)
     4. Default ``eicab_topology.json``
 
     Species resolution order (drives how ``no_upstream_start`` rules resolve onto
-    array axes — a mouse is a quadruped, so ``caudal`` lands on scanner A/P
+    array axes: a mouse is a quadruped, so ``caudal`` lands on scanner A/P
     rather than S/I):
     1. Explicit ``species`` argument (``"human"`` / ``"mouse"``)
     2. ``config.species`` when it is not ``"auto"``
@@ -283,6 +293,7 @@ def run_morphometrics_case(
             length_scale=resolved_length_scale,
             config=cfg,
             case_id=case_id,
+            verbose=verbose,
         )
         _write_provenance(
             case_dir, seg_path=seg_p, pipeline_seg=pipeline_seg, cfg=cfg, topology_json=topo_json,
@@ -315,4 +326,19 @@ def run_morphometrics_case(
 
     if not excel_path.is_file():
         raise FileNotFoundError(f"Morphometrics Excel not produced: {excel_path}")
+    # The final report, last: it reads the tortuosity metrics written just above.
+    try:
+        from nvitk.measure.morpho.export_utils.report import REPORT_FEATURES, write_morphometrics_report
+
+        report_csv = write_morphometrics_report(case_dir)
+        print(f"  [report] {report_csv.name} (+ 'Report' sheet) → {case_dir}")
+        prov = case_dir / PROVENANCE_FILE
+        if prov.is_file():
+            payload = json.loads(prov.read_text(encoding="utf-8"))
+            payload["report"] = {"file": report_csv.name, "features": list(REPORT_FEATURES),
+                                 "lesions": "high confidence only"}
+            prov.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001 (the run's tables are written; the report is a summary)
+        print(f"  WARNING [report]: {exc}")
+        traceback.print_exc()
     return excel_path

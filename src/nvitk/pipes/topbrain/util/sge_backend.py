@@ -4,7 +4,7 @@ Mirrors :mod:`nvitk.pipes.qvtpy.util.io.sge_backend`, with two differences that 
 what this pipeline runs:
 
 - stages are **cohort-scoped**, not per-subject. nnU-Net and nnssl own their own per-case
-  parallelism, so one job per stage is the right granularity — splitting a training run across
+  parallelism, so one job per stage is the right granularity: splitting a training run across
   array tasks would fight the framework rather than help it;
 - the deep-learning stages need the *torch* device as well as the nvitk array backend. Those
   are separate axes: ``--backend cpu|gpu`` selects NumPy vs CuPy for our own array work
@@ -86,7 +86,7 @@ def sge_backend_is_gpu(backend: str) -> bool:
 
 
 def sge_stage_ngpu(backend: str, *, request_gpu: bool | None = None) -> int:
-    """``qsub -l ngpu=…`` count; ``0`` omits the request (CPU job)."""
+    """``qsub -l ngpu=...`` count; ``0`` omits the request (CPU job)."""
     from nvitk.pipes.topbrain import config as cfg
 
     if request_gpu is False:
@@ -140,8 +140,8 @@ def torch_device_for_backend(
     """Resolve the torch device for a stage.
 
     An explicit *device* always wins. Otherwise ``--backend gpu`` implies ``cuda`` **if a CUDA
-    device is actually visible**, and falls back to ``cpu`` with a warning rather than dying
-    inside torch — a workstation without a GPU should still be able to run the light stages.
+    device is visible**, and falls back to ``cpu`` with a warning rather than dying
+    inside torch: a workstation without a GPU should still be able to run the light stages.
 
     Parameters
     ----------

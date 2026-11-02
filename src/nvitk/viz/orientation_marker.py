@@ -215,7 +215,7 @@ def _label_parts(pv: Any, axcodes: str, matrix: np.ndarray) -> list[tuple[Any, t
     Each end carries a small plaque in the arrow's color with the letter written
     on both faces in white. The plaque is opaque, so whichever face is turned
     away stays hidden and the letter never shows up mirrored -- a backwards ``R``
-    reads as a bug, not as anatomy, even though the scene around it genuinely is
+    reads as a bug, not as anatomy, even though the scene around it is
     mirrored for left-handed frames.
 
     Plaques stand upright on the head-feet axis and face outward along their own

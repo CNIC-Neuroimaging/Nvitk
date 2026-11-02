@@ -82,7 +82,7 @@ def attach_left_inspection_dock(
                 break
 
     # Nothing named matched, but another panel may already be occupying the left
-    # edge — one added by ``add_dock_widget`` rather than by this helper, so it
+    # edge: one added by ``add_dock_widget`` rather than by this helper, so it
     # cannot be named in advance. Tabify with it. Re-splitting Napari's own docks
     # around an existing arrangement tears that arrangement apart: the panel that
     # got there first ends up the only one with usable geometry.
@@ -129,7 +129,7 @@ def install_expand_button(dock: Any, title: str, *, extras: list[Any] | None = N
     toggle on the Tools panel).
 
     Napari's own docks carry only a float and a close button, and floating one
-    leaves it at whatever size the sidebar had — so every panel that wants room
+    leaves it at whatever size the sidebar had, so every panel that wants room
     starts with a drag to resize and a drag to place. This makes it one click:
     float and fill the screen, click again to put it back where it was.
     """
@@ -157,8 +157,8 @@ def install_expand_button(dock: Any, title: str, *, extras: list[Any] | None = N
         widget.setFixedSize(_BUTTON_PX, _BUTTON_PX)
         widget.setCursor(Qt.PointingHandCursor)
         # Every geometry property is set explicitly, not just the colours. A host
-        # stylesheet styles *all* its buttons — Napari caps title-bar buttons at
-        # 12x12, the statmodels window pads them by 5x12 — and either one leaves a
+        # stylesheet styles *all* its buttons (Napari caps title-bar buttons at
+        # 12x12, the statmodels window pads them by 5x12), and either one leaves a
         # 22px button with no room for its glyph. The control is then laid out and
         # clickable but draws blank, which is indistinguishable from missing.
         widget.setStyleSheet(
@@ -180,7 +180,7 @@ def install_expand_button(dock: Any, title: str, *, extras: list[Any] | None = N
     # One title bar for every nvitk panel, ours. Napari's own cannot host these:
     # its stylesheet clamps every direct QPushButton child to 12x12
     # (``#QtCustomTitleBar > QPushButton { max-width: 12px; max-height: 12px }``),
-    # which crops a text glyph to nothing — the button is laid out and clickable
+    # which crops a text glyph to nothing; the button is laid out and clickable
     # but draws blank. Its three controls have equivalents here: pop-out floats,
     # and the close button closes.
     bar = QWidget(dock)

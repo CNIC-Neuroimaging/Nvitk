@@ -7,8 +7,8 @@ Description
 atlases this project reports measurements in are not fetchable from anywhere:
 
 ``desikan``
-    The Desikan–Killiany cortical parcellation. It is what FreeSurfer's ``aparc`` produces and what
-    the ASL and T1 pipelines publish their ``ctx-lh-…`` / ``left_…`` region ids against — but
+    The Desikan-Killiany cortical parcellation. It is what FreeSurfer's ``aparc`` produces and what
+    the ASL and T1 pipelines publish their ``ctx-lh-...`` / ``left_...`` region ids against, but
     ``nilearn.datasets`` ships Destrieux, not Desikan, so there is nothing to download.
 
 ``vascular``
@@ -18,14 +18,14 @@ atlases this project reports measurements in are not fetchable from anywhere:
 So the geometry has to be *located* rather than fetched. This module answers "where is it", in one
 place, with the same precedence for both:
 
-1. an explicit environment variable — the escape hatch for a one-off run or a cluster job;
+1. an explicit environment variable: the escape hatch for a one-off run or a cluster job;
 2. the ``atlas`` block of ``.nvitk/settings.json``, found by the same search
    :func:`~nvitk.db.settings_paths.settings_json_path` already uses for the ``db`` block;
 3. an ``ATLAS/`` directory beside the configured dataset root, since that is where these files
-   actually live in the lab tree;
+   live in the lab tree;
 4. for Desikan only, a FreeSurfer installation's ``fsaverage`` surface labels.
 
-Nothing here reads the atlas — that is :mod:`~nvitk.viz.brainshow`'s job. These functions return
+Nothing here reads the atlas: that is :mod:`~nvitk.viz.brainshow`'s job. These functions return
 paths (or ``None``) and never raise, so a caller can report *every* place it looked when nothing is
 configured, which is the difference between an actionable error and "atlas not found".
 
@@ -35,18 +35,16 @@ Settings example
 
     {
       "atlas": {
-        "root":     "…/DB/ATLAS/",
-        "desikan":  "…/ATLAS/aparc+aseg_MNI.nii.gz",
-        "vascular": "…/ATLAS/arterial_atlas_watershed_tpm_correct_space.nii.gz"
+        "root":     ".../DB/ATLAS/",
+        "desikan":  ".../ATLAS/aparc+aseg_MNI.nii.gz",
+        "vascular": ".../ATLAS/arterial_atlas_watershed_tpm_correct_space.nii.gz"
       }
     }
 """
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import os
 from pathlib import Path
 from typing import Any
@@ -77,9 +75,7 @@ _VASCULAR_FILENAMES: tuple[str, ...] = (
 ATLAS_SUFFIXES: tuple[str, ...] = (".nii", ".nii.gz", ".mgz", ".annot")
 
 
-# ---------------------------------------------------------------------------
 # Settings
-# ---------------------------------------------------------------------------
 def load_atlas_settings_block() -> dict[str, Any]:
     """The ``atlas`` section of ``settings.json``, or ``{}``."""
     from nvitk.db.settings_paths import load_settings_document
@@ -98,9 +94,9 @@ def atlas_root() -> Path | None:
     """
     Directory the parcellation files live in.
 
-    ``NVITK_ATLAS_ROOT`` → ``atlas.root`` in settings → an ``ATLAS`` directory beside the configured
-    dataset root, which is where the lab tree keeps them (``…/DB/ATLAS`` next to
-    ``…/DB/nvitk-dataset``).
+    ``NVITK_ATLAS_ROOT`` -> ``atlas.root`` in settings -> an ``ATLAS`` directory beside the configured
+    dataset root, which is where the lab tree keeps them (``.../DB/ATLAS`` next to
+    ``.../DB/nvitk-dataset``).
     """
     from nvitk.db.settings_paths import load_db_settings_block
 
@@ -125,7 +121,7 @@ def atlas_root() -> Path | None:
 def _resolve_atlas_file(
     *, env_var: str, settings_key: str, filenames: tuple[str, ...]
 ) -> Path | None:
-    """Shared precedence for a named parcellation: env → settings → the atlas directory."""
+    """Shared precedence for a named parcellation: env -> settings -> the atlas directory."""
     env = _expand(os.environ.get(env_var))
     if env is not None:
         if env.exists():
@@ -152,7 +148,7 @@ def _resolve_atlas_file(
 
 
 def desikan_atlas_path() -> Path | None:
-    """Configured Desikan–Killiany parcellation (a NIfTI volume or a FreeSurfer ``.annot``)."""
+    """Configured Desikan-Killiany parcellation (a NIfTI volume or a FreeSurfer ``.annot``)."""
     return _resolve_atlas_file(
         env_var=ENV_DESIKAN, settings_key="desikan", filenames=_DESIKAN_FILENAMES
     )
@@ -165,9 +161,7 @@ def vascular_atlas_path() -> Path | None:
     )
 
 
-# ---------------------------------------------------------------------------
 # FreeSurfer fallback
-# ---------------------------------------------------------------------------
 def freesurfer_home() -> Path | None:
     """A usable FreeSurfer installation, from ``FREESURFER_HOME`` or the conventional locations."""
     env = _expand(os.environ.get("FREESURFER_HOME"))
@@ -188,7 +182,7 @@ _FSAVERAGE_SUBJECTS: tuple[str, ...] = ("fsaverage5", "fsaverage")
 
 def fsaverage_aparc_annot() -> tuple[Path, Path, str] | None:
     """
-    ``(lh, rh, subject)`` paths to an fsaverage ``?h.aparc.annot`` — the canonical Desikan labels.
+    ``(lh, rh, subject)`` paths to an fsaverage ``?h.aparc.annot``: the canonical Desikan labels.
 
     Searched under ``$SUBJECTS_DIR`` first, then a FreeSurfer install's own ``subjects`` directory,
     trying each entry of :data:`_FSAVERAGE_SUBJECTS` in turn.
@@ -217,9 +211,7 @@ def fsaverage_aparc_annot() -> tuple[Path, Path, str] | None:
     return None
 
 
-# ---------------------------------------------------------------------------
 # Cache
-# ---------------------------------------------------------------------------
 def atlas_cache_dir() -> Path:
     """
     Directory for parcellations nvitk generates itself, created on demand.

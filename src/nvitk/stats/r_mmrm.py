@@ -5,13 +5,13 @@ Description
 -----------
 An MMRM is not a random-effects model. Where a MixedLM says *"each subject has its own intercept,
 and everything else is independent noise"*, an MMRM says *"the repeated measurements within a
-subject are correlated, and here is the shape of that correlation"* — fitting a structured
+subject are correlated, and here is the shape of that correlation"*: fitting a structured
 covariance matrix directly instead of decomposing it into random effects plus residual.
 
 For a subject × territory frame that matters. A random intercept imposes **compound symmetry**:
 every pair of territories is assumed equally correlated. In reality MCA and ACA (both anterior) are
 more alike than MCA and Basilar. An unstructured MMRM estimates all of those correlations rather
-than assuming them away — at the cost of ``k(k+1)/2`` covariance parameters for ``k`` territories,
+than assuming them away, at the cost of ``k(k+1)/2`` covariance parameters for ``k`` territories,
 which needs a reasonable number of subjects to support.
 
 .. code-block:: text
@@ -39,9 +39,7 @@ internals from Python would be far more brittle, and R's own accessors are the d
 
 from __future__ import annotations
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
-# ──────────────────────────────────────────────────────────────────────────────
 import shutil
 import subprocess
 import re
@@ -70,9 +68,7 @@ INSTALL_HINT = (
 )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Covariance structures and degrees-of-freedom methods
-# ──────────────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class CovarianceStructure:
     """One ``mmrm`` covariance structure, and when it is the right choice."""
@@ -163,9 +159,7 @@ DF_METHODS: dict[str, DfMethod] = {
 }
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Availability
-# ──────────────────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class MmrmBackendStatus:
     """What is present, what is missing, and what to do about it."""
@@ -217,7 +211,7 @@ def _r_package_versions(names: Sequence[str]) -> dict[str, str]:
 
 def mmrm_backend_status(*, check_r_packages: bool = True) -> MmrmBackendStatus:
     """
-    Probe rpy2 → R → ``mmrm``. Never raises, and never imports R as an import side effect.
+    Probe rpy2 -> R -> ``mmrm``. Never raises, and never imports R as an import side effect.
 
     Deliberately independent of the lme4 probe: MMRM needs neither pymer4 nor the easystats suite,
     so it can be available when the lme4 engine is not, and reporting them together would send you
@@ -261,13 +255,11 @@ def mmrm_backend_status(*, check_r_packages: bool = True) -> MmrmBackendStatus:
 
 
 def emmeans_available() -> bool:
-    """Whether ``emmeans`` is installed — least-squares means need it."""
+    """Whether ``emmeans`` is installed: least-squares means need it."""
     return bool(_r_package_versions(["emmeans"]).get("emmeans"))
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Formula
-# ──────────────────────────────────────────────────────────────────────────────
 # A covariance term written inside the formula: ``us(territory | mri_id)``, ``ar1(v | g / s)``.
 _COVARIANCE_TERM_RE = re.compile(
     r"(?<![A-Za-z0-9_.])(" + "|".join(sorted(COVARIANCE_STRUCTURES, key=len, reverse=True)) + r")"
@@ -294,7 +286,7 @@ def parse_mmrm_covariance(formula: str) -> tuple[str, CovarianceTerm | None]:
     """
     Split an ``mmrm`` formula into its fixed part and its covariance term.
 
-    Lets the term be written inline — ``… + us(territory | mri_id)`` — the way it is in R, instead
+    Lets the term be written inline, ``... + us(territory | mri_id)``, the way it is in R, instead
     of being assembled from separate controls. Returns the fixed formula with the term removed, plus
     the parsed term (``None`` when the formula has none).
 
@@ -372,7 +364,7 @@ def mmrm_formula(
     ----------
     group : str
         Optional grouping column for a *separate* covariance matrix per group, written
-        ``us(visit | group / subject)`` — e.g. one covariance per treatment arm.
+        ``us(visit | group / subject)``, e.g. one covariance per treatment arm.
     """
     fixed = str(fixed or "").strip()
     if not fixed or "~" not in fixed:
@@ -386,7 +378,7 @@ def validate_mmrm_data(
     """
     Problems that would make an ``mmrm`` fit fail or mislead, as human-readable messages.
 
-    ``mmrm`` requires at most one observation per ``(subject, visit)`` cell — the covariance matrix
+    ``mmrm`` requires at most one observation per ``(subject, visit)`` cell: the covariance matrix
     is indexed by visit, so a duplicate has no place to go and R raises a message that does not
     point at the data. Checking here means the error names the offending subjects.
     """
@@ -432,9 +424,7 @@ def validate_mmrm_data(
     return problems
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # R bridge
-# ──────────────────────────────────────────────────────────────────────────────
 # Extraction lives in R and returns tidy data frames: rpy2 converts those cleanly, whereas walking
 # the fit object's internals from Python would break on every upstream refactor.
 _R_HELPERS = """
@@ -542,9 +532,7 @@ def _call_r(name: str, *args) -> pd.DataFrame:
         return pd.DataFrame(func(*args))
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Fitting
-# ──────────────────────────────────────────────────────────────────────────────
 def fit_mmrm(
     *,
     data: pd.DataFrame,
@@ -563,8 +551,8 @@ def fit_mmrm(
     Parameters
     ----------
     formula : str
-        Either the full R formula with the covariance term written inline —
-        ``"pi ~ age_c + us(territory | mri_id)"`` — or the fixed part alone, in which case the term
+        Either the full R formula with the covariance term written inline,
+        ``"pi ~ age_c + us(territory | mri_id)"``, or the fixed part alone, in which case the term
         is assembled from *visit*, *subject*, *structure* and *group*. An inline term always wins:
         if you wrote one, that is the model, and the separate arguments are ignored.
     method : str
@@ -610,7 +598,7 @@ def fit_mmrm(
         raise ValueError(f"No complete rows left after dropping missing values in {needed}.")
 
     # mmrm needs the repeated and subject columns as factors. pandas Categorical is what rpy2 maps
-    # to an R factor — a plain string column arrives as a character vector, which mmrm rejects with
+    # to an R factor: a plain string column arrives as a character vector, which mmrm rejects with
     # "Time point variable 'x' must be a factor". The R helper coerces again as a backstop, so this
     # holds whatever rpy2 version is installed. The same pass flattens any *ordered* categorical,
     # which R would otherwise fit with polynomial rather than treatment contrasts.
@@ -675,9 +663,7 @@ def _formula_columns(columns: Sequence[str], formula: str) -> list[str]:
     return sorted(set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", str(formula or ""))) & available)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Reporting
-# ──────────────────────────────────────────────────────────────────────────────
 _COEF_ALIASES: dict[str, tuple[str, ...]] = {
     "coef": ("Estimate",),
     "std_err": ("Std. Error", "Std.Error", "Std..Error"),
@@ -735,7 +721,7 @@ def mmrm_correlation_matrix(fit: Any) -> pd.DataFrame:
     """
     The covariance matrix rescaled to correlations.
 
-    This is the thing an unstructured MMRM is *for*: it says how alike two territories actually are,
+    This is the thing an unstructured MMRM is *for*: it says how alike two territories are,
     which a random intercept assumes rather than estimates.
     """
     covariance = mmrm_covariance_matrix(fit)
@@ -830,9 +816,7 @@ def mmrm_info_dict(
     }
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Least-squares means and plotting
-# ──────────────────────────────────────────────────────────────────────────────
 def mmrm_emmeans(
     fit: Any,
     specs: str,
@@ -850,7 +834,7 @@ def mmrm_emmeans(
         An emmeans specification formula, e.g. ``"~ territory"`` or
         ``"~ tacsctot_group | territory"``.
     at_name, at_values
-        Evaluate a *continuous* predictor over a grid rather than at its mean — the confidence band
+        Evaluate a *continuous* predictor over a grid rather than at its mean: the confidence band
         along a fitted line. Without them ``emmeans`` collapses a continuous covariate to a single
         point, which is a marginal mean and not a curve.
     ci_level : float
@@ -871,7 +855,7 @@ def mmrm_emmeans(
         # byte-for-byte what it always was.
         return _call_r(".nvitk_mmrm_emmeans", fit, specs)
 
-    # The gridded call reuses lme4's helper — ``emmeans`` takes any model it supports, and an mmrm
+    # The gridded call reuses lme4's helper: ``emmeans`` takes any model it supports, and an mmrm
     # fit *is* the R object, exactly as an lmrob fit is. See :func:`.r_robust.lmrob_emmeans`.
     from rpy2.robjects import FloatVector, globalenv
     from rpy2.robjects import r as R_
@@ -896,7 +880,7 @@ def mmrm_predict(fit: Any, newdata: pd.DataFrame, *, use_random_effects: bool = 
     Marginal predictions at *newdata*, evaluated by R so factor contrasts keep R's own encoding.
 
     ``use_random_effects`` exists only to match the signature the shared plotting code expects. An
-    MMRM has no random effects to add — its subject structure lives in the residual covariance — so
+    MMRM has no random effects to add (its subject structure lives in the residual covariance), so
     both settings give the same marginal curve and it is ignored.
     """
     del use_random_effects
@@ -975,7 +959,7 @@ def plot_mmrm_params(
 
     The companion to :func:`plot_mmrm_emmeans`, which answers the categorical question. Least-squares
     means hold every other predictor at one point, so asking them about a continuous covariate
-    returns a single estimate at that covariate's mean — three dots in a column rather than three
+    returns a single estimate at that covariate's mean: three dots in a column rather than three
     lines. This draws the curve instead, and is what the plot-mode picker selects between.
     """
     from .r_mixedlm import plot_lme4_params
@@ -1025,7 +1009,7 @@ def plot_mmrm_emmeans(
     ----------
     display : {"overview", "grouped"}
         ``"grouped"`` splits the anatomical levels into a grid of panels (see
-        :mod:`nvitk.stats.region_groups`). The split follows whichever column holds them — *hue* when
+        :mod:`nvitk.stats.region_groups`). The split follows whichever column holds them: *hue* when
         there is one, otherwise *x*, in which case each panel's axis carries only its own levels.
         The means themselves are unchanged: they were estimated over the whole model either way.
     """
@@ -1132,7 +1116,7 @@ def plot_mmrm_correlation(
     ----------
     levels : sequence of str, optional
         Show only these levels, in this order. The correlations are still *estimated* over every
-        level — this only restricts the display.
+        level: this only restricts the display.
     """
     import matplotlib.pyplot as plt
     import seaborn as sns
@@ -1172,7 +1156,7 @@ def plot_mmrm_correlation(
     ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right", fontsize=9)
     ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=9)
     # Constrained layout re-runs on every draw, so the labels stay inside the figure when the Qt
-    # canvas is resized — tight_layout only solves it for the size at creation time.
+    # canvas is resized: tight_layout only solves it for the size at creation time.
     fig.set_layout_engine("constrained")
     return fig
 

@@ -14,19 +14,14 @@ from .anatomy import orient_centerline_points_by_flow
 from .anatomy_axes import AnatomicalAxes
 from .caliber import (
     compute_siphon_mask,
-    detect_enlargement_segments,
-    detect_stenosis_segments,
-    enlargement_pointwise,
     refresh_enlargement_summary_from_flags,
-    resolve_stenosis_enlargement_overlap,
     segment_detail_json,
     select_caliber_detection_radius,
-    stenosis_pointwise,
-    stenosis_raw_percent,
     stenosis_total_length,
-    stenosis_valid_mask_from_ends,
+    taper_stretch_ids,
 )
 from nvitk.measure import morphometrics_config as _cfg
+from nvitk.measure.morpho.lesion_detection import detect_caliber_lesions, lesion_result_fields
 from .geometry import (
     arc_length,
     chord_length,
@@ -250,7 +245,7 @@ def reference_centerline_points_from_results(path_results: List[dict]) -> List[n
 
 
 def refresh_centerline_result_metrics(res: dict) -> None:
-    """In-place: (re)compute every derived metric for a path result — geometry, curvature/torsion
+    """In-place: (re)compute every derived metric for a path result; geometry, curvature/torsion
     summaries, taper slope, and stenosis/enlargement detection (both MIS- and cross-section-radius
     based), writing all fields the export layer expects back into *res*.
     """
@@ -274,91 +269,14 @@ def refresh_centerline_result_metrics(res: dict) -> None:
     res["bend_peak_count"] = int(bend_peak_count(curvature, _cfg.BEND_KAPPA_PEAK, _cfg.INFLECT_SMOOTH_WIN))
     res.update(radius_stats(radius))
     res["taper_slope_mm_per_mm"] = float(taper_slope(s, radius))
-    sten = detect_stenosis_segments(
-        s=s, r=radius, threshold_pct=_cfg.STENOSIS_THRESHOLD_PCT,
-        min_segment_mm=_cfg.STENOSIS_MIN_LEN_MM, exclude_end_mm=_cfg.STENOSIS_EXCLUDE_END_MM,
-        pts=pts,
-    )
-    sten_pct_point, is_stenotic = stenosis_pointwise(
-        s=s, r=radius, r_ref_per_point=sten.r_ref_per_point,
-        threshold_pct=_cfg.STENOSIS_THRESHOLD_PCT, exclude_end_mm=_cfg.STENOSIS_EXCLUDE_END_MM,
-        min_segment_mm=_cfg.STENOSIS_MIN_LEN_MM,
-    )
-    sten_raw_pct_point = stenosis_raw_percent(
-        s=s, r=radius, r_ref_per_point=sten.r_ref_per_point,
-        exclude_end_mm=0.0,
-    )
-    enlarg = detect_enlargement_segments(
-        s=s, r=radius, threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT,
-        min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
-        pts=pts,
-    )
-    enlargement_pct_point, is_enlarged = enlargement_pointwise(
-        s=s, r=radius, r_ref_per_point=enlarg.r_ref_per_point,
-        threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
-        min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM,
-        pts=pts,
-    )
-    sten_pct_point, is_stenotic, enlargement_pct_point, is_enlarged = resolve_stenosis_enlargement_overlap(
-        sten_pct_point, is_stenotic, enlargement_pct_point, is_enlarged
-    )
-    # CS-based enlargement binary flag (radius_mm is always cross-section radius)
-    radius_cs = np.asarray(res["radius_mm"], dtype=float)
-    enlarg_cs = detect_enlargement_segments(
-        s=s, r=radius_cs, threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT,
-        min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
-        pts=pts,
-    )
-    _, is_enlarged_cs = enlargement_pointwise(
-        s=s, r=radius_cs, r_ref_per_point=enlarg_cs.r_ref_per_point,
-        threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
-        min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM, pts=pts,
-    )
-    is_enlarged_cs = np.where(is_stenotic == 1, 0, is_enlarged_cs).astype(int)
-    siphon_mask = compute_siphon_mask(pts, s)
-    res["siphon_mask_point"] = siphon_mask.astype(float)
-    res["stenosis_percent_point"] = sten_pct_point
-    res["stenosis_raw_percent_point"] = sten_raw_pct_point
-    res["stenosis_core_candidate_point"] = (
-        (sten_raw_pct_point >= _cfg.STENOSIS_THRESHOLD_PCT) & np.isfinite(sten_raw_pct_point)
-    ).astype(float)
-    res["stenosis_support_candidate_point"] = (
-        (sten_raw_pct_point >= min(_cfg.STENOSIS_SUPPORT_THRESHOLD_PCT, _cfg.STENOSIS_THRESHOLD_PCT))
-        & np.isfinite(sten_raw_pct_point)
-        & (s >= float(_cfg.STENOSIS_EXCLUDE_END_MM))
-    ).astype(float)
-    res["is_stenotic"] = is_stenotic
-    res["stenosis_reference_radius_point"] = sten.r_ref_per_point
-    res["stenosis_threshold_radius_point"] = (1.0 - _cfg.STENOSIS_THRESHOLD_PCT / 100.0) * sten.r_ref_per_point
-    res["enlargement_percent_point"] = enlargement_pct_point
-    res["is_enlarged"] = is_enlarged
-    res["is_enlarged_mis"] = is_enlarged
-    res["is_enlarged_cs"] = is_enlarged_cs
-    res["enlargement_reference_radius_point"] = enlarg.r_ref_per_point
-    res["enlargement_threshold_radius_point"] = (1.0 + _cfg.ENLARGEMENT_THRESHOLD_PCT / 100.0) * enlarg.r_ref_per_point
-    stenotic_radius = radius[(is_stenotic == 1) & np.isfinite(radius)]
-    enlarged_radius = radius[(is_enlarged == 1) & np.isfinite(radius)]
-    res["radius_ref_mm"] = float(sten.r_ref)
-    res["radius_min_mm"] = float(sten.r_min)
-    res["radius_min_stenotic_mm"] = float(np.min(stenotic_radius)) if stenotic_radius.size else np.nan
-    res["stenosis_percent_max"] = float(sten.percent_stenosis_max)
-    res["degree_of_stenosis_pct"] = float(sten.percent_stenosis_max)
-    res["stenosis_length_total_mm"] = float(stenosis_total_length(s, is_stenotic))
-    res["stenosis_segments_n"] = int(len(sten.segments_point_idx))
-    res["stenosis_segments_point_idx"] = json.dumps(sten.segments_point_idx)
-    res["stenosis_segments_detail_json"] = segment_detail_json(s, sten_pct_point, sten.segments_point_idx)
-    res["enlargement_radius_ref_mm"] = float(enlarg.r_ref)
-    res["enlargement_radius_max_mm"] = float(enlarg.r_max)
-    res["radius_max_enlarged_mm"] = float(np.max(enlarged_radius)) if enlarged_radius.size else np.nan
-    res["enlargement_percent_max"] = float(enlarg.percent_enlargement_max)
-    res["enlargement_length_total_mm"] = float(stenosis_total_length(s, is_enlarged))
-    res["enlargement_segments_n"] = int(len(enlarg.segments_point_idx))
-    res["enlargement_segments_point_idx"] = json.dumps(enlarg.segments_point_idx)
-    res["enlargement_segments_detail_json"] = segment_detail_json(s, enlargement_pct_point, enlarg.segments_point_idx)
+    les = detect_caliber_lesions(s, np.asarray(res["radius_mm"], dtype=float), radius, pts, cow_source="detection")
+    res["siphon_mask_point"] = compute_siphon_mask(pts, s).astype(float)
+    res["taper_stretch_point"] = taper_stretch_ids(pts, radius)
+    res.update(lesion_result_fields(les, s, radius))
 
 
 def _as_flag_array(values, n: int) -> np.ndarray:
-    """Coerce a per-point boolean-ish array to ``int`` 0/1 of length *n* (NaN → 0)."""
+    """Coerce a per-point boolean-ish array to ``int`` 0/1 of length *n* (NaN -> 0)."""
     if values is None:
         return np.zeros(n, dtype=int)
     arr = np.asarray(values, dtype=float)
@@ -394,7 +312,7 @@ def summarize_segment_result(res: dict) -> dict:
     their reference radius is established over the whole parent vessel and often
     lies proximal to the segment, so re-running detection on an isolated distal
     piece would silently lose lesions (and flag uniformly narrow segments as
-    normal). The per-point flags transferred from the measured root→terminal
+    normal). The per-point flags transferred from the measured root->terminal
     paths are aggregated instead.
     """
     pts = centerline_points_from_result(res)
@@ -427,7 +345,7 @@ def summarize_segment_result(res: dict) -> dict:
     ref_valid = ref[np.isfinite(ref)]
     res["radius_ref_mm"] = float(np.nanmedian(ref_valid)) if ref_valid.size else np.nan
 
-    # -- stenosis, aggregated from the transferred per-point flags -----------
+    # stenosis, aggregated from the transferred per-point flags
     # stenosis_total_length bit-ANDs consecutive flags, so it needs an integer array.
     is_stenotic = _as_flag_array(res.get("is_stenotic"), n)
     sten_pct = np.asarray(res.get("stenosis_percent_point", np.full(n, np.nan)), dtype=float)
@@ -442,7 +360,7 @@ def summarize_segment_result(res: dict) -> dict:
     res["stenosis_segments_point_idx"] = json.dumps(sten_runs)
     res["stenosis_segments_detail_json"] = segment_detail_json(s, sten_pct, sten_runs)
 
-    # -- enlargement, likewise ----------------------------------------------
+    # enlargement, likewise
     is_enlarged = _as_flag_array(res.get("is_enlarged"), n)
     enl_pct = np.asarray(res.get("enlargement_percent_point", np.full(n, np.nan)), dtype=float)
     enl_runs = binary_runs(is_enlarged)
@@ -468,7 +386,7 @@ def slice_centerline_result(res: dict, start_idx: int, *, redetect: bool = True)
     With ``redetect=False`` the stenosis/enlargement point flags established on
     the full path are kept and merely re-aggregated
     (:func:`summarize_segment_result`), instead of re-running detection on the
-    truncated path — the reference radius usually lies in the removed prefix.
+    truncated path: the reference radius usually lies in the removed prefix.
     """
     n = len(res["x_mm"])
     start_idx = int(np.clip(start_idx, 0, max(0, n - 1)))
@@ -484,7 +402,7 @@ def slice_centerline_result(res: dict, start_idx: int, *, redetect: bool = True)
         "enlargement_support_candidate_point", "enlargement_percent_point",
         "is_enlarged", "is_enlarged_cs", "is_enlarged_mis",
         "enlargement_reference_radius_point", "enlargement_threshold_radius_point",
-        "siphon_mask_point",
+        "siphon_mask_point", "taper_stretch_point",
         "donut_loop_indices", "donut_arm_indices", "donut_arm_labels",
         "tree_point_labels", "tree_point_paths", "tree_point_depths",
     ]
@@ -508,14 +426,14 @@ def deduplicate_path_results(
 ) -> Tuple[List[dict], List[str]]:
     """Trim path results so each piece of vessel is represented exactly once.
 
-    Root→terminal paths of the same component all traverse the shared proximal
+    Root->terminal paths of the same component all traverse the shared proximal
     trunk, so summing their lengths multiply-counts it. Paths are processed
     longest-first against a growing reference cloud; the leading run of points
     already covered by an earlier path is removed. A path left with fewer than
     *min_points* unique points is dropped entirely.
 
     Returns ``(kept_results, dropped_path_ids)``. Caliber flags are preserved
-    rather than re-detected — see :func:`slice_centerline_result`.
+    rather than re-detected; see :func:`slice_centerline_result`.
     """
     if len(path_results) <= 1:
         return list(path_results), []
@@ -994,75 +912,10 @@ def analyze_centerline_poly(
     n_bends = bend_peak_count(kappa, _cfg.BEND_KAPPA_PEAK, _cfg.INFLECT_SMOOTH_WIN)
     r_stats = radius_stats(radius_area)
     taper = taper_slope(s, detection_radius)
-    sten = detect_stenosis_segments(
-        s=s, r=detection_radius, threshold_pct=_cfg.STENOSIS_THRESHOLD_PCT,
-        min_segment_mm=_cfg.STENOSIS_MIN_LEN_MM, exclude_end_mm=_cfg.STENOSIS_EXCLUDE_END_MM,
-        pts=pts,
-    )
-    sten_pct_point, is_stenotic = stenosis_pointwise(
-        s=s, r=detection_radius, r_ref_per_point=sten.r_ref_per_point,
-        threshold_pct=_cfg.STENOSIS_THRESHOLD_PCT, exclude_end_mm=_cfg.STENOSIS_EXCLUDE_END_MM,
-        min_segment_mm=_cfg.STENOSIS_MIN_LEN_MM,
-    )
-    sten_raw_pct_point = stenosis_raw_percent(
-        s=s, r=detection_radius, r_ref_per_point=sten.r_ref_per_point,
-        exclude_end_mm=0.0,
-    )
-    candidate_valid = stenosis_valid_mask_from_ends(s, float(_cfg.STENOSIS_CANDIDATE_EXCLUDE_END_MM))
-    sten_core_candidate = (
-        (sten_raw_pct_point >= _cfg.STENOSIS_THRESHOLD_PCT) & np.isfinite(sten_raw_pct_point)
-        & candidate_valid
-    ).astype(np.float64)
-    sten_support_candidate = (
-        (sten_raw_pct_point >= min(_cfg.STENOSIS_SUPPORT_THRESHOLD_PCT, _cfg.STENOSIS_THRESHOLD_PCT))
-        & np.isfinite(sten_raw_pct_point)
-        & candidate_valid
-    ).astype(np.float64)
-    enlarg = detect_enlargement_segments(
-        s=s, r=radius_area, threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT,
-        min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
-        pts=pts,
-    )
-    enlargement_pct_point, is_enlarged = enlargement_pointwise(
-        s=s, r=radius_area, r_ref_per_point=enlarg.r_ref_per_point,
-        threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
-        min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM,
-        pts=pts,
-    )
-    enlarg_raw_pct_point = np.full(len(pts), np.nan, dtype=float)
-    enlarg_ref_valid = np.isfinite(radius_area) & np.isfinite(enlarg.r_ref_per_point) & (enlarg.r_ref_per_point > 1e-8)
-    enlarg_raw_pct_point[enlarg_ref_valid] = (radius_area[enlarg_ref_valid] / enlarg.r_ref_per_point[enlarg_ref_valid] - 1.0) * 100.0
-    enlarg_candidate_valid = stenosis_valid_mask_from_ends(s, float(_cfg.ENLARGEMENT_CANDIDATE_EXCLUDE_END_MM))
-    enlarg_core_candidate = (
-        (enlarg_raw_pct_point >= _cfg.ENLARGEMENT_THRESHOLD_PCT) & np.isfinite(enlarg_raw_pct_point)
-        & enlarg_candidate_valid
-    ).astype(np.float64)
-    enlarg_support_candidate = (
-        (enlarg_raw_pct_point >= min(_cfg.ENLARGEMENT_SUPPORT_THRESHOLD_PCT, _cfg.ENLARGEMENT_THRESHOLD_PCT))
-        & np.isfinite(enlarg_raw_pct_point)
-        & enlarg_candidate_valid
-    ).astype(np.float64)
-    sten_pct_point, is_stenotic, enlargement_pct_point, is_enlarged = resolve_stenosis_enlargement_overlap(
-        sten_pct_point, is_stenotic, enlargement_pct_point, is_enlarged
-    )
-    sten_total_len = stenosis_total_length(s, is_stenotic)
-    stenotic_radius = detection_radius[(is_stenotic == 1) & np.isfinite(detection_radius)]
-    enlarged_radius = radius_area[(is_enlarged == 1) & np.isfinite(radius_area)]
-    stenosis_binary = is_stenotic.astype(np.float64)
-    enlargement_binary = is_enlarged.astype(np.float64)
-    # CS-based enlargement is already computed above (radius_area); MIS-based is new.
-    is_enlarged_cs = is_enlarged
-    enlarg_mis = detect_enlargement_segments(
-        s=s, r=detection_radius, threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT,
-        min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
-        pts=pts,
-    )
-    _, is_enlarged_mis = enlargement_pointwise(
-        s=s, r=detection_radius, r_ref_per_point=enlarg_mis.r_ref_per_point,
-        threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
-        min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM, pts=pts,
-    )
-    is_enlarged_mis = np.where(is_stenotic == 1, 0, is_enlarged_mis).astype(int)
+    les = detect_caliber_lesions(s, radius_area, detection_radius, pts, cow_source="cross_section")
+    sten, enlarg = les.stenosis, les.enlargement
+    stenosis_binary = les.is_stenotic.astype(np.float64)
+    enlargement_binary = les.is_enlarged.astype(np.float64)
 
     if save_centerline_vtp:
         poly = build_polyline_polydata(points=pts, arrays=[
@@ -1072,19 +925,19 @@ def analyze_centerline_poly(
             (detection_radius, "StenosisDetectionRadius"),
             (cross_section_area, "CrossSectionArea"),
             (sten.r_ref_per_point, "StenosisReferenceRadius"),
-            ((1.0 - _cfg.STENOSIS_THRESHOLD_PCT / 100.0) * sten.r_ref_per_point, "StenosisThresholdRadius"),
-            (sten_raw_pct_point, "StenosisRawPercent"),
-            (sten_core_candidate, "StenosisCoreCandidate"),
-            (sten_support_candidate, "StenosisSupportCandidate"),
-            (sten_pct_point, "StenosisPercent"), (stenosis_binary, "StenosisBinary"),
+            (les.stenosis_threshold_radius, "StenosisThresholdRadius"),
+            (les.stenosis_raw_pct_point, "StenosisRawPercent"),
+            (les.stenosis_core_candidate, "StenosisCoreCandidate"),
+            (les.stenosis_support_candidate, "StenosisSupportCandidate"),
+            (les.stenosis_pct_point, "StenosisPercent"), (stenosis_binary, "StenosisBinary"),
             (enlarg.r_ref_per_point, "EnlargementReferenceRadius"),
-            ((1.0 + _cfg.ENLARGEMENT_THRESHOLD_PCT / 100.0) * enlarg.r_ref_per_point, "EnlargementThresholdRadius"),
-            (enlarg_raw_pct_point, "EnlargementRawPercent"),
-            (enlarg_core_candidate, "EnlargementCoreCandidate"),
-            (enlarg_support_candidate, "EnlargementSupportCandidate"),
-            (enlargement_pct_point, "EnlargementPercent"), (enlargement_binary, "EnlargementBinary"),
-            (is_enlarged_cs.astype(np.float64), "EnlargementBinaryCS"),
-            (is_enlarged_mis.astype(np.float64), "EnlargementBinaryMIS"),
+            (les.enlargement_threshold_radius, "EnlargementThresholdRadius"),
+            (les.enlargement_raw_pct_point, "EnlargementRawPercent"),
+            (les.enlargement_core_candidate, "EnlargementCoreCandidate"),
+            (les.enlargement_support_candidate, "EnlargementSupportCandidate"),
+            (les.enlargement_pct_point, "EnlargementPercent"), (enlargement_binary, "EnlargementBinary"),
+            (les.is_enlarged_cs.astype(np.float64), "EnlargementBinaryCS"),
+            (les.is_enlarged_mis.astype(np.float64), "EnlargementBinaryMIS"),
             (siphon_mask.astype(np.float64), "SiphonMask"),
             (np.arange(1, len(pts) + 1, dtype=np.float64), "PointIndex"),
         ])
@@ -1099,19 +952,19 @@ def analyze_centerline_poly(
             (radius_mis, "MaximumInscribedSphereRadius"),
             (detection_radius, "StenosisDetectionRadius"),
             (sten.r_ref_per_point, "StenosisReferenceRadius"),
-            ((1.0 - _cfg.STENOSIS_THRESHOLD_PCT / 100.0) * sten.r_ref_per_point, "StenosisThresholdRadius"),
-            (sten_raw_pct_point, "StenosisRawPercent"),
-            (sten_core_candidate, "StenosisCoreCandidate"),
-            (sten_support_candidate, "StenosisSupportCandidate"),
-            (sten_pct_point, "StenosisPercent"), (stenosis_binary, "StenosisBinary"),
+            (les.stenosis_threshold_radius, "StenosisThresholdRadius"),
+            (les.stenosis_raw_pct_point, "StenosisRawPercent"),
+            (les.stenosis_core_candidate, "StenosisCoreCandidate"),
+            (les.stenosis_support_candidate, "StenosisSupportCandidate"),
+            (les.stenosis_pct_point, "StenosisPercent"), (stenosis_binary, "StenosisBinary"),
             (enlarg.r_ref_per_point, "EnlargementReferenceRadius"),
-            ((1.0 + _cfg.ENLARGEMENT_THRESHOLD_PCT / 100.0) * enlarg.r_ref_per_point, "EnlargementThresholdRadius"),
-            (enlarg_raw_pct_point, "EnlargementRawPercent"),
-            (enlarg_core_candidate, "EnlargementCoreCandidate"),
-            (enlarg_support_candidate, "EnlargementSupportCandidate"),
-            (enlargement_pct_point, "EnlargementPercent"), (enlargement_binary, "EnlargementBinary"),
-            (is_enlarged_cs.astype(np.float64), "EnlargementBinaryCS"),
-            (is_enlarged_mis.astype(np.float64), "EnlargementBinaryMIS"),
+            (les.enlargement_threshold_radius, "EnlargementThresholdRadius"),
+            (les.enlargement_raw_pct_point, "EnlargementRawPercent"),
+            (les.enlargement_core_candidate, "EnlargementCoreCandidate"),
+            (les.enlargement_support_candidate, "EnlargementSupportCandidate"),
+            (les.enlargement_pct_point, "EnlargementPercent"), (enlargement_binary, "EnlargementBinary"),
+            (les.is_enlarged_cs.astype(np.float64), "EnlargementBinaryCS"),
+            (les.is_enlarged_mis.astype(np.float64), "EnlargementBinaryMIS"),
             (siphon_mask.astype(np.float64), "SiphonMask"),
             (tree_meta["tree_depth"], "TreeDepth"),
             (np.arange(1, len(pts) + 1, dtype=np.float64), "PointIndex"),
@@ -1124,40 +977,14 @@ def analyze_centerline_poly(
         "maximum_inscribed_sphere_radius_mm": radius_mis,
         "stenosis_detection_radius_mm": detection_radius,
         "curvature_1_per_mm": kappa, "torsion_1_per_mm": torsion, "turn_proxy": turn_proxy,
-        "stenosis_raw_percent_point": sten_raw_pct_point,
-        "stenosis_core_candidate_point": sten_core_candidate,
-        "stenosis_support_candidate_point": sten_support_candidate,
-        "stenosis_percent_point": sten_pct_point, "is_stenotic": is_stenotic,
-        "stenosis_reference_radius_point": sten.r_ref_per_point,
-        "stenosis_threshold_radius_point": (1.0 - _cfg.STENOSIS_THRESHOLD_PCT / 100.0) * sten.r_ref_per_point,
-        "enlargement_raw_percent_point": enlarg_raw_pct_point,
-        "enlargement_core_candidate_point": enlarg_core_candidate,
-        "enlargement_support_candidate_point": enlarg_support_candidate,
-        "enlargement_percent_point": enlargement_pct_point, "is_enlarged": is_enlarged,
-        "is_enlarged_cs": is_enlarged_cs, "is_enlarged_mis": is_enlarged_mis,
         "siphon_mask_point": siphon_mask.astype(float),
-        "enlargement_reference_radius_point": enlarg.r_ref_per_point,
-        "enlargement_threshold_radius_point": (1.0 + _cfg.ENLARGEMENT_THRESHOLD_PCT / 100.0) * enlarg.r_ref_per_point,
+        # Where the stretch-wise taper reference may step (junction-to-junction stretch ids).
+        "taper_stretch_point": taper_stretch_ids(pts, detection_radius),
         "length_mm": float(L), "chord_length_mm": float(C), "tortuosity_dm": float(T),
         "curvature_mean_1_per_mm": float(k_mean), "curvature_median_1_per_mm": float(k_median),
         "curvature_p95_1_per_mm": float(k_p95), "curvature_max_1_per_mm": float(k_max),
         "inflection_count": int(n_inflections), "bend_peak_count": int(n_bends),
-        "radius_ref_mm": float(sten.r_ref), "radius_min_mm": float(sten.r_min),
-        "radius_min_stenotic_mm": float(np.min(stenotic_radius)) if stenotic_radius.size else np.nan,
-        "stenosis_percent_max": float(sten.percent_stenosis_max),
-        "degree_of_stenosis_pct": float(sten.percent_stenosis_max),
-        "stenosis_length_total_mm": float(sten_total_len),
-        "stenosis_segments_n": int(len(sten.segments_point_idx)),
-        "stenosis_segments_point_idx": json.dumps(sten.segments_point_idx),
-        "stenosis_segments_detail_json": segment_detail_json(s, sten_pct_point, sten.segments_point_idx),
-        "enlargement_radius_ref_mm": float(enlarg.r_ref),
-        "enlargement_radius_max_mm": float(enlarg.r_max),
-        "enlargement_percent_max": float(enlarg.percent_enlargement_max),
-        "enlargement_length_total_mm": float(stenosis_total_length(s, is_enlarged)),
-        "enlargement_segments_n": int(len(enlarg.segments_point_idx)),
-        "enlargement_segments_point_idx": json.dumps(enlarg.segments_point_idx),
-        "enlargement_segments_detail_json": segment_detail_json(s, enlargement_pct_point, enlarg.segments_point_idx),
         "taper_slope_mm_per_mm": float(taper),
-        "radius_max_enlarged_mm": float(np.max(enlarged_radius)) if enlarged_radius.size else np.nan,
         **r_stats,
+        **lesion_result_fields(les, s, detection_radius),
     }

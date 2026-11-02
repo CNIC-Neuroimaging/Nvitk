@@ -47,7 +47,7 @@ def brain_extraction(
         One intensity volume, or a sequence of volumes for multi-modal
         modalities such as ``t1t2infant``.
     modality
-        ANTsPyNet modality string (``t1``, ``t2``, ``flair``, ``mra``, …).
+        ANTsPyNet modality string (``t1``, ``t2``, ``flair``, ``mra``, ...).
     """
     antspynet = require_antspynet()
     mod = str(modality).strip().lower()

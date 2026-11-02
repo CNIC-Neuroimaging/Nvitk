@@ -11,6 +11,8 @@ contributions:
       filename_patterns:
         - "*.nii"
         - "*.nii.gz"
+        - "*.mgz"
+        - "*.mgh"
         - "*.mha"
         - "*.mhd"
         - "*.tif"

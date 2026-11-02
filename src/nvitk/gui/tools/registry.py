@@ -9,6 +9,8 @@ from nvitk.gui.pipeline.catalog import PIPELINE_TOOLS
 from nvitk.measure.morpho.anatomy_axes import SPECIES_AUTO, SPECIES_CHOICES
 from nvitk.measure.morpho.topology_io import topology_choices as _morpho_topology_choices
 from nvitk.measure.morphometrics_config import DEFAULT_PROFILE as _MORPHO_DEFAULT_PROFILE
+from nvitk.measure.morphometrics_config import ENLARGEMENT_RADIUS_SOURCE_LABELS as _ENLARGEMENT_RADIUS_LABELS
+from nvitk.measure.morphometrics_config import LESION_DETECTION_METHODS as _LESION_DETECTION_METHODS
 from nvitk.measure.morphometrics_config import PROFILES as _MORPHO_PROFILE_MAP
 from nvitk.morphology.skeleton_methods import (
     SKELETON_METHOD_CHOICES,
@@ -18,6 +20,9 @@ from nvitk.morphology.skeleton_methods import (
 )
 
 _MORPHO_PROFILES: tuple[str, ...] = tuple(sorted(_MORPHO_PROFILE_MAP))
+#: "Enlargement radius" picker: the profile's own ENLARGEMENT_RADIUS_SOURCE, or an override.
+MORPHO_PROFILE_VALUE = "profile value"
+_ENLARGEMENT_RADIUS_CHOICES: tuple[str, ...] = (MORPHO_PROFILE_VALUE, *_ENLARGEMENT_RADIUS_LABELS.values())
 
 ParamKind = Literal[
     "int",
@@ -60,7 +65,7 @@ class GuiToolSpec:
     run_mode: RunMode = "layer"
     cli_command: str = ""
     description: str = ""
-    #: False only for a tool that has nothing to do with the active layer at all — it reads a
+    #: False only for a tool that has nothing to do with the active layer at all: it reads a
     #: directory, a database, or a results folder, and manages its own output (napari layers, a
     #: dialog). Defaults to True because almost every tool here operates on the active layer's
     #: data; the Tools panel's "no layers loaded" gate consults this before running anything.
@@ -68,15 +73,24 @@ class GuiToolSpec:
     #: The operation is meaningful **per label**, so a multi-label selection runs it once on each
     #: label and recombines the results with the original ids, instead of on their binary union.
     #:
-    #: Set this only where per-label and per-union genuinely differ and the per-label reading is the
+    #: Set this only where per-label and per-union differ and the per-label reading is the
     #: one a user means. Connected components qualifies: on a union, two touching labels report one
     #: component and a disjoint smaller label is dropped outright. The mask set-ops (``seg_mask_*``)
-    #: do not — a union is exactly what they are for — and neither does ``label_cc``, which
+    #: do not (a union is exactly what they are for), and neither does ``label_cc``, which
     #: *assigns* new ids and would need a documented offset scheme per label rather than a flag.
     multilabel: bool = False
+    #: The result lives on the **reference layer's** grid, not the active layer's: the output layer
+    #: takes the reference layer's placement and grid metadata (affine, spacing, axes, ...) and the
+    #: active layer's everything else, so it is drawn (and saved), where the reference is.
+    output_on_reference_grid: bool = False
+    #: A geometric transform: it moves voxels without changing what they hold. On a label map it
+    #: runs on the label ids themselves (only the selected ones when labels are picked), always
+    #: nearest-neighbour, and returns a label map (like its ``nvitk-transform`` counterpart)
+    #: instead of transforming the binary union the label target modes reduce the layer to.
+    geometric: bool = False
 
 
-#: Ids of tools since folded into another: ``old id → (new id, params the old id fixes)``.
+#: Ids of tools since folded into another: ``old id -> (new id, params the old id fixes)``.
 #: Recorded steps and scripts written against the old id keep running.
 TOOL_ID_ALIASES: dict[str, tuple[str, dict[str, Any]]] = {
     "img_mask_keep_inside": (
@@ -116,6 +130,10 @@ _CATEGORY_ORDER = (
     "Morphology",
     "Centerline",
     "Segmentation",
+    "FastSurfer",
+    "FreeSurfer",
+    "FSL",
+    "ASL perfusion",
     "Registration",
     "Visualization",
     "Transform",
@@ -160,7 +178,7 @@ def _sk(name: str) -> tuple[str, ...]:
         from nvitk.filters import skimage_filters as _f
 
         return tuple(getattr(_f, name))
-    except Exception:  # noqa: BLE001 — the registry must import without skimage
+    except Exception:  # noqa: BLE001 (the registry must import without skimage)
         return ("otsu",)
 
 
@@ -232,7 +250,7 @@ def _registration_choices() -> dict[str, tuple[str, ...]]:
         out["flirt_dof"] = tuple(str(d) for d in _flirt.FLIRT_DOF)
         out["flirt_cost"] = tuple(_flirt.FLIRT_COSTS)
         out["flirt_interp"] = tuple(_flirt.FLIRT_INTERPS)
-    except Exception:  # noqa: BLE001 — the registry must import without nipype
+    except Exception:  # noqa: BLE001 (the registry must import without nipype)
         pass
     try:
         from nvitk.registration import ants as _ants
@@ -259,6 +277,11 @@ def _registration_choices() -> dict[str, tuple[str, ...]]:
 _REG_CHOICES = _registration_choices()
 _REG_ALSO_WARP = ParamSpec(
     "reg_also_warp", "Also warp layers (comma-separated names)", "str", ""
+)
+#: A label map / segmentation in the moving image's space, carried through the
+#: registration with the same transform, always nearest neighbour.
+_REG_LABEL_LAYER = ParamSpec(
+    "reg_label_layer", "Label / segmentation layer to warp (optional, moving space)", "layer", ""
 )
 
 _TOOLS: tuple[GuiToolSpec, ...] = (
@@ -642,6 +665,25 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         ),
     ),
     GuiToolSpec(
+        "polyline_to_centerline",
+        "Centerline",
+        "From polyline (centerline image)",
+        (
+            ParamSpec("polyline_layer", "Polyline layer (Shapes / mesh polylines / Points)", "layer", ""),
+            ParamSpec("label_id", "Label of unlabelled paths (0 = the mask's label under it, else 1)", "int", 0,
+                      min=0, max=65535),
+        ),
+        needs_3d=True,
+        run_mode="notify",
+        description=(
+            "The reverse of To polyline: draws the paths of a Shapes layer (To polyline, CPR, centerline "
+            "network, centring), the Mesh panel's centerline polylines or an ordered Points layer as a "
+            "1-voxel, 26-connected centerline image on the active layer's grid, each path with its own "
+            "label id (paths without one take the label below, the mask's label under them, or 1). "
+            "The result can feed any tool that takes a centerline image."
+        ),
+    ),
+    GuiToolSpec(
         "vmtk_centerline_network",
         "Centerline",
         "Centerline network (VMTK)",
@@ -714,11 +756,20 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         (
             ParamSpec("reference_layer", "TOF / MRA image layer", "layer", ""),
             _CORRECTION_IDS,
+            ParamSpec("siphon_pretess", "Pretess: remove edge / corner-only contacts", "bool", True),
+            ParamSpec("siphon_resegment", "Re-segment both ICAs with one threshold", "choice", "none",
+                      choices=("none", "common")),
+            ParamSpec("siphon_max_cut_mm3", "Largest cut, mm³", "float", 20.0, min=0.5, max=200.0),
             _OUTPUT_DIR,
         ),
         needs_reference_layer=True,
         needs_3d=True,
         run_mode="notify",
+        description=(
+            "Opens the ICA siphon where its two limbs touch on TOF and closes a loop. The segmentation "
+            "is kept and only the contact is removed (an intensity-weighted minimum cut). Adds the "
+            "corrected labels, the removed voxels and the centerlines as layers."
+        ),
     ),
     GuiToolSpec(
         "mask_genus",
@@ -1152,13 +1203,43 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         run_mode="notify",
     ),
     GuiToolSpec(
+        "seg_eicab_postprocess",
+        "Segmentation",
+        "eICAB post-process (refine, extend, grow, siphon)",
+        (
+            ParamSpec("reference_layer", "TOF / MRA image layer", "layer", ""),
+            ParamSpec("eicab_pp_remove_acha", "Drop the anterior choroidal arteries (17, 18)", "bool", True),
+            ParamSpec("eicab_pp_resegment", "Re-segment every label at its local half maximum", "bool", True),
+            ParamSpec("eicab_pp_extend", "ICAs down to the image floor (multi-scale Frangi)", "bool", True),
+            ParamSpec("eicab_pp_loop_fill", "ICA loops below the siphon: fill the inner-wall notches", "bool", True),
+            ParamSpec("eicab_pp_distal", "Also the WB_pp layer: ACAs / MCAs / PCAs / SCAs grown along the Frangi tree", "bool", True),
+            ParamSpec("eicab_pp_aca_guard", "ACAs: AComm sides + midline guard", "bool", True),
+            ParamSpec("eicab_pp_siphon", "ICA siphon correction (minimum cut)", "bool", True),
+            ParamSpec("eicab_pp_distal_ids", "Label ids grown distally", "str", "5,6,7,8,13,14,15,16"),
+            ParamSpec("eicab_pp_icas", "ICA label ids (to the floor, siphon)", "str", "1,2"),
+            _OUTPUT_DIR,
+        ),
+        needs_reference_layer=True,
+        needs_3d=True,
+        run_mode="notify",
+        description=(
+            "Stage 1's eICAB post-process on a label layer: the anterior choroidals dropped, each label re-drawn "
+            "at its local half maximum, the ICAs followed to the image floor along a multi-scale "
+            "Frangi tree (the basilar is not extended) and their loops below the siphon filled where the "
+            "inner wall came out dark, each label kept to its largest component with its holes "
+            "filled after every step, and the ICA siphon loops cut: the CW_pp layer. With the distal growth, also the WB_pp layer: the ACAs / MCAs / PCAs / SCAs grown "
+            "distally in competition, the ACA / MCA growth labelled A2 / M2. The table lists, per label, the "
+            "voxels before / after, each extension, the distal growth and the siphon cuts."
+        ),
+    ),
+    GuiToolSpec(
         "viz_vessel_cpr",
         "Visualization",
         "Vessel CPR (flattened vessel)",
         (
             ParamSpec("image_layer", "Intensity image (optional)", "layer", ""),
             ParamSpec("wall_layer", "Wall mask (optional)", "layer", ""),
-            ParamSpec("centerline_layer", "Centerlines (optional)", "layer", ""),
+            ParamSpec("centerline_layer", "Centerlines (optional: image, Shapes paths, mesh polylines or Points)", "layer", ""),
             ParamSpec("step_mm", "Station spacing (mm)", "float", 0.5, min=0.1, max=5.0),
             ParamSpec("upsample", "Upsample image + mask (1 = off)", "float", 1.0, min=1.0, max=4.0),
             ParamSpec("join_gap_vox", "Join vessel pieces up to N voxels (0 = off)", "int", 8, min=0, max=50),
@@ -1317,7 +1398,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         "Cross-sections (mask + image)",
         (
             ParamSpec("image_layer", "Intensity image (optional)", "layer", ""),
-            ParamSpec("centerline_layer", "Centerlines (optional)", "layer", ""),
+            ParamSpec("centerline_layer", "Centerlines (optional: image, Shapes paths, mesh polylines or Points)", "layer", ""),
             ParamSpec("cross_section_radius_vox", "Plane half-size (vox)", "float", 12.0,
                       min=2.0, max=200.0),
             ParamSpec("cross_section_res", "Plane resolution (0=auto)", "int", 0, min=0, max=1024),
@@ -1533,7 +1614,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "Collapse a 3D or 4D image along one axis (max, mean, median, min, std, sum)."
         ),
     ),
-    # ---- Interpolation -----------------------------------------------------------
+    # Interpolation
     GuiToolSpec(
         "interp_resample_axes",
         "Interpolation",
@@ -1615,7 +1696,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "slices with data."
         ),
     ),
-    # ---- Time (3D+t) ------------------------------------------------------------
+    # Time (3D+t)
     GuiToolSpec(
         "time_extract_frame",
         "Time & frequency",
@@ -1689,7 +1770,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "carry one (e.g. 73 %, 78 %, 83 % reconstructions)."
         ),
     ),
-    # ---- Frequency (k-space) ----------------------------------------------------
+    # Frequency (k-space)
     GuiToolSpec(
         "kspace_fft",
         "Time & frequency",
@@ -1764,6 +1845,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("flirt_no_search", "No search (images already roughly aligned)", "bool", False),
             ParamSpec("flirt_interp", "Output interpolation", "choice", "trilinear", choices=_REG_CHOICES["flirt_interp"]),
             ParamSpec("flirt_bins", "Histogram bins", "int", 256, min=16, max=1024),
+            _REG_LABEL_LAYER,
             _REG_ALSO_WARP,
             ParamSpec("warped_name", "Warped output filename", "str", "moving_warped.nii.gz"),
             ParamSpec("matrix_name", "Matrix output filename", "str", "affine.mat"),
@@ -1773,8 +1855,9 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         description=(
             "FSL FLIRT: align the active (moving) layer to the reference. 6 DOF is rigid, "
             "7 adds a global scale, 9 per-axis scales, 12 a full affine. Writes the .mat "
-            "matrix and adds the resliced moving image; 'Also warp' reslices more layers "
-            "(masks with nearest neighbour)."
+            "matrix and adds the resliced moving image. A label / segmentation layer in the "
+            "moving space is resliced with the same matrix, nearest neighbour; 'Also warp' "
+            "reslices more layers (masks with nearest neighbour)."
         ),
     ),
     GuiToolSpec(
@@ -1812,6 +1895,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("ants_fixed_mask", "Fixed mask layer (optional)", "layer", ""),
             ParamSpec("ants_moving_mask", "Moving mask layer (optional)", "layer", ""),
             ParamSpec("ants_initial_transform", "Initial transform file (optional)", "str", ""),
+            _REG_LABEL_LAYER,
             _REG_ALSO_WARP,
             ParamSpec("write_composite_transform", "Write composite transform", "bool", False),
             ParamSpec("verbose", "Verbose", "bool", False),
@@ -1822,7 +1906,9 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "ants.registration of the active (moving) layer to the reference: Rigid, Affine, "
             "SyN, the antsRegistrationSyN[r/a/s/b] presets… with the stage metrics, iteration "
             "schedules and smoothing exposed. Adds the warped image and lists the forward "
-            "transforms; 'Also warp' maps more layers with them (masks with genericLabel)."
+            "transforms. A label / segmentation layer in the moving space is mapped with them "
+            "(genericLabel, nearest-neighbour-like); 'Also warp' maps more layers (masks with "
+            "genericLabel)."
         ),
     ),
     GuiToolSpec(
@@ -1863,6 +1949,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("fireants_smooth_warp", "Warp smoothing sigma", "float", 0.5, min=0.0, max=10.0),
             ParamSpec("fireants_smooth_grad", "Gradient smoothing sigma", "float", 1.0, min=0.0, max=10.0),
             ParamSpec("device", "Device (e.g. cuda:0, cpu)", "str", "cuda:0"),
+            _REG_LABEL_LAYER,
             _REG_ALSO_WARP,
             ParamSpec("verbose", "Verbose", "bool", False),
         ),
@@ -1871,7 +1958,9 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         description=(
             "GPU registration with FireANTs: any chain of moments → rigid → affine → greedy / "
             "SyN, each stage starting from the previous one, with a multi-resolution pyramid. "
-            "Transforms are saved in ANTs format, so 'FireANTs apply' or ANTsPy maps more images."
+            "Transforms are saved in ANTs format, so 'FireANTs apply' or ANTsPy maps more images. "
+            "A label / segmentation layer in the moving space is mapped with them (genericLabel); "
+            "'Also warp' maps more layers."
         ),
     ),
     GuiToolSpec(
@@ -1961,6 +2050,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "Rotate the active 3D layer around axis 0/1/2 (default Z). "
             "Use order 0 for label masks. Keep reshape off to preserve shape."
         ),
+        geometric=True,
     ),
     GuiToolSpec(
         "swap_axes",
@@ -1975,6 +2065,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "Exchange two array axes of the active volume (e.g. 0↔2 to turn XYZ into ZYX). "
             "Spacing/affine columns are updated when metadata is present."
         ),
+        geometric=True,
     ),
     GuiToolSpec(
         "isotropy",
@@ -1986,6 +2077,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("order", "Interpolation order", "int", 1, min=0, max=5),
         ),
         needs_3d=True,
+        geometric=True,
     ),
     GuiToolSpec(
         "resample_to",
@@ -1993,9 +2085,11 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         "Resample to reference layer grid",
         (
             ParamSpec("reference_layer", "Reference layer", "layer", ""),
-            ParamSpec("order", "Interpolation order", "int", 0, min=0, max=5),
+            ParamSpec("order", "Interpolation order (label maps use 0)", "int", 1, min=0, max=5),
         ),
         needs_reference_layer=True,
+        output_on_reference_grid=True,
+        geometric=True,
     ),
     GuiToolSpec(
         "oblique_slice",
@@ -2007,6 +2101,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("order", "Interpolation order", "int", 1, min=0, max=5),
         ),
         needs_3d=True,
+        geometric=True,
     ),
     GuiToolSpec(
         "qvtpy_locs",
@@ -2116,14 +2211,20 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ),
             ParamSpec("bridge_gaps_vox", "Bridge same-label gaps up to N voxels (0 = off)", "int", 0,
                       min=0, max=50),
-            ParamSpec("n_workers", "Workers", "int", 1, min=1, max=64),
+            ParamSpec("siphon_legacy", "cow_morpho's siphon mask (legacy, covers whole vessels)", "bool",
+                      False),
+            ParamSpec("enlargement_radius", "Enlargement radius", "choice", MORPHO_PROFILE_VALUE,
+                      choices=_ENLARGEMENT_RADIUS_CHOICES),
+            ParamSpec("smooth_cross_section", "Running median of the cross-section radius (enlargements)",
+                      "bool", False),
+            ParamSpec("case_id", "Case id (empty = the layer name)", "str", ""),
+            ParamSpec("show_lesions", "Show lesions as points", "bool", True),
+            ParamSpec("n_workers", "Parallel vessel jobs (1 = one at a time)", "int", 1, min=1, max=64),
             ParamSpec("skip_existing", "Skip if Excel exists", "bool", False),
-            ParamSpec(
-                "input_already_smoothed",
-                "Input already Taubin-smoothed",
-                "bool",
-                False,
-            ),
+            ParamSpec("lesion_detection", "Stenosis / enlargement detection", "choice", MORPHO_PROFILE_VALUE,
+                      choices=(MORPHO_PROFILE_VALUE, *_LESION_DETECTION_METHODS)),
+            ParamSpec("taubin", "Taubin-smooth the labels (off: masks already at the half maximum)", "bool", False),
+            ParamSpec("verbose", "Print the progress per vessel (log / terminal)", "bool", False),
         ),
         needs_3d=True,
         run_mode="notify",
@@ -2135,10 +2236,21 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "reference), or 'none' for topology-agnostic per-label metrics. "
             "Species 'auto' reads the topology's _meta block. The profile 'eicab_cw' "
             "is tuned for eICAB Circle-of-Willis masks (cow_morpho parity, VMTK "
-            "centerlines); bridging same-label gaps departs from that tuning. Results: "
-            "one row per vessel (vessel_summary.csv), per segment, per lesion (with "
-            "severity and confidence) and per subject. Leave Output directory empty to "
-            "show results in the GUI only."
+            "centerlines, calibrated siphon mask; the legacy switch restores cow's); "
+            "bridging same-label gaps departs from that tuning. Enlargement radius and the "
+            "cross-section median override the profile's enlargement test, for comparison. "
+            "Parallel vessel jobs > 1 measures that many vessels (label / component jobs) at "
+            "once, one process each (VMTK is memory-hungry: a few is plenty). "
+            "Shows the centerlines, "
+            "the vessel surfaces and the lesions (orange stenoses, blue enlargements, "
+            "opaque by confidence, sized by severity; hover one for its details, click it "
+            "for its calibre profile in the Lesion inspector), and opens the results window: "
+            "per vessel every measure (calibre, end-window diameters, blanking, "
+            "first/last-N-mm tortuosity, curvature integrals, direction angles, branching, "
+            "lesion severity and confidence, plus the earlier path, volumetry and "
+            "tortuosity metrics), with Colour labels by colouring the labels and the "
+            "surfaces by any of them; per lesion (click to show it), per segment and per "
+            "subject. Leave Output directory empty to show results in the GUI only."
         ),
     ),
     GuiToolSpec(
@@ -2312,15 +2424,569 @@ _PIPELINE_GUI: tuple[GuiToolSpec, ...] = tuple(
 
 _TOOLS = _TOOLS + _PIPELINE_GUI
 
+# FastSurfer (nvitk.gui.tools.fastsurfer_tools)
+
+
+def _fastsurfer_default(kind: str) -> str:
+    """The remembered FreeSurfer installation / license, to prefill the surface tools."""
+    try:
+        from nvitk.segmentation.fastsurfer import config as _fs
+
+        if kind == "dest":
+            return str(_fs.default_freesurfer_dest())
+        path = _fs.freesurfer_home() if kind == "home" else _fs.fs_license()
+        return str(path) if path else ""
+    except Exception:  # noqa: BLE001 (the registry must import without FastSurfer)
+        return ""
+
+
+_FS_SUBJECTS = ParamSpec("output_dir", "Subjects directory (blank = temporary)", "str", "")
+_FS_SID = ParamSpec("fs_sid", "Subject id (blank = layer name)", "str", "")
+_FS_NATIVE = ParamSpec("fs_native_image", "Results on the input's own grid (native image)", "bool", True)
+_FS_VOX = ParamSpec(
+    "fs_vox_size", "Voxel size when not native", "choice", "min", choices=("min", "1", "0.9", "0.8", "0.7")
+)
+_FS_BIAS = ParamSpec("fs_biasfield", "Bias-field correction + PV-corrected stats", "bool", True)
+_FS_COMPUTE = (
+    ParamSpec("fs_viewagg_device", "View aggregation on", "choice", "auto", choices=("auto", "cuda", "cpu")),
+    ParamSpec("fs_batch", "Inference batch size", "int", 1, min=1, max=16),
+    ParamSpec("fs_threads", "Threads (0 = auto)", "int", 0, min=0, max=128),
+)
+_FS_SURFACE = (
+    ParamSpec("fs_freesurfer_home", "FreeSurfer home (7.4.1)", "str", _fastsurfer_default("home")),
+    ParamSpec("fs_license", "FreeSurfer license file", "str", _fastsurfer_default("license")),
+    ParamSpec("fs_3t", "3T Talairach atlas", "bool", False),
+    ParamSpec("fs_parallel", "Both hemispheres at once", "bool", True),
+    ParamSpec("fs_no_surfreg", "Skip spherical registration (faster)", "bool", False),
+    ParamSpec("fs_fsaparc", "Also FreeSurfer's own aparc", "bool", False),
+    ParamSpec("fs_ignore_fs_version", "Accept another FreeSurfer version", "bool", False),
+)
+_FS_MODULE_PARAMS = (_FS_SUBJECTS, _FS_SID, _FS_NATIVE, _FS_VOX, _FS_BIAS, *_FS_COMPUTE)
+
+_FASTSURFER_TOOLS: tuple[GuiToolSpec, ...] = (
+    GuiToolSpec(
+        "fastsurfer_seg",
+        "FastSurfer",
+        "Whole-brain segmentation (aseg + DKT, all modules)",
+        (
+            _FS_SUBJECTS,
+            _FS_SID,
+            ParamSpec("fs_cereb", "Cerebellum (CerebNet)", "bool", True),
+            ParamSpec("fs_hypothal", "Hypothalamus (HypVINN)", "bool", True),
+            ParamSpec("fs_cc", "Corpus callosum segmentation + shape", "bool", True),
+            ParamSpec("fs_t2_layer", "T2 layer for HypVINN (optional)", "layer", ""),
+            ParamSpec("fs_reg_mode", "T1/T2 registration", "choice", "coreg", choices=("coreg", "robust", "none")),
+            _FS_NATIVE,
+            _FS_VOX,
+            _FS_BIAS,
+            ParamSpec("fs_tal_reg", "Talairach registration (eTIV; needs the license)", "bool", False),
+            ParamSpec("fs_qc_snap", "QC snapshots", "bool", False),
+            *_FS_COMPUTE,
+        ),
+        run_mode="notify",
+        cli_command="nvitk-fastsurfer seg",
+    ),
+    GuiToolSpec(
+        "fastsurfer_cereb", "FastSurfer", "Cerebellum sub-segmentation (CerebNet)", _FS_MODULE_PARAMS,
+        run_mode="notify", requires_layer=False, cli_command="nvitk-fastsurfer cereb",
+    ),
+    GuiToolSpec(
+        "fastsurfer_hypothal",
+        "FastSurfer",
+        "Hypothalamus sub-segmentation (HypVINN)",
+        (*_FS_MODULE_PARAMS[:2], ParamSpec("fs_t2_layer", "T2 layer (optional)", "layer", ""),
+         ParamSpec("fs_reg_mode", "T1/T2 registration", "choice", "coreg", choices=("coreg", "robust", "none")),
+         *_FS_MODULE_PARAMS[2:]),
+        run_mode="notify", requires_layer=False, cli_command="nvitk-fastsurfer hypothal",
+    ),
+    GuiToolSpec(
+        "fastsurfer_cc", "FastSurfer", "Corpus callosum segmentation + shape", _FS_MODULE_PARAMS,
+        run_mode="notify", requires_layer=False, cli_command="nvitk-fastsurfer cc",
+    ),
+    GuiToolSpec(
+        "fastsurfer_surf", "FastSurfer", "Cortical surfaces (recon-surf)", (_FS_SUBJECTS, _FS_SID, *_FS_SURFACE,
+                                                                          _FS_COMPUTE[2]),
+        run_mode="notify", requires_layer=False, cli_command="nvitk-fastsurfer surf",
+    ),
+    GuiToolSpec(
+        "fastsurfer_full",
+        "FastSurfer",
+        "Full pipeline (segmentation + surfaces)",
+        (_FS_SUBJECTS, _FS_SID, ParamSpec("fs_t2_layer", "T2 layer for HypVINN (optional)", "layer", ""),
+         ParamSpec("fs_vox_size", "Voxel size", "choice", "min", choices=("min", "1", "0.9", "0.8", "0.7")),
+         _FS_BIAS, *_FS_SURFACE, *_FS_COMPUTE),
+        run_mode="notify", cli_command="nvitk-fastsurfer run",
+    ),
+    GuiToolSpec(
+        "fastsurfer_long",
+        "FastSurfer",
+        "Longitudinal (template + time points)",
+        (
+            ParamSpec("fs_long_layers", "Time-point T1 layers (comma-separated names)", "str", ""),
+            ParamSpec("fs_template_id", "Template id", "str", "template"),
+            ParamSpec("fs_long_parallel", "Time points at once (0 = one)", "int", 0, min=0, max=16),
+            _FS_SUBJECTS,
+            *_FS_SURFACE[:2],
+        ),
+        run_mode="notify", requires_layer=False, cli_command="nvitk-fastsurfer long",
+    ),
+    GuiToolSpec(
+        "fastsurfer_load_subject",
+        "FastSurfer",
+        "Load a FastSurfer / FreeSurfer subject",
+        (
+            ParamSpec("fs_subject_dir", "Subject directory (…/subjects/<id>)", "str", ""),
+            ParamSpec("fs_load_surfaces", "Load surfaces", "bool", True),
+        ),
+        run_mode="notify", requires_layer=False,
+    ),
+    GuiToolSpec(
+        "fastsurfer_segstats",
+        "FastSurfer",
+        "Partial-volume corrected label statistics",
+        (ParamSpec("fs_norm_layer", "Intensity layer (bias-corrected T1, optional)", "layer", ""), _OUTPUT_DIR),
+        run_mode="notify", cli_command="nvitk-fastsurfer segstats",
+    ),
+    GuiToolSpec(
+        "fastsurfer_reduce_aseg",
+        "FastSurfer",
+        "aparc+aseg → aseg + brain mask",
+        (ParamSpec("fs_fixwm", "Relabel disconnected white matter", "bool", True), _OUTPUT_DIR),
+        run_mode="notify", cli_command="nvitk-fastsurfer reduce-to-aseg",
+    ),
+    GuiToolSpec(
+        "fastsurfer_conform",
+        "FastSurfer",
+        "Conform to FastSurfer space (isotropic, 256³, LIA)",
+        (ParamSpec("fs_conform_vox", "Voxel size", "choice", "1", choices=("1", "min", "any")), _OUTPUT_DIR),
+        run_mode="notify", cli_command="nvitk-fastsurfer conform",
+    ),
+    GuiToolSpec(
+        "fastsurfer_install_freesurfer",
+        "FastSurfer",
+        "Install FreeSurfer 7.4.1 (for surfaces)",
+        (
+            ParamSpec("fs_install_dest", "Install into", "str", _fastsurfer_default("dest")),
+            ParamSpec("fs_license", "FreeSurfer license file (optional)", "str", ""),
+        ),
+        run_mode="notify", requires_layer=False, cli_command="nvitk-fastsurfer install-freesurfer",
+    ),
+)
+
+_TOOLS = _TOOLS + _FASTSURFER_TOOLS
+
+
+# FreeSurfer topology tools (nvitk.gui.tools.freesurfer_tools)
+# Listed only when FreeSurfer (and each tool's programs) is found; see visible_tool_ids().
+
+
+def _fs_license_default() -> str:
+    try:
+        from nvitk.gui.tools.freesurfer_tools import default_license
+
+        return default_license()
+    except Exception:  # noqa: BLE001 (the registry must import regardless)
+        return ""
+
+
+_FS_LICENSE_PARAM = ParamSpec("freesurfer_license", "FreeSurfer license file (blank = found one)", "str",
+                              _fs_license_default())
+_FS_LABEL = ParamSpec("freesurfer_label", "Label (0 = every nonzero voxel)", "int", 0, min=0, max=9999)
+_FS_REF = ParamSpec("reference_layer", "Image the mask came from (TOF, T1; optional)", "layer", "")
+
+
+def _fs(tool_id: str, label: str, params: tuple[ParamSpec, ...], description: str, *, category: str = "FreeSurfer",
+        license_param: bool = True) -> GuiToolSpec:
+    return GuiToolSpec(tool_id, category, label, (*params, *((_FS_LICENSE_PARAM,) if license_param else ()), _OUTPUT_DIR),
+                       run_mode="notify", needs_3d=tool_id not in _FS_SURFACE_TOOLS, description=description,
+                       cli_command="nvitk-freesurfer" if category == "FreeSurfer" else "")
+
+
+_FS_SURFACE_TOOLS = frozenset({"freesurfer_main_component", "freesurfer_euler", "freesurfer_smooth",
+                               "freesurfer_inflate", "freesurfer_qsphere", "fastsurfer_spectral_sphere"})
+_FS_CHAIN = (_FS_LABEL, _FS_REF,
+             ParamSpec("freesurfer_defect_seg", "Defects as a volume (defect-seg)", "bool", True))
+
+_FREESURFER_TOOLS: tuple[GuiToolSpec, ...] = (
+    _fs("freesurfer_pretess", "Pretess (mri_pretess)", (_FS_LABEL, _FS_REF),
+        "mri_pretess: makes the label's edge / corner-only contacts face contacts (it adds the brighter voxel), "
+        "so marching cubes sees the same topology as a 26-connected count. nvitk's own pretess removes instead "
+        "(ICA siphon correction)."),
+    _fs("freesurfer_mc", "Marching cubes (mri_mc)", (_FS_LABEL, ParamSpec(
+        "freesurfer_connectivity", "Connectivity (1 = 6+, 2 = 18, 3 = 6, 4 = 26)", "int", 1, min=1, max=4)),
+        "mri_mc: the label's surface, as FreeSurfer and FastSurfer tessellate (Surface layer, scanner RAS)."),
+    _fs("freesurfer_main_component", "Main component (surface)", (),
+        "mris_extract_main_component on the active Surface layer."),
+    _fs("freesurfer_euler", "Euler number / defects (surface)", (),
+        "mris_euler_number on the active Surface layer: Euler number, holes (handles) and defect index, beside "
+        "nvitk's own V − E + F count."),
+    _fs("freesurfer_smooth", "Smooth (mris_smooth)", (ParamSpec("freesurfer_iterations", "Iterations", "int", 10,
+                                                                min=1, max=500),),
+        "mris_smooth -nw on the active Surface layer."),
+    _fs("freesurfer_inflate", "Inflate (mris_inflate)", (), "mris_inflate on the active Surface layer."),
+    _fs("freesurfer_qsphere", "Quick sphere (mris_sphere -q)", (),
+        "mris_sphere -q on the active (inflated, genus-0) Surface layer: the map the topology fixers start from."),
+    _fs("freesurfer_fix_topology", "Fix topology (mris_fix_topology)", (*_FS_CHAIN, ParamSpec(
+        "freesurfer_sphere", "Sphere", "choice", "qsphere", choices=("qsphere", "spectral"))),
+        "The whole chain on a mask, in recon-all order: pretess → mri_mc → main component → smooth → inflate → "
+        "sphere → mris_fix_topology (genetic search) → remove intersections, then defect-seg. Opens the surface "
+        "before and after, the defects and an Euler report. Built for the cortex: offered to test and compare "
+        "(e.g. with the ICA siphon correction)."),
+    _fs("freesurfer_topo_fixer", "Topology fixer (mris_topo_fixer)", (*_FS_CHAIN, ParamSpec(
+        "freesurfer_sphere", "Sphere", "choice", "qsphere", choices=("qsphere", "spectral"))),
+        "As Fix topology, with mris_topo_fixer (recon-all's fallback when mris_fix_topology leaves defects)."),
+    _fs("fastsurfer_spectral_sphere", "Spectral sphere (FastSurfer)", (),
+        "FastSurfer's spectral spherical projection (lapy) of the active genus-0 Surface layer: what FastSurfer "
+        "uses instead of mris_sphere -q. No FreeSurfer needed.", category="FastSurfer", license_param=False),
+    _fs("fastsurfer_topology_chain", "Topology chain (recon-surf order)", _FS_CHAIN,
+        "FastSurfer's recon-surf surface stream on a mask: pretess → mri_mc → main component → smooth → inflate → "
+        "spectral sphere → mris_fix_topology → orientation rewrite. Needs FastSurfer and FreeSurfer.",
+        category="FastSurfer"),
+)
+
+_TOOLS = _TOOLS + _FREESURFER_TOOLS
+
+#: Tools shown only when their external software is found (nvitk.gui.tools.freesurfer_tools).
+_GATED_TOOL_IDS = frozenset(t.id for t in _FREESURFER_TOOLS)
+
+# FSL (nvitk.gui.tools.fsl_tools)
+
+
+def _fsl_choices(module: str, name: str, fallback: tuple[str, ...]) -> tuple[str, ...]:
+    """An option list from the :mod:`nvitk.fsl` wrapper itself, so the picker cannot drift from it."""
+    try:
+        import importlib
+
+        value = getattr(importlib.import_module(f"nvitk.fsl.{module}"), name)
+        return tuple(value)
+    except Exception:  # noqa: BLE001 (the registry must import regardless)
+        return fallback
+
+
+def _fsl(tool_id: str, label: str, params: tuple[ParamSpec, ...] = (), *, layer: bool = True,
+         cli: str = "") -> GuiToolSpec:
+    return GuiToolSpec(tool_id, "FSL", label, (*params, _OUTPUT_DIR), run_mode="notify", requires_layer=layer,
+                       cli_command=f"nvitk-fsl {cli}" if cli else "")
+
+
+_FSL_MASK = ParamSpec("fsl_mask_layer", "Brain mask layer", "layer", "")
+_FSL_BVECS = ParamSpec("fsl_bvecs", "bvecs file (blank = next to the layer's source)", "str", "")
+_FSL_BVALS = ParamSpec("fsl_bvals", "bvals file (blank = next to the layer's source)", "str", "")
+_FSL_REF = ParamSpec("fsl_ref_layer", "Reference layer", "layer", "")
+_FSL_IMG_TYPE = ParamSpec("fsl_img_type", "Image type", "choice", "T1", choices=("T1", "T2", "PD"))
+
+_FSL_TOOLS: tuple[GuiToolSpec, ...] = (
+    # structural
+    _fsl("fsl_bet", "BET brain extraction", (
+        ParamSpec("fsl_f", "Fractional intensity (smaller = larger brain)", "float", 0.5, min=0.0, max=1.0),
+        ParamSpec("fsl_g", "Vertical gradient in f", "float", 0.0, min=-1.0, max=1.0),
+        ParamSpec("fsl_bet_mode", "Variant", "choice", "standard",
+                  choices=_fsl_choices("structural", "BET_MODES", ("standard",))),
+        ParamSpec("fsl_mask", "Brain mask", "bool", True),
+        ParamSpec("fsl_skull", "Skull image", "bool", False),
+    ), cli="bet"),
+    _fsl("fsl_fast", "FAST tissue segmentation (+ bias correction)", (
+        ParamSpec("fsl_classes", "Tissue classes", "int", 3, min=2, max=6), _FSL_IMG_TYPE,
+        ParamSpec("fsl_bias", "Bias-field correction", "bool", True),
+    ), cli="fast"),
+    _fsl("fsl_first", "FIRST subcortical segmentation", (
+        ParamSpec("fsl_structures", "Structures (blank = all; e.g. L_Hipp,R_Hipp)", "str", ""),
+        ParamSpec("fsl_brain_extracted", "Input is brain-extracted", "bool", False),
+        ParamSpec("fsl_first_method", "Boundary correction", "choice", "auto", choices=("auto", "fast", "none")),
+    ), cli="first"),
+    _fsl("fsl_anat", "fsl_anat structural pipeline", (
+        _FSL_IMG_TYPE,
+        ParamSpec("fsl_strong_bias", "Strong bias field", "bool", False),
+        ParamSpec("fsl_no_crop", "No FOV cropping", "bool", False),
+        ParamSpec("fsl_no_nonlinreg", "No non-linear registration", "bool", False),
+        ParamSpec("fsl_no_subcortseg", "No FIRST", "bool", False),
+    ), cli="anat"),
+    _fsl("fsl_siena", "SIENA two-time-point atrophy (PBVC)", (
+        ParamSpec("fsl_layer2", "Second time point layer", "layer", ""),
+        ParamSpec("fsl_bet_opts", "BET options (e.g. -f 0.3)", "str", ""),
+        ParamSpec("fsl_ventricles", "Ventricular analysis (VIENA)", "bool", False),
+    ), cli="siena"),
+    _fsl("fsl_sienax", "SIENAX normalised brain volume", (
+        ParamSpec("fsl_bet_opts", "BET options (e.g. -f 0.3)", "str", ""),
+        ParamSpec("fsl_regional", "Regional (peripheral GM, ventricular CSF)", "bool", False),
+    ), cli="sienax"),
+    _fsl("fsl_reorient2std", "Reorient to standard (fslreorient2std)", cli="reorient2std"),
+    _fsl("fsl_robustfov", "Crop neck (robustfov)", (
+        ParamSpec("fsl_brain_size", "Brain size in z (mm)", "float", 170.0, min=50.0, max=300.0),
+    ), cli="robustfov"),
+    _fsl("fsl_deface", "Deface (fsl_deface)", (
+        ParamSpec("fsl_f", "BET fractional intensity", "float", 0.5, min=0.0, max=1.0),
+        ParamSpec("fsl_bias", "Bias-correct first", "bool", False),
+    ), cli="deface"),
+    _fsl("fsl_lesion_filling", "Lesion filling", (
+        ParamSpec("fsl_lesion_layer", "Lesion mask layer", "layer", ""),
+        ParamSpec("fsl_wm_layer", "White-matter mask layer (optional)", "layer", ""),
+    ), cli="lesion-filling"),
+    # registration
+    _fsl("fsl_fnirt", "FNIRT non-linear registration", (
+        _FSL_REF,
+        ParamSpec("fsl_affine", "FLIRT affine input→reference (.mat, recommended)", "str", ""),
+        ParamSpec("fsl_fnirt_config", "Configuration", "choice", "T1_2_MNI152_2mm",
+                  choices=_fsl_choices("registration", "FNIRT_CONFIGS", ("T1_2_MNI152_2mm",))),
+    ), cli="fnirt"),
+    _fsl("fsl_applywarp", "applywarp (warp / affine onto a reference)", (
+        _FSL_REF,
+        ParamSpec("fsl_warp", "Warp field / coefficients file", "str", ""),
+        ParamSpec("fsl_premat", "Affine before the warp (.mat)", "str", ""),
+        ParamSpec("fsl_interp", "Interpolation (labels always nn)", "choice", "trilinear",
+                  choices=_fsl_choices("registration", "APPLYWARP_INTERP", ("trilinear", "nn"))),
+    ), cli="applywarp"),
+    _fsl("fsl_invwarp", "invwarp (invert the active warp layer)", (
+        ParamSpec("fsl_ref_layer", "Original input space layer", "layer", ""),
+    ), cli="invwarp"),
+    _fsl("fsl_convert_xfm", "convert_xfm (invert / concatenate matrices)", (
+        ParamSpec("fsl_xfm_mode", "Operation", "choice", "inverse", choices=("inverse", "concatenate")),
+        ParamSpec("fsl_matrix", "Matrix (.mat; for concatenate: applied first)", "str", ""),
+        ParamSpec("fsl_matrix2", "Second matrix (concatenate)", "str", ""),
+        ParamSpec("fsl_output_matrix", "Output .mat (blank = run folder)", "str", ""),
+    ), layer=False, cli="convert-xfm"),
+    _fsl("fsl_mcflirt", "MCFLIRT motion correction (4D)", (
+        ParamSpec("fsl_ref_vol", "Reference volume (-1 = middle)", "int", -1, min=-1, max=10000),
+        ParamSpec("fsl_mean_vol", "Register to the mean volume", "bool", False),
+        ParamSpec("fsl_cost", "Cost", "choice", "normcorr",
+                  choices=_fsl_choices("registration", "MCFLIRT_COSTS", ("normcorr",))),
+    ), cli="mcflirt"),
+    _fsl("fsl_epi_reg", "epi_reg (EPI → T1, BBR)", (
+        ParamSpec("fsl_t1_layer", "T1 (whole head) layer", "layer", ""),
+        ParamSpec("fsl_t1brain_layer", "T1 brain layer", "layer", ""),
+        ParamSpec("fsl_wmseg_layer", "White-matter segmentation layer (optional)", "layer", ""),
+    ), cli="epi-reg"),
+    # diffusion
+    _fsl("fsl_topup", "TOPUP susceptibility field (b0 pair)", (
+        ParamSpec("fsl_datain", "Acquisition parameters file (datain)", "str", ""),
+        ParamSpec("fsl_topup_config", "Configuration", "choice", "b02b0.cnf",
+                  choices=_fsl_choices("diffusion", "TOPUP_CONFIGS", ("b02b0.cnf",))),
+    ), cli="topup"),
+    _fsl("fsl_eddy", "EDDY eddy-current / motion correction (DWI)", (
+        _FSL_MASK, ParamSpec("fsl_acqp", "acqp file", "str", ""), ParamSpec("fsl_index", "index file", "str", ""),
+        _FSL_BVECS, _FSL_BVALS, ParamSpec("fsl_topup_base", "TOPUP basename (optional)", "str", ""),
+        ParamSpec("fsl_repol", "Replace outlier slices (--repol)", "bool", True),
+    ), cli="eddy"),
+    _fsl("fsl_dtifit", "DTIFIT tensor fit (FA, MD …)", (
+        _FSL_MASK, _FSL_BVECS, _FSL_BVALS, ParamSpec("fsl_wls", "Weighted least squares", "bool", False),
+    ), cli="dtifit"),
+    _fsl("fsl_bedpostx", "BEDPOSTX fibre orientations (DWI)", (
+        _FSL_MASK, _FSL_BVECS, _FSL_BVALS, ParamSpec("fsl_fibres", "Fibres per voxel", "int", 3, min=1, max=3),
+    ), cli="bedpostx"),
+    _fsl("fsl_probtrackx2", "PROBTRACKX2 tractography (active layer = seed)", (
+        ParamSpec("fsl_bedpostx_dir", "BEDPOSTX folder (….bedpostX)", "str", ""),
+        ParamSpec("fsl_samples", "Samples per seed voxel", "int", 5000, min=100, max=100000),
+        ParamSpec("fsl_waypoint_layer", "Waypoint mask layer (optional)", "layer", ""),
+        ParamSpec("fsl_exclusion_layer", "Exclusion mask layer (optional)", "layer", ""),
+    ), cli="probtrackx2"),
+    _fsl("fsl_tbss", "TBSS skeleton (cohort FA maps)", (
+        ParamSpec("fsl_fa_list", "FA maps (comma-separated paths, or a folder)", "str", ""),
+        ParamSpec("fsl_tbss_target", "Registration target", "choice", "FMRIB58",
+                  choices=("FMRIB58", "most_representative")),
+        ParamSpec("fsl_threshold", "Skeleton FA threshold", "float", 0.2, min=0.0, max=1.0),
+    ), layer=False, cli="tbss"),
+    _fsl("fsl_xtract", "XTRACT standard tracts", (
+        ParamSpec("fsl_bedpostx_dir", "BEDPOSTX folder (….bedpostX)", "str", ""),
+        ParamSpec("fsl_species", "Species", "choice", "HUMAN",
+                  choices=_fsl_choices("diffusion", "XTRACT_SPECIES", ("HUMAN",))),
+        ParamSpec("fsl_std2diff", "standard → diffusion warp (blank = <bpx>/xfms)", "str", ""),
+        ParamSpec("fsl_diff2std", "diffusion → standard warp", "str", ""),
+        ParamSpec("fsl_tracts", "Tracts (blank = all)", "str", ""),
+    ), layer=False, cli="xtract"),
+    # functional
+    _fsl("fsl_melodic", "MELODIC ICA (4D)", (
+        ParamSpec("fsl_dim", "Components (0 = automatic)", "int", 0, min=0, max=500),
+        ParamSpec("fsl_approach", "Approach", "choice", "symm",
+                  choices=_fsl_choices("functional", "MELODIC_APPROACHES", ("symm",))),
+        ParamSpec("fsl_tr", "TR (s, 0 = from header)", "float", 0.0, min=0.0, max=60.0),
+    ), cli="melodic"),
+    _fsl("fsl_susan", "SUSAN noise reduction", (
+        ParamSpec("fsl_sigma", "Smoothing sigma (mm)", "float", 2.0, min=0.1, max=50.0),
+        ParamSpec("fsl_bt", "Brightness threshold (negative = 10% of robust range)", "float", -1.0,
+                  min=-1.0, max=1e9),
+    ), cli="susan"),
+    _fsl("fsl_slicetimer", "Slice-timing correction (4D)", (
+        ParamSpec("fsl_tr", "TR (s)", "float", 2.0, min=0.01, max=60.0),
+        ParamSpec("fsl_slice_order", "Acquisition order", "choice", "bottom-up",
+                  choices=_fsl_choices("functional", "SLICE_ORDERS", ("bottom-up",))),
+        ParamSpec("fsl_timings", "Slice timings file (optional)", "str", ""),
+    ), cli="slicetimer"),
+    _fsl("fsl_fugue", "FUGUE field-map unwarping (EPI)", (
+        ParamSpec("fsl_fmap_layer", "Field map layer (rad/s)", "layer", ""),
+        ParamSpec("fsl_dwell", "Effective echo spacing (s)", "float", 0.0005, min=0.0, max=1.0),
+        ParamSpec("fsl_unwarpdir", "Unwarp direction", "choice", "y",
+                  choices=_fsl_choices("functional", "UNWARP_DIRECTIONS", ("y",))),
+    ), cli="fugue"),
+    _fsl("fsl_prepare_fieldmap", "Prepare field map (active layer = phase)", (
+        ParamSpec("fsl_mag_layer", "Brain-extracted magnitude layer", "layer", ""),
+        ParamSpec("fsl_delta_te", "Echo time difference (ms)", "float", 2.46, min=0.01, max=100.0),
+        ParamSpec("fsl_scanner", "Scanner", "choice", "SIEMENS",
+                  choices=_fsl_choices("functional", "FIELDMAP_SCANNERS", ("SIEMENS",))),
+    ), cli="prepare-fieldmap"),
+    # utilities
+    _fsl("fsl_maths", "fslmaths", (
+        ParamSpec("fsl_ops", "Operations (e.g. -thr 100 -bin; {layer:NAME} for another layer)", "str", ""),
+        ParamSpec("fsl_odt", "Output data type (blank = input's)", "choice", "",
+                  choices=("", "char", "short", "int", "float", "double")),
+    ), cli="maths"),
+    _fsl("fsl_stats", "fslstats summary", (
+        ParamSpec("fsl_mask_layer", "Mask layer (optional)", "layer", ""),
+        ParamSpec("fsl_stats_options", "Options", "str", "-R -r -M -S -V"),
+    ), cli="stats"),
+    _fsl("fsl_meants", "fslmeants (mean time series in a mask)", (
+        ParamSpec("fsl_mask_layer", "Mask layer", "layer", ""),
+    ), cli="meants"),
+    _fsl("fsl_cluster", "cluster (clusters above a threshold)", (
+        ParamSpec("fsl_threshold", "Threshold", "float", 3.1, min=-1e9, max=1e9),
+        ParamSpec("fsl_connectivity", "Connectivity", "choice", "26", choices=("6", "18", "26")),
+        ParamSpec("fsl_min_extent", "Minimum cluster size (voxels)", "int", 0, min=0, max=10_000_000),
+    ), cli="cluster"),
+    _fsl("fsl_smoothest", "smoothest (smoothness of a z-stat)", (
+        ParamSpec("fsl_mask_layer", "Mask layer", "layer", ""),
+    ), cli="smoothest"),
+    _fsl("fsl_command", "Run any FSL command", (
+        ParamSpec("fsl_command", "Command ({layer:NAME} inputs, {out:NAME} outputs)", "str", ""),
+        ParamSpec("fsl_long", "Long-running (background job)", "bool", False),
+    ), layer=False, cli="run"),
+    GuiToolSpec(
+        "fsl_install", "FSL", "Install nvitk's FSL core", (
+            ParamSpec("fsl_install_structural", "Structural", "bool", True),
+            ParamSpec("fsl_install_registration", "Registration", "bool", True),
+            ParamSpec("fsl_install_diffusion", "Diffusion", "bool", True),
+            ParamSpec("fsl_install_functional", "Functional", "bool", True),
+            ParamSpec("fsl_install_asl", "ASL perfusion (BASIL)", "bool", True),
+            ParamSpec("fsl_install_cuda", "GPU builds (eddy, bedpostx, probtrackx2)", "bool", True),
+        ),
+        run_mode="notify", requires_layer=False, cli_command="nvitk-fsl install",
+    ),
+)
+
+_TOOLS = _TOOLS + _FSL_TOOLS
+
+# ASL perfusion: FSL BASIL (nvitk.gui.tools.fsl_tools)
+
+
+def _asl(tool_id: str, label: str, params: tuple[ParamSpec, ...] = (), *, cli: str = "") -> GuiToolSpec:
+    return GuiToolSpec(tool_id, "ASL perfusion", label, (*params, _OUTPUT_DIR), run_mode="notify",
+                       cli_command=f"nvitk-fsl {cli}" if cli else "")
+
+
+_ASL_LABELLING = ParamSpec("fsl_asl_labelling", "Labelling", "choice", "pcasl",
+                           choices=_fsl_choices("asl", "LABELLINGS", ("pcasl", "pasl")))
+_ASL_DELAYS = ParamSpec("fsl_asl_delays", "PLDs (pCASL) / TIs (pASL) in s, comma-separated", "str", "1.8")
+_ASL_BOLUS = ParamSpec("fsl_asl_bolus", "Labelling duration (s; one, or one per delay)", "str", "1.8")
+_ASL_IAF = ParamSpec("fsl_asl_iaf", "Volumes", "choice", "tc",
+                     choices=_fsl_choices("asl", "ASL_FORMATS", ("tc", "ct", "diff")))
+_ASL_IBF = ParamSpec("fsl_asl_ibf", "Order (rpt: all delays repeated; tis: repeats of each delay together)",
+                     "choice", "rpt", choices=_fsl_choices("asl", "BLOCK_FORMATS", ("rpt", "tis")))
+_ASL_RPTS = ParamSpec("fsl_asl_rpts", "Repeats per delay when they differ (with order tis)", "str", "")
+_ASL_T1 = ParamSpec("fsl_asl_t1", "Tissue T1 (s)", "float", 1.3, min=0.1, max=5.0)
+_ASL_T1B = ParamSpec("fsl_asl_t1b", "Blood T1 (s)", "float", 1.65, min=0.1, max=5.0)
+_ASL_BAT = ParamSpec("fsl_asl_bat", "Arrival time prior (s; 0 = 1.3 pCASL / 0.7 pASL)", "float", 0.0,
+                     min=0.0, max=5.0)
+_ASL_ALPHA = ParamSpec("fsl_asl_alpha", "Labelling efficiency (0 = 0.85 pCASL / 0.98 pASL)", "float", 0.0,
+                       min=0.0, max=1.0)
+_ASL_TR = ParamSpec("fsl_asl_tr", "Calibration TR (s)", "float", 3.2, min=0.1, max=100.0)
+_ASL_CGAIN = ParamSpec("fsl_asl_cgain", "ASL / calibration gain ratio", "float", 1.0, min=0.0, max=1000.0)
+_ASL_TISSREF = ParamSpec("fsl_asl_tissref", "Reference tissue", "choice", "csf",
+                         choices=_fsl_choices("asl", "TISSUE_REFS", ("csf", "wm", "gm")))
+_ASL_PVGM = ParamSpec("fsl_asl_pvgm_layer", "GM partial-volume layer (ASL space, optional)", "layer", "")
+_ASL_PVWM = ParamSpec("fsl_asl_pvwm_layer", "WM partial-volume layer (ASL space, optional)", "layer", "")
+
+_ASL_TOOLS: tuple[GuiToolSpec, ...] = (
+    _asl("fsl_asl_oxford", "BASIL perfusion: CBF, arrival time, aCBV (oxford_asl)", (
+        _ASL_LABELLING, _ASL_DELAYS, _ASL_BOLUS, _ASL_IAF, _ASL_IBF, _ASL_RPTS,
+        ParamSpec("fsl_asl_slicedt", "Time between slices (s; 2D readout)", "float", 0.0, min=0.0, max=1.0),
+        ParamSpec("fsl_asl_sliceband", "Slices per band (multiband; 0 = none)", "int", 0, min=0, max=256),
+        ParamSpec("fsl_mask_layer", "Brain mask layer (optional; else automatic)", "layer", ""),
+        ParamSpec("fsl_asl_calib_layer", "M0 calibration layer (optional)", "layer", ""),
+        ParamSpec("fsl_asl_cmethod", "Calibration", "choice", "auto", choices=("auto", "voxel", "single", "both")),
+        _ASL_TR, _ASL_CGAIN, _ASL_TISSREF,
+        ParamSpec("fsl_asl_m0", "M0 value (without a calibration layer; 0 = uncalibrated)", "float", 0.0,
+                  min=0.0, max=1e12),
+        _ASL_ALPHA,
+        ParamSpec("fsl_asl_struct_layer", "Structural layer (whole head, optional)", "layer", ""),
+        ParamSpec("fsl_asl_fslanat", "fsl_anat folder (optional; MNI space, region analysis)", "str", ""),
+        ParamSpec("fsl_asl_wp", "White-paper quantification (Alsop 2015)", "bool", False),
+        ParamSpec("fsl_asl_spatial", "Adaptive spatial prior on CBF", "bool", True),
+        ParamSpec("fsl_asl_mc", "Motion correction (MCFLIRT)", "bool", False),
+        ParamSpec("fsl_asl_pvcorr", "Partial-volume correction (GM / WM CBF)", "bool", False),
+        _ASL_PVGM, _ASL_PVWM,
+        ParamSpec("fsl_asl_artsupp", "Vascular crushing used (no arterial component)", "bool", False),
+        ParamSpec("fsl_asl_fixbolus", "Fix the labelling duration (always for pCASL)", "bool", False),
+        ParamSpec("fsl_asl_infert1", "Include T1 uncertainty", "bool", False),
+        _ASL_BAT, _ASL_T1, _ASL_T1B,
+        ParamSpec("fsl_asl_region_analysis", "Region analysis (needs the fsl_anat folder)", "bool", False),
+        ParamSpec("fsl_asl_cblip_layer", "Reversed phase-encode calibration layer (optional, TOPUP)", "layer", ""),
+        ParamSpec("fsl_asl_echospacing", "Effective echo spacing (s, with the reversed calibration)", "float", 0.0,
+                  min=0.0, max=1.0),
+        ParamSpec("fsl_asl_pedir", "Phase-encode direction", "choice", "",
+                  choices=("", *_fsl_choices("asl", "PE_DIRECTIONS", ("x", "y", "z", "-x", "-y", "-z")))),
+        ParamSpec("fsl_asl_extra", "Extra oxford_asl options", "str", ""),
+    ), cli="asl"),
+    _asl("fsl_asl_basil", "BASIL fit (label-control differenced data)", (
+        ParamSpec("fsl_mask_layer", "Brain mask layer", "layer", ""),
+        _ASL_LABELLING, _ASL_DELAYS, _ASL_BOLUS,
+        ParamSpec("fsl_asl_repeats", "Repeats per delay", "int", 1, min=1, max=10000),
+        ParamSpec("fsl_asl_ibf", "Order (tis: repeats of each delay together; rpt: reordered first)", "choice",
+                  "tis", choices=_fsl_choices("asl", "BLOCK_FORMATS", ("rpt", "tis"))),
+        _ASL_BAT, _ASL_T1, _ASL_T1B,
+        ParamSpec("fsl_asl_spatial", "Adaptive spatial prior", "bool", True),
+        ParamSpec("fsl_asl_inferart", "Arterial (macrovascular) component", "bool", False),
+        ParamSpec("fsl_asl_infertau", "Infer the labelling duration", "bool", False),
+        ParamSpec("fsl_asl_infert1", "Include T1 uncertainty", "bool", False),
+        _ASL_PVGM, _ASL_PVWM,
+    ), cli="basil"),
+    _asl("fsl_asl_file", "asl_file: label-control subtraction / averaging", (
+        ParamSpec("fsl_asl_ntis", "Number of delays in the data", "int", 1, min=1, max=1000),
+        ParamSpec("fsl_asl_operation", "Operation", "choice", "diff",
+                  choices=_fsl_choices("asl", "ASL_FILE_OPERATIONS", ("diff", "split-pairs", "mean"))),
+        _ASL_IAF, _ASL_IBF,
+        ParamSpec("fsl_asl_obf", "Output order (tis = grouped by delay, as BASIL reads it)", "choice", "same",
+                  choices=("same", "tis", "rpt")),
+        _ASL_RPTS, ParamSpec("fsl_mask_layer", "Mask layer (optional)", "layer", ""),
+    ), cli="asl-file"),
+    _asl("fsl_asl_calib", "asl_calib: M0 from a reference region (active layer = calibration)", (
+        ParamSpec("fsl_asl_perfusion_layer", "Perfusion layer to calibrate (optional)", "layer", ""),
+        ParamSpec("fsl_asl_refmask_layer", "Reference-region mask layer", "layer", ""),
+        ParamSpec("fsl_asl_struct_layer", "Brain-extracted structural (instead of a mask)", "layer", ""),
+        ParamSpec("fsl_asl_asl2struct", "ASL → structural matrix (with the structural)", "str", ""),
+        _ASL_TISSREF,
+        ParamSpec("fsl_asl_calib_mode", "Mode", "choice", "longtr",
+                  choices=_fsl_choices("asl", "CALIB_MODES", ("longtr", "satrecov"))),
+        _ASL_TR, _ASL_CGAIN, ParamSpec("fsl_asl_te", "Echo time (ms)", "float", 0.0, min=0.0, max=1000.0),
+        _ASL_ALPHA, ParamSpec("fsl_mask_layer", "Brain mask layer (optional)", "layer", ""),
+    ), cli="asl-calib"),
+)
+
+_TOOLS = _TOOLS + _ASL_TOOLS
+
+
+
+
+def visible_tool_ids() -> set[str]:
+    """The gated tools that can run here (FreeSurfer found, its programs, FastSurfer + lapy)."""
+    try:
+        from nvitk.gui.tools.freesurfer_tools import available_tool_ids
+
+        return available_tool_ids()
+    except Exception:  # noqa: BLE001
+        return set()
+
 
 def categories() -> list[str]:
-    """Display order of tool categories."""
-    return list(_CATEGORY_ORDER)
+    """Display order of tool categories; *FreeSurfer* only when an installation is found."""
+    shown = visible_tool_ids()
+    return [c for c in _CATEGORY_ORDER if c != "FreeSurfer" or any(t.startswith("freesurfer_") for t in shown)]
 
 
 def tools_for_category(category: str) -> list[GuiToolSpec]:
-    """All registered tool specs belonging to *category*."""
-    return [t for t in _TOOLS if t.category == category]
+    """The registered tool specs of *category* (gated tools only when they can run here)."""
+    tools = [t for t in _TOOLS if t.category == category]
+    if any(t.id in _GATED_TOOL_IDS for t in tools):
+        shown = visible_tool_ids()
+        tools = [t for t in tools if t.id not in _GATED_TOOL_IDS or t.id in shown]
+    return tools
 
 
 def all_tools() -> tuple[GuiToolSpec, ...]:
@@ -2384,6 +3050,7 @@ SGE_BLOCKLIST: frozenset[str] = frozenset({
     "centerline_detect_junctions",
     "centerline_cut_junctions",
     "centerline_to_polyline",
+    "polyline_to_centerline",
     "vmtk_centerline_network",
     "centerline_center",
     "vmtk_vessel_enhancement",
@@ -2412,6 +3079,7 @@ SGE_BLOCKLIST: frozenset[str] = frozenset({
     "viz_pwv",
     "viz_tof_morphometrics",
     "seg_eicab",
+    "seg_eicab_postprocess",
     "orient_volume",
     "reorient_volume",
     "seg_mouse_brain",
@@ -2431,6 +3099,9 @@ SGE_BLOCKLIST: frozenset[str] = frozenset({
     "pet_ureter_seg",
 })
 
+# The FreeSurfer topology tools run on this machine's FreeSurfer / FastSurfer (no cluster staging yet).
+SGE_BLOCKLIST = SGE_BLOCKLIST | _GATED_TOOL_IDS
+
 SGE_BLOCKLIST_PREFIXES: tuple[str, ...] = ("qvtpy_stage",)
 
 
@@ -2439,6 +3110,11 @@ def is_sge_capable(tool_id: str | None) -> bool:
     if not tool_id:
         return False
     tid = str(tool_id).strip()
+    # FastSurfer / FSL: several inputs and outputs, staged their own way (nvitk.gui.sge.external).
+    if tid.startswith(("fastsurfer_", "fsl_")):
+        from nvitk.gui.sge.external import external_sge_capable
+
+        return tool_by_id(tid) is not None and external_sge_capable(tid)
     if tid in SGE_BLOCKLIST:
         return False
     if any(tid.startswith(p) for p in SGE_BLOCKLIST_PREFIXES):
@@ -2460,6 +3136,8 @@ def sge_block_reason(tool_id: str | None) -> str:
     spec = tool_by_id(str(tool_id))
     if spec is None:
         return f"Unknown tool {tool_id!r}."
+    if str(tool_id).startswith(("fastsurfer_", "fsl_")):
+        return f"{spec.label} works on this computer only (it reads local folders or installs software)."
     if spec.run_mode != "layer":
         return f"{spec.label} uses run mode {spec.run_mode!r} (not supported on SGE yet)."
     if str(tool_id) in SGE_BLOCKLIST:

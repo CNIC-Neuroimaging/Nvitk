@@ -6,6 +6,7 @@ Dataset catalog: ``repository.json``, table manifests, variable registry, scaffo
 
 from __future__ import annotations
 
+import copy
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -88,7 +89,7 @@ class DatasetCatalog:
         (manifests + schema) and creating empty ``tables/``/``cache/`` directories."""
         destination = Path(root).expanduser().resolve()
         # Templates ship inside the package. They used to be read from
-        # ``<repo>/dataset/nvitk-dataset/catalog``, which only exists in a source checkout — so
+        # ``<repo>/dataset/nvitk-dataset/catalog``, which only exists in a source checkout, so
         # for a conda/pip install this produced an empty ``catalog/`` and no error, and the
         # resulting "dataset" failed later with a missing-manifest message that pointed nowhere.
         template_root = Path(__file__).resolve().parent / "catalog_templates"
@@ -316,6 +317,41 @@ class DatasetCatalog:
             if coerce_bool(entry.get("is_default")):
                 return str(entry["pipeline_id"])
         return None
+
+    def register_default_pipeline(self, spec: dict[str, Any]) -> bool:
+        """Make *spec* (``pipeline_id``, ``modality``, ``aliases``, optional ``pipeline_name``) the
+        default pipeline of its modality in ``measurement_pipelines.json``: added if missing, flagged
+        ``is_default`` with its aliases. The modality's other pipelines lose ``is_default`` and the
+        aliases *spec* takes (``latest`` ...), keeping their own (``v3`` ...). The manifest is written
+        only when this changes it; returns whether it did. Idempotent, so publishers can call it on
+        every run (concurrent jobs write the same content)."""
+        if self.pipelines_manifest_path is None:
+            raise ManifestError("The dataset has no pipelines manifest (repository.json: pipelines_manifest).")
+        pid = str(spec["pipeline_id"])
+        modality = str(spec["modality"]).strip().lower()
+        aliases = [str(a) for a in spec.get("aliases") or []]
+        taken = {a.lower() for a in aliases}
+        payload = copy.deepcopy(self.pipelines_manifest)
+        entries = payload.setdefault("pipelines", [])
+        mine = next((e for e in entries if str(e.get("pipeline_id")) == pid), None)
+        if mine is None:
+            mine = {"pipeline_id": pid}
+            entries.insert(0, mine)
+        for entry in entries:
+            if entry is mine or str(entry.get("modality") or "").strip().lower() != modality:
+                continue
+            entry["is_default"] = False
+            entry["aliases"] = [a for a in entry.get("aliases") or [] if str(a).strip().lower() not in taken]
+        own = [a for a in mine.get("aliases") or [] if str(a).strip().lower() not in taken]
+        mine.update(modality=spec["modality"], is_default=True, aliases=aliases + own)
+        if spec.get("pipeline_name"):
+            mine["pipeline_name"] = spec["pipeline_name"]
+        if payload == self.pipelines_manifest:
+            return False
+        self.validate_pipelines_manifest(payload)
+        write_json(self.pipelines_manifest_path, payload)
+        self.pipelines_manifest = payload
+        return True
 
     def pipeline_ids_for_role(self, role: str) -> list[str]:
         """``pipeline_id`` values for every pipeline entry tagged with *role*."""

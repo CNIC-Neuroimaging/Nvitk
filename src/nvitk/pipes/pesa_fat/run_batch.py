@@ -1,18 +1,18 @@
 """PESA-Fat batch master.
 
-Single entry point that drives the *whole* PESA-Fat batch — stage 0
+Single entry point that drives the *whole* PESA-Fat batch: stage 0
 (DICOM -> NIfTI + renaming), then the ct-pet-v5 and dixon-v5 pipelines
-(stages 1–3), and optional stage 4 (local HTML QC report).
+(stages 1-3), and optional stage 4 (local HTML QC report).
 
 Two execution modes:
 
-* ``--submit local`` — stage 0 is run in-process, then each pipeline's
+* ``--submit local``: stage 0 is run in-process, then each pipeline's
   master (:mod:`ct_pet_v5.run` / :mod:`dixon_v5.run`) is called with
   ``--submit local`` for the selected stages.
-* ``--submit sge`` — for every subject we submit a stage-0 SGE job
+* ``--submit sge``: for every subject we submit a stage-0 SGE job
   (``qsub`` wrapping ``singularity exec python -m stage0_convert``) and
   capture its jid. Each pipeline then submits **one array job per subject**
-  (tasks = stages 1–3, ``-tc 1`` + done-markers) with ``-hold_jid`` on that
+  (tasks = stages 1-3, ``-tc 1`` + done-markers) with ``-hold_jid`` on that
   stage-0 jid. CT-PET and Dixon arrays for a given subject run in parallel
   after stage 0. Optional ``stage4`` appends a CPU QC job that holds on all
   pipeline array jids when stage 3 is part of the script.
@@ -98,9 +98,7 @@ STAGE_CHOICES = ("stage0", "stage1", "stage2", "stage3", "stage4")
 INPUT_SOURCE_CHOICES = ("paths", "xnat")
 
 
-# ---------------------------------------------------------------------------
 # Stage 0 on SGE
-# ---------------------------------------------------------------------------
 
 
 _STAGE0_BIND_DICOM = "/PESAFat/DICOM/"
@@ -144,7 +142,7 @@ def _stage0_cluster_paths(lay: BatchLayout, container: Path, src_dir: Path) -> C
 
 
 def _pipeline_cluster_paths(lay: BatchLayout, container: Path, src_dir: Path) -> ClusterPaths:
-    """Host paths for stages 1–3 and batch stage-3 aggregation (NIfTI + RESULTS)."""
+    """Host paths for stages 1-3 and batch stage-3 aggregation (NIfTI + RESULTS)."""
     return ClusterPaths(
         src=src_dir,
         container=container,
@@ -617,9 +615,7 @@ def _submit_stage0(
     return jid
 
 
-# ---------------------------------------------------------------------------
 # Dispatch helpers
-# ---------------------------------------------------------------------------
 
 
 def _subject_list(lay: BatchLayout, subjects_arg: str | None, source: str) -> list[str]:
@@ -842,9 +838,7 @@ def _run_sge(
         )
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 
 
 @click.command("nvitk-pesa-fat")

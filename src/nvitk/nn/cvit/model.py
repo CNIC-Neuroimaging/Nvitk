@@ -1,12 +1,12 @@
 """
-CViT networks — segmentation (:class:`CViT`) and masked-image-modelling (:class:`CViTMIM`).
+CViT networks: segmentation (:class:`CViT`) and masked-image-modelling (:class:`CViTMIM`).
 
 Description
 -----------
-``x → tokenizer → (token grid, conv skips) → transformer encoder → decoder → logits``
+``x -> tokenizer -> (token grid, conv skips) -> transformer encoder -> decoder -> logits``
 
 :class:`CViT` is constructible the way nnU-Net builds networks from a plans file
-(``cls(input_channels=…, num_classes=…, deep_supervision=…, **arch_kwargs)`` followed by
+(``cls(input_channels=..., num_classes=..., deep_supervision=..., **arch_kwargs)`` followed by
 ``network.apply(network.initialize)``), so a plans file whose
 ``network_class_name`` is ``"nvitk.nn.cvit.CViT"`` and whose ``arch_kwargs`` is a serialised
 :class:`~nvitk.nn.cvit.config.CViTConfig` works even with stock nnU-Net trainers.
@@ -43,9 +43,7 @@ from .decoders import PatchDecoder, UNetDecoder
 from .tokenizers import build_tokenizer
 from .transformer import TransformerEncoder
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Segmentation network
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class CViT(nn.Module):
@@ -106,23 +104,21 @@ class CViT(nn.Module):
         d = cfg.to_dict()
         return cls(d.pop("input_channels"), d.pop("num_classes"), d.pop("deep_supervision"), **d)
 
-    # ---- skip / probe convenience ----------------------------------------------------------
+    # skip / probe convenience
     def set_skip_scale(self, scale: float) -> None:
         self.decoder.set_skip_scale(scale)
 
     def gate_penalty(self) -> torch.Tensor:
         return self.decoder.gate_penalty()
 
-    # ---- forward ---------------------------------------------------------------------------
+    # forward
     def forward(self, x: torch.Tensor) -> torch.Tensor | list[torch.Tensor]:
         grid, skips = self.tokenizer(x)
         tokens = self.encoder(grid)
         return self.decoder(tokens, skips)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Masked image modelling
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class CViTMIM(nn.Module):
@@ -171,7 +167,7 @@ class CViTMIM(nn.Module):
         self.keys_to_in_proj = tuple(f"tokenizer.{k}" for k in self.tokenizer.in_proj_keys)
         self.apply(CViT.initialize)
 
-    # ---- masks -----------------------------------------------------------------------------
+    # masks
     @staticmethod
     def random_token_mask(
         batch: int,
@@ -200,7 +196,7 @@ class CViTMIM(nn.Module):
         m = token_mask[:, None].float()
         return F.interpolate(m, scale_factor=self.config.token_stride, mode="nearest").bool()
 
-    # ---- forward ---------------------------------------------------------------------------
+    # forward
     def forward(self, x: torch.Tensor, token_mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Reconstruct *x* from its visible part.
 
@@ -233,9 +229,7 @@ class CViTMIM(nn.Module):
         return err.sum() / (m.sum() * recon.shape[1]).clamp_min(1.0)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Factories
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def config_from_kwargs(arch_kwargs: dict[str, Any], **forced: Any) -> CViTConfig:
@@ -268,7 +262,7 @@ def build_cvit(
     input_patch_size: Sequence[int] | None = None,
     deep_supervision: bool = True,
 ) -> CViT:
-    """nnU-Net-facing factory: plans ``arch_kwargs`` (+ patch size) → initialised :class:`CViT`.
+    """nnU-Net-facing factory: plans ``arch_kwargs`` (+ patch size) -> initialised :class:`CViT`.
 
     ``input_patch_size`` overrides ``arch_kwargs["input_shape"]`` so the positional-embedding grid
     always matches the configuration being trained or predicted.

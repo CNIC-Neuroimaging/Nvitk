@@ -132,7 +132,7 @@ class CrossSectionPanel(QWidget):
         the selected cross-section (blue = selected, red = upstream, green = downstream).
 
         Each curve's cardiac time-averaged flow magnitude (``mean_flow_ml_min``) is appended to its
-        legend entry, and the selected station's value is called out in a box beside the curves —
+        legend entry, and the selected station's value is called out in a box beside the curves:
         mL/min is the reporting unit, while the curves stay in the ml/s the pipeline computes.
         """
         if self._wave_ax is None or self._wave_canvas is None:
@@ -170,7 +170,7 @@ class CrossSectionPanel(QWidget):
                 label = f"{offset:+d} idx {index}{flow_txt}"
                 lw = 1.4
             self._wave_ax.plot(phases, flow, color=color, lw=lw, label=label)
-        # Time-averaged |Q| at the picked station — the headline number, kept out
+        # Time-averaged |Q| at the picked station: the headline number, kept out
         # of the legend stack so it survives a narrow dock.
         self._wave_ax.set_title(
             f"Q̄ = {selected_mean_ml_min:.1f} mL/min"

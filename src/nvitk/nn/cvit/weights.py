@@ -1,5 +1,5 @@
 """
-CViT weight transfer — export / load pretrained encoders and build fine-tuning parameter groups.
+CViT weight transfer: export / load pretrained encoders and build fine-tuning parameter groups.
 
 Description
 -----------
@@ -23,7 +23,7 @@ Checkpoint formats
 Layer-wise learning-rate decay
 ------------------------------
 :func:`layerwise_lr_groups` implements BEiT-style decay for fine-tuning: the decoder trains at the
-base rate, transformer block ``i`` at ``base · decay^(depth − i)``, and the tokenizer /
+base rate, transformer block ``i`` at ``base · decay^(depth - i)``, and the tokenizer /
 embeddings at ``base · decay^(depth + 1)``. Norms, biases, embeddings and gates get no weight
 decay.
 """
@@ -43,9 +43,7 @@ from .transformer import resize_pos_embed
 ENCODER_PREFIXES: tuple[str, ...] = ("tokenizer.", "encoder.")
 _STRIP_PREFIXES: tuple[str, ...] = ("module.", "_orig_mod.")
 
-# ──────────────────────────────────────────────────────────────────────────────
 # State-dict helpers
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _unwrap(model: nn.Module) -> nn.Module:
@@ -97,9 +95,7 @@ def _adapt_in_channels(w: torch.Tensor, c_new: int, how: str) -> torch.Tensor:
     raise ValueError(f"adapt_in_channels must be 'repeat', 'mean' or 'skip', got {how!r}.")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Loading
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def load_pretrained_encoder(
@@ -125,8 +121,8 @@ def load_pretrained_encoder(
         ``"skip"`` leaves those layers at their fresh initialisation.
     strict
         Raise if any other encoder tensor has a shape that cannot be reconciled, or if the
-        checkpoint holds no encoder tensors at all — a silent partial load is how a
-        "pretrained" run quietly trains from scratch.
+        checkpoint holds no encoder tensors at all: a silent partial load is how a
+        "pretrained" run silently trains from scratch.
 
     Returns
     -------
@@ -180,13 +176,11 @@ def load_pretrained_encoder(
     return report
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Fine-tuning parameter groups
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _layer_id(name: str, depth: int) -> int:
-    """0 = tokenizer / embeddings, 1…depth = transformer blocks, depth+1 = everything after."""
+    """0 = tokenizer / embeddings, 1...depth = transformer blocks, depth+1 = everything after."""
     if name.startswith("tokenizer.") or name in (
         "encoder.pos_embed", "encoder.registers", "encoder.mask_token"
     ):

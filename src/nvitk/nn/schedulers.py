@@ -3,8 +3,8 @@ Learning-rate schedules for transformer training (epoch-stepped, nnU-Net / nnssl
 
 Description
 -----------
-:class:`WarmupPolyLR` is a linear warm-up followed by polynomial decay — the recipe nnU-Net's
-Primus trainers use — with one difference that matters for fine-tuning: it multiplies the
+:class:`WarmupPolyLR` is a linear warm-up followed by polynomial decay (the recipe nnU-Net's
+Primus trainers use) with one difference that matters for fine-tuning: it multiplies the
 scheduled rate by each parameter group's ``lr_scale`` instead of writing one value into every
 group. nnU-Net's own warm-up schedulers do the latter, which silently erases layer-wise LR decay
 (:func:`nvitk.nn.cvit.weights.layerwise_lr_groups`).

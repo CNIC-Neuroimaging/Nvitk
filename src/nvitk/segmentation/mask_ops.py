@@ -21,9 +21,7 @@ FILL_MIN = "min"
 FILL_NAN = "nan"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Foregrounds
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _data(obj: Image | Any) -> Any:
@@ -43,7 +41,7 @@ def _foreground_mask(
 ) -> Any:
     """Boolean foreground from a mask / label map.
 
-    Empty *label_ids* → any nonzero voxel. Otherwise only listed label ids.
+    Empty *label_ids* -> any nonzero voxel. Otherwise only listed label ids.
     """
     arr = _data(mask)
     if label_ids:
@@ -67,9 +65,7 @@ def _check_same_shape(a: Any, b: Any) -> None:
         raise ValueError(f"Mask shapes must match; got {a.shape} vs {b.shape}.")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Set operations
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def mask_union(mask_a: Image | Any, mask_b: Image | Any) -> Image | Any:
@@ -119,9 +115,7 @@ def mask_complement(
     return _wrap_like(mask, (w & ~a).astype(np.uint8))
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Keeping / removing image regions
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def mask_region(
@@ -205,13 +199,13 @@ def apply_mask_to_image(
         Binary mask or label map on the same voxel grid as *image* (its spatial
         part, for a 3D+t image).
     mode
-        ``keep_inside`` — keep the voxels in the region, fill the rest.
-        ``keep_outside`` (``remove_inside``) — remove the region: fill it, keep the rest.
+        ``keep_inside``: keep the voxels in the region, fill the rest.
+        ``keep_outside`` (``remove_inside``): remove the region: fill it, keep the rest.
     fill_value
-        What removed voxels become: a number, ``"min"`` (the image's minimum —
+        What removed voxels become: a number, ``"min"`` (the image's minimum;
         air on a CT) or ``"nan"`` (makes the result floating point).
     label_ids
-        Labels of *mask* that make the region; ``None`` / empty → every nonzero label.
+        Labels of *mask* that make the region; ``None`` / empty -> every nonzero label.
     margin_mm
         Grow (> 0) or shrink (< 0) the region by this distance first
         (:func:`mask_region`), with the image's *spacing*.
@@ -230,7 +224,7 @@ def apply_mask_to_image(
     vol = _data(image)
     region = mask_region(mask, label_ids=label_ids, margin_mm=margin_mm, spacing=spacing)
     if region.shape != vol.shape:
-        # A 3D mask over a 3D+t image: the same region in every frame — and only that:
+        # A 3D mask over a 3D+t image: the same region in every frame, and only that:
         # a mask matching some other three axes is a misalignment, not a broadcast.
         expanded = False
         if vol.ndim == region.ndim + 1:

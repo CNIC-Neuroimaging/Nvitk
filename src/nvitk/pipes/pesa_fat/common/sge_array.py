@@ -31,7 +31,7 @@ def sge_pesa_array_resources(
     ngpu: int,
     cpu_ngpu: int,
 ) -> tuple[SgeResources, bool]:
-    """Padded resources for a per-subject PESA-Fat stage1–3 array job.
+    """Padded resources for a per-subject PESA-Fat stage1-3 array job.
 
     Pads ``h_vmem`` to stage1 when stage1 is among *stages_sel*; otherwise uses
     the CPU-stage mem. ``ngpu`` / ``use_nv`` follow *device* (same as today's

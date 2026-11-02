@@ -2,7 +2,7 @@
 
 Slicer already ships ``numpy``, ``scipy``, ``vtk`` and ``matplotlib``. The
 vendored morphometrics code additionally needs the four packages below. nvitk
-itself is **not** a dependency — the pipeline is vendored under ``nvitk_vendor``
+itself is **not** a dependency: the pipeline is vendored under ``nvitk_vendor``
 precisely because nvitk's install requirements (antspyx, TotalSegmentator,
 nnU-Net, a pinned SimpleITK) cannot go into Slicer's Python.
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import importlib
 
-#: ``import name`` → ``pip name`` for everything the vendored pipeline needs.
+#: ``import name`` -> ``pip name`` for everything the vendored pipeline needs.
 REQUIRED: dict[str, str] = {
     "pandas": "pandas",
     "nibabel": "nibabel",

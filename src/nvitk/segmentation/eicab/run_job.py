@@ -3,8 +3,7 @@
 
 Paths are under the outer pipeline container mounts (``/nvitk/data/``,
 ``/nvitk/output/``, etc.). :func:`run_eicab` runs the inner eICAB ``singularity run``
-with the same bind layout as legacy ``run_eicab_inference.sh`` (TOF bind, output,
-``/tmp``, vasculature on ``PATH``).
+with the TOF, output, ``/tmp`` and vasculature (on ``PATH``) binds.
 """
 
 from __future__ import annotations
@@ -37,7 +36,19 @@ def main(argv: list[str] | None = None) -> int:
         "--post-process-eicab",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Otsu ICA resegment + region growing after eICAB.",
+        help="eICAB post-process after eICAB (re-segment, extend the trunks, siphon cuts).",
+    )
+    p.add_argument(
+        "--eicab-pp-siphon",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Include the ICA siphon correction in the post-process.",
+    )
+    p.add_argument(
+        "--eicab-pp-distal",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Also write *_eICAB_WB_pp: the ACAs / MCAs / PCAs / SCAs grown distally along the Frangi tree, the ACA / MCA growth labelled A2 / M2 (21-24). *_eICAB_CW_pp (no distal growth) is always written.",
     )
     p.add_argument(
         "--backend",
@@ -63,7 +74,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.post_process_eicab:
             from nvitk.pipes.qvtpy.util.eicab.eicab_postprocess import postprocess_eicab_directory
 
-            postprocess_eicab_directory(args.output)
+            postprocess_eicab_directory(args.output, tof_original_path=args.input, siphon=args.eicab_pp_siphon,
+                                        distal=args.eicab_pp_distal)
     except Exception as exc:
         log.error("run_job failed: %s", exc)
         raise
