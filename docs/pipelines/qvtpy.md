@@ -21,10 +21,10 @@ nvitk-qvtpy --subject-dir /data/subj01 --stages stage0_c,stage1,stage2,stage3,st
 | `stage0_c` | `convert`, `stage0` | DICOM → NIfTI + reorg + optional `phase2volume` derivatives. |
 | `stage1` | `eicab` | eICAB on `TOF/TOF.nii.gz`, then the eICAB post-process (below). |
 | `stage2` | `registration` | eICAB TOF (resampled) → 4D-flow reference, **rigid FSL FLIRT**. |
-| `stage3` | `centerline` | eICAB in 4D-flow space + arterial/venous centerline extraction. |
+| `stage3` | `centerline` | eICAB in 4D-flow space + arterial/venous centerline extraction. The sinuses: the global sliding-threshold CD mask in the posterior slab, extended with the dim stretches it misses (threshold recomputed on the venous search region; `--venous-extend`), skeletonised, chains running from a midline sinus into a transverse one cut at the turn, then named. |
 | `stage4` | `segmentation` | Complex-difference crop per vessel + threshold, the ICAs' and basilar's region growing, then the blood flood (Frangi + hysteresis vessel tree on the CD divided by the subject's blood signal; watershed from the ACAs / MCAs / PCAs, the two ACAs sharing theirs in turns behind a midline guard; comms and venous sinuses fill only their own lumen; A1 / M1 / P1 growth labelled A2 / M2 / P2; small islands dropped) → `seg_4dflow`. |
 | `stage4t` | `seg_t` | Same, per `ComplexDifference_4D` frame → `seg_4dflow_4d` (opt-in). |
-| `stage5` | `loc` | QVTplus-style Location-of-Comparison (LOC) CSV, arterial + venous. |
+| `stage5` | `loc` | QVTplus-style Location-of-Comparison (LOC) CSV, arterial + venous: one LOC per vessel, including the A2 / M2 / P2. |
 | `stage6` | `measure` | Per-LOC masked-plane flow / PI / RI from the phase volumes — see {doc}`qvtpy-hemodynamics`. |
 | `stage7` | `morphometrics`, `morpho` | TOF eICAB morphometrics — caliber/tortuosity/stenosis — see {doc}`qvtpy-morphometrics`. |
 | `stage8_xnat_upload` | `xnat_upload` | Uploads `eicab/` + `qvtpy/` results to the XNAT session (also standalone as `nvitk-qvtpy-xnat-upload`; requires stage 2–7 complete). |

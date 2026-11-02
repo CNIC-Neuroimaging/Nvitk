@@ -1,7 +1,7 @@
 """Write QVTPY QC review status onto ``image_measurements.qc_status``.
 
 Each review decision updates matching rows for the latest qvtpy pipeline
-(``4dflow_v3`` / aliases ``latest`` / ``qvtpy``) keyed by
+(``4dflow_v4`` / aliases ``latest`` / ``qvtpy``) keyed by
 ``subject_uid`` + ``pipeline_id`` + ``variable_id`` (+ optional ``region_id``).
 """
 

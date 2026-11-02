@@ -40,7 +40,11 @@ from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread, imsave
 from nvitk.measure import dice as measure_dice
 from nvitk.pipes.qvtpy import config as cfg
-from nvitk.pipes.qvtpy.stage4_4dflow_segmentation import EICAB_IN_4DFLOW_NIFTI, load_stage3_eicab
+from nvitk.pipes.qvtpy.stage4_4dflow_segmentation import (
+    EICAB_IN_4DFLOW_NIFTI,
+    load_stage3_eicab,
+    load_stage3_venous_mask,
+)
 from nvitk.pipes.qvtpy.util.segmentation.flood_options import flood_cli_args, flood_click_options, flood_settings
 from nvitk.pipes.qvtpy.util.centerline.centerline_io import (
     centerline_meta_path,
@@ -292,6 +296,7 @@ def run_subject(
         centerlines_mask=centerlines_mask,
         eicab_qvtpy=eicab_qvtpy,
         eicab_native=eicab_native,
+        venous_mask=load_stage3_venous_mask(s3),
         spacing=tuple(float(v) for v in cd_img.spacing[:3]),
         crop_padding_bbox=int(crop_padding_bbox),
         thr_algorithm=thr_algorithm,

@@ -1,13 +1,14 @@
 """Publish qvtpy stage-7 TOF morphometrics into the NVITK ``image_measurements`` table.
 
-Long-form rows go under pipeline ``tof_morpho_v1``, one region per vessel, and are exactly the
+Long-form rows go under pipeline ``tof_morpho_v2`` (registered on every publish as the dataset's
+default TOF pipeline; ``tof_morpho_v1`` keeps its rows), one region per vessel, and are exactly the
 stage-7 report (:mod:`nvitk.measure.morpho.export_utils.report`): the report features of every
 present vessel, and its lesion flags from high-confidence lesions only (``has_stenosis`` /
 ``stenosis_diameter_percent_max``, ``has_enlargement`` / ``enlargement_diameter_percent_max``,
 ``has_hypoplasia`` for the main vessels, absent ones included, and ``has_fetal_pca`` on the P2s;
 flags are 1/0, unit ``boolean``).
 ``morphometrics_report.csv`` is read when present and built from the run's tables otherwise. A
-publish replaces all of the subject's ``tof_morpho_v1`` rows, so variables earlier runs published
+publish replaces all of the subject's ``tof_morpho_v2`` rows, so variables earlier runs published
 and the report no longer has do not linger. Runs older than ``vessel_summary.csv`` fall back to
 aggregating the ``00_Path_Summary`` sheet of ``case_metrics_donut_tree.xlsx``.
 
@@ -28,14 +29,14 @@ from nvitk.core.logger import Logger
 from nvitk.db.exceptions import SettingsError, TableNotFoundError
 from nvitk.db.repo import DataRepo
 from nvitk.db.storage import utc_now_iso
-from nvitk.pipes.qvtpy.common.db_publish import _finite, resolve_repo
+from nvitk.pipes.qvtpy.common.db_publish import _finite, register_default_pipeline, resolve_repo
 
 log = Logger()
 
-TOF_MORPHO_PIPELINE_ID = "tof_morpho_v1"
+TOF_MORPHO_PIPELINE_ID = "tof_morpho_v2"
 TOF_MORPHO_PIPELINE_NAME = "TOF Morphometrics"
 TOF_MORPHO_MODALITY = "tof"
-TOF_MORPHO_PIPELINE_ALIASES = ("tof_morpho", "morpho", "tof_morpho_v1")
+TOF_MORPHO_PIPELINE_ALIASES = ("tof_morpho", "morpho", "latest", "current", "last", "v2", "2")
 
 # variable_id -> unit
 _SCALAR_VARS: dict[str, str] = {
@@ -389,8 +390,10 @@ def publish_stage7(
     build_sqlite_index: bool = True,
     source_batch_id: str | None = None,
 ) -> pd.DataFrame:
-    """Upsert stage-7 TOF morphometrics into ``image_measurements``."""
+    """Upsert stage-7 TOF morphometrics into ``image_measurements``, with ``tof_morpho_v2``
+    registered as the dataset's default TOF pipeline."""
     repo = resolve_repo(repo, prefer_sge=prefer_sge)
+    register_default_pipeline(repo, tof_morpho_pipeline_catalog_spec())
     rows = build_image_measurement_rows_from_stage7(
         subject_uid=subject_uid, stage7_dir=stage7_dir
     )

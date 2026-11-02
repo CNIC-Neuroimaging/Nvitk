@@ -132,6 +132,13 @@ def _segmentation_meta(
 # Stage 4: local CD crop + threshold + largest-CC clean + blood flood
 
 
+def load_stage3_venous_mask(s3: Path) -> np.ndarray | None:
+    """Stage 3's venous mask (the sinuses' CD mask their centerlines were drawn from), ``None`` for
+    stage-3 runs older than it: stage 4 keeps each sinus's threshold inside it."""
+    path = s3 / "venous_mask.nii.gz"
+    return as_backend_array(imread(path).data).astype(bool) if path.is_file() else None
+
+
 def load_stage3_eicab(s3: Path, subject: str, stage: str) -> tuple[np.ndarray | None, np.ndarray | None]:
     """Stage 3's registered eICAB labels: ``(qvtpy ids, eICAB's own ids)``, ``None`` when missing.
     The qvtpy ones anchor the ACAs' components and the AComm; the native ones wall the basilar's
@@ -193,6 +200,7 @@ def run_subject(
         centerlines_mask,
         eicab_qvtpy=eicab_qvtpy,
         eicab_native=eicab_native,
+        venous_mask=load_stage3_venous_mask(s3),
         spacing=tuple(float(v) for v in cd_img.spacing[:3]),
         crop_padding_bbox=int(crop_padding_bbox),
         thr_algorithm=thr_algorithm,
@@ -421,6 +429,7 @@ __all__ = [
     "flood_settings",
     "EICAB_IN_4DFLOW_EICAB_IDS_NIFTI",
     "load_stage3_eicab",
+    "load_stage3_venous_mask",
     "EICAB_IN_4DFLOW_NIFTI",
     "main",
     "run_subject",

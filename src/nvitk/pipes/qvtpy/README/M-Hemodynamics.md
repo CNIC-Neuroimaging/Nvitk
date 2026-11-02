@@ -72,9 +72,10 @@ matters because it defines what "the ICA flow" means:
 | Vessel group | Rule |
 |---|---|
 | L/R ICA, basilar | one LOC each, preferably on a shared axial plane at maximum axial alignment |
-| MCA / ACA / PCA | **dual** `init` + `fin` from trunk ↔ side-branch intersections (M1/A1/P1 then M2/A2/P2) |
+| A1 / M1 / P1 | one `init` LOC at the midpoint of the stage-3 centerline (before the flood); fallbacks: trunk ↔ side-branch intersections |
+| A2 / M2 / P2 | one `mid` LOC on the label's trunk (its longest path from the A1 / M1 / P1), published as `LACA_A2` … `RPCA_P2` (pipeline `4dflow_v4`) |
 | ACA fallback | AComm / circle-of-Willis junction stations when named side branches are missing |
-| Venous sinuses | arc midpoint **inside the venous slab mask**; the SSS/STR pair is then separated away from the confluence, and a transverse sinus falls back to its longest in-mask segment |
+| Venous sinuses | arc midpoint **inside stage 3's venous mask** (`venous_mask.nii.gz`, the one the sinuses were named on); the SSS/STR pair is then separated away from the confluence, and a transverse sinus falls back to its longest in-mask segment |
 
 The DB import keeps **one row per vessel**, preferring the `init` role (see
 [db_publish.py](src/nvitk/pipes/qvtpy/common/db_publish.py)).

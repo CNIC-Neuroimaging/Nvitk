@@ -349,6 +349,7 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     pcomm_min_points: int,
     arterial_branch_min_points: int,
     venous_brain_mask: bool,
+    venous_extend: bool,
     totalseg_model_dir: Path | None,
     crop_padding_bbox: int,
     thr_algorithm_4dflow: str,
@@ -357,7 +358,6 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     loc_arterial_strategy: str,
     cross_section_radius_vox: float,
     loc_endpoint_inset_frac: float,
-    distal_locs: bool,
     measure_resegment: bool,
     measure_thr_algorithm: str,
     cross_section_res: int,
@@ -537,6 +537,7 @@ def _emit_qvtpy_sge_subjects_for_chunk(
                             pcomm_min_points=pcomm_min_points,
                             arterial_branch_min_points=arterial_branch_min_points,
                             venous_brain_mask=venous_brain_mask,
+                            venous_extend=venous_extend,
                             totalseg_model_dir=totalseg_model_dir,
                             backend=backend,
                         ),
@@ -622,7 +623,6 @@ def _emit_qvtpy_sge_subjects_for_chunk(
                             cross_section_radius_vox=cross_section_radius_vox,
                             venous_min_component_frac=venous_min_component_frac,
                             loc_endpoint_inset_frac=loc_endpoint_inset_frac,
-                            distal_locs=distal_locs,
                             backend=backend,
                         ),
                     )
@@ -1148,6 +1148,12 @@ def _submit_qvtpy_sge_subjects_remote(
     help="Stage3: restrict venous candidates to TotalSegmentator brain on Angiography_3D.",
 )
 @click.option(
+    "--venous-extend/--no-venous-extend",
+    default=True,
+    show_default=True,
+    help="Stage3: add the dim sinus stretches the global CD threshold misses before naming the sinuses.",
+)
+@click.option(
     "--totalseg-model-dir",
     type=click.Path(path_type=Path),
     default=None,
@@ -1174,15 +1180,6 @@ def _submit_qvtpy_sge_subjects_remote(
 )
 @click.option("--cross-section-radius-vox", type=float, default=10.0, show_default=True)
 @click.option("--loc-endpoint-inset-frac", type=float, default=0.08, show_default=True, help="Stage5: dual LOC inset from polyline ends.")
-@click.option(
-    "--distal-locs/--no-distal-locs",
-    default=False,
-    show_default=True,
-    help=(
-        "Stage5: for MCA/ACA/PCA also emit distal (fin) LOCs past the stage-3 "
-        "A1/M1/P1 span. Default off: one init LOC per vessel."
-    ),
-)
 # stage 6
 @click.option(
     "--measure-resegment/--no-measure-resegment",
@@ -1337,6 +1334,7 @@ def main(
     pcomm_min_points: int,
     arterial_branch_min_points: int,
     venous_brain_mask: bool,
+    venous_extend: bool,
     totalseg_model_dir: Path | None,
     crop_padding_bbox: int,
     thr_algorithm_4dflow: str,
@@ -1344,7 +1342,6 @@ def main(
     loc_arterial_strategy: str,
     cross_section_radius_vox: float,
     loc_endpoint_inset_frac: float,
-    distal_locs: bool,
     measure_resegment: bool,
     measure_thr_algorithm: str,
     cross_section_res: int,
@@ -1744,6 +1741,7 @@ def main(
                             pcomm_min_points=pcomm_min_points,
                             arterial_branch_min_points=arterial_branch_min_points,
                             venous_brain_mask=venous_brain_mask,
+                            venous_extend=venous_extend,
                             totalseg_model_dir=totalseg_model_dir_eff,
                             totalseg_device=backend,
                         ),
@@ -1791,7 +1789,6 @@ def main(
                             cross_section_radius_vox=cross_section_radius_vox,
                             venous_min_component_frac=venous_min_component_frac,
                             loc_endpoint_inset_frac=loc_endpoint_inset_frac,
-                            distal_locs=distal_locs,
                         ),
                     )
                 if run_s6 and _local_stage_pending(subj, STAGE_MEASURE, **_local_skip):
@@ -2038,6 +2035,7 @@ def main(
         pcomm_min_points=pcomm_min_points,
         arterial_branch_min_points=arterial_branch_min_points,
         venous_brain_mask=venous_brain_mask,
+        venous_extend=venous_extend,
         totalseg_model_dir=totalseg_model_dir_eff,
         crop_padding_bbox=crop_padding_bbox,
         thr_algorithm_4dflow=thr_algorithm_4dflow,
@@ -2046,7 +2044,6 @@ def main(
         loc_arterial_strategy=loc_arterial_strategy,
         cross_section_radius_vox=cross_section_radius_vox,
         loc_endpoint_inset_frac=loc_endpoint_inset_frac,
-        distal_locs=distal_locs,
         measure_resegment=measure_resegment,
         measure_thr_algorithm=measure_thr_algorithm,
         cross_section_res=cross_section_res,

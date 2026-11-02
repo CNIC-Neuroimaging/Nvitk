@@ -16,7 +16,10 @@ Steps (:func:`build_seg_4dflow_local`):
    centerline, thresholded (``lsthr`` / ``lthr`` / ``otsu``), with the other vessels' centerlines
    as barriers; then the pieces of it that touch its own centerline (the crop's threshold also
    keeps brighter tissue patches elsewhere in the crop; none on the centerline: the centerline
-   itself is the seed). The A2 / M2 / P2 are not thresholded: barely resolved in 4D flow, a crop
+   itself is the seed). A venous sinus keeps only what lies inside stage 3's venous mask (dilated
+   by one voxel; without it, within ``_VENOUS_TUBE_RADIUS`` voxels of its centerline): around a dim
+   sinus the crop threshold otherwise takes the tissue as one block. The A2 / M2 / P2 are not
+   thresholded: barely resolved in 4D flow, a crop
    threshold gives them protrusions and blocks of noise. Their masks come from the flood only,
    seeded with their bare centerlines (just before it) and with what their A1 / M1 / P1 floods. The communicating arteries are seeded the same way (their
    centerline plus the threshold crop).
@@ -155,6 +158,8 @@ _DISTAL_LR_PAIRS: tuple[tuple[int, int], ...] = (
     (QVTPY_LPCA_P2, QVTPY_RPCA_P2),
 )
 #: Arteries that grow along the vessel tree (the others only fill their own lumen).
+#: Without stage 3's venous mask, a sinus's threshold is kept within this many voxels of its centerline.
+_VENOUS_TUBE_RADIUS: int = 6
 _DISTAL_TARGET_IDS: frozenset[int] = frozenset(QVTPY_MCA_IDS | QVTPY_ACA_IDS | QVTPY_PCA_IDS | QVTPY_DISTAL_IDS)
 #: Labels that only fill their own lumen: the communicating arteries and the venous sinuses (a
 #: growing sinus would run out along the cortical veins). The ICAs / basilar / vertebrals are
@@ -1157,6 +1162,7 @@ def build_seg_4dflow_local(
     *,
     eicab_qvtpy: np.ndarray | None = None,
     eicab_native: np.ndarray | None = None,
+    venous_mask: np.ndarray | None = None,
     spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
     crop_padding_bbox: int = 3,
     thr_algorithm: ThrAlgorithm = "lsthr",
@@ -1176,7 +1182,8 @@ def build_seg_4dflow_local(
     flood_min_island_mm3: float = FLOOD_MIN_ISLAND_MM3_DEFAULT,
 ) -> LocalSegResult:
     """Build multilabel ``seg_4dflow`` from CD and the per-label centerline backbone (module
-    docstring): local threshold per label, the ICAs' and basilar's region growing (walled off from
+    docstring): local threshold per label (a sinus's within stage 3's *venous_mask*), the ICAs'
+    and basilar's region growing (walled off from
     the registered eICAB SCAs, *eicab_native*, when given), the vertebral split (*split_vertebral*),
     the communicating arteries' seeds (the AComm only with *segment_acomm*), then the blood flood
     (*flood_expand*; :func:`flood_expand_vessels` with the ``flood_*`` settings). *spacing*: voxel
@@ -1199,6 +1206,12 @@ def build_seg_4dflow_local(
     )
     stats: list[VesselSegStats] = []
     cl_rad = max(0, int(cl_barrier_radius))
+    cube = make_ball_footprint(3, connectivity=3)
+    if venous_mask is not None:
+        venous_allowed = ndi.binary_dilation(as_backend_array(venous_mask).astype(bool), structure=cube)
+    else:
+        venous_allowed = ndi.binary_dilation(np.isin(clm, as_backend_array(sorted(QVTPY_VENOUS_LABEL_IDS))),
+                                             structure=cube, iterations=_VENOUS_TUBE_RADIUS)
     branched = QVTPY_ACA_IDS | QVTPY_MCA_IDS | QVTPY_PCA_IDS | QVTPY_DISTAL_IDS
 
     for lid in phase1_ids:
@@ -1220,6 +1233,8 @@ def build_seg_4dflow_local(
         cl_barrier = _dilated_other_centerlines_barrier(
             clm, lid, bbox, radius=_CL_BARRIER_RADIUS_BRANCHED if lid in branched else cl_rad
         )
+        if lid in QVTPY_VENOUS_LABEL_IDS:
+            crop_mask = as_backend_array(crop_mask).astype(bool) & venous_allowed[i0 : i1 + 1, j0 : j1 + 1, k0 : k1 + 1]
         n_thr = _paste_crop_mask(seg, crop_mask, lid, bbox, forbidden=cl_barrier)
         stats.append(VesselSegStats(
             label_id=lid, bbox=bbox, face_padding=face_pad, thr_algorithm=thr_algorithm, opt_thresh=opt_t,
