@@ -672,18 +672,19 @@ def is_main_path_station(branch_name: Any, label_id: int) -> bool:
     """
     Whether a ``pitc_profile.csv`` station sits on its vessel's **main path**.
 
-    Stage 4/6 decompose a branched territory into a trunk plus bifurcation arms and name them with
-    :func:`~nvitk.pipes.qvtpy.labels.qvtpy_branch_names`: ``LMCA-M1`` for the trunk, ``LMCA-M2a``
-    / ``LMCA-M2b`` for the arms; a non-branched vessel keeps its bare name (``LICA``) with any
-    extra path suffixed ``-b2``, ``-b3``.
+    Stage 4/6 name each label's paths with :func:`~nvitk.pipes.qvtpy.labels.qvtpy_branch_names`:
+    the trunk keeps the vessel's name (``LICA``, ``LMCA_M1``) and extra paths are suffixed ``-b2``,
+    ``-b3``; a distal label's paths are ``LMCA_M2-a``, ``LMCA_M2-b``, ... (its main path the first).
+    Runs before the A1 / M1 / P1 split (2026-10-28) named the trunk ``LMCA-M1`` and the arms
+    ``LMCA-M2a``.
 
     The along-segment CV is a statement about **one continuous vessel**: mass is conserved along a
     non-branching segment, so its station flows should barely move. Pooling a trunk with its side
     arms breaks that premise: flow legitimately steps down past each bifurcation, and the CV would
     measure the branching, not the segmentation quality. Only the trunk qualifies.
 
-    Both the canonical trunk name and the bare vessel name are accepted, so a profile written
-    before branch naming (bare names throughout) still resolves; ``-M2a`` / ``-b2`` never do.
+    The canonical trunk name, the bare vessel name and the names of runs before the split
+    (``LMCA-M1``, ``LMCA``) are accepted; ``-M2a`` / ``-b2`` never are.
     """
     from nvitk.pipes.qvtpy.labels import qvtpy_branch_names, qvtpy_vessel_name
 
@@ -691,7 +692,12 @@ def is_main_path_station(branch_name: Any, label_id: int) -> bool:
     if not key:
         return False
     trunk = str(qvtpy_branch_names(int(label_id), 1)[0]).upper()
-    return key in {trunk, str(qvtpy_vessel_name(int(label_id))).upper()}
+    name = str(qvtpy_vessel_name(int(label_id))).upper()
+    ok = {trunk, name}
+    if "_" in name:  # LMCA_M1 -> LMCA-M1 / LMCA (before the split)
+        base, seg = name.split("_", 1)
+        ok |= {f"{base}-{seg}", base}
+    return key in ok
 
 
 def compute_segment_cv_from_profiles(
@@ -720,8 +726,8 @@ def compute_segment_cv_from_profiles(
       Unbranched vessels keep the full trunk: an ICA or the basilar is one tube over its whole
       sampled length, and narrowing it there would only discard good stations.
 
-    ``region_id`` is emitted as the plain vessel name (``LMCA``, not ``LMCA-M1``) so it joins the
-    published flow rows directly.
+    ``region_id`` is emitted as the plain vessel name (``LMCA_M1``, not a branch name) so it joins
+    the published flow rows directly.
 
     Returns a long ``(subject_uid, region_id, value)`` frame ready for :func:`compute_vessel_qc`.
     """

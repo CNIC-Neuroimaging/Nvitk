@@ -190,8 +190,12 @@ def _autosize(worksheet: Any, frame: pd.DataFrame, *, max_width: int = 42) -> No
         worksheet.column_dimensions[get_column_letter(i)].width = min(width + 2, max_width)
 
 
+#: Public name of :func:`_autosize` for other exporters (the Results panel's table export).
+autosize_columns = _autosize
+
 __all__ = [
     "EXCEL_ROW_LIMIT",
+    "autosize_columns",
     "build_provenance_frame",
     "export_analysis_frame",
     "export_group_summary",

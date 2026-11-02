@@ -417,6 +417,7 @@ def add_centerline_polylines_shapes(
     label_color: dict[int, str] = {}
     paths: list[np.ndarray] = []
     edge_colors: list[str] = []
+    path_labels: list[int] = []
     for item in polylines:
         pts = np.asarray(item["points"], dtype=np.float64)
         if pts.shape[0] < 2:
@@ -426,6 +427,7 @@ def add_centerline_polylines_shapes(
             label_color[lid] = palette[len(label_color) % len(palette)]
         paths.append(pts.astype(np.float32))
         edge_colors.append(label_color[lid])
+        path_labels.append(lid)
 
     if not paths:
         return None
@@ -438,6 +440,8 @@ def add_centerline_polylines_shapes(
         "edge_color": edge_colors,
         "edge_width": float(edge_width),
         "opacity": 0.95,
+        # Each path's label id, so a centerline image can be drawn back from them (From polyline).
+        "features": {"label": path_labels},
         "metadata": {
             POLYLINE_SHAPES_META: True,
             "n_paths": int(len(paths)),

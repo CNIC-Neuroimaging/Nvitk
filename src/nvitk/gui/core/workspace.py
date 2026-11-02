@@ -999,7 +999,19 @@ def install_panel_manager(viewer: Any) -> PanelManager | None:
     return manager
 
 
+def raise_panel(viewer: Any, object_name: str) -> bool:
+    """Bring the panel dock *object_name* (``nvitk:tools``, ``nvitk:mesh``, ...) to the front,
+    wherever it lives (the main window or a panel window). False when there is no such dock."""
+    manager = getattr(viewer, "_nvitk_panel_manager", None)
+    dock = manager.find(object_name) if manager is not None else None
+    if dock is None:
+        return False
+    manager.show_dock(dock)
+    return True
+
+
 __all__ = [
+    "raise_panel",
     "LABELS_SHORTCUT",
     "TAB_HINT",
     "WINDOWS_PREF_KEY",

@@ -66,20 +66,26 @@ def component_tables(
     branch_df: pd.DataFrame,
     tree_summary: Mapping[str, Any],
     axes: Any | None = None,
+    extra_junctions: np.ndarray | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Per-component rows (run inside the worker, where the per-point arrays live)."""
+    """Per-component rows (run inside the worker, where the per-point arrays live).
+    *extra_junctions* (mm): bifurcations shared with the other half of a split vessel, which bound
+    the lesions like the component's own (not counted as its bifurcations)."""
     junctions = (
         branch_df[["x_mm", "y_mm", "z_mm"]].to_numpy(dtype=float)
         if branch_df is not None and not branch_df.empty and {"x_mm", "y_mm", "z_mm"} <= set(branch_df.columns)
         else np.empty((0, 3))
     )
+    lesion_junctions = junctions
+    if extra_junctions is not None and len(extra_junctions):
+        lesion_junctions = np.vstack([junctions.reshape(-1, 3), np.asarray(extra_junctions, dtype=float).reshape(-1, 3)])
     ident = _identity(case_id, label, vessel_info)
     contexts = [r for r in path_results if len(r.get("x_mm", [])) >= 2] or list(split_results)
 
     seg_list = [seg for seg in split_results if len(seg.get("x_mm", [])) >= 2]
     lesions = [
         {**ident, "component_id": int(component_id), **row}
-        for row in lesion_rows(contexts, seg_list, junctions=junctions)
+        for row in lesion_rows(contexts, seg_list, junctions=lesion_junctions)
     ]
     segments = []
     for seg in seg_list:
@@ -189,6 +195,24 @@ def _neighbours(name: str, infos: Mapping[str, Any]) -> set[str]:
 HYPOPLASIA_MIN_PRESENT_FRACTION = 0.5
 
 
+def _measured_vessels(vessels: pd.DataFrame) -> set[str]:
+    """Names of the vessels present **and measured**: a centerline longer than zero and a finite
+    median diameter. A label with a few voxels and no centerline is in the mask but not measured
+    (a hypoplasia, ``too_small``)."""
+    out: set[str] = set()
+    for _, r in vessels.iterrows():
+        if not bool(r.get("present", False)):
+            continue
+        length = pd.to_numeric(r.get("centerline_length_mm", np.nan), errors="coerce")
+        diam = pd.to_numeric(r.get("diameter_median_mm", np.nan), errors="coerce")
+        if "centerline_length_mm" in r and not (np.isfinite(length) and length > 0):
+            continue
+        if "diameter_median_mm" in r and not np.isfinite(diam):
+            continue
+        out.add(str(r.get("vessel_name")))
+    return out
+
+
 def hypoplasia_rows(
     vessels: pd.DataFrame,
     mapping: Mapping[int, Any] | None,
@@ -204,7 +228,8 @@ def hypoplasia_rows(
     reached, so the absence is local), and 0.3 (low, ``neighbours_absent``) when none is, which
     suggests a field-of-view or segmentation dropout. Flags name the common variants:
     ``fetal_pca`` (a P1 absent, its PComm and P2 present) and ``a1_aplasia`` (an ACA absent, the
-    AComm and the other ACA present). The rows carry no location or path.
+    AComm and the other ACA present). The rows carry no location or path. A vessel in the mask
+    without a measured centerline (no length, no diameter) counts as ``too_small``.
 
     With fewer than *min_present_fraction* of the main vessels present the mask is taken for a
     part of the circle (a label selection, a crop) and no row is made. With the profile's
@@ -214,7 +239,9 @@ def hypoplasia_rows(
         return []
     infos = {str(getattr(info, "name", f"label_{lid}")): info for lid, info in mapping.items()}
     labels = {str(getattr(info, "name", f"label_{lid}")): int(lid) for lid, info in mapping.items()}
-    present = {str(n) for n, p in zip(vessels.get("vessel_name", []), vessels.get("present", [])) if bool(p)}
+    present = _measured_vessels(vessels)
+    # In the mask at all (measured or not): what the neighbour / variant checks look at.
+    in_mask = {str(n) for n, p in zip(vessels.get("vessel_name", []), vessels.get("present", [])) if bool(p)}
     case_id = str(vessels["case_id"].dropna().iloc[0]) if "case_id" in vessels and vessels["case_id"].notna().any() else ""
     main = [n for n in _cfg.HYPOPLASIA_MAIN_VESSELS if n in infos]
     if getattr(_cfg, "PROCESS_SELECTED_TAGS_ONLY", False):
@@ -230,14 +257,14 @@ def hypoplasia_rows(
         info_vox = (voxels or {}).get(labels[name]) or {}
         n_vox = int(info_vox.get("n_voxels", 0)) if isinstance(info_vox, Mapping) else int(info_vox or 0)
         flags = ["too_small" if n_vox > 0 else "absent"]
-        conf = 1.0 if neigh & present else 0.3
+        conf = 1.0 if neigh & in_mask else 0.3
         if conf < 1.0:
             flags.append("neighbours_absent")
         side = name[0] if name[:1] in ("L", "R") else ""
         other = {"L": "R", "R": "L"}.get(side, "")
-        if name.endswith("PCA_P1") and {f"{side}PCOMM", f"{side}PCA_P2"} <= present:
+        if name.endswith("PCA_P1") and {f"{side}PCOMM", f"{side}PCA_P2"} <= in_mask:
             flags.append("fetal_pca")
-        if name.endswith("ACA") and {"ACOMM", f"{other}ACA"} <= present:
+        if name.endswith("ACA_A1") and {"ACOMM", f"{other}ACA_A1"} <= in_mask:
             flags.append("a1_aplasia")
         rows.append({
             **_identity(case_id, labels[name], infos[name]),
@@ -253,36 +280,165 @@ def hypoplasia_rows(
 
 
 def add_hypoplasia_columns(vessels: pd.DataFrame, rows: Iterable[Mapping[str, Any]]) -> pd.DataFrame:
-    """``hypoplasia`` (bool) and ``hypoplasia_confidence_class`` per vessel, from *rows*."""
+    """``hypoplasia`` (bool), ``hypoplasia_confidence_class`` and ``hypoplasia_flags`` per vessel,
+    from the hypoplasia lesion *rows*."""
     if vessels.empty:
         return vessels
+    rows = [r for r in rows if str(r.get("kind", "hypoplasia")) == "hypoplasia"]
     by_name = {str(r["vessel_name"]): str(r["confidence_class"]) for r in rows}
+    flags = {str(r["vessel_name"]): str(r.get("confidence_flags", "")) for r in rows}
     out = vessels.copy()
     out["hypoplasia"] = out["vessel_name"].astype(str).isin(by_name)
     out["hypoplasia_confidence_class"] = out["vessel_name"].astype(str).map(by_name).fillna("")
+    out["hypoplasia_flags"] = out["vessel_name"].astype(str).map(flags).fillna("")
     return out
+
+
+def locate_a1_hypoplasia(
+    rows: list[dict[str, Any]],
+    multilabel: np.ndarray,
+    mapping: Mapping[int, Any] | None,
+    spacing: Sequence[float],
+) -> None:
+    """Give each A1 hypoplasia row (in place) a position, where the missing A1 would run: midway
+    between the end of its ICA (the ICA voxel nearest the target below) and the AComm (its
+    centroid), or without an AComm the end of the other side's A1 (its voxel nearest the ICA).
+    Rows without both ends keep no position. ``index × spacing`` mm, like the other lesions."""
+    if not mapping or multilabel is None:
+        return
+    labels = {str(getattr(info, "name", f"label_{lid}")): int(lid) for lid, info in mapping.items()}
+    sp = np.asarray(list(spacing)[:3], dtype=float)
+
+    def voxels(name: str) -> np.ndarray:
+        lid = labels.get(name)
+        return np.argwhere(multilabel == lid).astype(float) if lid is not None else np.empty((0, 3))
+
+    for row in rows:
+        name = str(row.get("vessel_name", ""))
+        if str(row.get("kind")) != "hypoplasia" or not name.endswith("ACA_A1") or name[:1] not in ("L", "R"):
+            continue
+        side = name[0]
+        other = "R" if side == "L" else "L"
+        ica = voxels(f"{side}ICA")
+        if not len(ica):
+            continue
+        acomm = voxels("ACOMM")
+        if len(acomm):
+            target = acomm.mean(0)
+        else:
+            a1 = voxels(f"{other}ACA_A1")
+            if not len(a1):
+                continue
+            target = a1[int(np.argmin(np.linalg.norm(a1 - ica.mean(0), axis=1)))]
+        ica_end = ica[int(np.argmin(np.linalg.norm(ica - target, axis=1)))]
+        mid = 0.5 * (ica_end + target) * sp
+        row.update(x_mm=float(mid[0]), y_mm=float(mid[1]), z_mm=float(mid[2]))
+
+
+def _touches(a: np.ndarray, b: np.ndarray) -> bool:
+    """Whether masks *a* and *b* are 26-adjacent (or overlap)."""
+    from scipy import ndimage as ndi
+
+    if not a.any() or not b.any():
+        return False
+    return bool((ndi.binary_dilation(a, structure=np.ones((3, 3, 3), dtype=bool)) & b).any())
+
+
+def fetal_pca_rows(
+    multilabel: np.ndarray,
+    mapping: Mapping[int, Any] | None,
+    vessels: pd.DataFrame,
+    hypoplasia: Iterable[Mapping[str, Any]],
+    spacing: Sequence[float],
+) -> list[dict[str, Any]]:
+    """One ``kind = "fetal"`` lesion row per side with a fetal posterior cerebral artery: the P2 fed
+    from the ICA through the PComm while the P1 is absent or hypoplastic.
+
+    Conditions, per side:
+    - the P1 is absent, too small to measure (a ``hypoplasia`` row), or present with a median
+      diameter below ``HYPOPLASIA_DIAMETER_MM``;
+    - the PComm and the P2 are in the mask;
+    - in the label volume (*multilabel*), the PComm touches the ICA, and the P2 either directly or
+      through the P1.
+
+    Flags: ``p1_absent`` / ``p1_too_small`` / ``p1_hypoplastic``, and ``via_p1`` when the PComm
+    reaches the P2 through the P1's voxels. Confidence 1.0. The row sits at the PComm's centroid
+    (``index × spacing`` mm, like the other lesions)."""
+    if not mapping or multilabel is None:
+        return []
+    labels = {str(getattr(info, "name", f"label_{lid}")): int(lid) for lid, info in mapping.items()}
+    infos = {str(getattr(info, "name", f"label_{lid}")): info for lid, info in mapping.items()}
+    by_name = {str(r["vessel_name"]): r for _, r in vessels.iterrows()} if not vessels.empty else {}
+    hyp = {str(r["vessel_name"]): str(r.get("confidence_flags", "")) for r in hypoplasia
+           if str(r.get("kind", "")) == "hypoplasia"}
+    case_id = str(vessels["case_id"].dropna().iloc[0]) if "case_id" in vessels and vessels["case_id"].notna().any() else ""
+    thr = float(_cfg.HYPOPLASIA_DIAMETER_MM)
+    sp = np.asarray(list(spacing)[:3], dtype=float)
+    rows: list[dict[str, Any]] = []
+    for side in ("L", "R"):
+        p1, pcomm, p2, ica = f"{side}PCA_P1", f"{side}PCOMM", f"{side}PCA_P2", f"{side}ICA"
+        if not {p1, pcomm, p2, ica} <= set(labels):
+            continue
+        if p1 in hyp:
+            p1_state = "p1_too_small" if "too_small" in hyp[p1] else "p1_absent"
+        else:
+            r = by_name.get(p1)
+            d = float(r.get("diameter_median_mm", np.nan)) if r is not None else np.nan
+            if r is None or not bool(r.get("present", False)):
+                p1_state = "p1_absent"
+            elif not np.isfinite(d):
+                p1_state = "p1_too_small"
+            elif np.isfinite(d) and d < thr:
+                p1_state = "p1_hypoplastic"
+            else:
+                continue
+        m_pc = multilabel == labels[pcomm]
+        m_p2 = multilabel == labels[p2]
+        if not m_pc.any() or not m_p2.any() or not _touches(m_pc, multilabel == labels[ica]):
+            continue
+        flags = [p1_state]
+        if not _touches(m_pc, m_p2):
+            m_p1 = multilabel == labels[p1]
+            if not (_touches(m_pc, m_p1) and _touches(m_p1, m_p2)):
+                continue
+            flags.append("via_p1")
+        centre = np.argwhere(m_pc).mean(0) * sp
+        rows.append({
+            **_identity(case_id, labels[p2], infos[p2]),
+            "kind": "fetal", "segment": "", "path_id": "",
+            "length_mm": np.nan, "taper_percent": np.nan, "extreme_radius_mm": np.nan,
+            "reference_radius_mm": np.nan, "reference": "none",
+            "diameter_percent": np.nan, "area_percent": np.nan,
+            "confidence": 1.0, "confidence_class": "high", "confidence_flags": ";".join(flags),
+            "x_mm": float(centre[0]), "y_mm": float(centre[1]), "z_mm": float(centre[2]),
+        })
+    return rows
 
 
 #: Circle-of-Willis variant segments of the eICAB topology (vessel_name -> variant name).
 _COW_VARIANT_VESSELS = {
-    "LACA": "left_A1", "RACA": "right_A1", "ACOMM": "AComm",
+    "LACA_A1": "left_A1", "RACA_A1": "right_A1", "ACOMM": "AComm",
     "LPCOMM": "left_PComm", "RPCOMM": "right_PComm",
     "LPCA_P1": "left_P1", "RPCA_P1": "right_P1",
 }
 
 
-def subject_summary(vessels: pd.DataFrame) -> pd.DataFrame:
-    """One row per subject: CoW variants (absent / hypoplastic / present), completeness, left/right
-    asymmetry indices (2|L-R|/(L+R)) of paired vessels, totals and lesion counts."""
+def subject_summary(vessels: pd.DataFrame, lesions: Iterable[Mapping[str, Any]] = ()) -> pd.DataFrame:
+    """One row per subject: CoW variants (absent / hypoplastic / present, and a fetal PCA per side
+    from the ``fetal`` rows of *lesions*), completeness, left/right asymmetry indices (2|L-R|/(L+R))
+    of paired vessels, totals and lesion counts."""
     if vessels.empty:
         return pd.DataFrame()
+    fetal_sides = {str(r.get("side", "")) for r in lesions if str(r.get("kind", "")) == "fetal"}
     row: dict[str, Any] = {"case_id": vessels["case_id"].dropna().iloc[0] if "case_id" in vessels else ""}
     by_name = {str(r["vessel_name"]): r for _, r in vessels.iterrows()}
     thr = float(_cfg.HYPOPLASIA_DIAMETER_MM)
     complete = 0
     for name, variant in _COW_VARIANT_VESSELS.items():
         r = by_name.get(name)
-        if r is None or not bool(r.get("present", False)):
+        if r is not None and "too_small" in str(r.get("hypoplasia_flags", "")):
+            state = "hypoplastic"  # in the mask, too small to measure
+        elif r is None or not bool(r.get("present", False)):
             state = "absent"
         else:
             d = float(r.get("diameter_median_mm", np.nan))
@@ -290,6 +446,8 @@ def subject_summary(vessels: pd.DataFrame) -> pd.DataFrame:
             complete += state == "present"
         row[f"{variant}_status"] = state
         row[f"{variant}_diameter_median_mm"] = float(r.get("diameter_median_mm", np.nan)) if r is not None else np.nan
+    row["left_fetal_pca"] = "L" in fetal_sides
+    row["right_fetal_pca"] = "R" in fetal_sides
     row["cow_variant_segments_present"] = int(complete)
     row["cow_complete"] = bool(complete == len(_COW_VARIANT_VESSELS))
     present = vessels[vessels.get("present", True) == True]  # noqa: E712
@@ -314,4 +472,5 @@ def subject_summary(vessels: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame([row])
 
 
-__all__ = ["add_hypoplasia_columns", "component_tables", "hypoplasia_rows", "subject_summary", "vessel_summary"]
+__all__ = ["add_hypoplasia_columns", "component_tables", "fetal_pca_rows", "hypoplasia_rows",
+           "locate_a1_hypoplasia", "subject_summary", "vessel_summary"]

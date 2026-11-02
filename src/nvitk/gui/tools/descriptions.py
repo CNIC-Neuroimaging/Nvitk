@@ -50,6 +50,10 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Per label keeps the main path and all unique branch edges through "
         "bifurcations. Min branch points (0 = keep all) is the only prune."
     ),
+    "polyline_to_centerline": (
+        "Draw polylines (Shapes paths, mesh polylines, ordered Points) back into a labelled "
+        "centerline image on the active layer's grid."
+    ),
     "centerline_cut_junctions": (
         "Split a label at junction markers from Detect skeleton junctions."
     ),

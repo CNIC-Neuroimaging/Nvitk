@@ -12,7 +12,8 @@ SGE) and the GUI share it.
 :func:`morphometrics_report` keeps :data:`REPORT_FEATURES` and summarises the lesions per vessel
 from **high-confidence** lesions only (moderate and low ones are left out of the report):
 ``has_stenosis`` / ``stenosis_diameter_percent_max``, ``has_enlargement`` /
-``enlargement_diameter_percent_max`` and ``has_hypoplasia`` (an absent main vessel).
+``enlargement_diameter_percent_max``, ``has_hypoplasia`` (an absent main vessel) and
+``has_fetal_pca`` (on the P2 of a fetal posterior cerebral artery).
 ``radius_mean_mm`` is cow_morpho's mean cross-section radius (length-weighted over the vessel's
 segments), not half of ``diameter_mean_mm``, which is the inscribed one.
 """
@@ -36,7 +37,7 @@ REPORT_FEATURES: tuple[str, ...] = (
 REPORT_LESION_COLUMNS: tuple[str, ...] = (
     "has_stenosis", "stenosis_diameter_percent_max",
     "has_enlargement", "enlargement_diameter_percent_max",
-    "has_hypoplasia",
+    "has_hypoplasia", "has_fetal_pca",
 )
 REPORT_IDENTITY: tuple[str, ...] = ("case_id", "label", "vessel_name", "side", "present")
 REPORT_CSV = "morphometrics_report.csv"
@@ -268,7 +269,7 @@ def vessel_table(stage7_dir: Path | str) -> pd.DataFrame:
 
 def report_lesion_columns(lesions: pd.DataFrame, vessel_names: list[str]) -> pd.DataFrame:
     """Per vessel, from the **high-confidence** lesions: whether it has a stenosis / an enlargement /
-    a hypoplasia, and the largest diameter % of its stenoses / enlargements (NaN when none)."""
+    a hypoplasia / a fetal PCA, and the largest diameter % of its stenoses / enlargements (NaN when none)."""
     rows = []
     if lesions.empty or not {"vessel_name", "kind"} <= set(lesions.columns):
         high = pd.DataFrame(columns=["vessel_name", "kind", "diameter_percent"])
@@ -283,6 +284,7 @@ def report_lesion_columns(lesions: pd.DataFrame, vessel_names: list[str]) -> pd.
             row[f"has_{kind}"] = bool(len(k))
             row[f"{kind}_diameter_percent_max"] = float(pct.max()) if pct.notna().any() else np.nan
         row["has_hypoplasia"] = bool((sub["kind"].astype(str) == "hypoplasia").any())
+        row["has_fetal_pca"] = bool((sub["kind"].astype(str) == "fetal").any())
         rows.append(row)
     return pd.DataFrame(rows)
 

@@ -69,7 +69,14 @@ FLAG_TEXT: dict[str, tuple[str, float]] = {
     "neighbours_absent": ("its neighbouring vessels are absent too (field of view / segmentation?)", 0.3),
     "fetal_pca": ("fetal-type PCA: PComm and P2 present", None),
     "a1_aplasia": ("A1 aplasia: AComm and the other ACA present", None),
+    # Fetal PCA (P2 fed from the ICA through the PComm): the state of the P1.
+    "p1_absent": ("P1 absent from the mask", None),
+    "p1_too_small": ("P1 in the mask but too small for a centerline", None),
+    "p1_hypoplastic": ("P1 hypoplastic (median diameter below the hypoplasia threshold)", None),
+    "via_p1": ("the PComm reaches the P2 through the P1 stump", None),
 }
+#: Lesion kinds that are variants of the circle, not calibre changes: no calibre profile.
+_NO_PROFILE_KINDS = ("hypoplasia", "fetal")
 
 
 @dataclass
@@ -170,9 +177,12 @@ def lesion_card(row: Any, run: LesionRun | None = None, *, html: bool = True) ->
     ref, ext = _num(row, "reference_radius_mm"), _num(row, "extreme_radius_mm")
     conf = _num(row, "confidence")
     sev = "wider" if wider else "narrower"
-    if kind == "hypoplasia":
-        lines = [f"{row.get('vessel_name', '')} — hypoplasia",
-                 f"confidence {conf:.2f} ({row.get('confidence_class', '')})"]
+    if kind in _NO_PROFILE_KINDS:
+        title = (f"{row.get('vessel_name', '')} — hypoplasia" if kind == "hypoplasia" else
+                 f"{str(row.get('side', ''))} fetal PCA — the P2 fed from the ICA through the PComm")
+        lines = [title, f"confidence {conf:.2f} ({row.get('confidence_class', '')})"]
+        if kind == "hypoplasia" and np.isfinite(_num(row, "x_mm")):
+            lines[0] += " (shown where it would run: ICA end → AComm / other A1)"
         flags = flag_lines(row, run)
         if not html:
             return "\n".join(lines + [f"  – {f}" for f in flags])
@@ -229,12 +239,15 @@ def draw_profile(ax: Any, run: LesionRun, i: int) -> str:
 
     ax.clear()
     row = run.lesions.iloc[int(i)]
-    if str(row.get("kind", "")) == "hypoplasia":
-        ax.text(0.5, 0.5, "No calibre profile: the vessel has no measured centerline.", ha="center", va="center",
-                transform=ax.transAxes, fontsize=9, color=COLOR_MUTED)
+    if str(row.get("kind", "")) in _NO_PROFILE_KINDS:
+        hyp = str(row.get("kind", "")) == "hypoplasia"
+        ax.text(0.5, 0.5, "No calibre profile: " + ("the vessel has no measured centerline." if hyp else
+                                                    "a fetal PCA is a variant of the circle."),
+                ha="center", va="center", transform=ax.transAxes, fontsize=9, color=COLOR_MUTED)
         ax.set_xticks([])
         ax.set_yticks([])
-        return "A hypoplasia is an absent main vessel; see the flags above."
+        return ("A hypoplasia is an absent main vessel; see the flags above." if hyp else
+                "The PComm joins the ICA to the P2 while the P1 is absent or hypoplastic; the marker sits on the PComm.")
     found = run.span(i)
     if found is None:
         ax.text(0.5, 0.5, "Point table of this path not found", ha="center", va="center", color=COLOR_MUTED,
@@ -251,7 +264,10 @@ def draw_profile(ax: Any, run: LesionRun, i: int) -> str:
     # measurement, the detection radius on re-measured paths; outputs without the column used the
     # cross-section). Anything else than the detection radius is the cross-section one, possibly
     # its running median (ENLARGEMENT_SMOOTH_CROSS_SECTION).
-    if kind == "enlargement":
+    robust = str(row.get("detection_method", "")) == "robust_reference" and "robust_radius_mm" in pts.columns
+    if robust:  # one signal and one reference for both kinds
+        tested = pd.to_numeric(pts["robust_radius_mm"], errors="coerce").to_numpy(float)
+    elif kind == "enlargement":
         tested = (pd.to_numeric(pts["enlargement_radius_mm"], errors="coerce").to_numpy(float)
                   if "enlargement_radius_mm" in pts.columns else r_cs)
     else:
@@ -278,7 +294,10 @@ def draw_profile(ax: Any, run: LesionRun, i: int) -> str:
         ax.axvspan(s[p], s[q], color=LESION_COLOURS.get(str(run.lesions.iloc[j].get("kind")), colour), alpha=0.10,
                    lw=0, label="other lesions" if first_other else None)
         first_other = False
-    lo, hi = (float(v) for v in run.param("LESION_PROXIMAL_REFERENCE_WINDOW_MM", (2.0, 10.0)))
+    # Runs before 2026-10-28 recorded the window as (gap, far edge); later ones gap / length / search.
+    lo, hi = (float(v) for v in run.param("LESION_PROXIMAL_REFERENCE_WINDOW_MM", (
+        float(run.param("LESION_REFERENCE_GAP_MM", 2.0)),
+        float(run.param("LESION_REFERENCE_GAP_MM", 2.0)) + float(run.param("LESION_REFERENCE_WINDOW_LENGTH_MM", 8.0)))))
     end_ex = float(run.param("LESION_REFERENCE_EXCLUDE_END_MM", 0.0) or 0.0)  # older runs: none
     ref_where = str(row.get("reference", ""))
     ref_r = _num(row, "reference_radius_mm")
@@ -287,7 +306,7 @@ def draw_profile(ax: Any, run: LesionRun, i: int) -> str:
     if any(np.isfinite(p0) for p0, _ in spans.values()):
         # The windows the run used (LESION_REFERENCE_METHOD): both for an interpolated reference.
         anchors: dict[str, tuple[float, float]] = {}
-        for side in (("proximal", "distal") if ref_where == "interpolated" else (ref_where,)):
+        for side in (("proximal", "distal") if ref_where in ("interpolated", "robust") else (ref_where,)):
             p0, p1 = spans.get(side, (np.nan, np.nan))
             if not (np.isfinite(p0) and np.isfinite(p1)):
                 continue
@@ -298,7 +317,7 @@ def draw_profile(ax: Any, run: LesionRun, i: int) -> str:
             if np.isfinite(median):  # each window's own median, over the window
                 ax.hlines(median, w0, w1, colors=COLOR_OK, lw=2.2,
                           label="window median" if len(anchors) == 1 else None)
-        if len(anchors) == 2:
+        if len(anchors) == 2 and ref_where == "interpolated":
             (sp, rp), (sd, rd) = anchors["proximal"], anchors["distal"]
             ax.plot([sp, sd], [rp, min(rd, rp)], color=COLOR_OK, lw=1.2, ls="--", label="interpolated reference")
             if np.isfinite(rd) and np.isfinite(rp) and rd > rp:
@@ -322,7 +341,13 @@ def draw_profile(ax: Any, run: LesionRun, i: int) -> str:
     ax.plot(s, tested, color=COLOR_TEXT, lw=1.3, label=tested_name)
     ref = _reference(pts, kind)
     pct = float(run.param("STENOSIS_THRESHOLD_PCT" if kind == "stenosis" else "ENLARGEMENT_THRESHOLD_PCT", 10.0))
-    if ref is not None:
+    if robust:
+        rref = pd.to_numeric(pts["robust_reference_radius_mm"], errors="coerce").to_numpy(float)
+        ax.plot(s, rref, "--", color=colour, lw=1.1, label="robust reference")
+        # The kind's threshold; a noisy path's core threshold (k σ) can lie beyond it.
+        band = rref * (1.0 - pct / 100.0) if kind == "stenosis" else rref * (1.0 + pct / 100.0)
+        ax.plot(s, band, ":", color=colour, lw=1.1, label=f"{pct:g} % threshold (or k σ, if larger)")
+    elif ref is not None:
         thr = ref * (1.0 - pct / 100.0) if kind == "stenosis" else ref * (1.0 + pct / 100.0)
         ax.plot(s, ref, "--", color=colour, lw=1.1, label="taper reference")
         ax.plot(s, thr, ":", color=colour, lw=1.1, label=f"{pct:g} % threshold")
@@ -442,7 +467,7 @@ def _make_inspector(viewer: Any) -> Any:
                 style_image_figure(self._fig)
                 self._canvas.draw_idle()
             kind = str(run.lesions.iloc[self.index].get("kind", "stenosis"))
-            if kind == "hypoplasia":
+            if kind in _NO_PROFILE_KINDS:
                 self._note.setText(note)
                 return
             pct = float(run.param("STENOSIS_THRESHOLD_PCT" if kind == "stenosis" else "ENLARGEMENT_THRESHOLD_PCT",
@@ -653,7 +678,8 @@ def _confidences(run: LesionRun) -> np.ndarray:
 
 
 def located(lesions: pd.DataFrame) -> np.ndarray:
-    """The lesions with a position (``x/y/z_mm``); a hypoplasia (an absent vessel) has none."""
+    """The lesions with a position (``x/y/z_mm``). A hypoplasia (an absent vessel) has none,
+    except an A1 one, placed midway between its ICA's end and the AComm / other A1."""
     if lesions.empty or not {"x_mm", "y_mm", "z_mm"} <= set(lesions.columns):
         return np.zeros(len(lesions), dtype=bool)
     xyz = lesions[["x_mm", "y_mm", "z_mm"]].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)

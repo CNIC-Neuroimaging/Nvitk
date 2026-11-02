@@ -82,11 +82,7 @@ class QvtpyPaths:
 
 
 def _local_path_from_config(key: str, *, fallback: Path | None) -> Path:
-    """A local-workstation root: *fallback* (the CLI flag) if given, else ``local_<key>``.
-
-    The CLI flag wins here. Under ``--submit sge`` the opposite holds; see
-    :func:`_cluster_path_from_config`.
-    """
+    """A local-workstation root: *fallback* (the CLI flag) if given, else ``local_<key>``."""
     if fallback is not None:
         return Path(fallback)
     raw = _pipe_paths().get(f"local_{key}")
@@ -98,18 +94,16 @@ def _local_path_from_config(key: str, *, fallback: Path | None) -> Path:
 
 
 def _cluster_path_from_config(key: str, *, fallback: Path | None) -> Path:
-    """Resolve a cluster path setting *key* (e.g. ``"nifti_root"``): the ``cluster_<key>`` value
-    from ``sge.json`` if set, else *fallback*, else the hardcoded cluster default.
+    """A cluster root: *fallback* (the CLI flag) if given, else ``cluster_<key>``.
 
-    *key* is unprefixed, matching :func:`_local_path_from_config`. The prefix is added here.
+    As for local runs, an explicit ``--*-root`` flag beats ``sge.json``. *key* is unprefixed,
+    matching :func:`_local_path_from_config`. The prefix is added here.
     """
-    raw = _pipe_paths().get(f"cluster_{key}")
-    if raw is not None and str(raw).strip():
-        return Path(os.path.expanduser(str(raw).strip()))
     if fallback is not None:
         return Path(fallback)
+    raw = _pipe_paths().get(f"cluster_{key}")
     return Path(os.path.expanduser(str(config_paths.require(
-        None,
+        raw,
         key=f"pipelines.{PIPELINE_PATHS_ID}.cluster_{key}",
         hint="Set it, or pass the matching --*-root flag.",
     ))))

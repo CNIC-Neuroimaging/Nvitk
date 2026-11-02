@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal
 
 from nvitk.pipes.qvtpy import config as cfg
-from nvitk.pipes.qvtpy.util.eicab.eicab_masks import EicabMaskResolution, resolve_eicab_mask
+from nvitk.pipes.qvtpy.util.eicab.eicab_masks import EicabMaskResolution, resolve_eicab_mask, resolve_eicab_pp_mask
 
 EicabMaskPreference = Literal["cw", "wb"]
 
@@ -38,15 +38,17 @@ def resolve_stage7_seg_mask(
     output_root: Path,
     subject: str,
     *,
-    preference: EicabMaskPreference = "cw",
+    preference: EicabMaskPreference = "wb",
     prefer_postprocessed: bool = True,
 ) -> EicabMaskResolution:
-    """Return the eICAB multilabel mask used as stage-7 morphometrics input."""
-    return resolve_eicab_mask(
-        eicab_dir(output_root, subject),
-        preference=preference,
-        prefer_postprocessed=prefer_postprocessed,
-    )
+    """Return the eICAB multilabel mask used as stage-7 morphometrics input: with
+    *prefer_postprocessed*, stage 1's ``*_WB_pp`` (``"wb"``) then ``*_CW_pp``
+    (:func:`~nvitk.pipes.qvtpy.util.eicab.eicab_masks.resolve_eicab_pp_mask`); else eICAB's own."""
+    if prefer_postprocessed:
+        return resolve_eicab_pp_mask(eicab_dir(output_root, subject), preference=preference)
+    # Without the post-process, "wb" would be eICAB's whole-brain mask, which the CW-tuned profile
+    # is not meant for: eICAB's CW mask.
+    return resolve_eicab_mask(eicab_dir(output_root, subject), preference="cw", prefer_postprocessed=False)
 
 
 __all__ = [

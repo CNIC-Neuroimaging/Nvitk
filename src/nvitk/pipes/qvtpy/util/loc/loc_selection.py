@@ -50,8 +50,8 @@ QVTPY_MCA_PCA_BIFURCATION_LOC_IDS: frozenset[int] = frozenset(
 )
 # ACA: AComm / CW fallback when named side branches are absent.
 QVTPY_ACA_JUNCTION_LOC_IDS: frozenset[int] = frozenset(QVTPY_ACA_IDS)
-# MCA / ACA / PCA: dual init/fin from trunk <-> side-branch intersections
-# (M1/A1/P1 then M2/A2/P2) on named stage-4 centerlines.
+# MCA / ACA / PCA (A1 / M1 / P1): one init LOC from the stage-3 trunk or the trunk <-> side-branch
+# intersections; their A2 / M2 / P2 labels get their own mid LOC.
 QVTPY_BRANCH_INTERSECTION_LOC_IDS: frozenset[int] = frozenset(
     QVTPY_MCA_IDS | QVTPY_ACA_IDS | QVTPY_PCA_IDS
 )
@@ -1121,7 +1121,6 @@ def select_arterial_locs(
     arterial_seg: np.ndarray | None = None,
     eicab_qvtpy: np.ndarray | None = None,
     stage3_arterial: dict[int, Any] | None = None,
-    distal_locs: bool = False,
 ) -> tuple[list[LocRecord], dict[str, Any]]:
     """Select arterial LOCs. Returns ``(records, meta_extra)`` for loc_meta.json.
 
@@ -1132,9 +1131,9 @@ def select_arterial_locs(
     LOC policy (``strategy="qvtpy"``):
 
     - ICA / basilar: one shared-z mid LOC on the trunk
-    - MCA / ACA / PCA: init at the midpoint of the stage-3 A1/M1/P1 centerline
-      (pre-RG / pre-distal expansion); when *distal_locs* is true, also place fin
-      distal of that span on the stage-4 trunk (stage-3 coverage forbidden for fin)
+    - MCA / ACA / PCA (the A1 / M1 / P1 labels): one init LOC at the midpoint of the stage-3
+      centerline (before the flood)
+    - A2 / M2 / P2 labels: one mid LOC on the trunk (the longest path from their A1 / M1 / P1)
     - ACOMM: never measured (insufficient resolution)
     - PCOMM: only when present in the arterial set (stage-3 min-points survivors)
     - Other labels: one mid LOC on the trunk
@@ -1177,7 +1176,6 @@ def select_arterial_locs(
         "branch_intersection_loc_methods": {},
         "skipped_acomm": True,
         "stage3_x1_vessels": [],
-        "distal_locs": bool(distal_locs),
     }
     out: list[LocRecord] = []
     use_dual = strategy == "qvtpy"
@@ -1299,23 +1297,6 @@ def select_arterial_locs(
                     radius_vox=radius_vox,
                 )
             )
-            # Fin (distal) LOCs are computed above but only emitted when enabled.
-            if distal_locs and fin_idx is not None:
-                out.append(
-                    _arterial_loc_at_index(
-                        trunk,
-                        fin_idx,
-                        vessel_id=vid,
-                        vessel_name=vname,
-                        segment_id=1,
-                        loc_role="fin",
-                        mag=mag,
-                        cd=cd,
-                        vel_mag=vel_mag,
-                        voxel_spacing=voxel_spacing,
-                        radius_vox=radius_vox,
-                    )
-                )
             continue
 
         # LVA / RVA (when present after stage-4 VB split): one mid LOC each.

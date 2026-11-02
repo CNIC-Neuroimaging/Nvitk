@@ -188,13 +188,49 @@ def find_cd_path(search_roots: list[Path]) -> Path | None:
     return None
 
 
+_FRAME_DIR: list[Path] = []
+
+
+def _scanner_frame_copy(path: Path, eicab_dir: Path) -> Path:
+    """*path* (one of eICAB's own files, in its de-rotated frame) as a temporary copy carrying the
+    scanner-frame affine, when stage 1's post-process report recorded the correction it applied to
+    its masks (``scanner_frame.correction``); else *path*. The copies share one temporary
+    directory, removed when the GUI exits."""
+    import atexit
+    import json
+    import shutil
+
+    import nibabel as nib
+
+    from nvitk.pipes.qvtpy.util.eicab.eicab_postprocess import PP_REPORT_JSON
+
+    try:
+        rep = json.loads((Path(eicab_dir) / PP_REPORT_JSON).read_text(encoding="utf-8"))
+        correction = (rep.get("scanner_frame") or {}).get("correction")
+        if not correction:
+            return path
+        if not _FRAME_DIR:
+            _FRAME_DIR.append(Path(tempfile.mkdtemp(prefix="nvitk_eicab_frame_")))
+            atexit.register(shutil.rmtree, str(_FRAME_DIR[0]), True)
+        img = nib.load(str(path))
+        out = _FRAME_DIR[0] / f"{Path(eicab_dir).parent.name}_{path.name.replace('.nii.gz', '.nii')}"
+        nib.Nifti1Image(np.asanyarray(img.dataobj), np.asarray(correction, dtype=float) @ img.affine,
+                        img.header).to_filename(str(out))
+        return out
+    except Exception as exc:  # noqa: BLE001 (the file still opens, in eICAB's frame)
+        log.warning(f"eICAB QC: {path.name} kept in eICAB's frame ({exc})")
+        return path
+
+
 def load_eicab_qc_layers(
     viewer: Any,
     resource_root: Path,
     *,
     tof_search_roots: list[Path] | None = None,
 ) -> dict[str, Any]:
-    """Load TOF + eICAB resampled / CW / WB outputs."""
+    """Load TOF + eICAB outputs: ``TOF_resampled`` and eICAB's own CW / WB masks (hidden), and the
+    post-process's ``CW_pp`` and ``WB_pp`` masks. When the post-process wrote its masks in the
+    TOF's scanner frame, eICAB's own files are shown in that frame too."""
     eicab_dir = resolve_eicab_tree(resource_root)
     roots = [eicab_dir, *(tof_search_roots or [])]
     loaded: dict[str, Any] = {"eicab_dir": eicab_dir}
@@ -210,24 +246,60 @@ def load_eicab_qc_layers(
     resampled = _find_first(eicab_dir, ("**/TOF_resampled.nii.gz", "**/TOF_resampled.nii"))
     if resampled is not None:
         loaded["tof_resampled"] = _open_nifti(
-            viewer, resampled, name="TOF_resampled", visible=True
+            viewer, _scanner_frame_copy(resampled, resampled.parent), name="TOF_resampled", visible=tof is None
         )
 
-    cw = _find_first(
-        eicab_dir,
-        ("**/*_eICAB_CW_pp.nii.gz", "**/*_eICAB_CW.nii.gz", "**/*eICAB_CW*.nii.gz"),
-    )
-    if cw is not None:
-        loaded["eicab_cw"] = _open_nifti(viewer, cw, name="eICAB_CW", visible=True)
-
-    wb = _find_first(
-        eicab_dir,
-        ("**/*_eICAB_WB_pp.nii.gz", "**/*_eICAB_WB.nii.gz", "**/*eICAB_WB*.nii.gz"),
-    )
-    if wb is not None:
-        loaded["eicab_wb"] = _open_nifti(viewer, wb, name="eICAB_WB", visible=True)
+    pp_cw = _find_first(eicab_dir, ("**/*_eICAB_CW_pp.nii.gz", "**/*_eICAB_CW_pp.nii"))
+    pp_wb = _find_first(eicab_dir, ("**/*_eICAB_WB_pp.nii.gz", "**/*_eICAB_WB_pp.nii"))
+    for key, pattern in (("eicab_cw", ("**/*_eICAB_CW.nii.gz", "**/*_eICAB_CW.nii")),
+                         ("eicab_wb", ("**/*_eICAB_WB.nii.gz", "**/*_eICAB_WB.nii"))):
+        raw = _find_first(eicab_dir, pattern)
+        if raw is not None:
+            loaded[key] = _open_nifti(viewer, _scanner_frame_copy(raw, raw.parent), name=f"eICAB_{key[-2:].upper()}",
+                                      visible=pp_cw is None and pp_wb is None and key == "eicab_cw")
+    if pp_cw is not None:
+        loaded["eicab_cw_pp"] = _open_nifti(viewer, pp_cw, name="eICAB_CW_pp", visible=pp_wb is None)
+    if pp_wb is not None:
+        loaded["eicab_wb_pp"] = _open_nifti(viewer, pp_wb, name="eICAB_WB_pp", visible=True)
 
     return loaded
+
+
+def find_stage7_dir(eicab_dir: Path, search_roots: list[Path]) -> Path | None:
+    """The subject's stage-7 morphometrics folder: ``qvtpy/stage7_morphometrics`` beside its
+    ``eicab`` folder, else the first one under *search_roots* (e.g. a downloaded ``qvtpy``
+    resource) that holds a vessel table."""
+    beside = Path(eicab_dir).parent / cfg.QVT_SUBDIR / cfg.STAGE7_MORPHOMETRICS_DIR
+    if (beside / "vessel_summary.csv").is_file():
+        return beside
+    for root in search_roots:
+        hit = _find_first(Path(root), (f"**/{cfg.STAGE7_MORPHOMETRICS_DIR}/vessel_summary.csv",))
+        if hit is not None:
+            return hit.parent
+    return None
+
+
+def load_eicab_morphometrics(viewer: Any, loaded: dict[str, Any], search_roots: list[Path]) -> dict[str, int]:
+    """With the eICAB QC layers *loaded* (:func:`load_eicab_qc_layers`), the subject's stage-7
+    morphometrics as the TOF morphometrics tool shows them: centerlines, surfaces and lesion points
+    on the post-processed mask stage 7 measured (WB_pp, else CW_pp), and the vessel, lesion,
+    segment and subject tables in the results window. Returns what was shown (vessels / lesions),
+    empty without a stage-7 folder."""
+    stage7 = find_stage7_dir(Path(loaded["eicab_dir"]), search_roots)
+    if stage7 is None:
+        return {}
+    from nvitk.gui.viz.morpho_results import default_key_of, show_morphometrics_results
+    from nvitk.gui.viz.morpho_viz import install_morphometrics_viz
+
+    labels = loaded.get("eicab_wb_pp") or loaded.get("eicab_cw_pp")
+    reference = labels or loaded.get("tof_resampled") or loaded.get("tof")
+    info = install_morphometrics_viz(viewer, stage7, reference_layer=reference, color_by="radius")
+    counts = show_morphometrics_results(
+        viewer, stage7, label_layer=labels, surface_layer=info.get("surface_layer"),
+        lesion_layer=info.get("lesion_layer"), key_of=default_key_of(reference),
+    )
+    loaded["stage7_dir"] = stage7
+    return counts
 
 
 def load_qvtpy_qc_layers(
@@ -795,6 +867,8 @@ __all__ = [
     "download_pipeline_resource_for_qc",
     "find_cd_path",
     "find_phase_paths",
+    "find_stage7_dir",
+    "load_eicab_morphometrics",
     "load_eicab_qc_layers",
     "load_qvtpy_qc_layers",
     "resolve_eicab_tree",

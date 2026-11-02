@@ -359,6 +359,12 @@ def build_vessel_points_dataframe(case_id: str, label: int, vessel_info: VesselI
         "enlargement_radius_mm": np.asarray(res.get("enlargement_radius_mm", res["radius_mm"]), dtype=float),
         # Junction-to-junction stretch of the taper reference (TAPER_REFERENCE_METHOD = "stretch").
         "taper_stretch": np.asarray(res.get("taper_stretch_point", np.zeros(len(res["s_mm"]))), dtype=float).astype(int),
+        # LESION_DETECTION_METHOD = "robust_reference": the tested radius, its reference and r/ref − 1.
+        "robust_radius_mm": np.asarray(res.get("robust_radius_point", np.full(len(res["s_mm"]), np.nan)), dtype=float),
+        "robust_reference_radius_mm": np.asarray(
+            res.get("robust_reference_radius_point", np.full(len(res["s_mm"]), np.nan)), dtype=float
+        ),
+        "deviation_percent": np.asarray(res.get("deviation_percent_point", np.full(len(res["s_mm"]), np.nan)), dtype=float),
     })
     # Scanner RAS (the frame of the written VTPs) next to the computation frame (x/y/z_mm).
     from nvitk.measure.morpho.surface import to_world

@@ -89,6 +89,10 @@ def layer_polylines_world(layer: Any) -> list[np.ndarray]:
             for verts, st in zip(layer.data, types)
             if st in ("path", "line", "polygon") and len(verts) >= 2
         ]
+    if kind == "Surface":  # a mesh carrying its centerline polylines (Mesh panel metadata)
+        stored = (getattr(layer, "metadata", None) or {}).get(POLYLINES_META)
+        if stored:
+            return [data_to_world(layer, np.asarray(p, dtype=float)) for p in stored if len(p) >= 2]
     if kind == "Vectors":
         stored = (getattr(layer, "metadata", None) or {}).get(POLYLINES_META)
         if stored:
@@ -131,6 +135,82 @@ def layer_polylines_world(layer: Any) -> list[np.ndarray]:
         f"Layer '{getattr(layer, 'name', '?')}' ({kind}) is not a centerline: use a Shapes path, "
         "Vectors polyline, ordered Points or skeleton mask layer."
     )
+
+
+def layer_polylines_world_labelled(layer: Any) -> list[tuple[int | None, np.ndarray]]:
+    """:func:`layer_polylines_world` with each polyline's label id when the layer records one (a
+    ``label`` feature per Shapes path or per Points point, as To polyline and the centerline network
+    write them), else ``None``."""
+    kind = type(layer).__name__
+    lines = layer_polylines_world(layer)
+    features = getattr(layer, "features", None)
+    has = features is not None and "label" in getattr(features, "columns", ())
+    if kind == "Shapes" and has and len(features) == len(layer.data):
+        types = list(getattr(layer, "shape_type", []) or [])
+        labs = [int(v) for v, st, verts in zip(features["label"], types, layer.data)
+                if st in ("path", "line", "polygon") and len(verts) >= 2]
+        if len(labs) == len(lines):
+            return list(zip(labs, lines))
+    if kind == "Points" and has and len(features) == len(layer.data):
+        world = data_to_world(layer, np.asarray(to_numpy(layer.data), dtype=float))
+        labs = np.asarray(features["label"])
+        out: list[tuple[int | None, np.ndarray]] = []
+        for line in lines:  # each line's label: that of the point nearest its first vertex
+            j = int(np.argmin(np.linalg.norm(world - line[0], axis=1)))
+            out.append((int(labs[j]), line))
+        return out
+    return [(None, line) for line in lines]
+
+
+def is_polyline_layer(layer: Any) -> bool:
+    """Whether *layer* holds centerline polylines rather than a centerline image: Shapes paths,
+    Vectors (segments chained into polylines, or the Mesh panel's stored ones), a Surface carrying the
+    Mesh panel's polylines, or ordered Points."""
+    from nvitk.gui.mesh.layers import POLYLINES_META
+
+    kind = type(layer).__name__
+    if kind in ("Shapes", "Vectors", "Points"):
+        return True
+    return kind == "Surface" and bool((getattr(layer, "metadata", None) or {}).get(POLYLINES_META))
+
+
+def polylines_to_centerline_image(grid_layer: Any, polyline_layer: Any, *, label_id: int = 0,
+                                  label_volume: Any = None) -> tuple[np.ndarray, dict[int, int]]:
+    """The centerline image (int32, on *grid_layer*'s grid) of the polylines of *polyline_layer*
+    (:func:`is_polyline_layer`): each drawn as a 26-connected voxel chain of its label. A path
+    without a recorded label takes *label_id*, or with 0 the label under most of its voxels in
+    *label_volume* (default: *grid_layer*'s data when it is a label map), else 1. Returns the image
+    and ``{label: paths}``."""
+    from nvitk.morphology.skeleton_methods import rasterize_labelled_polylines
+
+    grid = np.asarray(to_numpy(grid_layer.data))
+    if grid.ndim != 3:
+        raise ValueError("The grid (active) layer must be 3D.")
+    lines = [(lab, world_to_data(grid_layer, pts)) for lab, pts in layer_polylines_world_labelled(polyline_layer)]
+    lines = [(lab, pts) for lab, pts in lines if len(pts) >= 2]
+    if not lines:
+        raise ValueError(f"No polyline in '{polyline_layer.name}'.")
+    lookup = None
+    if label_volume is not None:
+        lookup = np.asarray(to_numpy(label_volume))
+    elif type(grid_layer).__name__ == "Labels":
+        lookup = grid
+    labels: list[int] = []
+    for lab, pts in lines:
+        if lab is None or int(lab) <= 0:
+            lab = int(label_id)
+            if lab <= 0 and lookup is not None and lookup.shape == grid.shape:  # the mask's label under the path
+                one = rasterize_labelled_polylines(grid.shape, [pts], [1]) > 0
+                under = lookup[one]
+                under = under[under > 0]
+                lab = int(np.bincount(under.astype(np.int64)).argmax()) if under.size else 1
+            lab = lab if lab > 0 else 1
+        labels.append(int(lab))
+    image = rasterize_labelled_polylines(grid.shape, [p for _l, p in lines], labels)
+    counts: dict[int, int] = {}
+    for lab in labels:
+        counts[lab] = counts.get(lab, 0) + 1
+    return image, counts
 
 
 @dataclass

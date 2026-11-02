@@ -1190,6 +1190,30 @@ def repair_label(
     return out
 
 
+def repair_icas(
+    intensity: Any, labels: Any, ica_ids: Sequence[int], *, affine: Any | None = None,
+    spacing: Sequence[float] | None = None, pretess: bool = True,
+) -> dict[str, Any]:
+    """:func:`repair_label` (pretess + loop cuts) on each ICA of *labels* (in place, host or
+    CuPy), as the eICAB post-process and qvtpy stage 4 apply it; a compact log per ICA. The cuts
+    run on the host; the intensity crosses once."""
+    inten = to_numpy(intensity)
+    out: dict[str, Any] = {}
+    for lid in ica_ids:
+        if not bool((labels == int(lid)).any()):
+            continue
+        _m, _cut, entry = repair_label(labels, int(lid), inten, affine=affine, spacing=spacing,
+                                       pretess_mode="remove" if pretess else None, label_name=f"ICA_{int(lid)}")
+        rep = entry.get("repair") or {}
+        out[str(int(lid))] = {
+            "genus_before": entry["genus_before"], "genus_after": entry["genus_after"],
+            "pretess": entry.get("pretess"), "loops_cut": rep.get("n_cut_loops", 0),
+            "loops_left": rep.get("unresolved", 0), "cut_mm3": entry.get("cut_mm3"),
+            "removed_mm3": entry.get("removed_mm3"), "volume_change_pct": entry.get("volume_change_pct"),
+        }
+    return out
+
+
 @_host
 def _repair_label_host(
     labels: Any,
@@ -1403,6 +1427,7 @@ def print_summary(details: dict[int, dict[str, Any]]) -> str:
 
 
 __all__ = [
+    "repair_icas",
     "ASYMMETRY_TOLERANCE_PCT",
     "Betti",
     "Loop",

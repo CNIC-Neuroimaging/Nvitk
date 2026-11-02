@@ -289,6 +289,8 @@ class MorphoContext:
     config: Optional[Any] = None
     #: NIfTI voxel -> RAS-mm affine of the input mask (VTPs are written in that frame).
     affine: Optional[tuple] = None
+    #: Print the per-component progress (each spawned worker); off: only failures, on stderr.
+    verbose: bool = False
 
     def scaled(self, value_mm: float) -> float:
         """Scale a human-calibrated millimetre threshold to this case's anatomy."""

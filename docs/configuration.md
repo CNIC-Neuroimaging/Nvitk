@@ -52,22 +52,17 @@ Three independent layers:
 2. **What it says** — `sge.json` is read once and cached.
 3. **Which value wins** — per pipeline, as below.
 
-For `--submit local`, a CLI flag beats configuration:
+A CLI flag beats configuration. For qvtpy and pesa_fat this holds under `--submit local` and
+`--submit sge` alike (cvit and topbrain still prefer `cluster_*` under SGE):
 
 ```
---nifti-root  →  pipelines.<id>_paths.local_nifti_root  →  error
+--nifti-root  →  pipelines.<id>_paths.local_nifti_root    →  error   (local)
+--nifti-root  →  pipelines.<id>_paths.cluster_nifti_root  →  error   (sge)
 ```
 
-For `--submit sge`, configuration beats the CLI flag — deliberately, so a cluster run cannot be
-pointed at a workstation path by a leftover flag:
-
-```
-pipelines.<id>_paths.cluster_nifti_root  →  --nifti-root  →  error
-```
-
-```{warning}
-That inversion is intentional but surprising: under `--submit sge`, `--nifti-root` is ignored
-whenever `cluster_nifti_root` is set. Change the configuration, not the flag.
+```{note}
+Under `--submit sge`, `nvitk-qvtpy` only requires the `cluster_*` roots. The local layout (the
+XNAT download target) falls back to them when the `local_*` keys are unset.
 ```
 
 Nothing falls back to a built-in path. An unset-but-required value raises immediately, naming

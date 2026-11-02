@@ -2,8 +2,8 @@
 
 Walks through :func:`nvitk.pipes.qvtpy.util.eicab.eicab_postprocess.postprocess_eicab_labels`
 on a real subject (PESA10061584 by default): eICAB's Circle-of-Willis labels, the anterior
-choroidals dropped, the local half-maximum re-segmentation, the trunks taken to the image floor,
-the vertebral split, the competitive distal growth along the Frangi tree with the ACA midline
+choroidals dropped, the local half-maximum re-segmentation, the ICAs taken to the image floor,
+the competitive distal growth along the Frangi tree with the ACA midline
 guard, and the ICA siphon correction.
 
 Every state comes from ``eicab_pp_stages.npz``, which ``eicab_pp_precompute.py`` produces by
@@ -68,7 +68,6 @@ LABEL_COLORS = {
     13: "#2E8C47", 14: "#7FC491",            # PCA P2
     15: "#B4581F", 16: "#DE9A6A",            # SCAs
     17: "#6F7A7B", 18: "#A6AFB0",            # AChAs
-    19: "#4B3FB4", 20: "#9087DE",            # vertebrals
 }
 REMOVED = "#E8443A"
 CUT = "#D6336C"
@@ -97,7 +96,7 @@ class EicabPostProcess(CaptionScene):
         T = (lambda x: max(0.4, x * 0.3)) if FAST else (lambda x: x)
 
         world_all = np.asarray(data["blk_world"], float)
-        stages = ("raw", "noacha", "reseg", "ext", "va", "distal", "final")
+        stages = ("raw", "noacha", "reseg", "ext", "distal", "final")
         # Blocks some stage labels (the precompute also keeps the unclaimed Frangi tree).
         shown = np.zeros(len(world_all), bool)
         for k in stages:
@@ -234,10 +233,10 @@ class EicabPostProcess(CaptionScene):
             more = f", {x['branches']} branches" if x.get("branches", 1) > 1 else ""
             return f"{label} {x.get('length_mm', 0)} mm{more}"
 
-        cap3 = self.caption("3 · Trunks to the image floor", [
+        cap3 = self.caption("3 · ICAs to the image floor", [
             ("minimum-cost path through the Frangi tree (+ bright lumen)", INK, 20),
             ("from the open end, to a vessel cross-section at the floor", INK_SOFT, 18),
-            (f"{ext_text('1', 'LICA')}  ·  {ext_text('2', 'RICA')}  ·  {ext_text('3', 'basilar')}", INK, 18),
+            (f"{ext_text('1', 'LICA')}  ·  {ext_text('2', 'RICA')}", INK, 18),
         ])
         self.swap(cap2, cap3)
         self.stop_ambient_camera_rotation()
@@ -262,22 +261,7 @@ class EicabPostProcess(CaptionScene):
         self.wait(T(1.6))
         self.play(FadeOut(img), FadeOut(lines), run_time=T(0.5))
 
-        # 5 · vertebral split
-        va = meta["va_split"]
-        if va.get("applied"):
-            cap4 = self.caption("4 · Split the vertebrals off the basilar", [
-                ("the 4D-flow pipeline's logic: a centerline Y below the confluence", INK, 20),
-                ("sides from the ICAs  ·  new labels LVA 19 / RVA 20", INK_SOFT, 18),
-                (f"LVA {va['lva_mm3']} mm³  ·  RVA {va['rva_mm3']} mm³", LABEL_COLORS[19], 18),
-            ])
-            self.swap(cap3, cap4)
-            va_col, va_op, va_sop, va_size = style("va")
-            field.transition(self, va_col, va_op, va_sop, va_size, run_time=T(1.8), glow=LABEL_COLORS[19],
-                             glow_strength=0.5)
-            self.wait(T(1.6))
-            prev_cap = cap4
-        else:
-            prev_cap = cap3
+        prev_cap = cap3
 
         # 6 · distal growth
         dg = meta["distal"]
@@ -286,7 +270,7 @@ class EicabPostProcess(CaptionScene):
             ("ACAs, MCAs, PCAs (P2) and SCAs flood the tree at once", INK, 20),
             ("each tree voxel goes to the front that reaches it first", INK_SOFT, 18),
             ("cost 1–5 per mm by vesselness: the fronts keep to the lumen", INK_SOFT, 18),
-            (f"+{added / 1000:.1f} cm³  (volume {v['va']:.0f} → {v['distal']:.0f} mm³)", INK, 18),
+            (f"+{added / 1000:.1f} cm³  (volume {v['ext']:.0f} → {v['distal']:.0f} mm³)", INK, 18),
         ])
         self.swap(prev_cap, cap5)
         self.stop_ambient_camera_rotation()
@@ -309,7 +293,7 @@ class EicabPostProcess(CaptionScene):
                 plane.rotate(ang, axis=axis / np.linalg.norm(axis))
             plane.move_to(scene(p0))
         di_col, di_op, di_sop, di_size = style("distal")
-        grow = (occ["distal"] > 0) & (occ["va"] == 0)
+        grow = (occ["distal"] > 0) & (occ["ext"] == 0)
         order = np.where(grow & (arrival >= 0), arrival, np.where(grow, np.nanmax(arrival) + 1.0, -1.0))
         field.transition(self, di_col, di_op, di_sop, di_size, run_time=T(8.0), delay=order, lag=0.9,
                          glow="#EFA43A", glow_strength=0.6)

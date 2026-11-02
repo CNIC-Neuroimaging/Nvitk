@@ -14,18 +14,7 @@ from vtk.util import numpy_support
 
 from .anatomy import choose_root_endpoint, make_loop_region_path_id, make_path_id
 from .anatomy_axes import MorphoContext, default_morpho_context
-from .caliber import (
-    detect_enlargement_segments,
-    detect_stenosis_segments,
-    enlargement_pointwise,
-    enlargement_radius,
-    resolve_stenosis_enlargement_overlap,
-    segment_detail_json,
-    select_caliber_detection_radius,
-    stenosis_pointwise,
-    stenosis_raw_percent,
-    stenosis_total_length,
-)
+from .caliber import select_caliber_detection_radius
 from .centerlines import (
     analyze_centerline_poly,
     centerline_points_from_result,
@@ -36,6 +25,7 @@ from .centerlines import (
     suppress_enlargements_near_centerline_starts,
 )
 from nvitk.measure import morphometrics_config as _cfg
+from nvitk.measure.morpho.lesion_detection import detect_caliber_lesions, lesion_result_fields
 from .geometry import (
     arc_length,
     cumulative_s,
@@ -214,44 +204,10 @@ def run_isolated_donut_arm_vmtk(
     radius_mis = np.full(len(pts), np.nan, dtype=float)
     detection_radius = select_caliber_detection_radius(radius_area, radius_mis)
     s = cumulative_s(pts)
-    sten = detect_stenosis_segments(
-        s=s, r=detection_radius, threshold_pct=_cfg.STENOSIS_THRESHOLD_PCT,
-        min_segment_mm=_cfg.STENOSIS_MIN_LEN_MM, exclude_end_mm=_cfg.STENOSIS_EXCLUDE_END_MM,
-        pts=pts,
-    )
-    stenosis_pct_point, is_stenotic = stenosis_pointwise(
-        s=s, r=detection_radius, r_ref_per_point=sten.r_ref_per_point,
-        threshold_pct=_cfg.STENOSIS_THRESHOLD_PCT, exclude_end_mm=_cfg.STENOSIS_EXCLUDE_END_MM,
-        min_segment_mm=_cfg.STENOSIS_MIN_LEN_MM,
-    )
-    stenosis_raw_pct_point = stenosis_raw_percent(
-        s=s, r=detection_radius, r_ref_per_point=sten.r_ref_per_point,
-        exclude_end_mm=0.0,
-    )
-    stenosis_core_candidate = (
-        (stenosis_raw_pct_point >= _cfg.STENOSIS_THRESHOLD_PCT) & np.isfinite(stenosis_raw_pct_point)
-    ).astype(np.float64)
-    stenosis_support_candidate = (
-        (stenosis_raw_pct_point >= min(_cfg.STENOSIS_SUPPORT_THRESHOLD_PCT, _cfg.STENOSIS_THRESHOLD_PCT))
-        & np.isfinite(stenosis_raw_pct_point)
-        & (s >= float(_cfg.STENOSIS_EXCLUDE_END_MM))
-    ).astype(np.float64)
     # Donut arms are tested like re-measured paths (ENLARGEMENT_RADIUS_SOURCE = "cow": detection radius).
-    enl_radius, _ = enlargement_radius(s, radius_area, detection_radius, cow_source="detection")
-    enlarg = detect_enlargement_segments(
-        s=s, r=enl_radius, threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT,
-        min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
-        pts=pts,
-    )
-    enlargement_pct_point, is_enlarged = enlargement_pointwise(
-        s=s, r=enl_radius, r_ref_per_point=enlarg.r_ref_per_point,
-        threshold_pct=_cfg.ENLARGEMENT_THRESHOLD_PCT, exclude_end_mm=_cfg.ENLARGEMENT_EXCLUDE_END_MM,
-        min_segment_mm=_cfg.ENLARGEMENT_MIN_LEN_MM,
-        pts=pts,
-    )
-    stenosis_pct_point, is_stenotic, enlargement_pct_point, is_enlarged = resolve_stenosis_enlargement_overlap(
-        stenosis_pct_point, is_stenotic, enlargement_pct_point, is_enlarged
-    )
+    les = detect_caliber_lesions(s, radius_area, detection_radius, pts, cow_source="detection")
+    sten, enlarg = les.stenosis, les.enlargement
+    fields = lesion_result_fields(les, s, detection_radius)
     tree_label = f"loop{int(loop_i):02d}_arm{int(arm_i):02d}"
     tree_path = f"loop{int(loop_i):02d}.{int(arm_i):02d}"
     tree_depth = len([p for p in tree_path.split(".") if p])
@@ -264,16 +220,16 @@ def run_isolated_donut_arm_vmtk(
         (detection_radius, "StenosisDetectionRadius"),
         (cross_section_area, "CrossSectionArea"),
         (sten.r_ref_per_point, "StenosisReferenceRadius"),
-        ((1.0 - _cfg.STENOSIS_THRESHOLD_PCT / 100.0) * sten.r_ref_per_point, "StenosisThresholdRadius"),
-        (stenosis_raw_pct_point, "StenosisRawPercent"),
-        (stenosis_core_candidate, "StenosisCoreCandidate"),
-        (stenosis_support_candidate, "StenosisSupportCandidate"),
-        (stenosis_pct_point, "StenosisPercent"),
-        (is_stenotic.astype(np.float64), "StenosisBinary"),
+        (les.stenosis_threshold_radius, "StenosisThresholdRadius"),
+        (les.stenosis_raw_pct_point, "StenosisRawPercent"),
+        (les.stenosis_core_candidate, "StenosisCoreCandidate"),
+        (les.stenosis_support_candidate, "StenosisSupportCandidate"),
+        (les.stenosis_pct_point, "StenosisPercent"),
+        (les.is_stenotic.astype(np.float64), "StenosisBinary"),
         (enlarg.r_ref_per_point, "EnlargementReferenceRadius"),
-        ((1.0 + _cfg.ENLARGEMENT_THRESHOLD_PCT / 100.0) * enlarg.r_ref_per_point, "EnlargementThresholdRadius"),
-        (enlargement_pct_point, "EnlargementPercent"),
-        (is_enlarged.astype(np.float64), "EnlargementBinary"),
+        (les.enlargement_threshold_radius, "EnlargementThresholdRadius"),
+        (les.enlargement_pct_point, "EnlargementPercent"),
+        (les.is_enlarged.astype(np.float64), "EnlargementBinary"),
         (np.full(len(pts), loop_i, dtype=float), "DonutLoopIndex"),
         (np.full(len(pts), arm_i, dtype=float), "DonutArmIndex"),
         (np.full(len(pts), tree_depth, dtype=float), "TreeDepth"),
@@ -287,19 +243,12 @@ def run_isolated_donut_arm_vmtk(
     add_string_point_array(poly, [tree_label] * len(pts), "TreeLabel")
     add_string_point_array(poly, [tree_path] * len(pts), "TreePath")
     save_vtp(poly, path)
-    metrics = {
-        "stenosis_percent_max": float(sten.percent_stenosis_max),
-        "degree_of_stenosis_pct": float(sten.percent_stenosis_max),
-        "stenosis_length_total_mm": float(stenosis_total_length(s, is_stenotic)),
-        "stenosis_segments_n": int(len(sten.segments_point_idx)),
-        "stenosis_segments_point_idx": json.dumps(sten.segments_point_idx),
-        "stenosis_segments_detail_json": segment_detail_json(s, stenosis_pct_point, sten.segments_point_idx),
-        "enlargement_percent_max": float(enlarg.percent_enlargement_max),
-        "enlargement_length_total_mm": float(stenosis_total_length(s, is_enlarged)),
-        "enlargement_segments_n": int(len(enlarg.segments_point_idx)),
-        "enlargement_segments_point_idx": json.dumps(enlarg.segments_point_idx),
-        "enlargement_segments_detail_json": segment_detail_json(s, enlargement_pct_point, enlarg.segments_point_idx),
-    }
+    # The arm's run summaries (its point arrays are measured again with the full path).
+    summary_keys = ("stenosis_percent_max", "degree_of_stenosis_pct", "stenosis_length_total_mm",
+                    "stenosis_segments_n", "stenosis_segments_point_idx", "stenosis_segments_detail_json",
+                    "enlargement_percent_max", "enlargement_length_total_mm", "enlargement_segments_n",
+                    "enlargement_segments_point_idx", "enlargement_segments_detail_json")
+    metrics = {**{k: fields[k] for k in summary_keys}, **les.extra_fields}
     return float(length_mm), int(len(pts)), int(arm_mask.sum()), pts, metrics
 
 

@@ -77,12 +77,12 @@ _WAVEFORM_LAYOUT: tuple[tuple[int, str], ...] = (
     (1, "LICA"),
     (2, "RICA"),
     (3, "BASILAR"),
-    (7, "LMCA"),
-    (4, "LACA"),
-    (9, "LPCA"),
-    (8, "RMCA"),
-    (5, "RACA"),
-    (10, "RPCA"),
+    (6, "LMCA_M1"),
+    (4, "LACA_A1"),
+    (8, "LPCA_P1"),
+    (7, "RMCA_M1"),
+    (5, "RACA_A1"),
+    (9, "RPCA_P1"),
 )
 
 

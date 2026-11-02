@@ -334,6 +334,38 @@ def extract_branch_polylines(
     return polylines
 
 
+#: Splitting a chain where a midline sinus turns into a transverse one: one arm's left-right share
+#: of its direction at most this, the other's at least ``_TRANSVERSE_LR_MIN``.
+_MIDLINE_LR_MAX = 0.5
+_TRANSVERSE_LR_MIN = 0.8
+
+
+def split_midline_transverse_chains(
+    polylines: list[np.ndarray], axes: RasAxes, *, min_points: int = _MIN_BRANCH_POINTS
+) -> list[np.ndarray]:
+    """Cut each chain that runs from a midline sinus (SSS / straight sinus: little left-right
+    direction) into a transverse sinus (mostly left-right) without a skeleton junction between them
+    (the confluence can be smooth) at the turn, so the two are named apart. The cut is where the two
+    arms differ most; both keep at least *min_points*."""
+    out: list[np.ndarray] = []
+    for poly in polylines:
+        pts = to_numpy(poly)
+        n = int(pts.shape[0])
+        best, best_i = 0.0, None
+        for i in range(int(min_points), n - int(min_points) + 1):
+            lr_a = abs(_direction_anatomical(_principal_direction(pts[:i]), axes)[0])
+            lr_b = abs(_direction_anatomical(_principal_direction(pts[i:]), axes)[0])
+            lo, hi = min(lr_a, lr_b), max(lr_a, lr_b)
+            if lo <= _MIDLINE_LR_MAX and hi >= _TRANSVERSE_LR_MIN and hi - lo > best:
+                best, best_i = hi - lo, i
+        if best_i is None:
+            out.append(poly)
+            continue
+        log.info(f"venous split: a {n}-point chain cut at {best_i} (midline arm -> transverse arm)")
+        out.extend([poly[:best_i], poly[best_i:]])
+    return out
+
+
 # RAS-aware SSSV / STRV / LTSV / RTSV scoring
 
 
@@ -920,6 +952,7 @@ def assign_venous_branches(
     if not candidates:
         log.info("venous labeling: no candidates after extract")
         return {}
+    candidates = split_midline_transverse_chains(candidates, axes, min_points=min_points)
 
     conf_lr, conf_ap, conf_si = _estimate_confluence_center(venous_binary, axes)
     return assign_venous_polylines(
@@ -950,6 +983,7 @@ def venous_name_to_label_id(name: str, name_to_id: dict[str, int] | None = None)
 
 
 __all__ = [
+    "split_midline_transverse_chains",
     "RasAxes",
     "VenousBranch",
     "assign_venous_branches",

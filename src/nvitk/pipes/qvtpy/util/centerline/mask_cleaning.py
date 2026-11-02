@@ -110,8 +110,9 @@ def keep_largest_component_per_label(labels: np.ndarray) -> np.ndarray:
     return as_backend_array(out.astype(np.int32, copy=False))
 
 
-def keep_largest_component_label_inplace(seg: np.ndarray, label_id: int) -> int:
-    """In-place: keep only the largest CC of *label_id* in *seg*; clear stray islands.
+def keep_largest_component_label_inplace(seg: np.ndarray, label_id: int, *, connectivity: int = 1) -> int:
+    """In-place: keep only the largest CC of *label_id* in *seg* (*connectivity* 1: faces, 3: 26
+    neighbours); clear stray islands.
 
     Returns the remaining voxel count for *label_id*.
     """
@@ -121,8 +122,8 @@ def keep_largest_component_label_inplace(seg: np.ndarray, label_id: int) -> int:
     n_fg = int(np.count_nonzero(roi))
     if n_fg == 0:
         return 0
-    # Keep only the largest 6-connected CC (base tool); clear the stray islands.
-    keep = as_backend_array(keep_largest_components(roi, n=1, connectivity=1)).astype(bool)
+    # Keep only the largest CC (base tool); clear the stray islands.
+    keep = as_backend_array(keep_largest_components(roi, n=1, connectivity=int(connectivity))).astype(bool)
     seg_np[roi & ~keep] = 0
     return int(np.count_nonzero(seg_np == lid))
 
@@ -131,8 +132,11 @@ def keep_component_touching_seed_inplace(
     seg: np.ndarray,
     label_id: int,
     seed_mask: np.ndarray,
+    *,
+    connectivity: int = 1,
 ) -> int:
-    """In-place: keep the *label_id* CC that touches *seed_mask* (largest if several).
+    """In-place: keep the *label_id* CC (*connectivity* 1: faces, 3: 26 neighbours) that touches
+    *seed_mask* (largest if several).
 
     Use when a distal disconnected blob can out-vote the true vessel under a plain
     largest-CC rule (e.g. ACA A2 island vs eICAB A1-anchored trunk). If no CC
@@ -151,7 +155,7 @@ def keep_component_touching_seed_inplace(
         raise ValueError(
             f"seed_mask shape {seed.shape} must match seg shape {seg_np.shape}"
         )
-    labeled, num = label_connected(roi, connectivity=1)
+    labeled, num = label_connected(roi, connectivity=int(connectivity))
     labeled_np = as_backend_array(labeled)
     if int(num) <= 1:
         return n_fg
@@ -165,7 +169,7 @@ def keep_component_touching_seed_inplace(
             continue
         touch_sizes.append((comp_id, int(counts[comp_id]) if comp_id < counts.size else 0))
     if not touch_sizes:
-        return keep_largest_component_label_inplace(seg_np, lid)
+        return keep_largest_component_label_inplace(seg_np, lid, connectivity=connectivity)
     # Prefer the seed-touching component with the most voxels.
     best_comp = max(touch_sizes, key=lambda t: t[1])[0]
     keep = labeled_np == int(best_comp)

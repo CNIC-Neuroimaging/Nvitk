@@ -7,7 +7,12 @@
 **Outputs**
 
 - ``eicab_in_4dflow.nii.gz``, ``centerlines_mask.nii.gz``, ``centerline_meta.json``,
-  ``cd_vessel_binary_qc.nii.gz`` under ``stage3_centerline/``.
+  ``cd_vessel_binary_qc.nii.gz``, ``venous_mask.nii.gz`` under ``stage3_centerline/``.
+
+The venous sinuses come from the CD: the global sliding-threshold mask in the posterior slab, inside
+the brain, without the arteries; extended (``venous_extend``) with the dim stretches that threshold
+misses (:func:`~nvitk.pipes.qvtpy.util.centerline.flow_volume_masks.extend_venous_mask`); then
+skeletonised and named (:func:`~nvitk.pipes.qvtpy.util.centerline.venous_heuristics.assign_venous_branches`).
 """
 
 from __future__ import annotations
@@ -53,10 +58,11 @@ from nvitk.pipes.qvtpy.util.centerline.centerline_io import (
 )
 from nvitk.pipes.qvtpy.util.eicab.brain_mask import brain_mask_for_reference
 from nvitk.pipes.qvtpy.util.io.paths import resolve_totalseg_model_dir
-from nvitk.pipes.qvtpy.util.eicab.eicab_masks import EicabMaskKind, resolve_eicab_mask
+from nvitk.pipes.qvtpy.util.eicab.eicab_masks import EicabMaskKind, resolve_eicab_mask, resolve_eicab_pp_mask
 from nvitk.pipes.qvtpy.util.centerline.flow_volume_masks import (
     arterial_exclusion_mask,
     binary_vessel_segment_cd,
+    extend_venous_mask,
     venous_search_region,
 )
 from nvitk.pipes.qvtpy.util.centerline.mask_cleaning import (
@@ -85,11 +91,11 @@ def _load_wb_arterial_labels_for_venous_exclusion(
     CW Circle-of-Willis masks omit distal MCA/ACA/PCA territory that often enters
     the superior venous slab on CD; WB covers those for exclusion only.
     """
-    wb_res = resolve_eicab_mask(
-        eicab_dir,
-        preference="wb",
-        prefer_postprocessed=bool(eicab_prefer_pp),
-    )
+    # eICAB's own whole-brain mask covers the most distal arteries; stage 1's distal-grown WB_pp
+    # (the circle plus ~60 mm) is the next best.
+    wb_res = resolve_eicab_mask(eicab_dir, preference="wb", prefer_postprocessed=False)
+    if wb_res.used != "wb" and eicab_prefer_pp:
+        wb_res = resolve_eicab_pp_mask(eicab_dir, preference="wb")
     if wb_res.used != "wb":
         log.info(
             "venous arterial exclusion: WB eICAB not available "
@@ -200,7 +206,7 @@ def run_subject(
     nifti_root: Path,
     output_root: Path,
     eicab_subdir: str | None = None,
-    eicab_mask: EicabMaskKind = "cw",
+    eicab_mask: EicabMaskKind = "wb",
     skip_existing: bool = False,
     cd_up_thresh: float | None = None,
     cd_shift_hm: bool | None = None,
@@ -212,6 +218,7 @@ def run_subject(
     arterial_branch_min_points: int = 5,
     eicab_prefer_pp: bool = True,
     venous_brain_mask: bool = True,
+    venous_extend: bool = True,
     totalseg_device: str = "gpu",
     totalseg_model_dir: Path | None = None,
 ) -> Path:
@@ -222,11 +229,9 @@ def run_subject(
     fixed = Path(meta["fixed"])
     subdir = (eicab_subdir or cfg.STAGE1_EICAB_DIR).strip() or "eicab"
     eicab_dir = output_root / subject / subdir
-    eicab_res = resolve_eicab_mask(
-        eicab_dir,
-        preference=eicab_mask,
-        prefer_postprocessed=bool(eicab_prefer_pp),
-    )
+    # pp: the distal-grown WB_pp (its A2 / M2 reach stage 4) before CW_pp, unless "cw" is asked.
+    eicab_res = (resolve_eicab_pp_mask(eicab_dir, preference=eicab_mask) if eicab_prefer_pp
+                 else resolve_eicab_mask(eicab_dir, preference="cw", prefer_postprocessed=False))
 
     out_dir = _stage3_out(output_root, subject)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -368,6 +373,16 @@ def run_subject(
         log.info(
             f"[{subject}] venous: after brain mask voxels={int(np.count_nonzero(venous_mask))}"
         )
+    venous_extend_info: dict[str, Any] = {}
+    if venous_extend:
+        search = venous_region & ~art_excl & (brain_region if brain_region is not None else True)
+        venous_mask, venous_extend_info = extend_venous_mask(
+            cd, venous_mask, search, spacing=tuple(float(v) for v in cd_img.spacing[:3])
+        )
+        log.info(
+            f"[{subject}] venous: dim stretches added={venous_extend_info['voxels_added']} "
+            f"(region threshold {venous_extend_info['region_threshold']:.4g} vs global {float(sliding_opt_thresh):.4g})"
+        )
     venous_clean = as_backend_array(
         clean_venous_slab_mask(venous_mask, min_fraction=venous_min_component_frac)
     )
@@ -405,6 +420,8 @@ def run_subject(
     mask_path = out_dir / CENTERLINES_MASK_NIFTI
     imsave(mask_path, cl_mask, metadata=dict(lab_img.metadata or {}))
 
+    imsave(out_dir / "venous_mask.nii.gz", as_backend_array(venous_clean).astype(np.uint8),
+           metadata=dict(cd_img.metadata or {}))
     qc_path = out_dir / "cd_vessel_binary_qc.nii.gz"
     imsave(qc_path, vessel_bin.astype(np.uint8), metadata=dict(lab_img.metadata or {}))
 
@@ -451,6 +468,9 @@ def run_subject(
         "venous_voxels_after_brain_mask": int(np.count_nonzero(venous_mask)),
         "venous_arterial_exclusion_source": excl_src,
         "venous_arterial_exclusion_dilate_vox": 2,
+        "venous_extend": bool(venous_extend),
+        **{f"venous_extend_{k}": v for k, v in venous_extend_info.items()},
+        "venous_mask": str(out_dir / "venous_mask.nii.gz"),
     }
     done.write_text(json.dumps(meta_out, indent=2), encoding="utf-8")
     log.info(f"[{subject}] stage3 centerline -> {out_dir}")
@@ -470,8 +490,10 @@ def _stage3_cli_options(func):
     func = click.option(
         "--eicab-mask",
         type=click.Choice(["cw", "wb"], case_sensitive=False),
-        default="cw",
+        default="wb",
         show_default=True,
+        help="With --eicab-prefer-pp: wb = the distal-grown *_eICAB_WB_pp, else *_CW_pp; cw = *_CW_pp only. "
+        "Without: eICAB's own CW mask.",
     )(func)
     func = click.option("--cd-up-thresh", type=float, default=None, help="CD sliding-threshold upper fraction.")(func)
     func = click.option(
@@ -510,6 +532,13 @@ def _stage3_cli_options(func):
         help="Restrict venous candidates to TotalSegmentator brain on Angiography_3D.",
     )(func)
     func = click.option(
+        "--venous-extend/--no-venous-extend",
+        default=True,
+        show_default=True,
+        help="Add the dim sinus stretches the global CD threshold misses (threshold recomputed on the "
+        "venous search region), before naming the sinuses.",
+    )(func)
+    func = click.option(
         "--totalseg-device",
         type=click.Choice(["gpu", "cpu"], case_sensitive=False),
         default="gpu",
@@ -533,7 +562,7 @@ def _subject_sge_spec(
     container: Path,
     src_dir: Path | None = None,
     skip_existing: bool = False,
-    eicab_mask: str = "cw",
+    eicab_mask: str = "wb",
     cd_up_thresh: float | None = None,
     cd_shift_hm: bool | None = None,
     venous_min_component_frac: float = 0.005,
@@ -544,6 +573,7 @@ def _subject_sge_spec(
     arterial_branch_min_points: int = 5,
     eicab_prefer_pp: bool = True,
     venous_brain_mask: bool = True,
+    venous_extend: bool = True,
     totalseg_device: str | None = None,
     totalseg_model_dir: Path | None = None,
     backend: str = "gpu",
@@ -585,6 +615,8 @@ def _subject_sge_spec(
         parts.append("--cd-shift-hm" if cd_shift_hm else "--no-cd-shift-hm")
     if not venous_brain_mask:
         parts.append("--no-venous-brain-mask")
+    if not venous_extend:
+        parts.append("--no-venous-extend")
     ts_dev = totalseg_device or backend
     parts.extend(["--totalseg-device", shlex.quote(str(ts_dev).strip().lower())])
     # Host weights path for Singularity -B; in-container CLI/env must use binds.models.
@@ -626,7 +658,7 @@ def build_subject_sge_command(
     container: Path,
     src_dir: Path | None = None,
     skip_existing: bool = False,
-    eicab_mask: str = "cw",
+    eicab_mask: str = "wb",
     cd_up_thresh: float | None = None,
     cd_shift_hm: bool | None = None,
     venous_min_component_frac: float = 0.005,
@@ -637,6 +669,7 @@ def build_subject_sge_command(
     arterial_branch_min_points: int = 5,
     eicab_prefer_pp: bool = True,
     venous_brain_mask: bool = True,
+    venous_extend: bool = True,
     totalseg_device: str | None = None,
     totalseg_model_dir: Path | None = None,
     backend: str = "gpu",
@@ -662,6 +695,7 @@ def build_subject_sge_command(
         arterial_branch_min_points=arterial_branch_min_points,
         eicab_prefer_pp=eicab_prefer_pp,
         venous_brain_mask=venous_brain_mask,
+        venous_extend=venous_extend,
         totalseg_device=totalseg_device,
         totalseg_model_dir=totalseg_model_dir,
         backend=backend,
@@ -679,7 +713,7 @@ def submit_subject_sge(
     skip_existing: bool = False,
     hold_jid: str | None = None,
     emit: TextIO | None = None,
-    eicab_mask: str = "cw",
+    eicab_mask: str = "wb",
     cd_up_thresh: float | None = None,
     cd_shift_hm: bool | None = None,
     venous_min_component_frac: float = 0.005,
@@ -690,6 +724,7 @@ def submit_subject_sge(
     arterial_branch_min_points: int = 5,
     eicab_prefer_pp: bool = True,
     venous_brain_mask: bool = True,
+    venous_extend: bool = True,
     totalseg_device: str | None = None,
     totalseg_model_dir: Path | None = None,
     backend: str = "gpu",
@@ -713,6 +748,7 @@ def submit_subject_sge(
         arterial_branch_min_points=arterial_branch_min_points,
         eicab_prefer_pp=eicab_prefer_pp,
         venous_brain_mask=venous_brain_mask,
+        venous_extend=venous_extend,
         totalseg_device=totalseg_device,
         totalseg_model_dir=totalseg_model_dir,
         backend=backend,
@@ -739,6 +775,7 @@ def main(
     arterial_branch_min_points: int,
     eicab_prefer_pp: bool,
     venous_brain_mask: bool,
+    venous_extend: bool,
     totalseg_device: str,
     totalseg_model_dir: Path | None,
 ) -> None:
@@ -761,6 +798,7 @@ def main(
         arterial_branch_min_points=arterial_branch_min_points,
         eicab_prefer_pp=eicab_prefer_pp,
         venous_brain_mask=venous_brain_mask,
+        venous_extend=venous_extend,
         totalseg_device=totalseg_device,
         totalseg_model_dir=totalseg_model_dir,
     )

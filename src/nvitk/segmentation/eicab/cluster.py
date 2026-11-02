@@ -152,16 +152,23 @@ def build_eicab_postprocess_shell_cmd(
     backend: str,
     siphon: bool = True,
     distal: bool = True,
+    input_nifti: Path | None = None,
 ) -> str:
     """The eICAB post-process step inside the nvitk container (*siphon*: include the ICA siphon
-    correction)."""
+    correction; *distal*: also write the distal-grown WB_pp mask; *input_nifti*: the acquired TOF
+    under *data_root*, whose scanner frame the masks are written in)."""
     binds = SingularityBinds()
     rel_out = _require_under(output_dir, output_root, "output")
     c_out = f"{binds.output}{rel_out.as_posix()}"
+    tof_arg = ""
+    if input_nifti is not None:
+        rel_in = _require_under(input_nifti, data_root, "input")
+        tof_arg = f", tof_original_path=Path({json.dumps(f'{binds.data}{rel_in.as_posix()}')})"
     py_cmd = (
         "from pathlib import Path; "
         "from nvitk.pipes.qvtpy.util.eicab.eicab_postprocess import postprocess_eicab_directory; "
-        f"postprocess_eicab_directory(Path({json.dumps(c_out)}), siphon={bool(siphon)}, distal={bool(distal)})"
+        f"postprocess_eicab_directory(Path({json.dumps(c_out)}), siphon={bool(siphon)}, distal={bool(distal)}"
+        f"{tof_arg})"
     )
     inner = (
         f"export PYTHONPATH={binds.src} && "
@@ -305,6 +312,7 @@ def build_eicab_host_shell_cmd(
                 backend=backend,
                 siphon=pp_siphon,
                 distal=pp_distal,
+                input_nifti=input_nifti,
             )
         )
     body = " && ".join(steps)

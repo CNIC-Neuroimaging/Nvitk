@@ -299,6 +299,15 @@ class ResultsWindow(QWidget):
         copy_button.setToolTip("Copy this result to the clipboard as text")
         copy_button.clicked.connect(self._copy)
 
+        export_button = QPushButton("Export…")
+        export_button.setToolTip("Save the displayed table (the rows and columns the filters show, "
+                                 "in their sorted order) as an Excel workbook or a CSV file")
+        export_button.clicked.connect(self._export)
+
+        clear_all_button = QPushButton("Clear all")
+        clear_all_button.setToolTip("Remove every table from the results window (the history empties)")
+        clear_all_button.clicked.connect(self.clear_results)
+
         self._clear_highlight = QPushButton("Clear highlight")
         self._clear_highlight.setToolTip("Stop showing the selected row in the viewer")
         self._clear_highlight.clicked.connect(self._unhighlight)
@@ -332,6 +341,8 @@ class ResultsWindow(QWidget):
         toolbar.addWidget(self._history, stretch=1)
         toolbar.addWidget(self._clear_highlight)
         toolbar.addWidget(copy_button)
+        toolbar.addWidget(export_button)
+        toolbar.addWidget(clear_all_button)
 
         root = QVBoxLayout(self)
         root.setSpacing(SPACE_TIGHT)
@@ -605,14 +616,19 @@ class ResultsWindow(QWidget):
                 if item is not None:
                     item.setBackground(brush)
 
-    def _show_controls(self, result: _Result) -> None:
-        """Swap in the shown result's own controls (or none)."""
+    def _drop_controls(self) -> None:
+        """Remove the shown result's own controls."""
         while self._controls_layout.count():
             widget = self._controls_layout.takeAt(0).widget()
             if widget is not None:
                 widget.hide()  # before un-parenting, or Qt shows it as a stray top-level window
                 widget.setParent(None)
                 widget.deleteLater()
+        self._controls_box.setVisible(False)
+
+    def _show_controls(self, result: _Result) -> None:
+        """Swap in the shown result's own controls (or none)."""
+        self._drop_controls()
         widget = None
         if result.controls is not None:
             try:
@@ -659,6 +675,26 @@ class ResultsWindow(QWidget):
         self._history.blockSignals(False)
         self._show(result)
 
+    def clear_results(self) -> None:
+        """Drop every result: the history empties and the window shows no table."""
+        if self._shown is not None:
+            self._notify_row(self._shown, None)  # stop any highlight in the viewer
+        self._results.clear()
+        self._shown = None
+        self._history.blockSignals(True)
+        self._history.clear()
+        self._history.blockSignals(False)
+        self._heading.setText("")
+        self._subtitle.setVisible(False)
+        self._note.setVisible(False)
+        self._clear_highlight.setVisible(False)
+        self._colour_row.setVisible(False)
+        self._table.clear()
+        self._table.setRowCount(0)
+        self._table.setColumnCount(0)
+        self._drop_controls()
+        self._filter_count.setText("")
+
     def current_text(self) -> str:
         """The displayed result as plain text."""
         index = max(self._history.currentIndex(), 0)
@@ -676,6 +712,20 @@ class ResultsWindow(QWidget):
         clipboard = QApplication.clipboard()
         if clipboard is not None:
             clipboard.setText(self.current_text())
+
+    def table_frame(self) -> Any:
+        """The displayed table as a DataFrame (:func:`~nvitk.gui.viz.table_export.visible_table_frame`)."""
+        from nvitk.gui.viz.table_export import visible_table_frame
+
+        return visible_table_frame(self._table, self._shown.payload if self._shown is not None else {})
+
+    def _export(self) -> None:
+        """Save the displayed table where the user picks (:func:`~nvitk.gui.viz.table_export.export_dialog`)."""
+        from nvitk.gui.viz.table_export import export_dialog
+
+        if self._shown is not None and (out := export_dialog(self, self.table_frame(), self._shown.title)):
+            self._note.setText(f"Saved to {out}")
+            self._note.setVisible(True)
 
     def _notify_row(self, result: _Result | None, key: str | None) -> None:
         """Tell *result*'s owner which row is selected (``None``: none)."""

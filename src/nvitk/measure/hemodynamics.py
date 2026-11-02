@@ -10,6 +10,8 @@ backend; inputs are coerced with :func:`~nvitk.core.array.as_backend_array`.
 
 from __future__ import annotations
 
+import re
+
 import math
 from typing import Any
 
@@ -955,6 +957,12 @@ def _vessel_band_key(vessel_name: str) -> str:
     if not raw:
         return ""
     token = raw.upper().replace("-", "_").replace(" ", "_")
+    # qvtpy's split labels (2026-10-28): A1 / M1 / P1 are the ACA / MCA / PCA, A2 / M2 their distal
+    # segments, P2 is the PCA band too.
+    split = re.match(r"^([LR]?)(ACA|MCA|PCA)_(?:A|M|P)([12])$", token)
+    if split:
+        side, stem, seg = split.groups()
+        token = side + (stem + "DIST" if seg == "2" and stem != "PCA" else stem)
     for prefix in ("LEFT_", "RIGHT_", "L_", "R_"):
         if token.startswith(prefix):
             token = token[len(prefix):]
