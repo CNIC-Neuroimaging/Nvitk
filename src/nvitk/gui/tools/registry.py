@@ -2395,6 +2395,24 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         ),
     ),
     GuiToolSpec(
+        "viz_brain_vascular_map",
+        "Visualization",
+        "Brain regions ↔ vascular map",
+        (),
+        needs_3d=True,
+        run_mode="notify",
+        description=(
+            "Which brain regions each vessel irrigates. The active layer is the vessel mask (eICAB, "
+            "TopBrain, QVTPy...). Opens a dock to parcellate an image (ANTsPyNet DKT or FastSurfer on "
+            "a T1w MRI, TotalSegmentator brain structures on a CT, or an existing label layer) into "
+            "Desikan-Killiany-Tourville regions or lobes, optionally registering that image to the "
+            "vessels' own image (FLIRT / ANTs, linear). Draws every vessel in its label colour inside "
+            "a faint brain; clicking a vessel in 3D highlights it, dims the rest, and shows the "
+            "regions in its territory (nearest-vessel territories, passed down the arterial tree) "
+            "with their supplied share."
+        ),
+    ),
+    GuiToolSpec(
         "lab_mouse_tof_cow",
         "Lab",
         "Mouse TOF CoW",
@@ -3093,6 +3111,7 @@ SGE_BLOCKLIST: frozenset[str] = frozenset({
     "lab_mouse_tof_cow",
     "measure_voxelwise",
     "viz_voxelwise_3d",
+    "viz_brain_vascular_map",
     "reg_flirt_rigid",
     "reg_flirt_apply",
     "siphon_correct",

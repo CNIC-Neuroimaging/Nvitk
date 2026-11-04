@@ -566,6 +566,10 @@ def _run_gui_tool(
         _run_viz_voxelwise_3d(viewer)
         return None
 
+    if tool_id == "viz_brain_vascular_map":
+        _run_viz_brain_vascular_map(viewer, layer)
+        return None
+
     if tool_id == "viz_ortho_views":
         _run_viz_ortho_views(viewer, layer)
         return None
@@ -3652,6 +3656,14 @@ def _run_viz_voxelwise_3d(viewer: Any) -> None:
 
     start_voxelwise_3d(viewer)
     notify("Voxelwise 3-D window open. Choose a results folder to draw it.")
+
+
+def _run_viz_brain_vascular_map(viewer: Any, layer: Any) -> None:
+    """Open the brain-vascular map dock with the active layer as the vessel mask."""
+    from nvitk.gui.viz.brain_vasc_panel import start_brain_vascular_map
+
+    start_brain_vascular_map(viewer, layer)
+    notify("Brain-vascular map open: choose the parcellation (and registration), then Build map.")
 
 
 def _run_measure_voxelwise(viewer: Any) -> None:
