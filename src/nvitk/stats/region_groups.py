@@ -79,6 +79,10 @@ _HEMISPHERE_PANEL: dict[str, str] = {
     "mca": "Anterior Circulation",
     "aca": "Anterior Circulation",
     "pca": "Posterior Circulation",
+    "aca_a2": "Anterior Circulation",
+    "mca_m2": "Anterior Circulation",
+    "pca_p2": "Posterior Circulation",
+    "sca": "Posterior Circulation",
     "basi": "Posterior Circulation",
     "basilar": "Posterior Circulation",
     "va": "Posterior Circulation",
@@ -395,8 +399,11 @@ def region_display_panel(level: str) -> str | None:
     raw = str(level).strip()
     if not raw:
         return None
-    # qvtpy's split labels (LMCA_M1, LACA_A2, ...) sit in their parent vessel's panel.
-    raw = re.sub(r"^([LR](?:ACA|MCA|PCA))_(?:A|M|P)[12]$", r"\1", raw, flags=re.IGNORECASE)
+    # qvtpy's split labels (LMCA_M1, LACA_A2, their branches LMCA_M2-a, ...) and the territory
+    # grouping's distal keys sit in their parent vessel's / territory's panel.
+    raw = re.sub(r"^([LR](?:ACA|MCA|PCA))[_-]?(?:A|M|P)[12](?:-?[a-z]|-b\d+)?$", r"\1", raw,
+                 flags=re.IGNORECASE)
+    raw = re.sub(r"\s*\(distal\)$", "", raw, flags=re.IGNORECASE)
 
     # 1. Already a panel name
     for panel in PANEL_ORDER:

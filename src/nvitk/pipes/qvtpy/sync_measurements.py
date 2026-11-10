@@ -39,7 +39,16 @@ _STAGE6_FILES: tuple[str, ...] = (
     "loc_measurements.csv",
     "vessel_hemodynamics.csv",
 )
-_STAGE7_FILES: tuple[str, ...] = (STAGE7_SKIP_MARKER,)
+#: What the stage-7 publisher reads: the report (or what it is rebuilt from), and the Excel the
+#: legacy path aggregates when there is no ``vessel_summary.csv``.
+_STAGE7_FILES: tuple[str, ...] = (
+    STAGE7_SKIP_MARKER,
+    "morphometrics_report.csv",
+    "vessel_summary.csv",
+    "lesions.csv",
+    "volumetry.csv",
+    "centerlines/tortuosity_metrics.csv",
+)
 
 
 def _stage6_dir(output_root: Path, subject: str) -> Path:
@@ -146,8 +155,11 @@ def _download_stage6_and_stage7_from_sge(
     host: str,
     user: str,
     password: str,
+    stage6: bool = True,
+    stage7: bool = True,
 ) -> list[str]:
-    """Fetch stage-6 CSVs and stage-7 Excel into ``local_temp_root``."""
+    """Fetch the stage-6 CSVs and the stage-7 report files (*stage6* / *stage7*) into
+    ``local_temp_root``."""
     ready: list[str] = []
     with cluster_session(host=host, user=user, password=password) as session:
         for subject in subjects:
@@ -155,7 +167,7 @@ def _download_stage6_and_stage7_from_sge(
             remote_s6 = _stage6_dir(cluster_results_root, subject)
             local_s6 = _stage6_dir(local_temp_root, subject)
             local_s6.mkdir(parents=True, exist_ok=True)
-            for name in _STAGE6_FILES:
+            for name in _STAGE6_FILES if stage6 else ():
                 remote_s = str(remote_s6 / name)
                 if not remote_path_exists(session, remote_s):
                     continue
@@ -170,11 +182,12 @@ def _download_stage6_and_stage7_from_sge(
             remote_s7 = _stage7_dir(cluster_results_root, subject)
             local_s7 = _stage7_dir(local_temp_root, subject)
             local_s7.mkdir(parents=True, exist_ok=True)
-            for name in _STAGE7_FILES:
+            for name in _STAGE7_FILES if stage7 else ():
                 remote_s = str(remote_s7 / name)
                 if not remote_path_exists(session, remote_s):
                     continue
                 local_path = local_s7 / name
+                local_path.parent.mkdir(parents=True, exist_ok=True)
                 try:
                     download_remote_file(session, remote_s, local_path)
                     got_any = True

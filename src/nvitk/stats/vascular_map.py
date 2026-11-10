@@ -70,35 +70,49 @@ VESSEL_PATHS: dict[str, tuple[tuple[tuple[float, float], ...], float, tuple[floa
     # The carotid siphon enters from below, turns up, and bifurcates into ACA and MCA at ~y=0.60.
     "lica": (((0.320, 0.330), (0.332, 0.470), (0.362, 0.600)), 9.0, (0.248, 0.470), "ICA"),
     "rica": (((0.680, 0.330), (0.668, 0.470), (0.638, 0.600)), 9.0, (0.752, 0.470), "ICA"),
-    "lmca": (((0.362, 0.600), (0.300, 0.638), (0.246, 0.694), (0.294, 0.730)), 7.5,
-             (0.286, 0.788), "MCA"),
-    "rmca": (((0.638, 0.600), (0.700, 0.638), (0.754, 0.694), (0.706, 0.730)), 7.5,
-             (0.788, 0.735), "MCA"),
-    "laca": (((0.362, 0.600), (0.392, 0.700), (0.432, 0.798), (0.464, 0.856)), 7.0,
-             (0.372, 0.792), "ACA"),
-    "raca": (((0.638, 0.600), (0.608, 0.700), (0.568, 0.798), (0.536, 0.856)), 7.0,
-             (0.628, 0.792), "ACA"),
-    "acomm": (((0.464, 0.856), (0.500, 0.874), (0.536, 0.856)), 6.0, (0.582, 0.898), "AComA"),
+    # The A1 / M1 / P1 (qvtpy and eICAB labels 4-9, the whole ACA / MCA / PCA of the earlier
+    # pipelines) and the A2 / M2 / P2 beyond them are separate vessels, each its own stroke: the
+    # A1 runs medially to the AComm and the A2 forward along the midline, the M1 laterally to the
+    # Sylvian fissure and the M2 up it, the P1 to the PComm junction and the P2 round the midbrain.
+    # The M2 turns forward rather than back so it keeps clear of the swept sagittal sinus.
+    "lmca": (((0.362, 0.600), (0.316, 0.612), (0.268, 0.616)), 7.5, (0.304, 0.580), "M1"),
+    "rmca": (((0.638, 0.600), (0.684, 0.612), (0.732, 0.616)), 7.5, (0.696, 0.580), "M1"),
+    "lmca2": (((0.268, 0.616), (0.230, 0.636), (0.214, 0.680), (0.222, 0.732)), 6.0,
+              (0.270, 0.706), "M2"),
+    "rmca2": (((0.732, 0.616), (0.770, 0.636), (0.786, 0.680), (0.778, 0.732)), 6.0,
+              (0.730, 0.706), "M2"),
+    "laca": (((0.362, 0.600), (0.405, 0.668), (0.458, 0.712)), 7.0, (0.356, 0.706), "A1"),
+    "raca": (((0.638, 0.600), (0.595, 0.668), (0.542, 0.712)), 7.0, (0.644, 0.706), "A1"),
+    "laca2": (((0.458, 0.712), (0.464, 0.790), (0.474, 0.870), (0.478, 0.900)), 6.0,
+              (0.416, 0.842), "A2"),
+    "raca2": (((0.542, 0.712), (0.536, 0.790), (0.526, 0.870), (0.522, 0.900)), 6.0,
+              (0.584, 0.842), "A2"),
+    "acomm": (((0.458, 0.712), (0.500, 0.726), (0.542, 0.712)), 6.0, (0.500, 0.686), "AComA"),
     # Posterior circulation
-    "basi": (((0.500, 0.330), (0.500, 0.400), (0.500, 0.468)), 8.0, (0.586, 0.352), "Basilar"),
+    "basi": (((0.500, 0.330), (0.500, 0.400), (0.500, 0.468)), 8.0, (0.586, 0.312), "Basilar"),
     # The vertebrals converge on the basilar from below. Kept tight to the midline so the straight
     # sinus can pass outside them without the two systems crossing.
     # Kept short: the torcula sits directly below, and a long vertebral leaves the straight sinus
     # no corridor to reach it without crossing one of them.
     "lva": (((0.462, 0.268), (0.480, 0.300), (0.500, 0.330)), 6.5, (0.428, 0.244), "VA"),
     "rva": (((0.538, 0.268), (0.520, 0.300), (0.500, 0.330)), 6.5, (0.572, 0.244), "VA"),
-    # Carried past the PComm junction: the posterior cerebral does not end where the communicating
-    # artery joins it, and stopping there drew P1 alone; the shortest vessel on the figure for one
-    # of the larger ones.
-    # Carried past the PComm junction, posterolaterally around the midbrain. Extending it *up* and
-    # out instead would have it cross the carotid: true of the real anatomy, which passes behind
-    # the ICA, but unreadable in a flat schematic with no depth to show the crossing.
-    "lpca": (((0.500, 0.468), (0.456, 0.492), (0.412, 0.500), (0.386, 0.470),
-              (0.376, 0.420)), 7.0, (0.430, 0.404), "PCA"),
-    "rpca": (((0.500, 0.468), (0.544, 0.492), (0.588, 0.500), (0.614, 0.470),
-              (0.624, 0.420)), 7.0, (0.570, 0.404), "PCA"),
-    "lpcomm": (((0.362, 0.600), (0.378, 0.552), (0.412, 0.500)), 5.0, (0.240, 0.560), "PComA"),
-    "rpcomm": (((0.638, 0.600), (0.622, 0.552), (0.588, 0.500)), 5.0, (0.790, 0.560), "PComA"),
+    # The P2 goes posterolaterally round the midbrain. Extending it *up* and out instead would
+    # have it cross the carotid: true of the real anatomy, which passes behind the ICA, but
+    # unreadable in a flat schematic with no depth to show the crossing.
+    "lpca": (((0.500, 0.468), (0.456, 0.490), (0.412, 0.500)), 7.0, (0.462, 0.548), "P1"),
+    "rpca": (((0.500, 0.468), (0.544, 0.490), (0.588, 0.500)), 7.0, (0.538, 0.548), "P1"),
+    "lpca2": (((0.412, 0.500), (0.384, 0.474), (0.372, 0.430), (0.368, 0.390)), 6.0,
+              (0.360, 0.360), "P2"),
+    "rpca2": (((0.588, 0.500), (0.616, 0.474), (0.628, 0.430), (0.632, 0.390)), 6.0,
+              (0.640, 0.360), "P2"),
+    # The superior cerebellar arteries leave the basilar just below its tip, almost where the PCAs
+    # do, and run laterally under the P1, between the basilar and the P2.
+    "lsca": (((0.500, 0.458), (0.466, 0.462), (0.440, 0.446), (0.428, 0.420)), 5.0,
+             (0.430, 0.392), "SCA"),
+    "rsca": (((0.500, 0.458), (0.534, 0.462), (0.560, 0.446), (0.572, 0.420)), 5.0,
+             (0.570, 0.392), "SCA"),
+    "lpcomm": (((0.362, 0.600), (0.378, 0.552), (0.412, 0.500)), 5.0, (0.232, 0.536), "PComA"),
+    "rpcomm": (((0.638, 0.600), (0.622, 0.552), (0.588, 0.500)), 5.0, (0.768, 0.536), "PComA"),
     # Venous drainage
     # Routed outside the vertebral confluence: the previous path crossed both of them on its way
     # to the torcula, which read as an anastomosis that does not exist.
@@ -117,7 +131,7 @@ VESSEL_PATHS: dict[str, tuple[tuple[tuple[float, float], ...], float, tuple[floa
     # midline position carried no information the label does not already give.
     "sss": (((0.500, 0.958), (0.345, 0.912), (0.205, 0.790), (0.140, 0.610),
              (0.132, 0.430), (0.208, 0.252), (0.330, 0.168), (0.500, 0.140)), 10.5,
-            (0.196, 0.716), "Superior Sagittal Sinus"),
+            (0.332, 0.806), "Superior\nSagittal Sinus"),
 }
 
 #: Venous nodes are painted first so the arterial circle reads on top of the midline sinus.
@@ -143,6 +157,15 @@ BILATERAL_KEYS: dict[str, tuple[str, str]] = {
     "mca": ("lmca", "rmca"),
     "aca": ("laca", "raca"),
     "pca": ("lpca", "rpca"),
+    # The hemisphere grouping keeps the A1 / M1 / P1 under the bare names above and gives the
+    # A2 / M2 / P2 their own keys (ACA_A2, ...); the suffixed X1 spellings are accepted too.
+    "acaa1": ("laca", "raca"),
+    "mcam1": ("lmca", "rmca"),
+    "pcap1": ("lpca", "rpca"),
+    "acaa2": ("laca2", "raca2"),
+    "mcam2": ("lmca2", "rmca2"),
+    "pcap2": ("lpca2", "rpca2"),
+    "sca": ("lsca", "rsca"),
     "va": ("lva", "rva"),
     "vertebral": ("lva", "rva"),
     "pcomm": ("lpcomm", "rpcomm"),
