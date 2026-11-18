@@ -138,3 +138,10 @@ dataset/
 *.nii.gz
 *.h5
 *.hdf5
+
+# Dense GPU animations: regenerable stage arrays with image volumes, and manim's render output
+scripts/anim/eicab_full_stages.npz
+scripts/anim/morpho_stages.npz
+scripts/anim/qvtpy_pipeline_stages.npz
+scripts/anim/hemo_stages.npz
+/media/

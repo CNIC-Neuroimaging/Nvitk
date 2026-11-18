@@ -79,8 +79,8 @@ MEASURE_ERODE: dict[str, int] = {
     "KIDNEY_R": 1,
     "T_PVM_L": 1,
     "T_PVM_R": 1,
-    "BN_L3": 1,
-    "BN_L4": 1,
+    "BN_L3": 0,
+    "BN_L4": 0,
     # LEGS
     "L_QM_L": 1,
     "L_QM_R": 1,

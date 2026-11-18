@@ -29,7 +29,6 @@ from nvitk.pipes.pesa_fat.ct_pet_v5.labels import (
     MO_LABELS,
     MUSCLES_LABELS,
     ORGANS_LABELS,
-    OUTPUT_LABEL_TO_TS,
 )
 from nvitk.pipes.pesa_fat.dixon_v5 import config as dx_cfg
 from nvitk.pipes.pesa_fat.dixon_v5.labels import HEAD_LABELS, LEGS_LABELS, THORAX_LABELS
@@ -60,25 +59,30 @@ def _load_mask(stage2_dir: Path, filename: str) -> Image:
     return imread(str(resolve_nii(stage2_dir, stem)), axes="XYZ")
 
 
-def _ctpet_roi_specs() -> list[tuple[str, str, tuple[int, ...]]]:
-    """(display_name, mask_file, label_ids) unique over SUV + VOL specs.
+def _ctpet_roi_specs() -> list[tuple[str, str, tuple[int, ...], bool]]:
+    """(display_name, mask_file, label_ids, has_measure) unique over SUV + VOL specs.
 
     Deduplicated by display name, so a volume read from a ``*_VOL`` twin shows
-    under its SUV ROI; volume-only ROIs (CORP, MO_L3/MO_L4, GRASA_IM_*) keep
-    their own entry.
+    under its SUV ROI. Volume-only ROIs (CORP, MO_L3/MO_L4, GRASA_IM_*) keep their
+    own entry with *has_measure* off: no SUV is measured on them.
     """
     seen: set[str] = set()
-    out: list[tuple[str, str, tuple[int, ...]]] = []
-    candidates = [(spec.column_prefix, spec.mask_file, spec.label_ids) for spec in ct_cfg.SUV_SPECS]
+    out: list[tuple[str, str, tuple[int, ...], bool]] = []
+    candidates = [(spec.column_prefix, spec.mask_file, spec.label_ids, True) for spec in ct_cfg.SUV_SPECS]
     candidates += [
-        (spec.column[: -len("_VOL")] if spec.column.endswith("_VOL") else spec.column, spec.mask_file, spec.label_ids)
+        (
+            spec.column[: -len("_VOL")] if spec.column.endswith("_VOL") else spec.column,
+            spec.mask_file,
+            spec.label_ids,
+            False,
+        )
         for spec in ct_cfg.VOL_SPECS
     ]
-    for name, mask_file, label_ids in candidates:
+    for name, mask_file, label_ids, has_measure in candidates:
         if name in seen:
             continue
         seen.add(name)
-        out.append((name, mask_file, label_ids))
+        out.append((name, mask_file, label_ids, has_measure))
     return out
 
 
@@ -111,24 +115,6 @@ _DIXON_MASK_TO_LABELS: dict[str, dict[str, int]] = {
     "LEGS.nii": LEGS_LABELS,
 }
 
-# (stage-1 file stem, TS task for the class map, TS class). The stem differs from
-# the task for the WATER-contrast liver run, which stage 2 prefers over the FAT one.
-_DIXON_OUTPUT_LABEL_TO_TS: dict[str, list[tuple[str, str, str]]] = {
-    "H_PVM_L": [("total_mr", "total_mr", "autochthon_left")],
-    "H_PVM_R": [("total_mr", "total_mr", "autochthon_right")],
-    "LIVER": [(dx_cfg.THORAX_WATER_STEM, "total_mr", "liver"), ("total_mr", "total_mr", "liver")],
-    "PANCREAS": [("total_mr", "total_mr", "pancreas")],
-    "KIDNEY_L": [("total_mr", "total_mr", "kidney_left")],
-    "KIDNEY_R": [("total_mr", "total_mr", "kidney_right")],
-    "T_PVM_L": [("total_mr", "total_mr", "autochthon_left")],
-    "T_PVM_R": [("total_mr", "total_mr", "autochthon_right")],
-    "BN_L3": [("vertebrae_mr", "vertebrae_mr", "vertebrae_L3")],
-    "BN_L4": [("vertebrae_mr", "vertebrae_mr", "vertebrae_L4")],
-    "L_QM_L": [("thigh_shoulder_muscles_mr", "thigh_shoulder_muscles_mr", "quadriceps_femoris_left")],
-    "L_QM_R": [("thigh_shoulder_muscles_mr", "thigh_shoulder_muscles_mr", "quadriceps_femoris_right")],
-}
-
-
 def _pp_label_names(mask_file: str, label_ids: tuple[int, ...], *, pipeline: str) -> list[str]:
     """Human-readable label names for *label_ids* in *mask_file* (merges L/R deltoids into one)."""
     labels_dict = (
@@ -148,96 +134,42 @@ def _pp_label_names(mask_file: str, label_ids: tuple[int, ...], *, pipeline: str
     return names
 
 
-def _load_raw_ts_mask_ctpet(
-    lay: BatchLayout,
-    subject: str,
-    output_label_names: list[str],
-    *,
-    target: Image,
-) -> np.ndarray | None:
-    """Union of raw TotalSegmentator CT masks for *output_label_names*, resampled onto
-    *target*'s grid; None if no matching stage-1 outputs are found."""
-    stage1_dir = lay.results_dir / ct_cfg.STAGE1_DIR / subject / "CT"
-    combined: np.ndarray | None = None
-    ref_img: Image | None = None
-    for name in output_label_names:
-        ts_entries = list(OUTPUT_LABEL_TO_TS.get(name, []))
-        if name == "BODY" and not ts_entries:
-            ts_entries = (
-                list(OUTPUT_LABEL_TO_TS.get("BODY_TRUNC", []))
-                + list(OUTPUT_LABEL_TO_TS.get("BODY_EXT", []))
-            )
-        for task, ts_label in ts_entries:
-            seg_path = resolve_nii_optional(stage1_dir, task)
-            if seg_path is None:
-                continue
-            try:
-                cid = get_class_id(ts_label, task)
-                seg = imread(str(seg_path), axes="XYZ")
-            except Exception:
-                continue
-            if ref_img is None:
-                ref_img = seg
-            bin_np = (to_numpy(seg.data) == int(cid))
-            if combined is None:
-                combined = bin_np.copy()
-            else:
-                combined |= bin_np
-    if combined is None or ref_img is None:
-        return None
-    target_shape = tuple(int(v) for v in to_numpy(target.data).shape)
-    if combined.shape != target_shape:
-        try:
-            raw_img = ref_img.with_data(as_backend_array(combined.astype(np.uint8)))
-            combined = to_numpy(resample_mask_to_pet(raw_img, target).data) > 0
-        except Exception:
-            return None
-    return combined
+def _vol_mask_file(mask_file: str) -> str:
+    """``_VOL`` twin name of *mask_file* (``"MO.nii"`` -> ``"MO_VOL.nii"``)."""
+    stem, dot, ext = _base_mask_file(mask_file).partition(".")
+    return f"{stem}_VOL{dot}{ext}"
 
 
-def _load_raw_ts_mask_dixon(
-    lay: BatchLayout,
-    subject: str,
-    region: str,
-    output_label_names: list[str],
-    *,
-    target: Image,
-) -> np.ndarray | None:
-    """Union of raw TotalSegmentator MR masks for *output_label_names* in *region*, resampled
-    onto *target*'s grid; None if no matching stage-1 outputs are found."""
-    stage1_dir = lay.results_dir / dx_cfg.STAGE1_DIR / subject / f"{dx_cfg.INPUT_PREFIX}_{region}"
-    combined: np.ndarray | None = None
-    ref_img: Image | None = None
-    for name in output_label_names:
-        # Sources for one output label are ordered by preference, not unioned:
-        # LIVER lists the WATER-contrast run first and the FAT one as a fallback.
-        for stem, task, ts_label in _DIXON_OUTPUT_LABEL_TO_TS.get(name, []):
-            seg_path = resolve_nii_optional(stage1_dir, stem)
-            if seg_path is None:
-                continue
-            try:
-                cid = get_class_id(ts_label, task)
-                seg = imread(str(seg_path), axes="XYZ")
-            except Exception:
-                continue
-            if ref_img is None:
-                ref_img = seg
-            bin_np = (to_numpy(seg.data) == int(cid))
-            if combined is None:
-                combined = bin_np.copy()
-            else:
-                combined |= bin_np
-            break
-    if combined is None or ref_img is None:
-        return None
-    target_shape = tuple(int(v) for v in to_numpy(target.data).shape)
-    if combined.shape != target_shape:
-        try:
-            raw_img = ref_img.with_data(as_backend_array(combined.astype(np.uint8)))
-            combined = to_numpy(resample_mask_to_pet(raw_img, target).data) > 0
-        except Exception:
-            return None
-    return combined
+def _load_vol_mask(stage2_dir: Path, mask_file: str, cache: dict[str, Image]) -> Image:
+    """Stage-2 label image the volumes of *mask_file*'s ROIs are measured on.
+
+    That is the ``_VOL`` twin, or the regular mask when stage 2 wrote no twin (BODY,
+    FAT_IM, batches older than the twins): the same fallback stage 3 applies.
+    """
+    base = _base_mask_file(mask_file)
+    key = f"vol:{base}"
+    if key not in cache:
+        twin = _vol_mask_file(base)
+        stem = twin.partition(".")[0]
+        cache[key] = _load_mask(stage2_dir, twin if resolve_nii_optional(stage2_dir, stem) is not None else base)
+    return cache[key]
+
+
+def _mask_union(*masks: np.ndarray | None) -> np.ndarray | None:
+    """Union of the given boolean masks, skipping the missing ones; None if all are missing."""
+    out: np.ndarray | None = None
+    for mask in masks:
+        if mask is not None:
+            out = mask.copy() if out is None else out | mask
+    return out
+
+
+def _binary_on_grid(label_img: Image, label_ids: tuple[int, ...], target: Image) -> np.ndarray:
+    """Union of *label_ids* in *label_img* as a boolean array on *target*'s grid."""
+    bin_mask = _build_binary_mask(label_img, label_ids)
+    if target.data.shape != bin_mask.data.shape:
+        bin_mask = resample_mask_to_pet(bin_mask, target)
+    return to_numpy(bin_mask.data) > 0
 
 
 # Bone-marrow ROIs are shown from the sacrum up to L1 (stage-1 classes below), so a
@@ -398,50 +330,39 @@ class _SliceImageStore:
 
 def _render_slice_png(
     vol_2d: np.ndarray,
-    mask_pp_2d: np.ndarray,
+    mask_meas_2d: np.ndarray | None,
     *,
-    mask_raw_2d: np.ndarray | None = None,
+    mask_vol_2d: np.ndarray | None = None,
     title: str,
     vmin: float,
     vmax: float,
     rotate90: bool = False,
     figsize: tuple[float, float] | None = None,
 ) -> bytes:
-    """Render one axial/sagittal slice to PNG bytes, with raw-TS (blue) and post-processed
-    (red) mask contours overlaid."""
+    """Render one slice to PNG bytes with the post-processed mask contours overlaid: the
+    volumetry mask in blue and, on top, the measure mask in red."""
     if figsize is None:
         figsize = _figsize_for_slice(vol_2d, rotate90=rotate90)
     fig, ax = plt.subplots(figsize=figsize)
     v = np.asarray(vol_2d, dtype=np.float64)
-    m_pp = np.asarray(mask_pp_2d) > 0
-    m_raw = np.asarray(mask_raw_2d) > 0 if mask_raw_2d is not None else None
     v = _flip_lr_2d(v)
-    if m_pp is not None:
-        m_pp = _flip_lr_2d(m_pp)
-    if m_raw is not None:
-        m_raw = _flip_lr_2d(m_raw)
     if rotate90:
         v = np.rot90(v, k=1)
-        m_pp = np.rot90(m_pp, k=1)
-        if m_raw is not None:
-            m_raw = np.rot90(m_raw, k=1)
     ax.imshow(v.T, cmap="gray", origin="lower", vmin=vmin, vmax=vmax, interpolation="none")
-    if m_raw is not None and np.any(m_raw):
-        ax.contour(
-            m_raw.T.astype(float),
-            levels=[0.5],
-            colors=["blue"],
-            linewidths=1.0,
-            origin="lower",
-        )
-    if np.any(m_pp):
-        ax.contour(
-            m_pp.T.astype(float),
-            levels=[0.5],
-            colors=["red"],
-            linewidths=1.0,
-            origin="lower",
-        )
+    for mask_2d, color in ((mask_vol_2d, "blue"), (mask_meas_2d, "red")):
+        if mask_2d is None:
+            continue
+        m2d = _flip_lr_2d(np.asarray(mask_2d) > 0)
+        if rotate90:
+            m2d = np.rot90(m2d, k=1)
+        if np.any(m2d):
+            ax.contour(
+                m2d.T.astype(float),
+                levels=[0.5],
+                colors=[color],
+                linewidths=1.0,
+                origin="lower",
+            )
     ax.set_title(title, fontsize=8)
     ax.axis("off")
     buf = io.BytesIO()
@@ -672,24 +593,22 @@ def _build_ctpet_slice_viewer_core(
     roi_co_mid: dict[str, int] = {}
     roi_sg_mid: dict[str, int] = {}
 
-    for disp, mask_file, label_ids in _ctpet_roi_specs():
-        raw_m: np.ndarray | None = None
+    for disp, mask_file, label_ids, has_measure in _ctpet_roi_specs():
+        m_meas: np.ndarray | None = None
+        m_vol: np.ndarray | None = None
+        if has_measure:
+            try:
+                if mask_file not in cache:
+                    cache[mask_file] = _load_mask(stage2, mask_file)
+                m_meas = _binary_on_grid(cache[mask_file], label_ids, target_img)
+            except Exception:
+                m_meas = None
         try:
-            if mask_file not in cache:
-                cache[mask_file] = _load_mask(stage2, mask_file)
-            label_img = cache[mask_file]
-            bin_mask = _build_binary_mask(label_img, label_ids)
-            if target_img.data.shape != bin_mask.data.shape:
-                bin_mask = resample_mask_to_pet(bin_mask, target_img)
-            m = to_numpy(bin_mask.data) > 0
+            m_vol = _binary_on_grid(_load_vol_mask(stage2, mask_file, cache), label_ids, target_img)
         except Exception:
-            continue
-        try:
-            pp_names = _pp_label_names(mask_file, label_ids, pipeline="ctpet")
-            raw_m = _load_raw_ts_mask_ctpet(lay, subject, pp_names, target=target_img)
-        except Exception:
-            raw_m = None
-        if not np.any(m):
+            m_vol = None
+        m = _mask_union(m_meas, m_vol)
+        if m is None or not np.any(m):
             continue
 
         spine_z = None
@@ -703,18 +622,20 @@ def _build_ctpet_slice_viewer_core(
                 )
             spine_z = spine_cache["z"]
         z0, z1, z_indices, ax_mid = _axial_block(m, margin_vox, spine_z)
-        vmin, vmax = window if window is not None else _display_range_block(vol_arr, m, z0, z1)
+        # Intensity window from the measured voxels when the ROI has any.
+        m_win = m_meas if m_meas is not None and np.any(m_meas) else m
+        vmin, vmax = window if window is not None else _display_range_block(vol_arr, m_win, z0, z1)
         ax_uris: list[str] = []
         for z in z_indices:
             sl = vol_arr[:, :, z]
-            sl_m = m[:, :, z]
-            sl_raw = raw_m[:, :, z] if raw_m is not None else None
+            sl_m = m_meas[:, :, z] if m_meas is not None else None
+            sl_vol = m_vol[:, :, z] if m_vol is not None else None
             ax_uris.append(
                 img_store.add(
                     _render_slice_png(
                         sl,
                         sl_m,
-                        mask_raw_2d=sl_raw,
+                        mask_vol_2d=sl_vol,
                         title=f"{disp} axial z={z}",
                         vmin=vmin,
                         vmax=vmax,
@@ -733,14 +654,14 @@ def _build_ctpet_slice_viewer_core(
         co_uris: list[str] = []
         for y in y_indices:
             sl = vol_arr[:, y, z0 : z1 + 1]
-            sl_m = m[:, y, z0 : z1 + 1]
-            sl_raw = raw_m[:, y, z0 : z1 + 1] if raw_m is not None else None
+            sl_m = m_meas[:, y, z0 : z1 + 1] if m_meas is not None else None
+            sl_vol = m_vol[:, y, z0 : z1 + 1] if m_vol is not None else None
             co_uris.append(
                 img_store.add(
                     _render_slice_png(
                         sl,
                         sl_m,
-                        mask_raw_2d=sl_raw,
+                        mask_vol_2d=sl_vol,
                         title=f"{disp} coronal y={y}",
                         vmin=vmin,
                         vmax=vmax,
@@ -757,14 +678,14 @@ def _build_ctpet_slice_viewer_core(
         sg_uris: list[str] = []
         for x in x_indices:
             sl = vol_arr[x, :, z0 : z1 + 1]
-            sl_m = m[x, :, z0 : z1 + 1]
-            sl_raw = raw_m[x, :, z0 : z1 + 1] if raw_m is not None else None
+            sl_m = m_meas[x, :, z0 : z1 + 1] if m_meas is not None else None
+            sl_vol = m_vol[x, :, z0 : z1 + 1] if m_vol is not None else None
             sg_uris.append(
                 img_store.add(
                     _render_slice_png(
                         sl,
                         sl_m,
-                        mask_raw_2d=sl_raw,
+                        mask_vol_2d=sl_vol,
                         title=f"{disp} sagittal x={x}",
                         vmin=vmin,
                         vmax=vmax,
@@ -833,7 +754,7 @@ def build_ctpet_slice_viewer_html(
         margin_vox=margin_vox,
         img_store=img_store,
         dom_id=ct_dom,
-        title="CT-PET slices (CT underlay; red=post-processed, blue=raw TotalSegmentator)",
+        title="CT-PET slices (CT underlay; red=post-processed for measure, blue=post-processed for volumetry)",
         default_roi="HIGADO",
         review_ctx=review_ctx,
         sync_peer_dom_ids=[pet_dom],
@@ -879,7 +800,7 @@ def build_ctpet_pet_slice_viewer_html(
         margin_vox=margin_vox,
         img_store=img_store,
         dom_id=pet_dom,
-        title="CT-PET slices (PET SUV underlay; red=post-processed, blue=raw TotalSegmentator)",
+        title="CT-PET slices (PET SUV underlay; red=post-processed for measure, blue=post-processed for volumetry)",
         default_roi="HIGADO",
         review_ctx=None,
         sync_peer_dom_ids=[ct_dom],
@@ -941,10 +862,9 @@ def build_dixon_slice_viewer_html(
     roi_sg_mid: dict[str, int] = {}
 
     for disp, region, mask_file, label_ids in _dixon_roi_specs():
-        raw_m: np.ndarray | None = None
+        m_meas: np.ndarray | None = None
+        m_vol: np.ndarray | None = None
         try:
-            if mask_file not in cache_mask:
-                cache_mask[mask_file] = _load_mask(stage2, mask_file)
             if region not in cache_water:
                 stem = f"{dx_cfg.INPUT_PREFIX}_{region}_WATER"
                 cache_water[region] = imread(str(resolve_nii(nifti_dir, stem)), axes="XYZ")
@@ -952,24 +872,30 @@ def build_dixon_slice_viewer_html(
                 cache_vrange[region] = _full_volume_display_range(vol0)
                 zmid = min(vol0.shape[2] // 2, vol0.shape[2] - 1)
                 cache_sag_y_height[region] = _figsize_for_slice(vol0[:, :, zmid])[1]
-            label_img = cache_mask[mask_file]
             water_img = cache_water[region]
             vol = to_numpy(water_img.data)
             vmin, vmax = cache_vrange[region]
-            bin_mask = _build_binary_mask(label_img, label_ids)
-            m = to_numpy(bin_mask.data) > 0
-            if vol.shape != m.shape:
-                continue
         except Exception:
             continue
         try:
-            pp_names = _pp_label_names(mask_file, label_ids, pipeline="dixon")
-            raw_m = _load_raw_ts_mask_dixon(
-                lay, subject, region, pp_names, target=water_img
-            )
+            if mask_file not in cache_mask:
+                cache_mask[mask_file] = _load_mask(stage2, mask_file)
+            m_meas = to_numpy(_build_binary_mask(cache_mask[mask_file], label_ids).data) > 0
         except Exception:
-            raw_m = None
-        if not np.any(m):
+            m_meas = None
+        try:
+            m_vol = to_numpy(
+                _build_binary_mask(_load_vol_mask(stage2, mask_file, cache_mask), label_ids).data
+            ) > 0
+        except Exception:
+            m_vol = None
+        # Masks off the WATER grid cannot be overlaid on it.
+        if m_meas is not None and m_meas.shape != vol.shape:
+            m_meas = None
+        if m_vol is not None and m_vol.shape != vol.shape:
+            m_vol = None
+        m = _mask_union(m_meas, m_vol)
+        if m is None or not np.any(m):
             continue
 
         spine_z = None
@@ -990,14 +916,14 @@ def build_dixon_slice_viewer_html(
         ax_uris: list[str] = []
         for z in z_indices:
             sl = vol[:, :, z]
-            sl_m = m[:, :, z]
-            sl_raw = raw_m[:, :, z] if raw_m is not None else None
+            sl_m = m_meas[:, :, z] if m_meas is not None else None
+            sl_vol = m_vol[:, :, z] if m_vol is not None else None
             ax_uris.append(
                 img_store.add(
                     _render_slice_png(
                         sl,
                         sl_m,
-                        mask_raw_2d=sl_raw,
+                        mask_vol_2d=sl_vol,
                         title=f"{disp} axial z={z}",
                         vmin=vmin,
                         vmax=vmax,
@@ -1017,14 +943,14 @@ def build_dixon_slice_viewer_html(
         co_uris: list[str] = []
         for y in y_indices:
             sl = vol[:, y, z0 : z1 + 1]
-            sl_m = m[:, y, z0 : z1 + 1]
-            sl_raw = raw_m[:, y, z0 : z1 + 1] if raw_m is not None else None
+            sl_m = m_meas[:, y, z0 : z1 + 1] if m_meas is not None else None
+            sl_vol = m_vol[:, y, z0 : z1 + 1] if m_vol is not None else None
             co_uris.append(
                 img_store.add(
                     _render_slice_png(
                         sl,
                         sl_m,
-                        mask_raw_2d=sl_raw,
+                        mask_vol_2d=sl_vol,
                         title=f"{disp} coronal y={y}",
                         vmin=vmin,
                         vmax=vmax,
@@ -1041,14 +967,14 @@ def build_dixon_slice_viewer_html(
         sg_uris: list[str] = []
         for x in x_indices:
             sl = vol[x, :, z0 : z1 + 1]
-            sl_m = m[x, :, z0 : z1 + 1]
-            sl_raw = raw_m[x, :, z0 : z1 + 1] if raw_m is not None else None
+            sl_m = m_meas[x, :, z0 : z1 + 1] if m_meas is not None else None
+            sl_vol = m_vol[x, :, z0 : z1 + 1] if m_vol is not None else None
             sg_uris.append(
                 img_store.add(
                     _render_slice_png(
                         sl,
                         sl_m,
-                        mask_raw_2d=sl_raw,
+                        mask_vol_2d=sl_vol,
                         title=f"{disp} sagittal x={x}",
                         vmin=vmin,
                         vmax=vmax,
@@ -1071,7 +997,7 @@ def build_dixon_slice_viewer_html(
 
     return _viewer_html(
         dom_id=f"dx_sv_{_safe_stem(subject)}",
-        title="Dixon slices (WATER underlay; red=post-processed, blue=raw TotalSegmentator)",
+        title="Dixon slices (WATER underlay; red=post-processed for measure, blue=post-processed for volumetry)",
         roi_names=roi_names,
         roi_to_axial=roi_to_ax,
         roi_to_cor=roi_to_co,
