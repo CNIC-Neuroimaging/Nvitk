@@ -198,6 +198,30 @@ FLOW_REGION_ID_TO_TERRITORY: dict[str, str] = {
     "left_transverse": "Venous Drainage",
     "right_transverse": "Venous Drainage",
     "basilar": "Posterior Circulation",
+    # Tree-level hemodynamics (PWV, PITC) name the carotids this way.
+    "l_ica": "Internal Carotid Arteries",
+    "r_ica": "Internal Carotid Arteries",
+    # qvtpy / eICAB since 2026-10-28: the A1 / M1 / P1 are the vessels measured before the split
+    # (LACA / LMCA / LPCA) and keep their territory. The A2 / M2 / P2 carry the same blood further
+    # on, so averaging them with the proximal segments would mix two measurements of one supply:
+    # they get territories of their own.
+    "laca_a1": "Anterior Circulation",
+    "raca_a1": "Anterior Circulation",
+    "lmca_m1": "Anterior Circulation",
+    "rmca_m1": "Anterior Circulation",
+    "lpca_p1": "Posterior Circulation",
+    "rpca_p1": "Posterior Circulation",
+    "laca_a2": "Anterior Circulation (distal)",
+    "raca_a2": "Anterior Circulation (distal)",
+    "lmca_m2": "Anterior Circulation (distal)",
+    "rmca_m2": "Anterior Circulation (distal)",
+    "lpca_p2": "Posterior Circulation (distal)",
+    "rpca_p2": "Posterior Circulation (distal)",
+    # Superior cerebellar arteries: basilar branches, posterior circulation like the vertebrals.
+    "lsca": "Posterior Circulation",
+    "rsca": "Posterior Circulation",
+    "left_sca": "Posterior Circulation",
+    "right_sca": "Posterior Circulation",
 }
 
 TERRITORY_FLOW_REGIONS: dict[str, tuple[str, ...]] = {

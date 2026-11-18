@@ -1,6 +1,6 @@
 # nvitk algorithm animations (Manim)
 
-Three animations, each split in two scripts:
+Seven animations, each split in two scripts:
 
 | script | environment | job |
 | --- | --- | --- |
@@ -8,7 +8,8 @@ Three animations, each split in two scripts:
 | `*_manim.py` | a manim env (numpy only) | draws those arrays; never imports nvitk |
 
 The animations therefore show what the algorithms actually produce, not a hand-drawn
-approximation. `anim_voxels.py` holds the shared voxel-cloud renderer (`VoxelField`: colour,
+approximation. The four newer ones (below, "Dense GPU animations") draw their 3D content on the GPU
+and need `moderngl` in the manim environment as well. `anim_voxels.py` holds the shared voxel-cloud renderer (`VoxelField`: colour,
 opacity, stroke and size per cube, interpolated between states) and the caption helpers used by
 the two newer scenes.
 
@@ -20,6 +21,85 @@ the two newer scenes.
 
 The two newer `.npz` files hold display blocks and small voxel sets derived from those subjects'
 eICAB masks (no image volume, no identifiers beyond the subject id).
+
+## Dense GPU animations (eICAB, morphometrics, qvtpy pipeline, hemodynamics)
+
+Four outreach animations of the TOF morphometrics and 4D-flow hemodynamics pipelines, on the
+**stenosis example** (`/home/imarcoss/placeholder/animations/stenosis example`, PESA1108809: a 26 %
+stenosis of the left ICA). Two steps use the **fetal example** (`fetal example`, PESA2140369)
+instead, because the stenosis subject cannot show them: the circle-of-Willis variants (absent right
+A1, thread-like right P1, fetal right PCA) and the siphon min-cut (its siphons close no loop).
+Unlike the Cairo scenes above (3 mm display blocks, ~1.1 s per frame for 1,600 cubes), they draw
+every voxel at its own grid: 0.5 mm TOF voxels (~90,000 cubes), 0.78 mm 4D-flow voxels, surfaces,
+wireframes, centerline tubes, ~16,000 velocity arrows, 5,000 particles with trails, live
+cross-section maps and ray-marched MIPs of the TOF / 4D-flow angiograms, at a few ms per 1080p frame.
+
+| animation | scene | what it shows |
+| --- | --- | --- |
+| `eicab_full` | `EicabFull` | TOF MIP → eICAB's circle-of-Willis labels in their box → the post-process: half-maximum re-segmentation (the mask peels from the outside in; the AChAs go with it), ICAs to the floor along the minimum-cost paths, the distal growth (Frangi tree, competing fronts in arrival order, written as A2 / M2), then quickly on one isolated ICA (fetal example) the siphon min-cut (loop, pretess, bridge / contact, cost field, opened ring, cut, β₁ 1 → 0), WB_pp vs CW_pp |
+| `morpho` | `TofMorphometrics` | stage 7 in general: voxels → a surface per vessel as points + wireframe (close-up on the ICA) → VMTK centerlines → the two radii along the LICA (inscribed sphere rolling, six cross-sections with their 36 rays, live profile) → length / tortuosity / curvature / siphon mask → the stenosis on its path with the robust reference ±20 % band → circle-of-Willis variants (fetal example) → per-vessel table |
+| `qvtpy_pipeline` | `QvtpyPipeline` | stages 2-5: TOF and 4D-flow angiograms misaligned → the rigid FLIRT transform applied gradually → the labels in the 4D-flow grid with their centerlines and the named sinuses → stage 4: local threshold, trunk region growing, the blood flood (tree + watershed wave), siphon cut → stage 5 LOC planes |
+| `hemo` | `FlowHemodynamics` | stage 6 in general: velocity arrows pulsing through the cardiac cycle (cardiac clock) → particle pathlines → one LOC: live through-plane speed map + arrows, Q(t), PI / RI → all LOCs + mean-flow chart → dense stations coloured by PI, quality gate, PITC fit → the pulse wave travelling along the left ICA tree, beside its PWV plot: each station's cross-correlation delay vs distance (quality-excluded grey, MAD outliers open) and the area-weighted fit `pwv_fielding_m_s` |
+
+The stenosis example ships only its `eicab/` outputs. The qvtpy stages 2-6 were run locally for
+the animations (`python -m nvitk.pipes.qvtpy.run --stages stage2,stage3,stage4,stage5,stage6
+--subjects PESA1108809 --nifti-root ~/DATA/PESA-Brain/Morphometrics/DATA --output-root <scratch>
+--submit local --backend cpu`, with the example's `eicab/` copied under `<scratch>/PESA1108809/`),
+and the pipeline / hemodynamics precomputes take a `--root` holding `eicab/`, `4DFlow/` and
+`qvtpy/stage*` (symlinks are fine).
+
+Shared modules: `gl_render.py` (headless moderngl/EGL renderer: instanced cubes, spheres and
+arrows, meshes, tubes revealed along their length, textured quads, volume MIP; opaque first, then
+translucent geometry sorted back-to-front), `gl_scene.py` (`GLScene`: a manim `Scene` whose
+camera background is the GPU frame, orbit camera, `voxel_transition` with delayed waves and glow,
+3D-anchored labels, the same captions and `--no-text` behaviour as `CaptionScene`), and
+`vessel_palette.py` (eICAB and qvtpy label colours, ramps).
+
+What each precompute runs (nvitk environment; `PYTHONPATH=src` if the env holds a packaged nvitk):
+
+- `eicab_full_precompute.py`: `postprocess_eicab_variants` once (CW + WB masks), recording each
+  step, the trunk paths, the distal tree / owner / arrival cost; and for the siphon step
+  (`--siphon-eicab-dir`, the fetal example) its post-process up to the siphon correction, whose WB
+  mask goes through `siphon_cut_precompute.compute` at 0.5 mm voxels (the same cut stage 1 made).
+- `morpho_precompute.py`: `run_morphometrics_case` on `TOF_eICAB_WB_pp` (as stage 7; 5-15 min with
+  VMTK, cached in `--morpho-dir`), surfaces, point tables, six LICA cross-sections cut as
+  `compute_cross_section_radius` cuts them (their ray-median radii match the point table), the
+  most severe stenosis; and the variants subject (`--variants-mask`, `--variants-morpho-dir`).
+- `qvtpy_pipeline_precompute.py`: the FLIRT matrix as a world transform
+  (`flirt_matrix_to_world`), stage 3's outputs, and `build_seg_4dflow_local` re-run with the
+  example's own settings, recorded per step (it reproduces the shipped `seg_4dflow` exactly).
+- `hemo_precompute.py`: velocities via `velocity_mm_s_from_phases`, `measure_loc_row` per LOC
+  (matches the shipped `loc_measurements.csv`), `compute_vessel_hemodynamics(collect_plot_data=True)`
+  (matches `vessel_hemodynamics.csv`; the cross-correlation PWV is refitted from its plot data with `pwv_fielding_xcor`'s filters and reproduces `pwv_fielding_m_s`), the through-plane speed on each LOC plane, and particle
+  pathlines. The pathlines are a visualisation aid, not a stage-6 output: RK2 through the
+  time-resolved field, with a gentle pull towards the lumen centre near the wall so particles
+  survive the bends the 0.8 mm grid resolves coarsely (the precompute's docstring gives the numbers).
+
+```bash
+# nvitk environment
+python scripts/anim/eicab_full_precompute.py -o scripts/anim/eicab_full_stages.npz        # ~1 min
+python scripts/anim/morpho_precompute.py -o scripts/anim/morpho_stages.npz --morpho-dir /tmp/morpho_sten \
+    --variants-morpho-dir /tmp/morpho_fetal
+python scripts/anim/qvtpy_pipeline_precompute.py -o scripts/anim/qvtpy_pipeline_stages.npz --root <root>  # ~1 min
+python scripts/anim/hemo_precompute.py -o scripts/anim/hemo_stages.npz --root <root>                     # ~1 min
+
+# manim environment (needs moderngl and an EGL-capable GPU driver)
+EF_FAST=1 python scripts/anim/eicab_full_manim.py -ql --fps 15      # preview, ~20 s
+python scripts/anim/eicab_full_manim.py -qh --fps 30                # 1080p -> eicab_full.mp4
+python scripts/anim/eicab_full_manim.py -qk --fps 30                # 4K
+python scripts/anim/morpho_manim.py -qh --fps 30                    # -> tof_morphometrics.mp4
+python scripts/anim/qvtpy_pipeline_manim.py -qh --fps 30            # -> qvtpy_pipeline.mp4
+python scripts/anim/hemo_manim.py -qh --fps 30                      # -> flow_hemodynamics.mp4
+```
+
+Fast previews: `EF_FAST`, `MO_FAST`, `QP_FAST`, `HE_FAST`; other inputs: `EF_STAGES`,
+`MO_STAGES`, `QP_STAGES`, `HE_STAGES`. `--no-text` drops the explanatory text (captions, title
+cards, plot titles, 3D name tags, step notes, formulas) but, unlike the Cairo scenes, keeps what the
+picture needs to be read: plots with their axes, colour keys and legends, the flow chart, the
+per-vessel table, the re-segmentation inset and the siphon's β₁ counter (`GLScene.fixed(keep=True)`).
+Both versions stay frame for frame in step. The four
+`.npz` files are git-ignored: they hold image volumes (TOF, CD, velocities) and are 5-20 MB;
+regenerate them with the precomputes. The example subject's identifier is shown nowhere.
 
 ## The manim environment
 

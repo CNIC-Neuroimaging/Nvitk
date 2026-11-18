@@ -75,6 +75,12 @@ def _spacing_origin_direction(image: Any, ndim: int) -> tuple[
     # Derive missing / inconsistent geometry from the voxel->world affine
     # (critical for ANTsPyNet template registration / center-of-mass alignment).
     aff = _affine_matrix(image)
+    if aff is not None and aff.shape == (4, 4):
+        # nvitk affines are RAS (nibabel); ANTs/ITK physical space is LPS. Unflipped, ANTsPyNet sees
+        # the head turned 180° about S-I and lateralised outputs (DKT hemispheres) come out mirrored.
+        from nvitk.io._common import RAS_LPS_FLIP
+
+        aff = RAS_LPS_FLIP @ aff
     if aff is not None:
         n = min(3, ndim)
         aff_spacing = tuple(float(np.linalg.norm(aff[:n, i])) for i in range(n))

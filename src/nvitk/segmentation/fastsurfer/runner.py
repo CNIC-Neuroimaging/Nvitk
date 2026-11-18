@@ -294,8 +294,15 @@ def run(
     *,
     on_line: Callable[[str], None] | None = None,
     cwd: str | Path | None = None,
+    stop_when: Callable[[str], bool] | None = None,
 ) -> int:
-    """Run a FastSurfer command in the foreground, streaming its output; returns the exit code."""
+    """Run a FastSurfer command in the foreground, streaming its output; returns the exit code.
+
+    *stop_when* is checked on every output line; when it returns True the whole run (the script
+    and the Python steps it started) is terminated and ``-1`` returned. ``run_fastsurfer.sh``
+    carries on after a failed segmentation (bias field, stats...), which on a large input can
+    take most of an hour before it reports anything.
+    """
     log.info("$ " + " ".join(shlex.quote(str(a)) for a in argv))
     proc = subprocess.Popen(
         [str(a) for a in argv],
@@ -305,6 +312,9 @@ def run(
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        # Own process group only when it may be stopped: the children die with the script, and
+        # an interactive Ctrl-C still reaches an ordinary run.
+        start_new_session=stop_when is not None,
     )
     assert proc.stdout is not None
     for line in proc.stdout:
@@ -313,6 +323,21 @@ def run(
             on_line(text)
         else:
             print(text, flush=True)
+        if stop_when is not None and stop_when(text):
+            import os
+            import signal
+
+            log.warning(f"FastSurfer stopped: {text.strip()}")
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                proc.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
+            return -1
     return int(proc.wait())
 
 

@@ -14,6 +14,7 @@ import pandas as pd
 
 from nvitk.core.logger import Logger
 from nvitk.db.repo import _visit_label
+from nvitk.measure.morpho.export_utils.report import REPORT_FEATURES, REPORT_LESION_COLUMNS
 from nvitk.pipes.qvtpy.common.morpho_db_publish import _SCALAR_VARS as _MORPHO_SCALAR_VARS
 
 log = Logger()
@@ -36,8 +37,11 @@ KIND_MODALITY: dict[str, str] = {
     "tof": "tof",
 }
 
-# Vessel-wise LOC hemodynamics (per branch / LOC).
-QVTPY_VESSEL_FEATURES: tuple[str, ...] = ("flow_mean", "pi", "ri", "psf", "flow_tseries")
+# Vessel-wise LOC hemodynamics (per vessel; ``damping_index`` per branch, e.g. ``LMCA_M2-a``).
+QVTPY_VESSEL_FEATURES: tuple[str, ...] = (
+    "flow_mean", "pi", "ri", "velocity_mean", "cross_section_area", "damping_index", "psf",
+    "flow_tseries",
+)
 
 #: Variables stored one row per cardiac frame rather than one row per vessel. They load as a *set*
 #: of columns (``flow_tseries``, ``flow_tseries_f1``, ...), because the waveform is the measurement;
@@ -89,7 +93,11 @@ T1_FEATURES: tuple[str, ...] = (
     "t1_subcortical_volume",
 )
 FLAIR_FEATURES: tuple[str, ...] = ("wmh_dist", "wmh_freq", "wmh_les", "wmh_reg")
-TOF_FEATURES: tuple[str, ...] = tuple(_MORPHO_SCALAR_VARS.keys())
+#: The stage-7 report's variables (``tof_morpho_v2``) first, then the legacy Excel aggregates that
+#: only ``tof_morpho_v1`` publishes, so a saved config naming one of those still resolves.
+TOF_FEATURES: tuple[str, ...] = tuple(dict.fromkeys(
+    (*REPORT_FEATURES, *REPORT_LESION_COLUMNS, *_MORPHO_SCALAR_VARS)
+))
 
 FEATURE_ALIASES: dict[str, str] = {
     "flow": "flow_mean",
@@ -235,6 +243,11 @@ _HEMISPHERE_CANONICAL: dict[str, str] = {
     "sssv": "SSSV",
     "strv": "STRV",
     "watershed": "Watershed",
+    # The A1 / M1 / P1 keep the bare names above (the vessel measured before the split, and ASL's
+    # keys); the A2 / M2 / P2 are vessels of their own.
+    "aca_a2": "ACA_A2",
+    "mca_m2": "MCA_M2",
+    "pca_p2": "PCA_P2",
 }
 
 # ASL region ids carry the smoothing kernel as a suffix (``left_mca_8``, ``watershed_0``).
@@ -254,9 +267,10 @@ def region_to_hemisphere_pair_key(region_id: str) -> str:
     in separator or case land on the same key. That is what lets a 4D-flow measurement grouped by
     hemisphere join an ASL one on ``(subject_uid, territory)``.
     """
-    from nvitk.pipes.qvtpy.labels import qvtpy_legacy_vessel_name
+    from nvitk.pipes.qvtpy.labels import qvtpy_legacy_vessel_name, qvtpy_vessel_of_branch
 
-    raw = qvtpy_legacy_vessel_name(str(region_id).strip())  # LMCA_M1 -> LMCA
+    # LMCA_M2-a -> LMCA_M2 (a branch pairs with nothing on the other side), LMCA_M1 -> LMCA.
+    raw = qvtpy_legacy_vessel_name(qvtpy_vessel_of_branch(str(region_id).strip()))
     if not raw:
         return raw
     su = raw.upper().replace("-", "_")
@@ -270,9 +284,8 @@ def region_to_hemisphere_pair_key(region_id: str) -> str:
     m = _SIDE_LETTER_RE.match(su)
     if m:
         token = m.group(2)
-        canonical = _canonical_hemisphere_key(token)
-        if canonical != token:
-            return canonical
+        if token.lower() in _HEMISPHERE_CANONICAL:
+            return _canonical_hemisphere_key(token)
         return token.upper() if len(token) <= 4 else token.lower()
     stripped = _LR_PREFIX_RE.sub("", raw)
     return _canonical_hemisphere_key(stripped) if stripped else raw
@@ -403,11 +416,14 @@ def assign_group_key(
             asl_region_id_to_territory,
         )
 
+        from nvitk.pipes.qvtpy.labels import qvtpy_vessel_of_branch
+
         kind = str(kind).strip().lower()
         if kind == "asl":
             return asl_region_id_to_territory(rid) or "Unmapped"
-        return REGION_TO_TERRITORY_FLOW.get(rid) or REGION_TO_TERRITORY_FLOW.get(
-            rid.lower(), "Unmapped"
+        vessel = qvtpy_vessel_of_branch(rid)  # a branch (LMCA_M2-a) lies in its vessel's territory
+        return REGION_TO_TERRITORY_FLOW.get(vessel) or REGION_TO_TERRITORY_FLOW.get(
+            vessel.lower(), "Unmapped"
         )
     return rid
 

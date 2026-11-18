@@ -120,7 +120,7 @@ FAT_TASK_FALLBACK: str = "tissue_types"
 # Extra in-plane (XY only) erosion steps applied to the L3/L4 bone marrow after the
 # isotropic-in-voxels erosion. CT voxels are ~3x thicker than wide, so that erosion
 # trims far more in Z than in XY and leaves the marrow close to the cortex in-plane.
-MO_XY_ERODE: int = 4
+MO_XY_ERODE: int = 3
 
 # Bone marrow *volume* mask: raw L3/L4 vertebra voxels below this HU, biggest
 # component. Volumes skip the erosions, so the cortex is stripped by density instead.

@@ -91,7 +91,7 @@ from nvitk.types import Image
 # label, a margin against organ motion between the CT and PET acquisitions so the SUV
 # statistics stay inside the structure. Applied to FAT, FAT_BATCH, ORGANS and MUSCLES,
 # which the stage-3 SUVs and the QC report (red contours) both read; the ``*_VOL``
-# twins used for volumes are never eroded. The bone marrow (MO) is left out: it is
+# twins used for volumes (blue contours) are never eroded. The bone marrow (MO) is left out: it is
 # already deep inside the vertebra (``_BN_ERODE`` + ``cfg.MO_XY_ERODE``). The
 # quadriceps also keep their ``cfg.MUSCLE_ERODE_AFTER_SKELETON`` iteration before
 # this. 0 (or a missing label) means no erosion; a label that erosion would empty is

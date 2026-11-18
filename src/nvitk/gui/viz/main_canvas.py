@@ -117,6 +117,29 @@ def overridable(layer: Any) -> bool:
     return False
 
 
+#: Set by code that adds a layer meant for the orthogonal views only (e.g. the brain-vascular map's
+#: 2D region overlay while the canvas is in 3D): the filter keeps it off the canvas, and it stays
+#: off whether or not the filter existed when the layer was added.
+KEEP_OFF_CANVAS_ATTR = "_nvitk_keep_off_canvas"
+
+
+def keep_off_canvas(viewer: Any, layer: Any, off: bool) -> None:
+    """Draw *layer* in the orthogonal views only (*off*), or on the main canvas as well."""
+    setattr(layer, KEEP_OFF_CANVAS_ATTR, bool(off))
+    canvas = main_canvas_filter(viewer)
+    if canvas is not None:
+        canvas.apply()
+        return
+    # No filter yet (the orthogonal views have not been opened): flag the layer directly.
+    setattr(layer, CANVAS_HIDDEN_ATTR, bool(off))
+    try:
+        visual = viewer.window._qt_viewer.canvas.layer_to_visual.get(layer)
+    except Exception:  # noqa: BLE001
+        visual = None
+    if visual is not None:
+        visual._on_visible_change()
+
+
 class MainCanvasFilter(QObject):
     """Decides, layer by layer, whether and how the main canvas draws it."""
 
@@ -161,7 +184,7 @@ class MainCanvasFilter(QObject):
     # per-layer visibility
 
     def is_manually_hidden(self, layer: Any) -> bool:
-        return id(layer) in self._manual
+        return id(layer) in self._manual or bool(getattr(layer, KEEP_OFF_CANVAS_ATTR, False))
 
     def set_manually_hidden(self, layer: Any, hidden: bool) -> None:
         """Keep *layer* off the canvas (or put it back), leaving its visibility alone."""
@@ -460,12 +483,14 @@ def world_geometry(viewer: Any) -> Iterator[None]:
 
 
 __all__ = [
+    "KEEP_OFF_CANVAS_ATTR",
     "MainCanvasFilter",
     "PREF_CANVAS",
     "PREF_RESAMPLE",
     "TRUE_ATTR",
     "main_canvas_filter",
     "overridable",
+    "keep_off_canvas",
     "true_transform",
     "world_geometry",
 ]

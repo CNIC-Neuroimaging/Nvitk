@@ -440,6 +440,22 @@ def qvtpy_legacy_vessel_name(name: str) -> str:
     return m.group(1).upper() if m else str(name)
 
 
+_SPLIT_BRANCH_RE = re.compile(r"^([LR](?:ACA|MCA|PCA))[_\-]?([AMP][12])(?:-?[a-z]|-b\d+)?$", re.IGNORECASE)
+_EXTRA_BRANCH_RE = re.compile(r"-b\d+$", re.IGNORECASE)
+
+
+def qvtpy_vessel_of_branch(name: str) -> str:
+    """The vessel a branch-level region id belongs to: ``LMCA_M2-a`` (and the pre-2026-10-28
+    ``LMCA-M2a``) -> ``LMCA_M2``, ``LMCA-M1`` -> ``LMCA_M1``, ``LICA-b2`` -> ``LICA``; a vessel name
+    unchanged. Stage 6 publishes some variables (``damping_index``) per branch (see
+    :func:`qvtpy_branch_names`)."""
+    text = str(name).strip()
+    m = _SPLIT_BRANCH_RE.match(text)
+    if m:
+        return f"{m.group(1)}_{m.group(2)}".upper()
+    return _EXTRA_BRANCH_RE.sub("", text)
+
+
 def qvtpy_branch_parent_label(branch_name: str) -> int | None:
     """Parent qvtpy label id for a branch name like ``LMCA-M2a`` (or bare name)."""
     key = str(branch_name).strip()
@@ -449,6 +465,7 @@ def qvtpy_branch_parent_label(branch_name: str) -> int | None:
 
 __all__ = [
     "qvtpy_legacy_vessel_name",
+    "qvtpy_vessel_of_branch",
     "QVTPY_LACA_A2",
     "QVTPY_RACA_A2",
     "QVTPY_LMCA_M2",
