@@ -69,6 +69,9 @@ class GLScene(Scene):
     """A manim scene with a GPU 3D layer underneath (module docstring)."""
 
     def __init__(self, **kwargs):
+        # manim's partial-movie cache hashes the mobjects, not the GPU layer: a re-render after a
+        # change to the 3D state alone would splice in stale clips
+        config.disable_caching = True
         super().__init__(camera_class=_GLCamera, **kwargs)
 
     # -- set-up ---------------------------------------------------------------------------------

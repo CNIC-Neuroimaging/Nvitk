@@ -101,6 +101,54 @@ Both versions stay frame for frame in step. The four
 `.npz` files are git-ignored: they hold image volumes (TOF, CD, velocities) and are 5-20 MB;
 regenerate them with the precomputes. The example subject's identifier is shown nowhere.
 
+## PESA-Fat: Dixon MRI and CT-PET (`pesa_dixon_*.py`, `pesa_ctpet_*.py`)
+
+Two outreach animations of the PESA-Fat v5 pipelines (`nvitk.pipes.pesa_fat`), stages 1-3, on one
+Visit-5 subject (PESA1993744, batch 202603_Week4: both a Dixon and a CT-PET, segmented by the
+current stage 1 with `tissue_4_types`, the WATER-contrast liver and the leg skeleton). Same GPU
+renderer as above; red = the eroded measurement / SUV mask, blue = its uneroded volume twin (the QC
+report's convention); colours in `pesa_palette.py`.
+
+| animation | scene | what it shows |
+| --- | --- | --- |
+| `pesa_dixon` | `PesaDixon` | the three Dixon stations (neck and shoulders, abdomen, thighs) with their FAT / WATER / fat-fraction / T2* slices → stage 1 TotalSegmentator classes → the measured structures → the liver from the WATER run (gained / lost against the FAT run) → its vessels out (T2* > 50 ms) → the renal pelvis (convex hull minus kidney, grown twice) out → L3 / L4 eroded to the bone marrow → the femur (grown) out of the quadriceps, on a coronal cut → the one-voxel measurement erosion → voxels coloured by fat fraction → FF / T2* / volume chart, liver water fraction |
+| `pesa_ctpet` | `PesaCtPet` | CT bone MIP and PET MIP → stage 1 classes → visceral and subcutaneous fat, the arms and legs out → the organs cleared with their margins (coronal cut) → the ureter from the PET → the L3-L4 slab (FAT_BATCH) → the intermuscular fat split into legs / trunk at the quadriceps' slices, the neighbour vote → organs and hemisphere-split muscles, the skeleton → L3 / L4 bone marrow at the CT grid (isotropic then in-plane erosion; the < 400 HU volume twin) → the SUV erosion against motion → the last PET bed: the quadriceps cut 41 mm below the leg-bed centre (noise inset: model and measured, the cut slices staying in MUSCLES_VOL, the SUV changes) → voxels coloured by SUV → SUVmean / SUVmax / volume chart |
+
+- `pesa_dixon_precompute.py` rebuilds stage 2 with `dixon_v5.stage2_postprocess`'s own functions
+  (NumPy backend), recording each step at the Dixon grid (2 × 2 × 3 mm, ~770,000 voxels), and
+  checks the result against `_process` run into a temporary folder (0 voxels differ on all six
+  masks) and the means against `stage3_measure.process_subject` (matches the subject's Excel row).
+- `pesa_ctpet_precompute.py` runs the real `ct_pet_v5.stage2_postprocess._process` (CuPy) with
+  recorders wrapped around its steps (`_organs_mask`, `_with_dilated_organs`,
+  `_remove_extremities`, `_process_bladder`, `_neighbour_majority`, `split_lr_by_cc`,
+  `_subtract_skeleton`, `trim_last_pet_bed`), then `stage3_measure.process_subject` for the chart
+  and the quadriceps SUVs with and without the last-bed trim. The trim needs the PET bed geometry
+  (`PT_beds.json` in the NIfTI folder, else the PET DICOM under `--dicom-root`; stage 2 then writes
+  `PT_beds.json` into the NIfTI folder, so use a copy when that folder must stay untouched). The CT grid is pooled
+  3 × 3 × 2 for the voxels (~1.35 M; a block takes its most frequent label so thin fat layers
+  stay); the bone marrow stays at the CT grid; the SUV of each voxel is sampled from the PET (bw).
+  At that pooling the skeleton subtraction from the muscles changes 2 voxels, so the scene shows
+  the skeleton and says it rather than animating it.
+
+Both default to the cluster layout (`/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT`, its `NIFTI`
+and `RESULTS`); a local copy of the subject's NIfTI and stage-1 folders (~1 GB) works with
+`--nifti-root` / `--results-root`.
+
+```bash
+# nvitk environment (PYTHONPATH=src if the env holds a packaged nvitk)
+python scripts/anim/pesa_dixon_precompute.py -o scripts/anim/pesa_dixon_stages.npz --nifti-root <NIFTI> --results-root <RESULTS>  # ~15 s
+python scripts/anim/pesa_ctpet_precompute.py -o scripts/anim/pesa_ctpet_stages.npz --nifti-root <NIFTI> --results-root <RESULTS> --dicom-root <DICOM>  # ~75 s
+
+# manim environment
+PD_FAST=1 python scripts/anim/pesa_dixon_manim.py -ql --fps 15     # preview
+python scripts/anim/pesa_dixon_manim.py -qh --fps 30               # -> pesa_dixon.mp4
+python scripts/anim/pesa_ctpet_manim.py -qh --fps 30               # -> pesa_ctpet.mp4
+python scripts/anim/pesa_ctpet_manim.py -qh --fps 30 --no-text     # -> pesa_ctpet_notext.mp4
+```
+
+`GLScene` turns manim's partial-movie cache off: it hashes the mobjects only, so after a change to
+the 3D state alone a cached render would splice in stale clips.
+
 ## The manim environment
 
 Created with conda-forge (it needs native pango/cairo, which the PyPI wheels do not supply for
@@ -227,3 +275,20 @@ Manim re-rasterises every cube each frame, and the slow camera rotation means no
 be cached. At 1080p30: blood flood (~1,800 cubes) ~45 min; siphon (~1,460 cubes, 58 s of video)
 and eICAB post-process (~1,600 cubes, 64 s) about 35 min each (both can render in parallel). The `*_FAST=1` previews decimate the
 cubes and shorten every beat.
+
+## PET bed edge (PESA-Fat CT-PET) — `pet_bed_edge_*.py`
+
+`PetBedEdge` (Cairo, 2D, ~1 min to render at 1080p): why the last slices of a whole-body PET cut
+through the thighs are noisy, and the proposed (not implemented) per-subject trim of the
+quadriceps SUV mask. Beds from `FrameReferenceTime`, bed centres from the Philips `(7053,10D5)`
+plateaus, the triangular sensitivity model, measured noise vs `sqrt(0.78 / sens)`, the measure
+(red) and volumetry (blue) masks, the 41 mm rule and its effect, and why the number of removed
+slices changes between subjects. Spanish text. The `.npz` holds PET/CT slices (git-ignored).
+
+```bash
+python scripts/anim/pet_bed_edge_precompute.py --root ~/placeholder --subject PESA1256641   # nvitk env, ~15 s
+python scripts/anim/pet_bed_edge_manim.py -qh --fps 30            # manim env -> pet_bed_edge.mp4
+python scripts/anim/pet_bed_edge_manim.py -qh --fps 30 --no-text  # -> pet_bed_edge_notext.mp4
+```
+
+Render the two versions one after the other: in parallel they race on manim's text cache.

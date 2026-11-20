@@ -19,7 +19,9 @@ Produces the following per-subject label files under
 
 FAT, FAT_BATCH, ORGANS and MUSCLES are the SUV masks: each label is eroded by its
 :data:`SUV_ERODE` iterations (top of this module) as a margin against organ motion
-between CT and PET.
+between CT and PET. In MUSCLES the quadriceps are also cut where the lowest PET
+bed leaves them too noisy (:func:`trim_last_pet_bed`, :data:`cfg.PET_EDGE_TRIM`),
+and the plane and what it removed are written to ``PET_EDGE_TRIM.json``.
 
 MO, FAT, FAT_BATCH, ORGANS and MUSCLES also get a ``<NAME>_VOL.nii.gz`` twin with
 the same labels, read by the stage-3 volumes. It skips the erosions of the
@@ -45,6 +47,7 @@ v5 changes
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +72,7 @@ from nvitk.pipes.pesa_fat.common.paths import (
     resolve_nii_optional,
 )
 from nvitk.pipes.pesa_fat.common.label_erosion import erode_labels
+from nvitk.pipes.pesa_fat.common.pet_beds import PetBeds, check_leg_centre, ensure_pet_beds
 from nvitk.pipes.pesa_fat.ct_pet_v5 import config as cfg
 from nvitk.pipes.pesa_fat.ct_pet_v5.labels import (
     BODY_LABELS,
@@ -1003,6 +1007,78 @@ def build_muscles_mask(
     return _erode_after_skeleton(labels) if erode_after_skeleton else labels
 
 
+# Last-bed trim
+
+
+def trim_last_pet_bed(
+    labels: Image,
+    beds: PetBeds | None,
+    label_ids: dict[str, int],
+    *,
+    noise_limit: float = cfg.PET_EDGE_NOISE_LIMIT,
+) -> tuple[Image, dict[str, Any]]:
+    """Clear *label_ids* below the plane where the lowest PET bed's noise exceeds
+    *noise_limit* times the level between two bed centres.
+
+    The plane is snapped to the boundary between two PET slices, so the stage-3 PET
+    resampling drops whole PET slices. Returns the trimmed labels and a report (the
+    plane, the slices it removes and the voxels cleared per label); *labels* comes back
+    unchanged, with the reason in the report, when *beds* is missing or not trusted.
+    """
+    report: dict[str, Any] = {"applied": False, "labels": sorted(label_ids)}
+    if beds is None:
+        report["reason"] = "no PET bed geometry (PT_beds.json missing and no PET DICOM)"
+        log.warning(f"Last-bed trim skipped: {report['reason']}.")
+        return labels, report
+    if (why := check_leg_centre(beds)) is not None:
+        report["reason"] = why
+        log.warning(f"Last-bed trim skipped: {why}.")
+        return labels, report
+    affine = labels.affine
+    if affine is None:
+        report["reason"] = "mask has no affine"
+        log.warning(f"Last-bed trim skipped: {report['reason']}.")
+        return labels, report
+
+    z_cut = beds.inferior_cut(noise_limit)
+    n_slices = beds.slices_below(z_cut)
+    z_plane = beds.slice_boundary(n_slices)
+    report.update(
+        leg_bed_centre_mm=beds.leg_bed_centre(),
+        cut_distance_mm=beds.cut_distance(noise_limit),
+        noise_limit=noise_limit,
+        z_cut_mm=z_cut,
+        z_plane_mm=z_plane,
+        pet_slices_removed=n_slices,
+        voxels_removed={},
+    )
+    if n_slices == 0:
+        report["applied"] = True
+        log.info(
+            f"Last-bed trim: the PET starts {beds.leg_bed_centre() - beds.z_first:.0f} mm below the "
+            "leg-bed centre; no slice is above the noise limit."
+        )
+        return labels, report
+
+    arr = as_backend_array(labels.data).copy()
+    ids = [int(lid) for lid in label_ids.values()]
+    sel = np.isin(arr, np.asarray(ids, dtype=arr.dtype))
+    idx = np.nonzero(sel)
+    a = np.asarray(affine[2], dtype=np.float32)
+    z = a[0] * idx[0] + a[1] * idx[1] + a[2] * idx[2] + a[3]
+    below = z < z_plane
+    values = arr[idx]
+    for name, lid in label_ids.items():
+        report["voxels_removed"][name] = int(np.count_nonzero(below & (values == lid)))
+    arr[tuple(i[below] for i in idx)] = 0
+    report["applied"] = True
+    log.info(
+        f"Last-bed trim: {n_slices} PET slice(s) below z={z_plane:.1f} mm removed from "
+        + ", ".join(f"{k} ({v} vox)" for k, v in report["voxels_removed"].items())
+    )
+    return labels.with_data(arr), report
+
+
 # Per-subject worker
 
 
@@ -1022,10 +1098,17 @@ def _tissue_task(segmentation_dir: Path) -> str:
     return cfg.FAT_TASK_FALLBACK
 
 
-def _process(segmentation_dir: Path, nifti_dir: Path, output_dir: Path, exclude_ureter: bool = True) -> None:
+def _process(
+    segmentation_dir: Path,
+    nifti_dir: Path,
+    output_dir: Path,
+    exclude_ureter: bool = True,
+    dicom_dir: Path | None = None,
+) -> None:
     """Build and write the post-processed masks for one subject from its TotalSegmentator
     outputs, CT and PET volumes: MO/FAT/FAT_BATCH/ORGANS/MUSCLES plus their ``_VOL``
-    variants, FAT_IM, BODY and SKELETON."""
+    variants, FAT_IM, BODY and SKELETON. The PET bed geometry for the last-bed trim
+    comes from ``PT_beds.json`` in *nifti_dir*, else from the PET DICOM in *dicom_dir*."""
     output_dir.mkdir(parents=True, exist_ok=True)
     tissue_task = _tissue_task(segmentation_dir)
     total = _imread(segmentation_dir, "total")
@@ -1052,6 +1135,12 @@ def _process(segmentation_dir: Path, nifti_dir: Path, output_dir: Path, exclude_
     skeleton = build_skeleton_mask(total)
     muscles_vol = build_muscles_mask(total, muscles, skeleton=skeleton, erode_after_skeleton=False)
     muscles_out = erode_labels(_erode_after_skeleton(muscles_vol), MUSCLES_LABELS, SUV_ERODE)
+    if cfg.PET_EDGE_TRIM:
+        trim_ids = {n: MUSCLES_LABELS[n] for n in cfg.PET_EDGE_TRIM_LABELS if n in MUSCLES_LABELS}
+        muscles_out, trim_report = trim_last_pet_bed(
+            muscles_out, ensure_pet_beds(nifti_dir, dicom_dir), trim_ids
+        )
+        (output_dir / "PET_EDGE_TRIM.json").write_text(json.dumps(trim_report, indent=2))
     fat_im = build_fat_im_mask(
         tissue_types, muscles_vol, body=body, total=total, tissue_task=tissue_task
     )
@@ -1092,7 +1181,13 @@ def run_subject(
         raise FileNotFoundError(f"Expected stage-1 outputs under {seg_dir}")
 
     log.info(f"CT-PET v5 stage 2 | subject={subject} | backend={get_current_backend()}")
-    _process(seg_dir, nifti_dir, out_dir, exclude_ureter=exclude_ureter)
+    _process(
+        seg_dir,
+        nifti_dir,
+        out_dir,
+        exclude_ureter=exclude_ureter,
+        dicom_dir=lay.subject_dicom_dir(subject),
+    )
     log.info(f"[{subject}] ok -> {out_dir}")
     return out_dir
 

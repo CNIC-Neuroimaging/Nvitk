@@ -144,4 +144,7 @@ scripts/anim/eicab_full_stages.npz
 scripts/anim/morpho_stages.npz
 scripts/anim/qvtpy_pipeline_stages.npz
 scripts/anim/hemo_stages.npz
+scripts/anim/pet_bed_edge_stages.npz
+scripts/anim/pesa_dixon_stages.npz
+scripts/anim/pesa_ctpet_stages.npz
 /media/

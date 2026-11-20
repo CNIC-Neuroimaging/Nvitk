@@ -133,13 +133,13 @@ vec3 shade(vec3 base, vec3 n, float amb, float spec) {
 
 _CUBE_VS = """
 #version 330
-uniform mat4 view; uniform mat4 proj; uniform float side; uniform int pass_mode;
+uniform mat4 view; uniform mat4 proj; uniform float side; uniform vec3 aspect; uniform int pass_mode;
 in vec3 in_pos; in vec3 in_norm;
 in vec3 i_center; in vec3 i_rgb; in float i_op; in float i_size;
 out vec3 v_n; out vec3 v_local; out vec3 v_ln; out vec3 v_rgb; out float v_op;
 void main() {
     bool skip = i_op < 0.004 || (pass_mode == 0 && i_op < 0.995) || (pass_mode == 1 && i_op >= 0.995);
-    vec4 vp = view * vec4(i_center + in_pos * side * i_size, 1.0);
+    vec4 vp = view * vec4(i_center + in_pos * side * aspect * i_size, 1.0);
     gl_Position = skip ? vec4(2.0, 2.0, 2.0, 1.0) : proj * vp;
     v_n = mat3(view) * in_norm; v_local = in_pos; v_ln = in_norm; v_rgb = i_rgb; v_op = i_op;
 }
@@ -582,7 +582,8 @@ class _Instanced(Layer):
 
 class Voxels(_Instanced):
     """Instanced cubes. *centers* (N, 3) mm; *pitch* the voxel side (mm) at size 1; the drawn side
-    is ``pitch * fill`` (hairline gaps). State arrays ``rgb`` (N, 3), ``op`` (N,), ``size`` (N,);
+    is ``pitch * fill`` (hairline gaps), stretched per world axis by *aspect* (anisotropic grids:
+    ``spacing / pitch``). State arrays ``rgb`` (N, 3), ``op`` (N,), ``size`` (N,);
     call :meth:`set` to change them."""
 
     FMT = "3f 3f 1f 1f/i"
@@ -591,8 +592,9 @@ class Voxels(_Instanced):
     CULL = True
 
     def __init__(self, centers: np.ndarray, pitch: float, fill: float = 0.9, color=(0.58, 0.64, 0.74),
-                 edge_dark: float = 0.22) -> None:
+                 edge_dark: float = 0.22, aspect=(1.0, 1.0, 1.0)) -> None:
         self.centers = np.asarray(centers, "f4").reshape(-1, 3)
+        self.aspect = tuple(float(a) for a in aspect)
         n = len(self.centers)
         self.pitch, self.fill, self.edge_dark = float(pitch), float(fill), float(edge_dark)
         self.rgb = np.tile(np.asarray(color, "f4"), (n, 1))
@@ -627,6 +629,7 @@ class Voxels(_Instanced):
     def _uniforms(self, r):
         r.set_common(self.prog)
         self.prog["side"].value = self.pitch * self.fill
+        self.prog["aspect"].value = self.aspect
         self.prog["edge_dark"].value = self.edge_dark
 
 

@@ -155,6 +155,19 @@ MUSCLES_BIGGEST_CC_PER_SIDE: tuple[str, ...] = ("TRAPECIOS",)
 # the other side's, which keeps stray specks from standing in for a missing half.
 MUSCLES_SIDE_MIN_RATIO: float = 0.1
 
+# Last-bed trim of the SUV (measure) masks. The lowest PET bed is the only one that
+# covers the inferior end of the scan (mid-thigh), so its sensitivity falls towards 0
+# there and the noise rises (x1.7-2.5 at the last slice). Voxels of these MUSCLES
+# labels lying below the plane where the noise reaches PET_EDGE_NOISE_LIMIT times the
+# level between two bed centres (41 mm below the leg-bed centre for the 164 mm field
+# and 100 mm step) are cleared from MUSCLES; MUSCLES_VOL keeps them, so volumes do
+# not change. The plane comes from the PET bed geometry (``PT_beds.json`` written by
+# stage 0 next to PT.nii.gz; see :mod:`nvitk.pipes.pesa_fat.common.pet_beds`).
+# Without that geometry nothing is trimmed (with a warning).
+PET_EDGE_TRIM: bool = True
+PET_EDGE_TRIM_LABELS: tuple[str, ...] = ("CUADRICEPS_L", "CUADRICEPS_R")
+PET_EDGE_NOISE_LIMIT: float = 1.25
+
 
 # Stage-3 measurement specs
 
@@ -334,6 +347,9 @@ __all__ = [
     "MUSCLE_ERODE_AFTER_SKELETON",
     "MUSCLES_BIGGEST_CC_PER_SIDE",
     "MUSCLES_SIDE_MIN_RATIO",
+    "PET_EDGE_TRIM",
+    "PET_EDGE_TRIM_LABELS",
+    "PET_EDGE_NOISE_LIMIT",
     "MO_XY_ERODE",
     "MO_VOL_MAX_HU",
     "SuvSpec",

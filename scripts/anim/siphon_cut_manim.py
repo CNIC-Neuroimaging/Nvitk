@@ -26,7 +26,7 @@ from pathlib import Path
 import numpy as np
 from manim import (
     BOLD,
-    DEGREES,
+    DEGREES,    
     DL,
     DOWN,
     LEFT,

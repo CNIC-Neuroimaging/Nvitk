@@ -16,6 +16,11 @@ Responsibilities (applied to a single ``PESA*`` subject at a time):
       * ``MR_<series>_<metric>.nii``  -> ``DIXON_<REGION>_<metric>.nii``
         (region from DICOM slice location: lowest->HEAD, middle->THORAX, highest->LEGS)
 
+3. Write ``PT_beds.json`` next to ``PT.nii.gz``: the PET bed geometry read from the
+   DICOM headers (FrameReferenceTime groups, step, axial field), which the NIfTI
+   does not keep and the CT-PET stage-2 last-bed trim needs. Re-running stage 0 on
+   an already converted subject writes it when it is missing.
+
 The script is idempotent: converted subject folders that already contain
 NIfTI files are skipped; already-renamed targets are kept (``Path.replace`` is
 only invoked when the destination does not yet exist).
@@ -46,6 +51,7 @@ from nvitk.pipes.pesa_fat.common.paths import (
 
 
 from nvitk.pipes.pesa_fat.common.dixon_regions import build_series_region_map
+from nvitk.pipes.pesa_fat.common.pet_beds import PET_BEDS_JSON, ensure_pet_beds
 
 
 log = Logger()
@@ -205,6 +211,13 @@ def run_subject(
         f"[{subject}] rename done: "
         + ", ".join(f"{k}={v}" for k, v in summary.items())
     )
+    if any(subject_nifti.glob("PT.nii*")):
+        beds = ensure_pet_beds(subject_nifti, subject_dicom)
+        if beds is not None:
+            log.info(
+                f"[{subject}] {PET_BEDS_JSON}: {len(beds.group_starts)} beds, step {beds.step:.0f} mm, "
+                f"axial field {beds.axial_fov:.0f} mm"
+            )
     return subject_nifti
 
 
