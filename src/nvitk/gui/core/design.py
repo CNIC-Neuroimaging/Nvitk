@@ -113,6 +113,45 @@ SIGNIFICANCE_COLORS: dict[str, str] = {
     ".": "#4a4a2a",
 }
 
+#: Category accents: ten hues, tab20's pastel half on the dark chrome and its
+#: saturated half (deepened where it washed out on white) on the light one. They
+#: mark *kinds* of things (a tool section, an external suite, a viewport pane),
+#: never state, so they sit beside :data:`COLOR_ACCENT` rather than replacing it.
+#: Reach for them by hue name through :func:`accent`, or by meaning through
+#: :data:`SUITE_HUES`; a panel never needs the hex.
+ACCENTS: dict[str, str] = {
+    "blue": "#aec7e8",
+    "orange": "#ffbb78",
+    "green": "#98df8a",
+    "red": "#ff9896",
+    "purple": "#c5b0d5",
+    "brown": "#c49c94",
+    "pink": "#f7b6d2",
+    "grey": "#c7c7c7",
+    "olive": "#dbdb8d",
+    "cyan": "#9edae5",
+}
+
+#: External tool suite -> accent hue, so a suite's badge is the same colour in the
+#: tool browser, the mesh panel, the job list and anywhere else it is named.
+SUITE_HUES: dict[str, str] = {
+    "nvitk": "grey",
+    "FSL": "blue",
+    "FreeSurfer": "orange",
+    "FastSurfer": "red",
+    "ANTs": "green",
+    "ANTsPyNet": "olive",
+    "TotalSegmentator": "purple",
+    "eICAB": "cyan",
+    "TopBrain": "pink",
+    "VMTK": "brown",
+    "MeshLab": "cyan",
+    "PyMeshLab": "cyan",
+    "nilearn": "purple",
+    "FireANTs": "green",
+    "QVTpy": "pink",
+}
+
 # Themes
 #: The light theme, token by token. Every name above appears here exactly once:
 #: :func:`_check_palettes` fails the import if one is missing, so a token added to
@@ -175,6 +214,21 @@ LIGHT_TOKENS: dict[str, Any] = {
         "**": "#e2f2e2",
         "*": "#e9f6e6",
         ".": "#f1f1da",
+    },
+    # tab20's saturated half, read as text on white: orange, olive, cyan, pink and
+    # grey are taken a few steps darker than tab20 has them, or a badge in them is
+    # barely legible.
+    "ACCENTS": {
+        "blue": "#1f77b4",
+        "orange": "#c8600a",
+        "green": "#2ca02c",
+        "red": "#d62728",
+        "purple": "#9467bd",
+        "brown": "#8c564b",
+        "pink": "#c2549e",
+        "grey": "#6b6b74",
+        "olive": "#8a8b14",
+        "cyan": "#11899a",
     },
 }
 
@@ -290,14 +344,82 @@ def _rebind_tokens(outgoing: dict[str, Any], incoming: dict[str, Any]) -> None:
 
 # Spacing
 #: Gap between tightly related controls on one row.
-SPACE_TIGHT = 6
+SPACE_TIGHT = 4
 #: Standard gap between sibling widgets.
-SPACE = 10
+SPACE = 8
 #: Gap between distinct groups / cards.
-SPACE_LOOSE = 14
+SPACE_LOOSE = 12
 #: Inner padding of a card or pane.
-PAD = 12
+PAD = 10
 RADIUS = 5
+
+
+# Type scale
+#: Preferences key holding the interface's base font size, in points.
+FONT_PREF_KEY = "gui.font_pt"
+#: The base size when the preferences say nothing: a point under Napari's own 9pt,
+#: which reads as oversized next to the dense panels of a workbench.
+FONT_BASE_PT_DEFAULT = 8
+
+
+def _stored_font_pt() -> int:
+    """The base font size the preferences ask for, clamped to something usable."""
+    try:
+        from nvitk.gui.core.prefs import load_prefs
+
+        value = int(load_prefs().get(FONT_PREF_KEY) or FONT_BASE_PT_DEFAULT)
+    except Exception:  # noqa: BLE001 (a preference must never block an import)
+        return FONT_BASE_PT_DEFAULT
+    return min(max(value, 6), 14)
+
+
+#: Base font size in points: the body text of every panel, and Napari's chrome.
+FONT_BASE_PT = _stored_font_pt()
+_BASE_PX = round(FONT_BASE_PT * 4 / 3)
+#: Inline sizes, in pixels, derived from the base so one preference scales them all.
+#: ``XS``: badges and captions. ``S``: hints, units, small-caps headings, pane titles.
+#: ``M``: body text set explicitly. ``L``: a panel's title or a headline number.
+FONT_XS = _BASE_PX - 2
+FONT_S = _BASE_PX - 1
+FONT_M = _BASE_PX
+FONT_L = _BASE_PX + 2
+
+
+def apply_napari_font_size() -> None:
+    """Have Napari's chrome use :data:`FONT_BASE_PT`, without touching its settings file.
+
+    Napari sizes its chrome from ``settings.appearance.font_size`` rather than from
+    the theme, and writes that setting back to its own config, which other Napari
+    sessions on the machine share. The environment override is read when the
+    settings load and is never persisted, so nvitk's size stays nvitk's. Call it
+    before the first ``napari.settings.get_settings()``; a value the person set
+    in the environment themselves wins.
+    """
+    import os
+
+    os.environ.setdefault("NAPARI_APPEARANCE_FONT_SIZE", str(FONT_BASE_PT))
+
+
+def accent(hue: str, default: str = "grey") -> str:
+    """The current theme's hex for accent *hue* (a key of :data:`ACCENTS`)."""
+    return ACCENTS.get(str(hue), ACCENTS.get(default, COLOR_MUTED))
+
+
+def suite_color(suite: str) -> str:
+    """Accent colour of an external tool suite (:data:`SUITE_HUES`), grey when unknown."""
+    return accent(SUITE_HUES.get(str(suite), "grey"))
+
+
+def tint(color: str, alpha: float) -> str:
+    """*color* at *alpha* as a stylesheet ``rgba()``, for a fill behind text in that colour.
+
+    Not a hex, so a live theme switch cannot remap it: a widget using one restyles
+    itself from :func:`add_theme_listener` instead (the primitives in
+    :mod:`nvitk.gui.core.widgets` all do).
+    """
+    qcolor = QColor(color)
+    return f"rgba({qcolor.red()}, {qcolor.green()}, {qcolor.blue()}, {max(0.0, min(1.0, alpha)):.2f})"
+
 
 # Stylesheet
 def stylesheet() -> str:
@@ -310,6 +432,7 @@ def stylesheet() -> str:
 QWidget {{
     background-color: {COLOR_BG};
     color: {COLOR_TEXT};
+    font-size: {FONT_BASE_PT}pt;
 }}
 QLabel, QCheckBox, QRadioButton {{
     background: transparent;
@@ -318,7 +441,7 @@ QGroupBox {{
     background-color: {COLOR_SURFACE};
     border: 1px solid {COLOR_BORDER};
     border-radius: {RADIUS}px;
-    margin-top: 14px;
+    margin-top: 12px;
     padding: {PAD}px;
     /* Normal weight: a group box's font is inherited by every child, so bolding
        the box bolds all its content. Only the title is bold. */
@@ -330,7 +453,7 @@ QGroupBox::title {{
     left: 10px;
     padding: 0 6px;
     color: {COLOR_MUTED};
-    font-size: 10px;
+    font-size: {FONT_S}px;
     font-weight: bold;
     letter-spacing: 1px;
 }}
@@ -344,7 +467,7 @@ QListWidget, QListView, QTreeWidget, QTreeView, QTableWidget, QTableView, QAbstr
     selection-color: {COLOR_ON_ACCENT};
 }}
 QLineEdit, QSpinBox, QDoubleSpinBox {{
-    padding: 4px 6px;
+    padding: 2px 5px;
 }}
 QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus,
 QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
@@ -355,8 +478,8 @@ QComboBox {{
     color: {COLOR_TEXT};
     border: 1px solid {COLOR_BORDER};
     border-radius: 4px;
-    padding: 4px 8px;
-    min-height: 18px;
+    padding: 2px 6px;
+    min-height: 16px;
 }}
 QComboBox:hover {{
     background-color: {COLOR_CONTROL_HOVER};
@@ -376,7 +499,7 @@ QPushButton, QToolButton {{
     color: {COLOR_TEXT};
     border: 1px solid {COLOR_BORDER};
     border-radius: 4px;
-    padding: 5px 12px;
+    padding: 3px 9px;
 }}
 QPushButton:hover, QToolButton:hover {{
     background-color: {COLOR_CONTROL_HOVER};
@@ -404,7 +527,7 @@ QHeaderView::section {{
     border: none;
     border-right: 1px solid {COLOR_BORDER};
     border-bottom: 1px solid {COLOR_BORDER};
-    padding: 5px 6px;
+    padding: 3px 5px;
     font-weight: bold;
 }}
 /* Deliberately no ``::item {{ background-color }}`` rule: a stylesheet rule on
@@ -425,8 +548,8 @@ QTabBar::tab {{
     color: {COLOR_MUTED};
     border: 1px solid transparent;
     border-bottom: 2px solid transparent;
-    padding: 6px 14px;
-    margin-right: 2px;
+    padding: 4px 9px;
+    margin-right: 1px;
 }}
 QTabBar::tab:selected {{
     color: {COLOR_TEXT};
@@ -447,7 +570,7 @@ QMenu {{
     padding: 4px;
 }}
 QMenu::item {{
-    padding: 5px 20px;
+    padding: 4px 16px;
     border-radius: 3px;
 }}
 QMenu::item:selected {{
@@ -468,15 +591,15 @@ QDialog {{
 }}
 QMainWindow::separator {{
     background-color: {COLOR_BG};
-    width: {SPACE}px;
-    height: {SPACE}px;
+    width: {SPACE_TIGHT}px;
+    height: {SPACE_TIGHT}px;
 }}
 QMainWindow::separator:hover {{
     background-color: {COLOR_ACCENT_DEEP};
 }}
 QDockWidget {{
     color: {COLOR_MUTED};
-    font-size: 10px;
+    font-size: {FONT_S}px;
     font-weight: bold;
     titlebar-close-icon: none;
     titlebar-normal-icon: none;
@@ -486,7 +609,7 @@ QDockWidget::title {{
     border: 1px solid {COLOR_BORDER};
     border-top-left-radius: {RADIUS}px;
     border-top-right-radius: {RADIUS}px;
-    padding: 6px 10px;
+    padding: 4px 8px;
     text-align: left;
 }}
 QDockWidget::close-button, QDockWidget::float-button {{
@@ -506,7 +629,7 @@ QMenuBar {{
 }}
 QMenuBar::item {{
     background: transparent;
-    padding: 5px 10px;
+    padding: 3px 8px;
     border-radius: 3px;
 }}
 QMenuBar::item:selected {{
@@ -541,10 +664,10 @@ QSplitter::handle {{
     background-color: transparent;
 }}
 QSplitter::handle:horizontal {{
-    width: {SPACE}px;
+    width: {SPACE_TIGHT}px;
 }}
 QSplitter::handle:vertical {{
-    height: {SPACE}px;
+    height: {SPACE_TIGHT}px;
 }}
 QSplitter::handle:hover {{
     background-color: {COLOR_ACCENT_DEEP};
@@ -558,8 +681,8 @@ QScrollBar:vertical, QScrollBar:horizontal {{
     border: none;
     margin: 0;
 }}
-QScrollBar:vertical {{ width: 11px; }}
-QScrollBar:horizontal {{ height: 11px; }}
+QScrollBar:vertical {{ width: 9px; }}
+QScrollBar:horizontal {{ height: 9px; }}
 QScrollBar::handle {{
     background-color: {COLOR_SCROLL};
     border-radius: 5px;
@@ -691,7 +814,7 @@ def napari_theme_colors(theme: str | None = None) -> dict[str, str]:
         "warning": tokens["COLOR_WARN"],
         "error": tokens["COLOR_ERROR"],
         "current": tokens["COLOR_ACCENT_DEEP"],
-        "font_size": "9pt",
+        "font_size": f"{FONT_BASE_PT}pt",
     }
 
 
@@ -1000,14 +1123,13 @@ def bar_tool_button(object_name: str, parent: QWidget | None = None, *, min_widt
     """
     button = QToolButton(parent)
     button.setObjectName(object_name)
-    button.setCursor(Qt.PointingHandCursor)
     button.setFocusPolicy(Qt.NoFocus)
     button.setMinimumSize(min_width, 22)
     button.setStyleSheet(
         f"QToolButton#{object_name} {{ padding: 2px 8px; margin: 0px 2px;"
         f" min-width: {min_width}px; min-height: 22px; max-height: 26px;"
         f" background-color: {COLOR_CONTROL}; color: {COLOR_TEXT};"
-        f" border: 1px solid {COLOR_BORDER}; border-radius: 4px; font-size: 11px; }}"
+        f" border: 1px solid {COLOR_BORDER}; border-radius: 4px; font-size: {FONT_M}px; }}"
         f"QToolButton#{object_name}:hover {{ background-color: {COLOR_CONTROL_HOVER};"
         f" border-color: {COLOR_BORDER_STRONG}; }}"
     )
@@ -1042,11 +1164,11 @@ def theme_toggle_button(viewer: Any = None, parent: QWidget | None = None) -> QT
 
 
 # Primitives
-def mono_font(size: int = 10) -> QFont:
+def mono_font(size: int | None = None) -> QFont:
     """Monospace font at *size* points, for numbers that should stay in columns."""
     font = QFont("Monospace")
     font.setStyleHint(QFont.Monospace)
-    font.setPointSize(size)
+    font.setPointSize(int(size) if size else FONT_BASE_PT + 1)
     return font
 
 
@@ -1125,7 +1247,7 @@ def section_heading(text: str) -> QLabel:
     """Small caps heading that titles a card or a group of controls."""
     label = QLabel(text.upper())
     label.setStyleSheet(
-        f"color: {COLOR_MUTED}; font-size: 10px; font-weight: bold;"
+        f"color: {COLOR_MUTED}; font-size: {FONT_S}px; font-weight: bold;"
         " letter-spacing: 1px; border: none;"
     )
     return label
@@ -1138,7 +1260,7 @@ def chip(text: str, color: str = "") -> QLabel:
     label.setAlignment(Qt.AlignCenter)
     label.setStyleSheet(
         f"color: {color}; border: 1px solid {color}; border-radius: 3px;"
-        " padding: 1px 6px; font-weight: bold; font-size: 10px;"
+        f" padding: 0px 5px; font-weight: bold; font-size: {FONT_XS}px;"
     )
     label.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
     return label
@@ -1171,7 +1293,7 @@ def measure(
 ) -> QLabel:
     """A number with its unit set in muted type, so the figures stay dominant."""
     color = color or COLOR_TEXT
-    label = QLabel(f"{value}<span style='color:{COLOR_MUTED};font-size:10px;'> {unit}</span>")
+    label = QLabel(f"{value}<span style='color:{COLOR_MUTED};font-size:{FONT_S}px;'> {unit}</span>")
     label.setTextFormat(Qt.RichText)
     label.setStyleSheet(f"color: {color}; border: none;")
     label.setFont(mono_font())
@@ -1184,7 +1306,7 @@ def column_heading(text: str, align: Any = Qt.AlignLeft) -> QLabel:
     label = QLabel(text)
     label.setStyleSheet(
         f"color: {COLOR_MUTED}; border: none; border-bottom: 1px solid {COLOR_BORDER};"
-        " padding-bottom: 3px; font-size: 10px; font-weight: bold;"
+        f" padding-bottom: 3px; font-size: {FONT_S}px; font-weight: bold;"
     )
     label.setAlignment(align | Qt.AlignVCenter)
     return label
@@ -1293,8 +1415,20 @@ def style_image_figure(fig: Any) -> None:
 
 
 __all__ = [
+    "ACCENTS",
     "AXIS_COLORS",
+    "FONT_BASE_PT",
+    "FONT_L",
+    "FONT_M",
+    "FONT_PREF_KEY",
+    "FONT_S",
+    "FONT_XS",
+    "SUITE_HUES",
+    "accent",
     "add_theme_listener",
+    "apply_napari_font_size",
+    "suite_color",
+    "tint",
     "COLOR_ACCENT",
     "COLOR_ACCENT_DEEP",
     "COLOR_ALT_ROW",

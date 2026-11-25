@@ -60,7 +60,7 @@ Run `pyhelp` for an interactive, searchable tree of every registered command (`p
 ## Opening the GUI instead
 
 ```bash
-nvitk-gui
+nvitk
 ```
 
 Opens a Napari workbench with the same tool catalog as a form-driven dock, plus mesh

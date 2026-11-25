@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
-from qtpy.QtCore import Qt, QThread, Signal
+from qtpy.QtCore import Qt, Signal
 from qtpy.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -28,6 +28,8 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from nvitk.gui.core.thread_worker import ThreadWorker
+from nvitk.gui.core.design import COLOR_MUTED, FONT_S
 from nvitk.core.logger import Logger
 from nvitk.db.pipeline_assets import (
     XNAT_RESOURCE_EICAB,
@@ -59,7 +61,7 @@ SOURCE_XNAT = 0
 SOURCE_LOCAL = 1
 
 
-class _QcLoadWorker(QThread):
+class _QcLoadWorker(ThreadWorker):
     """Background thread that downloads (or reuses cached) pipeline resources and phase NIfTIs for a
     QC subject, so the GUI stays responsive during network I/O."""
 
@@ -227,14 +229,26 @@ class QcPanel(QWidget):
         *,
         on_inputs_opened: Callable[[list[str]], None] | None = None,
         parent: QWidget | None = None,
+        embedded: bool = False,
+        review_panel: Any = None,
+        tof_review: Any = None,
     ) -> None:
-        """Build the source/pipeline pickers, XNAT/local stacked pages, subject list, and Load button."""
+        """Build the source/pipeline pickers, XNAT/local stacked pages, subject list, and Load button.
+
+        *embedded* (the QC hub, :mod:`nvitk.gui.panels.qc_hub`): the pipeline is chosen by the
+        hub (:meth:`set_pipeline`), and the QVTPy / eICAB reviews go to the hub's *review_panel*
+        (a :class:`~nvitk.gui.viz.qc_review_panel.QcMeasurementsPanel`) and *tof_review* (a
+        :class:`~nvitk.gui.viz.tof_qc_review.TofReviewPanel`) rather than to a dock of their own.
+        """
         super().__init__(parent)
         self._viewer = viewer
         self._app_state = app_state
         self._on_inputs_opened = on_inputs_opened
         self._worker: _QcLoadWorker | None = None
-        self._review_panel = None
+        self._review_panel = review_panel
+        self._embedded_review = review_panel
+        self._tof_review = tof_review
+        self._embedded = bool(embedded)
 
         try:
             self._repo: DataRepo = get_repo_from_settings()
@@ -278,14 +292,27 @@ class QcPanel(QWidget):
         btn_row.addWidget(self._btn_load)
 
         lay = QVBoxLayout()
-        lay.addWidget(QLabel("QC source"))
-        lay.addWidget(self._source)
-        lay.addWidget(QLabel("Pipeline"))
-        lay.addWidget(self._pipeline)
-        lay.addWidget(self._stack)
-        lay.addWidget(QLabel("Subjects"))
-        lay.addWidget(self._subject_search)
-        lay.addWidget(self._subjects, stretch=1)
+        if self._embedded:
+            from nvitk.gui.core.widgets import hint_label
+
+            lay.setContentsMargins(0, 0, 0, 0)
+            source_row = QHBoxLayout()
+            source_row.addWidget(hint_label("Source"))
+            source_row.addWidget(self._source, 1)
+            lay.addLayout(source_row)
+            self._pipeline.setVisible(False)  # the hub's pipeline choice drives it
+            lay.addWidget(self._stack)
+            lay.addWidget(self._subject_search)
+            lay.addWidget(self._subjects, stretch=1)
+        else:
+            lay.addWidget(QLabel("QC source"))
+            lay.addWidget(self._source)
+            lay.addWidget(QLabel("Pipeline"))
+            lay.addWidget(self._pipeline)
+            lay.addWidget(self._stack)
+            lay.addWidget(QLabel("Subjects"))
+            lay.addWidget(self._subject_search)
+            lay.addWidget(self._subjects, stretch=1)
         lay.addLayout(btn_row)
         lay.addWidget(self._status)
         self.setLayout(lay)
@@ -363,7 +390,7 @@ class QcPanel(QWidget):
             "Load uses results for QC layers and NIfTI for phases / CD / TOF."
         )
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #aaa; font-size: 11px;")
+        hint.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_S}px;")
 
         lay = QVBoxLayout()
         lay.setContentsMargins(0, 0, 0, 0)
@@ -428,6 +455,12 @@ class QcPanel(QWidget):
             self._subjects_loaded = True
             self._reload_subjects()
 
+    def set_pipeline(self, key: str) -> None:
+        """Switch to pipeline *key* (``"qvtpy"`` or ``"eicab"``); reloads the subject list."""
+        index = self._pipeline.findData(key)
+        if index >= 0 and index != self._pipeline.currentIndex():
+            self._pipeline.setCurrentIndex(index)
+
     def _current_pipeline(self) -> str:
         """The currently selected pipeline id (``"qvtpy"`` or ``"eicab"``)."""
         return str(self._pipeline.currentData() or PIPELINE_QVTPY)
@@ -448,7 +481,12 @@ class QcPanel(QWidget):
     def _refresh_qc_statuses(self) -> None:
         """Query the DB for per-subject QC revision status."""
         try:
-            self._qc_statuses = subject_qc_status_summary(repo=self._repo)
+            if self._current_pipeline() == PIPELINE_EICAB:
+                from nvitk.gui.viz.tof_qc_review import subject_review_status
+
+                self._qc_statuses = subject_review_status(self._repo)
+            else:
+                self._qc_statuses = subject_qc_status_summary(repo=self._repo)
         except Exception:
             self._qc_statuses = {}
 
@@ -769,7 +807,11 @@ class QcPanel(QWidget):
                     extra_search_roots=roots,
                 )
                 stage6 = loaded.get("stage6_dir")
-                if isinstance(stage6, Path):
+                if isinstance(stage6, Path) and self._embedded_review is not None:
+                    self._embedded_review._on_revised = self._on_subject_revised
+                    if self._embedded_review.load_from_stage6(subject_uid, stage6) == 0:
+                        notify(f"No measurement CSVs found under {stage6}.", error=True)
+                elif isinstance(stage6, Path):
                     self._review_panel = show_qc_measurements(
                         self._viewer,
                         subject_uid=subject_uid,
@@ -798,6 +840,9 @@ class QcPanel(QWidget):
                 except Exception as morpho_exc:  # noqa: BLE001
                     counts = {}
                     notify(f"Morphometrics tables skipped: {morpho_exc}", error=True)
+                if self._tof_review is not None:
+                    self._tof_review.on_revised = self._on_subject_revised
+                    self._tof_review.load_subject(subject_uid, self._repo)
                 shown = (f"; {counts.get('vessels', 0)} vessel(s), {counts.get('lesions', 0)} lesion(s) "
                          "in the results window") if counts else "; no stage-7 morphometrics found"
                 notify(f"QC loaded eicab subject {subject_uid}{shown}.")

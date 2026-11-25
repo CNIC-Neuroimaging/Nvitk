@@ -800,7 +800,7 @@ def _reset_dims_order(viewer: Any, layer: Any) -> None:
         pass
 
 
-def apply_target_orientation(viewer: Any, layer: Any, target: str) -> tuple[str, str]:
+def apply_target_orientation(viewer: Any, layer: Any, target: str, *, reset_view: bool = True) -> tuple[str, str]:
     """Reorient *layer*'s Napari display to *target* axis codes and resync the viewer.
 
     Wraps :func:`reorient_layer_for_view` with the metadata bookkeeping (axes,
@@ -847,12 +847,44 @@ def apply_target_orientation(viewer: Any, layer: Any, target: str) -> tuple[str,
     layer.metadata = meta
     if new_axes and len(new_axes) == int(layer.data.ndim):
         layer.axis_labels = tuple(new_axes)
-    configure_viewer_for_layer(viewer, layer, configure_dims=True)
-    try:
-        viewer.reset_view()
-    except Exception:
-        pass
+    if reset_view:
+        configure_viewer_for_layer(viewer, layer, configure_dims=True)
+        try:
+            viewer.reset_view()
+        except Exception:
+            pass
     return previous, target_codes
+
+
+def apply_target_orientation_many(
+    viewer: Any, layers: list[Any], target: str
+) -> list[tuple[Any, str, str, str | None]]:
+    """Reorient several layers to *target*, resetting the viewer once at the end.
+
+    Returns ``(layer, previous, applied, error)`` per layer; a layer that cannot be reoriented
+    (no usable 3D affine, or a target its axes cannot reach) reports an error and is skipped
+    without stopping the others.
+    """
+    results: list[tuple[Any, str, str, str | None]] = []
+    for layer in layers:
+        if layer_orientation_codes(layer) is None:
+            results.append((layer, "", "", "no 3D affine"))
+            continue
+        try:
+            previous, applied = apply_target_orientation(viewer, layer, target, reset_view=False)
+            results.append((layer, previous, applied, None))
+        except Exception as exc:  # noqa: BLE001
+            results.append((layer, "", "", str(exc)))
+    anchor = viewer.layers.selection.active if viewer.layers.selection.active in layers else next(
+        (r[0] for r in results if r[3] is None), None
+    )
+    if anchor is not None:
+        configure_viewer_for_layer(viewer, anchor, configure_dims=True)
+        try:
+            viewer.reset_view()
+        except Exception:
+            pass
+    return results
 
 
 def _layer_display_scale(layer: Any, ndim: int) -> tuple[float, ...]:

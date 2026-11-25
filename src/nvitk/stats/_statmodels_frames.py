@@ -132,6 +132,13 @@ _LR_PREFIX_RE = re.compile(r"^(left_|right_|l_|r_)", re.IGNORECASE)
 _SIDE_LETTER_RE = re.compile(r"^([LR])([A-Z][A-Z0-9_]*)$", re.IGNORECASE)
 _TREE_ICA = frozenset({"L_ICA", "R_ICA", "LICA", "RICA", "LEFT_ICA", "RIGHT_ICA"})
 _TREE_BASILAR = frozenset({"BASILAR", "BASI"})
+#: Tree-root spellings → the vessel-wise key the other 4D-flow measurements use.
+_TREE_ROOT_KEYS: dict[str, str] = {
+    "L_ICA": "LICA",
+    "LEFT_ICA": "LICA",
+    "R_ICA": "RICA",
+    "RIGHT_ICA": "RICA",
+}
 
 
 def resolve_feature_id(feature: str) -> str:
@@ -179,7 +186,7 @@ def grouping_choices_for(kind: str, variable_id: str) -> list[tuple[str, str]]:
     # keys are shared with ASL: it is what makes a joint 4D-flow + perfusion frame possible.
     if kind == "qvtpy" and family == "tree":
         return [
-            ("By tree (L_ICA / R_ICA / Basilar)", "tree"),
+            ("By tree (LICA / RICA / Basilar)", "tree"),
             ("By hemisphere (avg L/R ICA; Basilar kept)", "hemisphere"),
             ("Vascular territory (shared with ASL)", "territory"),
         ]
@@ -396,6 +403,12 @@ def assign_group_key(
     """Map a published ``region_id`` to the analysis ``group_key``."""
     rid = str(region_id).strip()
     grouping = str(grouping).strip().lower()
+    if grouping == "tree" and str(kind).strip().lower() == "qvtpy":
+        # qvtpy names its trees after the root (L_ICA / R_ICA / Basilar), but every per-vessel
+        # 4D-flow measurement spells the same arteries LICA / RICA. Keying the trees the vessel way
+        # lets a tree metric (pwv_fielding_xcor) share a row with a vessel one (pi, pwv) after a
+        # melt instead of landing on a region of its own.
+        return _TREE_ROOT_KEYS.get(rid.upper().replace("-", "_"), rid)
     if grouping in {"vessel", "tree", "region"}:
         return rid
     if grouping == "hemisphere":

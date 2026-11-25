@@ -40,6 +40,7 @@ from nvitk.gui.core.design import (
     COLOR_TEXT,
     STATUS_COLORS,
 )
+from nvitk.gui.core.design import FONT_M
 
 log = Logger()
 
@@ -547,7 +548,7 @@ class QcMeasurementsPanel(QWidget):
                     "qc_subject_flag": "Subject flag",
                 }.get(metric, metric)
             )
-            heading.setStyleSheet(f"color: {COLOR_MUTED}; font-size: 11px;")
+            heading.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_M}px;")
             heading.setAlignment(Qt.AlignCenter)
             cell_lay.addWidget(heading)
             cell_lay.addWidget(chip)

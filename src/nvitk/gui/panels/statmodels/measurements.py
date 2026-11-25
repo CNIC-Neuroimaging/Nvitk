@@ -306,7 +306,8 @@ class MeasurementForm(QWidget):
                 )
             elif vid in {"pwv", "pwv_fielding_xcor", "pitc_slope", "pitc_intercept"}:
                 self._hint.setText(
-                    "Tree metrics: one value per arterial root (L_ICA / R_ICA / Basilar). "
+                    "Tree metrics: one value per arterial root, keyed LICA / RICA / Basilar like the "
+                    "vessel-wise measurements. "
                     "Hemisphere grouping averages L/R ICA and keeps Basilar."
                 )
             else:

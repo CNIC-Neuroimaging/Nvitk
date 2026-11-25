@@ -1,0 +1,224 @@
+{
+  "$schema": "nvitk-xnat-rules/1",
+  "name": "example",
+  "_comment": [
+    "nvitk XNAT rules: which XNAT projects you use and how a scan's series description maps to a",
+    "sequence. Copy to your config directory as 'xnat_rules.json' and edit. Rules are tried in",
+    "order; the first whose 'match' regexes all hit (and no 'not_match' does) wins. Regexes are",
+    "Python 're', case-insensitive. Test a rule set with `nvitk-config test-xnat-rules`.",
+    "`nvitk-config generate-pesa` writes the rules nvitk's PESA projects use, as a worked example."
+  ],
+  "default_visit_label": "1",
+  "default_classifier": "mri_ct_pet",
+  "visit_labels": {
+    "MY_PROJECT": "1"
+  },
+  "classifiers": {
+    "mri_ct_pet": {
+      "quality": {
+        "accept": [
+          "usable"
+        ],
+        "strip": true
+      },
+      "rules": [
+        {
+          "name": "T1 MPRAGE / 3D T1",
+          "match": {
+            "series_description": "mprage|mp[_\\s-]?rage|\\bt1w?\\b.*\\b3d\\b|\\b3d\\s*t1\\b|bravo|tfe.*t1"
+          },
+          "not_match": {
+            "series_description": "\\bpost\\b|gd|gad"
+          },
+          "result": {
+            "modality": "t1",
+            "sequence": "T1"
+          }
+        },
+        {
+          "name": "T1 post-contrast",
+          "match": {
+            "series_description": "(?:^|[^a-z0-9])t1w?(?:[^a-z0-9]|$).*(post|gd|gad)"
+          },
+          "result": {
+            "modality": "t1",
+            "sequence": "T1_POST"
+          }
+        },
+        {
+          "name": "T2",
+          "match": {
+            "series_description": "(?:^|[^a-z0-9])t2w?(?:[^a-z0-9]|$)"
+          },
+          "not_match": {
+            "series_description": "flair|star|\\*"
+          },
+          "result": {
+            "modality": "t2",
+            "sequence": "T2"
+          }
+        },
+        {
+          "name": "FLAIR",
+          "match": {
+            "series_description": "flair"
+          },
+          "result": {
+            "modality": "flair",
+            "sequence": "FLAIR"
+          }
+        },
+        {
+          "name": "Diffusion",
+          "match": {
+            "series_description": "dwi|dti|diffusion|ep2d_diff"
+          },
+          "not_match": {
+            "series_description": "(?:^|[^a-z0-9])(adc|fa|trace)(?:[^a-z0-9]|$)"
+          },
+          "result": {
+            "modality": "dwi",
+            "sequence": "DWI"
+          }
+        },
+        {
+          "name": "Resting-state / BOLD",
+          "match": {
+            "series_description": "\\bbold\\b|rs-?fmri|resting|\\bfmri\\b"
+          },
+          "result": {
+            "modality": "fmri",
+            "sequence": "BOLD"
+          }
+        },
+        {
+          "name": "ASL",
+          "match": {
+            "series_description": "\\basl\\b|pcasl|pasl|perfusion"
+          },
+          "result": {
+            "modality": "asl",
+            "sequence": "ASL"
+          }
+        },
+        {
+          "name": "TOF angiography",
+          "match": {
+            "series_description": "\\btof\\b|time.?of.?flight|\\bmra\\b"
+          },
+          "result": {
+            "modality": "tof",
+            "sequence": "TOF"
+          }
+        },
+        {
+          "name": "4D flow",
+          "match": {
+            "series_description": "4d.?q?flow"
+          },
+          "extract": {
+            "orientation": {
+              "type": "substring_map",
+              "field": "series_description",
+              "upper": true,
+              "map": {
+                "AP": [
+                  "AP",
+                  "PA"
+                ],
+                "RL": [
+                  "RL",
+                  "LR"
+                ],
+                "FH": [
+                  "FH",
+                  "HF",
+                  "SI",
+                  "IS"
+                ]
+              },
+              "default": "GENERIC"
+            }
+          },
+          "result": {
+            "modality": "4dflow",
+            "orientation": "{orientation}",
+            "sequence": "4DFLOW_{orientation}"
+          }
+        },
+        {
+          "name": "SWI",
+          "match": {
+            "series_description": "\\bswi\\b|susceptibility.?weighted"
+          },
+          "result": {
+            "modality": "swi",
+            "sequence": "SWI"
+          }
+        },
+        {
+          "name": "CT",
+          "match": {
+            "series_description": "\\bct\\b|computed tomograph"
+          },
+          "not_match": {
+            "series_description": "ctac|scout|topogram"
+          },
+          "result": {
+            "modality": "ct",
+            "sequence": "CT"
+          }
+        },
+        {
+          "name": "PET (attenuation corrected)",
+          "match": {
+            "series_description": "\\bpet\\b|ctac|\\bac\\b"
+          },
+          "result": {
+            "modality": "pt",
+            "sequence": "PET"
+          }
+        }
+      ]
+    }
+  },
+  "projects": {
+    "MY_PROJECT": {
+      "display_name": "My project",
+      "cohort_id": "MY-COHORT",
+      "classifier": "mri_ct_pet",
+      "default_sequences": [
+        "T1",
+        "FLAIR",
+        "TOF"
+      ]
+    }
+  },
+  "sequence_aliases": {
+    "4DFLOW": [
+      "4DFLOW_AP",
+      "4DFLOW_RL",
+      "4DFLOW_FH"
+    ]
+  },
+  "asset_slots": {
+    "T1": "t1",
+    "T1_POST": "t1_post",
+    "T2": "t2",
+    "FLAIR": "flair",
+    "DWI": "dwi",
+    "BOLD": "bold",
+    "ASL": "asl",
+    "TOF": "tof",
+    "4DFLOW_AP": "4dflow_ap",
+    "4DFLOW_RL": "4dflow_rl",
+    "4DFLOW_FH": "4dflow_fh",
+    "4DFLOW_GENERIC": "4dflow",
+    "SWI": "swi",
+    "CT": "ct",
+    "PET": "pet"
+  },
+  "asset_slot_labels": {},
+  "pipeline_resources": {},
+  "pipeline_filter_slots": []
+}

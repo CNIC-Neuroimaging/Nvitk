@@ -1368,6 +1368,77 @@ def apply_derived_columns(
     return out, errors
 
 
+_NAME_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def derived_column_references(spec: DerivedColumn) -> set[str]:
+    """
+    Column names *spec* reads: its source, plus every identifier in an expression.
+
+    Over-inclusive on purpose (an expression's function names come back too): callers intersect
+    the result with the names they care about.
+    """
+    names: set[str] = set()
+    if spec.source:
+        names.add(str(spec.source))
+    if spec.kind == "expression":
+        names.update(_NAME_TOKEN_RE.findall(str(spec.expression or "")))
+    return names
+
+
+def rename_in_expression(expression: str, old: str, new: str) -> str:
+    """Replace the identifier *old* by *new* in *expression*, whole tokens only."""
+    return re.sub(rf"(?<![A-Za-z0-9_]){re.escape(old)}(?![A-Za-z0-9_])", new, str(expression))
+
+
+def rename_derived_references(spec: DerivedColumn, old: str, new: str) -> DerivedColumn:
+    """*spec* with every reference to column *old* pointed at *new* (its own name included)."""
+    from dataclasses import replace
+
+    changes: dict[str, Any] = {}
+    if spec.name == old:
+        changes["name"] = new
+    if spec.source == old:
+        changes["source"] = new
+    if spec.kind == "expression" and spec.expression:
+        rewritten = rename_in_expression(spec.expression, old, new)
+        if rewritten != spec.expression:
+            changes["expression"] = rewritten
+    return replace(spec, **changes) if changes else spec
+
+
+def apply_column_renames(
+    df: pd.DataFrame, renames: Mapping[str, str]
+) -> tuple[pd.DataFrame, list[str]]:
+    """
+    Rename the columns of *df* named in *renames* (``{old: new}``).
+
+    Entries whose old name is absent are skipped silently: a rename can target a column that only
+    exists in one shape of the frame (before or after a melt), and the caller runs this once per
+    shape. A rename onto a name the frame already holds is refused and reported, rather than
+    producing two columns of one name.
+
+    Returns
+    -------
+    (frame, errors)
+    """
+    if not renames:
+        return df, []
+    mapping: dict[str, str] = {}
+    errors: list[str] = []
+    present = set(map(str, df.columns))
+    for old, new in renames.items():
+        if old not in present or old == new:
+            continue
+        if new in present and new not in renames:
+            errors.append(f"rename {old} → {new}: “{new}” is already a column")
+            continue
+        mapping[old] = new
+    if not mapping:
+        return df, errors
+    return df.rename(columns=mapping), errors
+
+
 __all__ = [
     "BINARIZE_OPS",
     "EQUALITY_RTOL",
@@ -1380,6 +1451,7 @@ __all__ = [
     "COLUMN_TYPES",
     "DerivedColumn",
     "FilterRule",
+    "apply_column_renames",
     "apply_column_types",
     "apply_derived_columns",
     "apply_reference_levels",
@@ -1396,11 +1468,14 @@ __all__ = [
     "default_bin_labels",
     "default_bin_name",
     "default_derived_name",
+    "derived_column_references",
     "ensure_unique_columns",
     "evaluate_expression",
     "factors_for_r",
     "filtered_columns",
     "parse_cut_points",
+    "rename_derived_references",
+    "rename_in_expression",
     "set_reference_level",
     "suggest_cut_points",
 ]

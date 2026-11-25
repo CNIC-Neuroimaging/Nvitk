@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from qtpy.QtWidgets import QComboBox, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from .constants import PIPELINE_KIND_ITEMS, PIPELINE_KIND_QVTPY
@@ -49,6 +51,22 @@ class StatmodelsPanel(QWidget):
         else:
             self._shell.set_pipeline_kind(kind)
         self._shell.show_maximized_floating()
+
+    def open_with_frame(self, frame: Any, *, title: str = "") -> Any:
+        """Open the Statmodels window on a new session whose analysis frame is *frame*.
+
+        Used by the Analysis module to model the table it shows (see
+        :func:`~nvitk.gui.panels.statmodels.relayout.adopt_frame`). Returns the session.
+        """
+        from .relayout import adopt_frame
+
+        kind = str(self._pipeline_kind.currentData() or PIPELINE_KIND_QVTPY)
+        if self._shell is None:
+            self._shell = StatmodelsShell(initial_pipeline_kind=kind)
+        session = self._shell.new_session(title=title or "From Analysis", pipeline_kind=kind)
+        adopt_frame(session, frame, label=title or "Analysis table")
+        self._shell.show_maximized_floating()
+        return session
 
 
 __all__ = ["StatmodelsPanel"]

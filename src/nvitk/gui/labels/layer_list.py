@@ -260,6 +260,35 @@ def _delegate_class() -> type:
         def _layer(index: Any) -> Any:
             return index.data(ItemRole)
 
+        def show_context_menu(self, index: Any, model: Any, pos: Any, parent: Any) -> None:
+            """nvitk's layer actions first (controls pop-over, render preset, reorient, label
+            vocabulary), then Napari's own menu."""
+            from qtpy.QtWidgets import QMenu
+
+            layer = self._layer(index)
+            if layer is None:
+                return super().show_context_menu(index, model, pos, parent)
+            menu = QMenu(parent)
+            try:
+                _fill_layer_menu(menu, self._viewer, layer, pos)
+            except Exception:  # noqa: BLE001 (nvitk's part must not cost Napari's menu)
+                menu.clear()
+            try:
+                from napari._app_model.context import get_context
+                from napari._qt._qapp_model import build_qmodel_menu
+                from napari._app_model.constants import MenuId
+
+                if not hasattr(self, "_context_menu"):
+                    self._context_menu = build_qmodel_menu(MenuId.LAYERLIST_CONTEXT, parent=parent)
+                self._context_menu.update_from_context(get_context(model.sourceModel()._root))
+                napari_menu = menu.addMenu("Napari")
+                for action in self._context_menu.actions():
+                    napari_menu.addAction(action)
+            except Exception:  # noqa: BLE001 (Napari internals moved: offer theirs separately)
+                more = menu.addAction("Napari layer actions…")
+                more.triggered.connect(lambda: super(LabelListDelegate, self).show_context_menu(index, model, pos, parent))
+            menu.exec_(pos)
+
         def _has_chip(self, index: Any) -> bool:
             return _known_label_like(self._layer(index))
 
@@ -838,6 +867,85 @@ class _WheelInLabels(QObject):
         steps = -int(delta / 40) or (-1 if delta > 0 else 1)
         # A list already at its end hands the wheel back to the layer list.
         return self._delegate.scroll(layer, steps)
+
+
+def _fill_layer_menu(menu: Any, viewer: Any, layer: Any, pos: Any) -> None:
+    """nvitk's entries of the layer-list context menu for *layer*."""
+    from nvitk.gui.core.icons import icon
+    from nvitk.gui.core.orientation import ORIENTATION_CODES, layer_orientation_codes
+
+    controls = menu.addAction(icon("sliders"), "Controls…")
+    controls.setToolTip("Napari's controls for this layer (and its labels), in a pop-over.")
+
+    def _open() -> None:
+        from nvitk.gui.labels.layer_popover import show_layer_popover
+
+        show_layer_popover(viewer, layer, pos)
+
+    controls.triggered.connect(_open)
+    kind = type(layer).__name__
+    if kind in ("Image", "Labels"):
+        from nvitk.gui.labels.layer_popover import show_inspect_popover
+        from nvitk.gui.panels.dicom_tags import layer_has_dicom_tags
+
+        props = menu.addAction(icon("info"), "Image properties…")
+        props.setToolTip("Grid, spacing, orientation, dtype and value range of this layer, in a pop-over.")
+        props.triggered.connect(lambda: show_inspect_popover(viewer, layer, "properties", pos))
+        tags = menu.addAction(icon("tag"), "DICOM tags…")
+        has_tags = layer_has_dicom_tags(layer)
+        tags.setEnabled(has_tags)
+        tags.setToolTip("The DICOM header this layer was read from, searchable, in a pop-over."
+                        if has_tags else "This layer was not read from DICOM (no tags kept).")
+        tags.triggered.connect(lambda: show_inspect_popover(viewer, layer, "dicom", pos))
+    selection = viewer.layers.selection
+
+    def _targets() -> list[Any]:
+        chosen = [l for l in viewer.layers if l in selection]
+        return chosen if layer in chosen else [layer]
+
+    if kind in ("Image", "Labels"):
+        from nvitk.gui.viz.render_presets import build_preset_menu
+
+        render = menu.addMenu(icon("droplet"), "Render preset")
+        render.aboutToShow.connect(lambda m=render: (m.clear(), build_preset_menu(m, _targets)))
+    if layer_orientation_codes(layer) is not None:
+        orient = menu.addMenu(icon("move"), "Reorient selected")
+
+        def _reorient(code: str) -> None:
+            from nvitk.gui.tools.orient_quick import reorient_selected
+
+            if layer not in selection:
+                selection.active = layer
+            reorient_selected(viewer, code)
+
+        for code in ORIENTATION_CODES:
+            action = orient.addAction(code)
+            action.triggered.connect(lambda _=False, c=code: _reorient(c))
+    if kind in ("Image", "Labels"):
+        from nvitk.gui.core.roi_world import WorldBox, crop_layers, current_box, set_box
+
+        crop = menu.addAction(icon("crop"), "Crop selected to the ROI box")
+        crop.setEnabled(current_box(viewer) is not None)
+        crop.triggered.connect(lambda: crop_layers(viewer, _targets(), current_box(viewer)))
+        if kind == "Labels" or is_label_like_layer(layer):
+            fit = menu.addAction(icon("roi_box"), "Set the ROI box around these labels")
+            fit.triggered.connect(lambda: set_box(viewer, WorldBox.from_labels(layer, margin_mm=5.0)))
+    if kind == "Labels" or is_label_like_layer(layer):
+        from nvitk.gui.labels.catalog import get_schema, layer_schema_key, rank_schemas, remember_layer_schema
+
+        vocab = menu.addMenu(icon("tag"), "Label vocabulary")
+        current = layer_schema_key(layer)
+        for key, score in rank_schemas(layer, top=5):
+            schema = get_schema(key)
+            if schema is None:
+                continue
+            action = vocab.addAction(f"{schema.title}  ({score:.2f})")
+            action.setCheckable(True)
+            action.setChecked(key == current)
+            action.triggered.connect(lambda _=False, k=key: remember_layer_schema(layer, k))
+        if vocab.isEmpty():
+            vocab.addAction("(no vocabulary matches these ids)").setEnabled(False)
+    menu.addSeparator()
 
 
 def install_layer_list_label_buttons(viewer: Any) -> Any | None:

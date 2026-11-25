@@ -1,0 +1,112 @@
+{
+  "$schema": "nvitk-dataset-config/1",
+  "name": "example",
+  "_comment": [
+    "nvitk dataset config: how spreadsheets become the dataset's subjects, visits and measurements.",
+    "Copy to your config directory as 'dataset.json' and edit. 'sources' lists each importable",
+    "(file, sheet); 'filename' may be a glob so dated exports match. 'default_pipeline_id' is the",
+    "measurement-pipeline version image values belong to (see measurement_pipelines.json).",
+    "`nvitk-config generate-pesa` writes nvitk's PESA configuration, as a worked example."
+  ],
+  "id_columns": {
+    "subject": [
+      "subject_uid",
+      "subject_id",
+      "participant_id",
+      "patient_id",
+      "subject"
+    ],
+    "visit": [
+      "visit_id",
+      "visit",
+      "visit_label",
+      "timepoint"
+    ],
+    "session": [
+      "session_uid",
+      "session_id",
+      "experiment_label",
+      "session"
+    ],
+    "date": [
+      "date",
+      "scan_date",
+      "session_date",
+      "acquisition_date"
+    ],
+    "namespace_exact": [
+      "subject_uid",
+      "subject_id",
+      "participant_id",
+      "patient_id",
+      "subject",
+      "session",
+      "session_id",
+      "visit",
+      "visit_id",
+      "sex",
+      "birth_date"
+    ],
+    "identifier_prefixes": []
+  },
+  "local_project_id": "local_db",
+  "default_visit_label": "1",
+  "visits": {
+    "baseline": "1"
+  },
+  "clinical_metadata_columns": [
+    "age",
+    "sex",
+    "weight",
+    "height",
+    "bmi"
+  ],
+  "sources": [
+    {
+      "filename": "clinical_*.xlsx",
+      "sheet": "Sheet1",
+      "source_kind": "clinical_wide",
+      "domain": "clinical",
+      "layout": "wide",
+      "cohort_id": "MY-COHORT",
+      "batch_id": "All",
+      "default_visit_label": "1"
+    },
+    {
+      "filename": "volumetry_*.csv",
+      "sheet": "Sheet1",
+      "source_kind": "image_wide",
+      "domain": "image",
+      "layout": "wide",
+      "modality": "t1",
+      "default_pipeline_id": "t1_volumetry_v1",
+      "cohort_id": "MY-COHORT",
+      "batch_id": "All",
+      "default_visit_label": "1"
+    }
+  ],
+  "local_presets": [
+    {
+      "preset_id": "my_pipeline",
+      "label": "My pipeline",
+      "layout": "flat",
+      "subject_globs": [
+        "sub-*"
+      ],
+      "roots": {
+        "dicom": "~/data/DICOM",
+        "nifti": "~/data/NIFTI",
+        "results": "~/data/RESULTS"
+      },
+      "show_batch": false,
+      "default_batch": ""
+    }
+  ],
+  "cohort_dir_rules": {
+    "reject_prefixes": [
+      "."
+    ],
+    "accept_regex": [],
+    "accept_prefixes": []
+  }
+}

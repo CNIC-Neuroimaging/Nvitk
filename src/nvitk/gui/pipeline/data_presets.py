@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -11,11 +10,11 @@ from typing import Any
 NIFTI_SUFFIXES = (".nii.gz", ".nii")
 QVTPY_PIPELINE_BUNDLE_DIRS: tuple[str, ...] = ("eicab", "qvtpy")
 
-# PESA-Fat on disk:  NIFTI_ROOT / <cohort> / PESA* / *.nii.gz
-#                    RESULTS_ROOT / <cohort> / res_* / PESA* / ...
-PESA_FAT_SUBJECT_GLOBS: tuple[str, ...] = ("PESA*",)
+def _dataset_config() -> Any:
+    """The dataset config in force (its ``local_presets`` and ``cohort_dir_rules``)."""
+    from nvitk.db.config.dataset_config import load_dataset_config
 
-_COHORT_WEEK_RE = re.compile(r"^\d{6}_Week\d+$", re.IGNORECASE)
+    return load_dataset_config()
 
 
 @dataclass(frozen=True)
@@ -30,6 +29,8 @@ class PipelinePresetSpec:
     show_batch: bool
     default_batch: str
     pesa_fat_layout: bool = False
+    #: Literal roots (``{"dicom", "nifti", "results"}``), for a pipeline without a config module.
+    roots: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass
@@ -75,46 +76,29 @@ class LocalAsset:
     path: Path
 
 
-PRESET_REGISTRY: tuple[PipelinePresetSpec, ...] = (
-    PipelinePresetSpec(
-        "qvtpy",
-        "QVTpy (4D flow)",
-        "nvitk.pipes.qvtpy.config",
-        layout="flat",
-        subject_globs=("PESA*",),
-        show_batch=False,
-        default_batch="",
-    ),
-    PipelinePresetSpec(
-        "pesa_fat",
-        "PESA-Fat (Dixon + CT-PET)",
-        "nvitk.pipes.pesa_fat.common.paths",
-        layout="batch",
-        subject_globs=PESA_FAT_SUBJECT_GLOBS,
-        show_batch=True,
-        default_batch="",
-        pesa_fat_layout=True,
-    ),
-    PipelinePresetSpec(
-        "pesa_fat_ctpet",
-        "PESA-Fat CT-PET v5",
-        "nvitk.pipes.pesa_fat.common.paths",
-        layout="batch",
-        subject_globs=PESA_FAT_SUBJECT_GLOBS,
-        show_batch=True,
-        default_batch="",
-        pesa_fat_layout=True,
-    ),
-    PipelinePresetSpec(
-        "pesa_fat_dixon",
-        "PESA-Fat Dixon v5",
-        "nvitk.pipes.pesa_fat.common.paths",
-        layout="batch",
-        subject_globs=PESA_FAT_SUBJECT_GLOBS,
-        show_batch=True,
-        default_batch="",
-        pesa_fat_layout=True,
-    ),
+def _preset_from_config(entry: dict[str, Any]) -> PipelinePresetSpec:
+    return PipelinePresetSpec(
+        preset_id=str(entry["preset_id"]),
+        label=str(entry.get("label") or entry["preset_id"]),
+        config_module=str(entry.get("config_module") or ""),
+        layout=str(entry.get("layout") or "flat"),
+        subject_globs=tuple(str(g) for g in entry.get("subject_globs") or ("*",)),
+        show_batch=bool(entry.get("show_batch", False)),
+        default_batch=str(entry.get("default_batch") or ""),
+        pesa_fat_layout=bool(entry.get("pesa_fat_layout", False)),
+        roots=tuple((str(k), str(v)) for k, v in dict(entry.get("roots") or {}).items()),
+    )
+
+
+#: Pipelines the Data browser can walk on disk, from the dataset config's ``local_presets``.
+PRESET_REGISTRY: tuple[PipelinePresetSpec, ...] = tuple(
+    _preset_from_config(entry) for entry in _dataset_config().local_presets
+)
+
+# PESA-Fat on disk:  NIFTI_ROOT / <cohort> / PESA* / *.nii.gz
+#                    RESULTS_ROOT / <cohort> / res_* / PESA* / ...
+PESA_FAT_SUBJECT_GLOBS: tuple[str, ...] = next(
+    (p.subject_globs for p in PRESET_REGISTRY if p.pesa_fat_layout), ("PESA*",)
 )
 
 
@@ -143,18 +127,9 @@ def _path_from_config(mod: Any, name: str) -> Path | None:
 
 
 def _is_cohort_dir_name(name: str) -> bool:
-    """Cohort folder under NIFTI/DICOM/RESULTS roots (not a PESA subject)."""
-    if not name or name.startswith(".") or name.startswith("res_"):
-        return False
-    if name.upper().startswith("PESA"):
-        return False
-    if _COHORT_WEEK_RE.match(name):
-        return True
-    if name.upper().startswith("DIXON_"):
-        return True
-    if name.startswith("Visit-"):
-        return True
-    return False
+    """Cohort folder under NIFTI/DICOM/RESULTS roots (not a subject), by the dataset config's
+    ``cohort_dir_rules``."""
+    return _dataset_config().is_cohort_dir_name(name)
 
 
 def list_local_cohorts(
@@ -218,10 +193,17 @@ def load_preset_roots(
 ) -> PipelineRoots:
     """Load default roots from a pipeline config, with optional overrides."""
     spec = get_pipeline_preset(preset_id)
-    mod = importlib.import_module(spec.config_module)
-    d_root = Path(dicom_root).expanduser() if dicom_root else _path_from_config(mod, "DEFAULT_DICOM_ROOT")
-    n_root = Path(nifti_root).expanduser() if nifti_root else _path_from_config(mod, "DEFAULT_NIFTI_ROOT")
-    r_root = Path(results_root).expanduser() if results_root else _path_from_config(mod, "DEFAULT_RESULTS_ROOT")
+    literal = dict(spec.roots)
+    mod = importlib.import_module(spec.config_module) if spec.config_module else None
+
+    def _default(key: str, attr: str) -> Path | None:
+        if literal.get(key):
+            return Path(literal[key]).expanduser()
+        return _path_from_config(mod, attr) if mod is not None else None
+
+    d_root = Path(dicom_root).expanduser() if dicom_root else _default("dicom", "DEFAULT_DICOM_ROOT")
+    n_root = Path(nifti_root).expanduser() if nifti_root else _default("nifti", "DEFAULT_NIFTI_ROOT")
+    r_root = Path(results_root).expanduser() if results_root else _default("results", "DEFAULT_RESULTS_ROOT")
     if d_root is None or n_root is None or r_root is None:
         raise ValueError(
             f"Pipeline {preset_id!r} is missing DEFAULT_DICOM_ROOT, DEFAULT_NIFTI_ROOT, "

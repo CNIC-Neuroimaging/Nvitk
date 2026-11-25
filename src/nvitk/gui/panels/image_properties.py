@@ -25,6 +25,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from nvitk.gui.core.design import FONT_L, FONT_S
 from nvitk.gui.core.design import (
     AXIS_COLORS,
     COLOR_ACCENT,
@@ -137,7 +138,7 @@ class ImagePropertiesPanel(QWidget):
         self._status.setStyleSheet(f"color: {COLOR_MUTED};")
 
         self._title = QLabel("")
-        self._title.setStyleSheet(f"color: {COLOR_TEXT}; font-size: 14px; font-weight: bold;")
+        self._title.setStyleSheet(f"color: {COLOR_TEXT}; font-size: {FONT_L}px; font-weight: bold;")
         self._title.setWordWrap(True)
 
         self._badges = QWidget()
@@ -327,7 +328,7 @@ class ImagePropertiesPanel(QWidget):
             affine_card = Card(f"Affine  ({domain} → world)")
             affine_card.add(matrix_grid(props.affine, digits=6, mark_last_column=True))
             note = cell("Highlighted column: translation (mm)", color=COLOR_MUTED)
-            note.setStyleSheet(f"color: {COLOR_MUTED}; border: none; font-size: 10px;")
+            note.setStyleSheet(f"color: {COLOR_MUTED}; border: none; font-size: {FONT_S}px;")
             affine_card.add(note)
             self._body_layout.addWidget(affine_card)
 

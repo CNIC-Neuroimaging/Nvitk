@@ -28,7 +28,6 @@ from qtpy.QtWidgets import (
 from nvitk.gui.core.design import COLOR_MUTED, SPACE, SPACE_TIGHT
 
 from nvitk.gui.tools.gpu_toggle import build_gpu_toggle_button
-from nvitk.gui.tools.orient_quick import build_orientation_quick_button
 from nvitk.gui.labels.catalog import layer_schema_key
 from nvitk.gui.labels.visibility import (
     is_label_like_layer,
@@ -180,6 +179,22 @@ def _tool_uses_labels(category: str, tool_id: str) -> bool:
     if tool_id == "viz_vessel_cross_sections":
         return False
     return category in _LABEL_CATEGORIES
+
+
+def _panel_entries(viewer: Any) -> list[tuple[str, str]]:
+    """``(object name, title)`` of every nvitk panel, for the search."""
+    try:
+        from nvitk.gui.core.workspace import list_panels
+
+        return list_panels(viewer)
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _raise_panel(viewer: Any, object_name: str) -> None:
+    from nvitk.gui.core.workspace import raise_panel
+
+    raise_panel(viewer, object_name)
 
 
 def build_tools_dock(
@@ -443,6 +458,9 @@ def build_tools_dock(
     _fit_timer = QTimer(tool_scroll)
     _fit_timer.setSingleShot(True)
     _fit_timer.setInterval(0)
+    # "user": the splitter handle under the tool form was dragged (kept until another tool is
+    # chosen); "applying": the fit itself is moving it.
+    _fit_state = {"user": False, "applying": False}
 
     def _fit_tool_scroll() -> None:
         """Give the tool form the height it needs.
@@ -480,11 +498,25 @@ def build_tools_dock(
             tool_scroll.setMinimumHeight(min(needed, _TOOL_SCROLL_MIN_HEIGHT))
             tool_scroll.setMaximumHeight(16777215)
             return
-        available = container.height() or tool_scroll.height()
+        # Beside a pipeline form / ROI list the two share a splitter: the form starts at what it
+        # needs (up to a share of the dock) and the handle between them is the user's to drag.
+        tool_scroll.setMinimumHeight(min(needed, 80))
+        tool_scroll.setMaximumHeight(16777215)
+        if _fit_state["user"]:
+            return
+        total = sum(aux_split.sizes())
+        available = total or container.height() or tool_scroll.height()
         ceiling = max(_TOOL_SCROLL_MIN_HEIGHT, int(available * _TOOL_SCROLL_HEIGHT_SHARE))
         height = max(_TOOL_SCROLL_MIN_HEIGHT, min(needed, ceiling))
-        tool_scroll.setMinimumHeight(height)
-        tool_scroll.setMaximumHeight(height)
+        top = height + sum(w.sizeHint().height() for w in (cursor_row, cow_row) if w.isVisible())
+        if total > top:
+            sizes = [top] + [0] * (aux_split.count() - 1)
+            rest = [i for i in range(1, aux_split.count()) if aux_split.widget(i).isVisible()]
+            for i in rest:
+                sizes[i] = (total - top) // len(rest)
+            _fit_state["applying"] = True
+            aux_split.setSizes(sizes)
+            _fit_state["applying"] = False
 
     # Widget visibility settles during the current event-loop pass, so measure
     # the form on the next one.
@@ -495,14 +527,14 @@ def build_tools_dock(
     from nvitk.gui.core.flow_layout import FlowRow
     from nvitk.gui.core.performance import build_performance_button
 
-    top_row = FlowRow()
-    for button in (
-        build_gpu_toggle_button(),
-        build_performance_button(),
-        build_orientation_quick_button(viewer),
-    ):
-        top_row.add(button)
-    layout.addWidget(top_row, 0)
+    # The compute backend and CPU threads moved to the activity bar's foot (shell/compute.py);
+    # reorienting is in the layer right-click menu (Reorient selected). Without the shell (a
+    # bare viewer, a test) the old buttons are kept, without the orientation one.
+    if getattr(viewer, "_nvitk_shell", None) is None and not getattr(viewer, "_nvitk_shell_pending", False):
+        top_row = FlowRow()
+        for button in (build_gpu_toggle_button(), build_performance_button()):
+            top_row.add(button)
+        layout.addWidget(top_row, 0)
 
     btn_ortho = QPushButton("Orthogonal views")
     btn_ortho.setToolTip(
@@ -524,6 +556,9 @@ def build_tools_dock(
             notify(f"Could not open the orthogonal views: {exc}", error=True)
 
     btn_ortho.clicked.connect(_open_ortho_views)
+    # The views are in the central viewport now (Layout menu); the button is kept for the
+    # tool-dock API but not shown.
+    btn_ortho.setVisible(False)
     layout.addWidget(btn_ortho, 0)
 
     def _select_tool(tool_id: str) -> None:
@@ -539,6 +574,9 @@ def build_tools_dock(
         # label picker and reference-layer wiring all hang off these two combos.
         tool_panel.category.value = spec.category
         tool_panel.operation.value = spec.label
+        browser = getattr(container, "_nvitk_tool_browser", None)
+        if browser is not None and browser.current_tool() != tool_id:
+            browser.select_tool(tool_id)  # chosen from the search: show where it lives
         _sync_aux_panels()
         from nvitk.gui.core.workspace import raise_panel
 
@@ -557,6 +595,53 @@ def build_tools_dock(
     # is what reaches the palette on a desktop whose window manager claims the key.
     search_tools = CommandSearchBar(lambda: build_commands(viewer, _select_tool))
     layout.addWidget(search_tools, 0)
+    # The tool browser's own search covers this one; Alt+F still opens the palette everywhere.
+    search_tools.setVisible(False)
+
+    # Every tool by task section, filterable by modality / domain / species / suite; picking one
+    # drives the form below exactly as the Category / Operation combos do.
+    from nvitk.gui.tools.browser import ToolBrowser
+
+    tool_browser = ToolBrowser(panels=lambda: _panel_entries(viewer))
+    tool_browser.tool_selected.connect(_select_tool)
+    tool_browser.panel_selected.connect(lambda name: _raise_panel(viewer, name))
+    container._nvitk_tool_browser = tool_browser
+    # The browser is the tool selector: the old Category / Operation dropdowns still exist (they
+    # carry the dispatch) but are not shown. Its height is the user's (drag the handle under it).
+    from nvitk.gui.core.widgets import resizable
+
+    layout.addWidget(resizable(tool_browser, height=330, minimum=140, pref_key="tools.browser"), 0)
+    for hidden in (tool_panel.category, tool_panel.operation):
+        hidden.visible = False
+    tool_title = QLabel("")
+    tool_title.setWordWrap(True)
+    tool_title.setTextFormat(Qt.RichText)
+
+    def _sync_tool_title(*_args: Any) -> None:
+        """Name the tool the form below belongs to (and where it sits in the browser)."""
+        from nvitk.gui.core import design as _design
+        from nvitk.gui.tools.registry import tool_by_id
+        from nvitk.gui.tools.taxonomy import SECTIONS, meta_for
+
+        tid = tool_id_from_label(tool_panel.category.value, tool_panel.operation.value)
+        spec = tool_by_id(tid) if tid else None
+        if spec is None:
+            tool_title.setText("")
+            return
+        meta = meta_for(spec)
+        section = next((sec.title for sec in SECTIONS if sec.key == meta.section), meta.section)
+        where = " › ".join(p for p in (section, meta.subsection) if p)
+        suite = "" if meta.suite == "nvitk" else (
+            f" &nbsp;<span style='color:{_design.suite_color(meta.suite)}'>{meta.suite}</span>")
+        tool_title.setText(
+            f"<b style='font-size:{_design.FONT_L}px'>{spec.label}</b>{suite}"
+            f"<br><span style='color:{_design.COLOR_MUTED}; font-size:{_design.FONT_S}px'>{where}</span>"
+        )
+
+    tool_panel.operation.changed.connect(_sync_tool_title)
+    tool_panel.category.changed.connect(_sync_tool_title)
+    _sync_tool_title()
+    layout.addWidget(tool_title, 0)
 
     from nvitk.gui.tools.registry import is_sge_capable, sge_block_reason
     from nvitk.gui.sge.submit import submit_gui_sge
@@ -588,43 +673,43 @@ def build_tools_dock(
 
     btn_run_sge.clicked.connect(_on_run_sge)
     layout.addWidget(btn_run_sge, 0)
-    layout.addWidget(tool_scroll, 0)
-    layout.addWidget(cursor_row, 0)
-    layout.addWidget(cow_row, 0)
-    layout.addWidget(totalseg_roi, 0)
-    layout.addWidget(pipeline_form, 0)
-    layout.addStretch(1)
-    container.setLayout(layout)
+    # The tool form and the panel that may come with it (the pipeline form, the TotalSegmentator
+    # ROI list) share a splitter, so neither is squeezed by the other: drag the handle between.
+    from qtpy.QtWidgets import QSplitter
 
-    _row_tools = layout.indexOf(tool_scroll)
-    _row_pipeline = layout.indexOf(pipeline_form)
-    _row_totalseg = layout.indexOf(totalseg_roi)
-    _row_spacer = layout.count() - 1
+    top_pane = QWidget()
+    top_layout = QVBoxLayout(top_pane)
+    top_layout.setContentsMargins(0, 0, 0, 0)
+    top_layout.setSpacing(layout.spacing())
+    top_layout.addWidget(tool_scroll, 1)
+    top_layout.addWidget(cursor_row, 0)
+    top_layout.addWidget(cow_row, 0)
+    aux_split = QSplitter(Qt.Vertical)
+    aux_split.setObjectName("nvitk_tool_form_split")
+    aux_split.setChildrenCollapsible(False)
+    aux_split.setHandleWidth(6)
+    aux_split.addWidget(top_pane)
+    aux_split.addWidget(totalseg_roi)
+    aux_split.addWidget(pipeline_form)
+    aux_split.splitterMoved.connect(
+        lambda *_a: _fit_state.__setitem__("user", True) if not _fit_state["applying"] else None)
+    container._nvitk_tool_form_split = aux_split
+    layout.addWidget(aux_split, 1)
+    container.setLayout(layout)
 
     def _update_aux_panel_layout() -> None:
         """Give the dock's spare height to the panel that can use it: the pipeline
         form or the TotalSeg ROI list when one is showing, else the tool form."""
         is_pipeline = pipeline_form.isVisible()
         is_ts = totalseg_roi.isVisible()
-        if is_pipeline:
-            expand_row = _row_pipeline
-        elif is_ts:
-            expand_row = _row_totalseg
-        else:
-            expand_row = _row_tools
-
-        # Only the panel that gets the stretch is allowed to grow; two
-        # panels both expanding would fight over the same spare height.
         pipeline_form.set_expanded(is_pipeline)
-        totalseg_roi.set_expanded(expand_row == _row_totalseg)
-        tool_scroll.setSizePolicy(
-            QSizePolicy.Preferred,
-            QSizePolicy.Expanding if expand_row == _row_tools else QSizePolicy.Fixed,
-        )
-
-        for i in range(layout.count()):
-            layout.setStretch(i, 1 if i == expand_row else 0)
-        layout.setStretch(_row_spacer, 0)
+        totalseg_roi.set_expanded(is_ts and not is_pipeline)
+        tool_scroll.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        aux = is_pipeline or is_ts
+        aux_split.setStretchFactor(0, 0 if aux else 1)
+        aux_split.setStretchFactor(1, 1 if is_ts and not is_pipeline else 0)
+        aux_split.setStretchFactor(2, 1 if is_pipeline else 0)
+        _fit_state["user"] = False  # another tool: its own fit
 
     _active_sync_timer.timeout.connect(
         lambda: (

@@ -22,6 +22,7 @@ import os
 from typing import Any
 
 from nvitk.core.logger import Logger
+from nvitk.gui.core.design import FONT_S
 
 log = Logger()
 
@@ -166,7 +167,7 @@ def open_performance_dialog(parent: Any = None) -> bool:
     if env:
         note = QLabel(f"$NVITK_WORKERS={env} is set and overrides this for the current session.")
         note.setWordWrap(True)
-        note.setStyleSheet(f"color: {COLOR_MUTED}; font-size: 10px;")
+        note.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_S}px;")
         root.addWidget(note)
 
     async_box = QCheckBox("Asynchronous slicing (Napari, experimental)")

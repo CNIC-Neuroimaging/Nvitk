@@ -48,23 +48,21 @@ def _cli_decorator(*args, **kwargs):
 _click_command = click.command if click is not None else _cli_decorator
 _click_option = click.option if click is not None else _cli_decorator
 
-SUBJECT_UID_CANDIDATES = [
-    "subject_uid",
-    "patient_id",
-    "pesa_id",
-    "patientid",
-    "codigoimagen",
-    "codigoimagen_x",
-    "subject",
-    "subject_id",
-    "pesa",
-    "seqn",
-    "codi sub.",
-    "codisub",
-]
-VISIT_CANDIDATES = ["visit_id", "visit", "visit_label", "visit_number", "visita"]
-SESSION_CANDIDATES = ["session_uid", "session_id", "mri_id", "mr id", "experiment_label", "session"]
-DATE_CANDIDATES = ["date", "imagingdate", "measured_at", "scan_date", "session_date", "psqdate_reconocimiento_medico"]
+def _dataset_config():
+    """The dataset config in force (``dataset.json``, or the packaged PESA default)."""
+    from nvitk.db.config.dataset_config import load_dataset_config
+
+    return load_dataset_config()
+
+
+_CONFIG = _dataset_config()
+
+#: Columns that may hold the subject id / visit / session / date, first present wins. From the
+#: dataset config's ``id_columns`` (:mod:`nvitk.db.config.dataset_config`).
+SUBJECT_UID_CANDIDATES = list(_CONFIG.subject_columns)
+VISIT_CANDIDATES = list(_CONFIG.visit_columns)
+SESSION_CANDIDATES = list(_CONFIG.session_columns)
+DATE_CANDIDATES = list(_CONFIG.date_columns)
 
 
 def _image_measurement_session_id_series(raw: pd.DataFrame) -> pd.Series:
@@ -111,75 +109,21 @@ def _timeseries_wide_frame_columns(all_columns: list, *, reserved: set[str]) -> 
         if _column_name_is_timeseries_frame_index(column):
             out.append(column)
     return out
-ID_NAMESPACE_EXACT = {
-    "patient_id",
-    "patientid",
-    "subject",
-    "subject_id",
-    "subject_uid",
-    "id",
-    "pesa_id",
-    "session",
-    "session_id",
-    "session_uid",
-    "visit",
-    "visit_id",
-    "seqn",
-    "mri_id",
-    "mr_id",
-    "mrid",
-    "medrecon_id",
-    "fert_id",
-    "psicosocial_id",
-    "codigoimagen",
-    "codigoimagen_x",
-    "codi_sub",
-    "pesa",
-    "sex",
-    "birth_date",
-    "fechanacimiento",
-}
-LOCAL_PROJECT_ID = "local_db"
-VISIT_PLAQUE = "3"
-VISIT_PESA_BRAIN = "4"
-VISIT_IA_PET_V5 = "5"
-DEFAULT_VISIT_LABEL = VISIT_PESA_BRAIN
-PLAQUE_SOURCE_FILENAME = "PESABrain_Echography_CarotidePlaque_20260216.xlsx"
+ID_NAMESPACE_EXACT = set(_CONFIG.namespace_exact)
+#: Column-name prefixes that mark an identifier rather than a variable.
+ID_PREFIXES: tuple[str, ...] = tuple(_CONFIG.identifier_prefixes)
+LOCAL_PROJECT_ID = _CONFIG.local_project_id
+VISIT_PLAQUE = _CONFIG.visits.get("plaque", "3")
+VISIT_PESA_BRAIN = _CONFIG.visits.get("pesa_brain", _CONFIG.default_visit_label)
+VISIT_IA_PET_V5 = _CONFIG.visits.get("ia_pet_v5", "5")
+DEFAULT_VISIT_LABEL = _CONFIG.default_visit_label
+PLAQUE_SOURCE_FILENAME = _CONFIG.plaque_source_filename
 ID_SOURCE_PESABRAIN_EXCEL = "pesabrain_excel"
 ID_SOURCE_XNAT = "xnat"
 ID_SOURCE_DERIVED = "derived"
 
-CLINICAL_METADATA_COLUMNS = {
-    "age_at_mri",
-    "sex",
-    "weight",
-    "height",
-    "bmi",
-    "bpxsym",
-    "bpxdim",
-    "bpxpls",
-    "tas",
-    "tad",
-    "pp",
-    "hematocrit",
-    "psqto000",
-    "lbxhdd",
-    "lbdldl",
-    "lbxtc",
-    "score2",
-    "pedframi10",
-    "pedframi30",
-    "visit",
-    "tacsctot",
-    "tacsctot_group",
-    "total_plaque_vol",
-    "left_carotid_plaque_vol",
-    "right_carotid_plaque_vol",
-    "total_femoral_plaque_vol",
-    "total_carotid_plaque_vol",
-    "apoe",
-    "age_c",
-}
+#: Clinical columns an image sheet repeats; skipped when its measurements are melted.
+CLINICAL_METADATA_COLUMNS = set(_CONFIG.clinical_metadata_columns)
 
 
 @dataclass(frozen=True)
@@ -198,96 +142,17 @@ class SourceSpec:
     default_pipeline_id: str | None = None
 
 
-PESABRAIN_DB_SPECS: dict[str, list[SourceSpec]] = {
-    "PESABrain_All_IDs.xlsx": [
-        SourceSpec("PESABrain_All_IDs.xlsx", "Sheet1", "subject_ids", "metadata", "wide", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
-    ],
-    "PESABrain_All_4DFlow_IDs.xlsx": [
-        SourceSpec("PESABrain_All_4DFlow_IDs.xlsx", "Sheet1", "subject_ids", "metadata", "wide", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
-    ],
-    "PESABrain_SubjectCatalog_AllXNAT_20260216.xlsx": [
-        SourceSpec("PESABrain_SubjectCatalog_AllXNAT_20260216.xlsx", "Datos", "subject_catalog", "metadata", "wide", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
-    ],
-    "PESABrain_Clinical_20260216.xlsx": [
-        SourceSpec("PESABrain_Clinical_20260216.xlsx", "Sheet1", "clinical_wide", "clinical", "wide", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
-    ],
-    "PESABrain_Clinical_AllXNAT_20260216.xlsx": [
-        SourceSpec("PESABrain_Clinical_AllXNAT_20260216.xlsx", "Datos", "clinical_wide", "clinical", "wide", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
-    ],
-    "PESABrain_APOE_20260318.xlsx": [
-        SourceSpec("PESABrain_APOE_20260318.xlsx", "Sheet1", "clinical_wide", "clinical", "wide", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
-    ],
-    "PESABrain_TAC_20260318.xlsx": [
-        SourceSpec("PESABrain_TAC_20260318.xlsx", "Sheet1", "clinical_wide", "clinical", "wide", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
-    ],
-    "PESABrain_Echography_CarotidePlaque_20260216.xlsx": [
-        SourceSpec(
-            "PESABrain_Echography_CarotidePlaque_20260216.xlsx",
-            "Sheet1",
-            "clinical_wide",
-            "clinical",
-            "wide",
-            cohort_id="PESA-Brain",
-            default_visit_label=VISIT_PLAQUE,
-            batch_id="All",
-        ),
-    ],
-    "PESABrain_4DFlow_LocalizedPI_20260216.xlsx": [
-        SourceSpec("PESABrain_4DFlow_LocalizedPI_20260216.xlsx", "PESABrain_AnalysisDB_Batch1", "image_wide", "image", "wide", modality="4dflow", default_pipeline_id='4dflow_v1', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
-    ],
-    "PESABrain_4DFlow_LocalizedTimeAvgFlow_20260216.xlsx": [
-        SourceSpec("PESABrain_4DFlow_LocalizedTimeAvgFlow_20260216.xlsx", "PESABrain_AnalysisDB_Batch1", "image_wide", "image", "wide", modality="4dflow", default_pipeline_id='4dflow_v1', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
-    ],
-    "PESABrain_4DFlow_LocalizedTimeseriesFlow_Wide_20260216.xlsx": [
-        SourceSpec("PESABrain_4DFlow_LocalizedTimeseriesFlow_Wide_20260216.xlsx", "Datos", "image_timeseries_wide", "image", "wide", modality="4dflow", default_pipeline_id='4dflow_v1', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
-    ],
-    "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx": [
-        SourceSpec("PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx", "Sheet1", "image_wide", "image", "wide", modality="4dflow", default_pipeline_id='4dflow_v2', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
-    ],
-    "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx": [
-        SourceSpec("PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx", "Sheet1", "image_wide", "image", "wide", modality="4dflow", default_pipeline_id='4dflow_v2', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
-    ],
-    "PESABrain_4DFlowv2_LocalizedTimeseriesFlow_Wide_202602410.xlsx": [
-        SourceSpec("PESABrain_4DFlowv2_LocalizedTimeseriesFlow_Wide_202602410.xlsx", "Sheet1", "image_timeseries_wide", "image", "wide", modality="4dflow", default_pipeline_id='4dflow_v2', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
-    ],
-    "PESABrain_ASLPerfusion_ThrMeanCBF_20260216.xlsx": [
-        SourceSpec("PESABrain_ASLPerfusion_ThrMeanCBF_20260216.xlsx", "Sheet1", "image_wide", "image", "wide", modality="asl", cohort_id="PESA-Brain", default_pipeline_id='asl_v1', default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
-    ],
-    "PESABrain_ASLPerfusion_CovCBF_20260216.xlsx": [
-        SourceSpec("PESABrain_ASLPerfusion_CovCBF_20260216.xlsx", "Sheet1", "image_wide", "image", "wide", modality="asl", cohort_id="PESA-Brain", default_pipeline_id='asl_v1', default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
-    ],
-    "PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx": [
-        SourceSpec("PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx", "Sheet1", "image_wide", "image", "wide", modality="asl", default_pipeline_id='asl_v1', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
-    ],
-    "PESABrain_ASLPerfusion_VascularAtlas_MeanATT_20260216.xlsx": [
-        SourceSpec(
-            "PESABrain_ASLPerfusion_VascularAtlas_MeanATT_20260216.xlsx",
-            "Sheet1",
-            "image_wide",
-            "image",
-            "wide",
-            modality="asl",
-            default_pipeline_id="asl_v1",
-            cohort_id="PESA-Brain",
-            default_visit_label=DEFAULT_VISIT_LABEL,
-            batch_id="All",
-        ),
-    ],
-    "PESABrain_ASLPerfusion_VascularAtlas_MedianATT_20260216.xlsx": [
-        SourceSpec(
-            "PESABrain_ASLPerfusion_VascularAtlas_MedianATT_20260216.xlsx",
-            "Sheet1",
-            "image_wide",
-            "image",
-            "wide",
-            modality="asl",
-            default_pipeline_id="asl_v1",
-            cohort_id="PESA-Brain",
-            default_visit_label=DEFAULT_VISIT_LABEL,
-            batch_id="All",
-        ),
-    ],
-}
+def _specs_from_config(config: Any) -> dict[str, list[SourceSpec]]:
+    """The dataset config's ``sources`` as :class:`SourceSpec` lists keyed by file name."""
+    return {
+        filename: [SourceSpec(**entry) for entry in entries]
+        for filename, entries in config.specs_by_filename().items()
+    }
+
+
+#: Importable sources by file name, from the dataset config's ``sources`` (out of the box, the
+#: PESA-Brain spreadsheets).
+PESABRAIN_DB_SPECS: dict[str, list[SourceSpec]] = _specs_from_config(_CONFIG)
 
 
 def list_pesabrain_sources() -> list[dict[str, Any]]:
@@ -319,6 +184,9 @@ def _matching_pesabrain_specs(
 ) -> list[SourceSpec]:
     """Look up registered :class:`SourceSpec` entries for *filename*, optionally filtered by sheet/kind."""
     matches = list(PESABRAIN_DB_SPECS.get(filename, []))
+    if not matches:
+        # Sources may name a glob (``Clinical_*.xlsx``): a dated export matches without a code change.
+        matches = [SourceSpec(**entry) for entry in _CONFIG.specs_for_file(filename)]
     if sheet is not None:
         matches = [spec for spec in matches if spec.sheet == sheet]
     if source_kind is not None:
@@ -338,7 +206,7 @@ def _is_identifier_column(column: str) -> bool:
         return True
     if normalized.endswith("_id") or normalized.endswith("_uid"):
         return True
-    if normalized.startswith("codigo") or normalized.startswith("codigoprueba"):
+    if any(normalized.startswith(prefix) for prefix in ID_PREFIXES):
         return True
     return False
 

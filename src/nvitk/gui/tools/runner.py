@@ -1715,6 +1715,13 @@ def _run_gui_tool(
             )
             return coerce_tool_output(out)
 
+    if tool_id.startswith(("antsxnet_", "ants_")):
+        from nvitk.gui.tools.ants_registry import ANTS_TOOL_IDS, run_ants_tool
+
+        if tool_id in ANTS_TOOL_IDS:
+            with using("numpy"):
+                return run_ants_tool(tool_id, img, viewer, params)
+
     if tool_id == "seg_brain_extraction":
         from nvitk.segmentation.brain_extraction import brain_extraction
 

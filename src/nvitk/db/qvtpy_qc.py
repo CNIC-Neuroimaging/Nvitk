@@ -169,8 +169,12 @@ def subject_qc_status_summary(
     repo: DataRepo | None = None,
     *,
     pipeline_id: str = QVTPY_PIPELINE_ID,
+    variables: Iterable[str] | None = None,
 ) -> dict[str, str]:
     """Per-subject revision status from ``image_measurements.qc_status``.
+
+    *variables* are the reviewed variable ids (default: the QVTPy QC metrics,
+    :data:`QC_METRIC_VARIABLES`); another pipeline's review passes its own.
 
     Returns a dict mapping ``subject_uid`` to one of:
     - ``"revised"``: every QC-relevant row for the subject has OK or FAIL.
@@ -181,8 +185,11 @@ def subject_qc_status_summary(
     if not repo.catalog.table_exists("image_measurements"):
         return {}
     qc_vars: set[str] = set()
-    for vars_ in QC_METRIC_VARIABLES.values():
-        qc_vars.update(vars_)
+    if variables is not None:
+        qc_vars.update(str(v) for v in variables)
+    else:
+        for vars_ in QC_METRIC_VARIABLES.values():
+            qc_vars.update(vars_)
     # Filter in SQL, not in pandas. The GUI calls this every time the QC tab is
     # opened, and pulling every measurement row across to discard all but the QC
     # variables was ~2 s of a 2.1 s load on a real dataset.

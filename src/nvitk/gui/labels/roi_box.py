@@ -90,6 +90,7 @@ class RoiBox(QObject):
         b = [min(max(int(v), a_ + 1), n) for v, a_, n in zip(hi, a, shape)]
         self._layer = weakref.ref(layer)
         self.shape, self.lo, self.hi = shape, a, b
+        self._outline_dropped = False
         self.sync_outline()
         if emit:
             self.changed.emit()
@@ -179,12 +180,16 @@ class RoiBox(QObject):
     # the outline on the canvas
 
     def _on_dims(self, _event: Any = None) -> None:
-        if self.active:
+        # Not after the outline was removed from outside (the user deleted it, or the viewer is
+        # closing and removing every layer): re-adding it on each dims change while layers are
+        # torn down never ends. The next change of the box itself draws it again.
+        if self.active and not getattr(self, "_outline_dropped", False):
             self.sync_outline()
 
     def _on_removed(self, event: Any) -> None:
         if getattr(event, "value", None) is self._outline():
             self._outline = lambda: None
+            self._outline_dropped = True
 
     def _corner_world(self, layer: Any, voxel: Sequence[float]) -> list[float]:
         return [float(v) for v in layer.data_to_world(list(voxel))]
@@ -224,9 +229,27 @@ class RoiBox(QObject):
 
     def sync_outline(self) -> None:
         """Draw the box on the canvas (or remove the outline when there is none)."""
+        # Not re-entrant: adding the outline layer changes the viewer's dims, whose handler
+        # (_on_dims) lands here again before the first outline is recorded, and a second one
+        # was added mid-insertion: a layer Napari's controls never registered, which crashed
+        # the viewer when it was removed (KeyError in the layer controls on close).
+        if getattr(self, "_syncing_outline", False):
+            return
+        self._syncing_outline = True
+        try:
+            self._sync_outline()
+        finally:
+            self._syncing_outline = False
+
+    def _sync_outline(self) -> None:
         outline = self._outline()
         if outline is not None and outline not in self._viewer.layers:
-            outline = None
+            # Removed from outside, and Napari's own dims update for that removal can run
+            # before _on_removed hears of it: count it as dropped here too, or each removal
+            # re-adds an outline that the viewer's closing loop removes again, forever.
+            self._outline = lambda: None
+            self._outline_dropped = True
+            return
         layer = self.layer
         if not self.active or layer is None:
             if outline is not None:

@@ -230,106 +230,19 @@ def infer_flow_orientation(description: str) -> str:
 
 def classify_scan(series_description: str | None, quality: str | None = None) -> dict[str, Any] | None:
     """Classify a scan by its *series_description* (and optional QC *quality*) into a
-    ``{modality, orientation, sequence, ...}`` dict, matching BrainVIEW/VWI_BB, TOF/MRA, 4D-flow, resting-
-    state fMRI, carotid QF, QSM/SWI, and other known sequence patterns in priority order. Returns
-    ``None`` when the description matches nothing, or when *quality* is present and not ``"usable"``
-    (except for the BrainVIEW/VWI_BB case, which is quality-independent)."""
-    description = series_description or ""
-    brainview_variant = parse_brainview_variant(description, quality)
-    if brainview_variant is not None:
-        return {
-            "modality": "mri",
-            "orientation": None,
-            "sequence": "VWI_BB",
-            "variant": brainview_variant,
-        }
+    ``{modality, orientation, sequence, ...}`` dict, with the default classifier of the XNAT rules in
+    force (:mod:`nvitk.db.config.xnat_rules`; out of the box, the PESA-Brain rules: BrainVIEW/VWI_BB,
+    TOF/MRA, 4D-flow, resting-state fMRI, carotid QF, QSM/SWI, FLAIR, T2 HR, T1, in that order).
+    Returns ``None`` when no rule matches, or when *quality* is present and not accepted (BrainVIEW
+    is quality-independent)."""
+    return _xnat_rules().default().classify(series_description, quality)
 
-    if quality is not None and str(quality).lower() != "usable":
-        return None
 
-    if re.search(r"cs3di_mc|tof|mra", description, flags=re.IGNORECASE):
-        return {
-            "modality": "tof",
-            "orientation": None,
-            "sequence": "TOF",
-        }
+def _xnat_rules():
+    """The XNAT rules in force (``xnat_rules.json``, or the packaged PESA default)."""
+    from nvitk.db.config.xnat_rules import load_xnat_rules
 
-    if re.search(r"4d.?q?flow|^\s*(?:AP|RL|FH)\s*$", description, flags=re.IGNORECASE):
-        orientation = infer_flow_orientation(description)
-        sequence = f"4DFLOW_{orientation}" if orientation != "GENERIC" else "4DFLOW_GENERIC"
-        return {
-            "modality": "4dflow",
-            "orientation": orientation,
-            "sequence": sequence,
-        }
-
-    # Additional structural / functional sequences (order: specific before broad)
-
-    if re.search(
-        r"resting\s*state|resting-state|\brsfmri\b|\brsf?mri\b|"
-        r"rest\s*fmri|fmri\s*rest|bold.*rest|epi.*rest|task\s*rest|mb\s*epi|multiband.*rest",
-        description,
-        flags=re.IGNORECASE,
-    ):
-        return {
-            "modality": "fmri",
-            "orientation": None,
-            "sequence": "RESTING_STATE_MB",
-        }
-
-    if re.search(r"carotid.*qf|qf.*carotid|carotid_qf|carotid\s*4d", description, flags=re.IGNORECASE):
-        return {
-            "modality": "mra",
-            "orientation": None,
-            "sequence": "CAROTID_QF",
-        }
-
-    if re.search(r"\bqsm\b|quantitative\s*suscept|suscept.*map", description, flags=re.IGNORECASE) and not re.search(
-        r"\bswi\b|susceptibility\s*weighted", description, flags=re.IGNORECASE
-    ):
-        return {
-            "modality": "qsm",
-            "orientation": None,
-            "sequence": "QSM",
-        }
-
-    if re.search(r"\bswi\b|swi\s*/\s*qsm|susceptibility\s*weighted", description, flags=re.IGNORECASE):
-        return {
-            "modality": "swi",
-            "orientation": None,
-            "sequence": "SWI_QSM",
-        }
-
-    if re.search(r"3d.*flair|flair.*3d|space.*flair|\bflair\b.*\b3d\b", description, flags=re.IGNORECASE):
-        return {
-            "modality": "flair",
-            "orientation": None,
-            "sequence": "3D_FLAIR",
-        }
-
-    if re.search(
-        r"3d.*t2.*(?:hr|high\s*res)|t2.*(?:hr|high\s*res).*(?:3d|space)|\bt2\s*space\b|space\s*t2",
-        description,
-        flags=re.IGNORECASE,
-    ):
-        return {
-            "modality": "t2",
-            "orientation": None,
-            "sequence": "3D_T2_HR",
-        }
-
-    if re.search(
-        r"\b3d\s*t1\b|\bt1\b.*\b3d\b|\bmprage\b|mp[_\s-]?rage|t1_mpr|t1\s*mprage|t1w?\s*3d",
-        description,
-        flags=re.IGNORECASE,
-    ):
-        return {
-            "modality": "t1",
-            "orientation": None,
-            "sequence": "3D_T1",
-        }
-
-    return None
+    return load_xnat_rules()
 
 
 def resolve_xnat_scan_from_scan_row(session: Any, row: Mapping[str, Any]) -> Any:
@@ -390,66 +303,14 @@ def resolve_xnat_scan_from_scan_row(session: Any, row: Mapping[str, Any]) -> Any
 
 
 def xnat_sequence_to_asset_slot(sequence_label: str) -> str:
-    """Map XNAT sequence labels (see :func:`classify_scan`) to canonical ``asset_slot`` names."""
-    key = str(sequence_label).strip().upper().replace("-", "_")
-    mapping = {
-        "TOF": "tof",
-        "4DFLOW_AP": "4dflow_ap",
-        "4DFLOW_FH": "4dflow_fh",
-        "4DFLOW_RL": "4dflow_rl",
-        "4DFLOW_GENERIC": "4dflow",
-        "3D_T1": "t1_3d",
-        "3D_T2_HR": "t2_hr_3d",
-        "3D_FLAIR": "flair_3d",
-        "SWI_QSM": "swi",
-        "QSM": "qsm",
-        "CAROTID_QF": "carotid_qf",
-        "RESTING_STATE_MB": "resting_state_mb",
-        "VWI_BB": "vwi_bb",
-        "DIXON_HEAD": "dixon_head",
-        "DIXON_THORAX": "dixon_thorax",
-        "DIXON_LEGS": "dixon_legs",
-        "CT": "ct",
-        "PET": "pet",
-    }
-    if key in mapping:
-        return mapping[key]
-    return re.sub(r"[^0-9a-z]+", "_", key.lower()).strip("_") or "unknown"
-
-
-_ASSET_SLOT_LABELS: dict[str, str] = {
-    "tof": "TOF",
-    "4dflow_ap": "4DFLOW AP",
-    "4dflow_fh": "4DFLOW FH",
-    "4dflow_rl": "4DFLOW RL",
-    "4dflow": "4DFLOW",
-    "t1_3d": "3D T1",
-    "t2_hr_3d": "3D T2 HR",
-    "flair_3d": "3D FLAIR",
-    "swi": "SWI/QSM",
-    "qsm": "QSM",
-    "carotid_qf": "Carotid QF",
-    "resting_state_mb": "Resting state MB",
-    "vwi_bb": "VWI BB",
-    "dixon_head": "DIXON HEAD",
-    "dixon_thorax": "DIXON THORAX",
-    "dixon_legs": "DIXON LEGS",
-    "ct": "CT",
-    "pet": "PET",
-    "pipeline_eicab": "eICAB results",
-    "pipeline_qvtpy": "QVTPy results",
-    "pipeline_4dflows": "4DFlows results",
-}
+    """Map XNAT sequence labels (see :func:`classify_scan`) to canonical ``asset_slot`` names (the
+    rules' ``asset_slots`` table; unregistered labels are slugified)."""
+    return _xnat_rules().asset_slot(sequence_label)
 
 
 def asset_slot_display_label(asset_slot: str) -> str:
     """Human-readable label for catalog ``asset_slot`` keys."""
-    key = str(asset_slot).strip().lower()
-    if not key:
-        return "?"
-    if key in _ASSET_SLOT_LABELS:
-        return _ASSET_SLOT_LABELS[key]
-    return key.replace("_", " ").upper()
+    return _xnat_rules().asset_slot_label(asset_slot)
 
 
 def requested_sequence_set(requested: str | Iterable[str] | None) -> set[str]:
@@ -457,17 +318,10 @@ def requested_sequence_set(requested: str | Iterable[str] | None) -> set[str]:
     tokens = parse_requested_sequences(requested)
     if not tokens:
         return set()
+    rules = _xnat_rules()
     normalized: set[str] = set()
     for token in tokens:
-        upper = _normalize_sequence_request_token(token)
-        if upper in {"4DFLOW", "4DFLOW_ALL"}:
-            normalized.update({"4DFLOW_AP", "4DFLOW_RL", "4DFLOW_FH"})
-        elif upper == "TOF":
-            normalized.add("TOF")
-        elif upper in {"VWI_BB", "BRAINVIEW", "VWI", "BLACK_BLOOD"}:
-            normalized.add("VWI_BB")
-        else:
-            normalized.add(upper)
+        normalized.update(rules.expand_sequence(_normalize_sequence_request_token(token)))
     return normalized
 
 
@@ -1094,7 +948,7 @@ def sync_xnat_project(
             raise ValueError("download_niftis requires download_root or nifti_download_root to be set.")
 
     from .xnat_projects import (
-        classify_experiment_ia_pet_v5,
+        classify_experiment,
         classify_scan_for_project,
         default_sequences_for_project,
         get_xnat_project,
@@ -1172,8 +1026,9 @@ def sync_xnat_project(
                 except KeyError:
                     project_spec = None
 
-                if project_spec is not None and project_spec.classifier == "ia_pet_v5":
-                    candidate_items = classify_experiment_ia_pet_v5(
+                if project_spec is not None and project_spec.experiment_level:
+                    candidate_items = classify_experiment(
+                        config.project,
                         scans,
                         experiment_label=experiment_label,
                     )

@@ -640,6 +640,8 @@ class AnalysisFrameView(QWidget):
     dropRequested(column)            remove a column from the analysis frame
     restoreRequested()               put every dropped column back
     typeChangeRequested(column, kind) recast a column (numeric / factor / ...)
+    renameRequested(column)          rename one column
+    renameFamilyRequested(family)    rename every ``<family>__<region>`` column at once
     referenceRequested(column, level) make a level the model's reference
     subjectPlotRequested(subject_uid) open the per-subject viewer for one subject
     fileDropped(path)                a spreadsheet was dragged onto the table
@@ -657,6 +659,8 @@ class AnalysisFrameView(QWidget):
     dropRequested = Signal(str)
     restoreRequested = Signal()
     typeChangeRequested = Signal(str, str)
+    renameRequested = Signal(str)
+    renameFamilyRequested = Signal(str)
     referenceRequested = Signal(str, str)
     subjectPlotRequested = Signal(str)
     fileDropped = Signal(str)
@@ -947,6 +951,18 @@ class AnalysisFrameView(QWidget):
             )
 
         menu.addSeparator()
+        menu.addAction(f"Rename “{column}”…", lambda: self.renameRequested.emit(column))
+        family = column.split("__", 1)[0] if "__" in column else ""
+        if family:
+            n_members = sum(1 for c in frame.columns if str(c).startswith(f"{family}__"))
+            rename_family = menu.addAction(
+                f"Rename measurement “{family}” ({n_members} region column(s))…",
+                lambda: self.renameFamilyRequested.emit(family),
+            )
+            rename_family.setToolTip(
+                f"Rename every {family}__<region> column, keeping the region suffix, so the "
+                f"family melts under the new name."
+            )
         menu.addAction("Set as plot x", lambda: self.plotXRequested.emit(column))
         type_menu = menu.addMenu("Column type")
         current_kind = self._column_types.get(column, "auto")

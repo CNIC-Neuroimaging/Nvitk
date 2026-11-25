@@ -394,9 +394,14 @@ class MainCanvasFilter(QObject):
         from nvitk.gui.viz.ortho_panel import _save_ortho_pref
 
         self._canvas_shown = bool(shown)
-        central = self._central()
-        if central is not None:
-            central.setVisible(self._canvas_shown)
+        viewport = getattr(self._viewer, "_nvitk_viewport", None)
+        if viewport is not None:
+            # The canvas is the viewport's 3D pane: hide that pane, not the whole centre.
+            viewport.apply_pane_visible("3d", self._canvas_shown)
+        else:
+            central = self._central()
+            if central is not None:
+                central.setVisible(self._canvas_shown)
         if remember:
             _save_ortho_pref(PREF_CANVAS, self._canvas_shown)
         if self._view_action is not None and self._view_action.isChecked() != self._canvas_shown:

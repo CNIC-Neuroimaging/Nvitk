@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nvitk-dataset-config/1",
+  "title": "nvitk dataset config",
+  "description": "How a dataset is assembled from spreadsheets and folders (see nvitk.db.config.dataset_config).",
+  "type": "object",
+  "required": ["id_columns", "sources"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "name": {"type": "string"},
+    "description": {"type": "string"},
+    "_comment": {},
+    "id_columns": {
+      "type": "object",
+      "properties": {
+        "subject": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "visit": {"type": "array", "items": {"type": "string"}},
+        "session": {"type": "array", "items": {"type": "string"}},
+        "date": {"type": "array", "items": {"type": "string"}},
+        "namespace_exact": {"type": "array", "items": {"type": "string"}},
+        "identifier_prefixes": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["subject"],
+      "additionalProperties": false
+    },
+    "local_project_id": {"type": "string"},
+    "default_visit_label": {"type": "string"},
+    "visits": {"type": "object", "additionalProperties": {"type": "string"}},
+    "clinical_metadata_columns": {"type": "array", "items": {"type": "string"}},
+    "plaque_source_filename": {"type": "string"},
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "filename": {"type": "string", "description": "File name, or a glob (* ? [])"},
+          "sheet": {"type": "string"},
+          "source_kind": {"enum": ["subject_ids", "subject_catalog", "clinical_wide", "cognitive_wide", "image_wide", "image_timeseries_wide"]},
+          "domain": {"enum": ["metadata", "clinical", "cognitive", "image"]},
+          "layout": {"enum": ["wide", "long"]},
+          "modality": {"type": ["string", "null"]},
+          "cohort_id": {"type": ["string", "null"]},
+          "batch_id": {"type": ["string", "null"]},
+          "default_visit_label": {"type": ["string", "null"]},
+          "default_pipeline_id": {"type": ["string", "null"]},
+          "_comment": {}
+        },
+        "additionalProperties": false
+      }
+    },
+    "local_presets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["preset_id", "label", "layout"],
+        "properties": {
+          "preset_id": {"type": "string"},
+          "label": {"type": "string"},
+          "config_module": {"type": "string", "description": "Python module exposing DEFAULT_DICOM_ROOT / DEFAULT_NIFTI_ROOT / DEFAULT_RESULTS_ROOT"},
+          "roots": {
+            "type": "object",
+            "properties": {"dicom": {"type": "string"}, "nifti": {"type": "string"}, "results": {"type": "string"}},
+            "additionalProperties": false
+          },
+          "layout": {"enum": ["flat", "batch"]},
+          "subject_globs": {"type": "array", "items": {"type": "string"}},
+          "show_batch": {"type": "boolean"},
+          "default_batch": {"type": "string"},
+          "pesa_fat_layout": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "cohort_dir_rules": {
+      "type": "object",
+      "properties": {
+        "reject_prefixes": {"type": "array", "items": {"type": "string"}},
+        "reject_startswith": {"type": "array", "items": {"type": "string"}},
+        "reject_upper_prefixes": {"type": "array", "items": {"type": "string"}},
+        "accept_regex": {"type": "array", "items": {"type": "string"}},
+        "accept_regex_flags": {"type": "string"},
+        "accept_upper_prefixes": {"type": "array", "items": {"type": "string"}},
+        "accept_prefixes": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -27,39 +27,28 @@ XNAT_RESOURCE_EICAB = qvt_cfg.STAGE1_EICAB_DIR
 XNAT_RESOURCE_QVTPY = qvt_cfg.QVT_SUBDIR
 XNAT_RESOURCE_4DFLOWS = "4dflows"
 
+from nvitk.db.config.xnat_rules import load_xnat_rules as _load_xnat_rules
+
+#: ``pipeline_resources`` of the XNAT rules in force (label -> slot, pipeline id, name...).
+_RESOURCES: dict[str, dict[str, Any]] = _load_xnat_rules().pipeline_resources
+
 # Indexed / synced by nvitk-xnat-pipeline-sync (bundle trees).
-QVTPY_PIPELINE_RESOURCES: tuple[str, ...] = (XNAT_RESOURCE_EICAB, XNAT_RESOURCE_QVTPY)
+QVTPY_PIPELINE_RESOURCES: tuple[str, ...] = tuple(k for k, v in _RESOURCES.items() if v.get("bundle"))
 
 # Downloadable experiment resources shown in the Data / QC browsers.
-GUI_PIPELINE_RESOURCES: tuple[str, ...] = (
-    XNAT_RESOURCE_EICAB,
-    XNAT_RESOURCE_QVTPY,
-    XNAT_RESOURCE_4DFLOWS,
-)
+GUI_PIPELINE_RESOURCES: tuple[str, ...] = tuple(k for k, v in _RESOURCES.items() if v.get("gui"))
 
-PIPELINE_RESOURCE_TO_SLOT: dict[str, str] = {
-    XNAT_RESOURCE_EICAB: "pipeline_eicab",
-    XNAT_RESOURCE_QVTPY: "pipeline_qvtpy",
-    XNAT_RESOURCE_4DFLOWS: "pipeline_4dflows",
-}
+PIPELINE_RESOURCE_TO_SLOT: dict[str, str] = {k: str(v["asset_slot"]) for k, v in _RESOURCES.items()}
 
 PIPELINE_RESOURCE_TO_PIPELINE_ID: dict[str, str] = {
-    XNAT_RESOURCE_EICAB: "eicab_v1",
-    XNAT_RESOURCE_QVTPY: "qvtpy_v1",
-    XNAT_RESOURCE_4DFLOWS: "4dflows_v1",
+    k: str(v.get("pipeline_id") or f"{k}_v1") for k, v in _RESOURCES.items()
 }
 
-PIPELINE_RESOURCE_TO_NAME: dict[str, str] = {
-    XNAT_RESOURCE_EICAB: "eICAB",
-    XNAT_RESOURCE_QVTPY: "QVTPy",
-    XNAT_RESOURCE_4DFLOWS: "4DFlows",
-}
+PIPELINE_RESOURCE_TO_NAME: dict[str, str] = {k: str(v.get("name") or k) for k, v in _RESOURCES.items()}
 
 # Always-available filter slots for the Data browser (even if catalog is empty).
-PIPELINE_FILTER_SLOTS: tuple[str, ...] = (
-    "pipeline_eicab",
-    "pipeline_qvtpy",
-    "pipeline_4dflows",
+PIPELINE_FILTER_SLOTS: tuple[str, ...] = _load_xnat_rules().pipeline_filter_slots or tuple(
+    PIPELINE_RESOURCE_TO_SLOT.values()
 )
 
 _DEFAULT_QVTPY_QC_STAGES: tuple[str, ...] = (

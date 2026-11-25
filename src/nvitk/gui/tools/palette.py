@@ -331,7 +331,26 @@ def build_commands(viewer: Any, run_tool: Callable[[str], None]) -> list[Command
         )
 
     commands.extend(mesh_commands(viewer))
+    commands.extend(panel_commands(viewer))
     return commands
+
+
+def panel_commands(viewer: Any) -> list[Command]:
+    """Every nvitk panel (Data, QC, DICOM browser, Labeling...) as an entry that opens it."""
+    try:
+        from nvitk.gui.core.workspace import list_panels, raise_panel
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        Command(
+            key=f"panel:{name}",
+            title=f"Panel: {title}",
+            group="Panels",
+            keywords=("panel", "tab", "open", "show", *title.lower().split()),
+            run=(lambda n=name: raise_panel(viewer, n)),
+        )
+        for name, title in list_panels(viewer)
+    ]
 
 
 def mesh_commands(viewer: Any) -> list[Command]:

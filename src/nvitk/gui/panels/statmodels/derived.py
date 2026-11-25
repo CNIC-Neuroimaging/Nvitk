@@ -191,8 +191,8 @@ class DerivedColumnsDialog(QDialog):
         # unbreakable column name, and a second scrollbar is worse than an elided one.
         self._preview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._preview_scroll.setMinimumHeight(70)
-        self._preview_scroll.setMaximumHeight(190)
-        lay.addWidget(self._preview_scroll)
+        from nvitk.gui.core.widgets import resizable  # drag the handle under it to resize
+        lay.addWidget(resizable(self._preview_scroll, height=190, pref_key="derived.preview"))
         return panel
 
     def _build_editor_side(self) -> QWidget:
@@ -335,9 +335,9 @@ class DerivedColumnsDialog(QDialog):
 
         lay.addWidget(QLabel("Include visits"))
         self._vs_visits = QListWidget()
-        self._vs_visits.setMaximumHeight(96)
         self._vs_visits.itemChanged.connect(lambda _i: self._on_vs_changed())
-        lay.addWidget(self._vs_visits)
+        from nvitk.gui.core.widgets import resizable  # drag the handle under it to resize
+        lay.addWidget(resizable(self._vs_visits, height=96, pref_key="derived.visits"))
 
         self._vs_preview = QLabel("")
         self._vs_preview.setWordWrap(True)

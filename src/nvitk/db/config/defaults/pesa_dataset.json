@@ -1,0 +1,400 @@
+{
+  "$schema": "nvitk-dataset-config/1",
+  "name": "PESA",
+  "description": "Dataset import rules reproducing nvitk's original PESA-Brain / PESA-Fat setup.",
+  "id_columns": {
+    "subject": [
+      "subject_uid",
+      "patient_id",
+      "pesa_id",
+      "patientid",
+      "codigoimagen",
+      "codigoimagen_x",
+      "subject",
+      "subject_id",
+      "pesa",
+      "seqn",
+      "codi sub.",
+      "codisub"
+    ],
+    "visit": [
+      "visit_id",
+      "visit",
+      "visit_label",
+      "visit_number",
+      "visita"
+    ],
+    "session": [
+      "session_uid",
+      "session_id",
+      "mri_id",
+      "mr id",
+      "experiment_label",
+      "session"
+    ],
+    "date": [
+      "date",
+      "imagingdate",
+      "measured_at",
+      "scan_date",
+      "session_date",
+      "psqdate_reconocimiento_medico"
+    ],
+    "namespace_exact": [
+      "birth_date",
+      "codi_sub",
+      "codigoimagen",
+      "codigoimagen_x",
+      "fechanacimiento",
+      "fert_id",
+      "id",
+      "medrecon_id",
+      "mr_id",
+      "mri_id",
+      "mrid",
+      "patient_id",
+      "patientid",
+      "pesa",
+      "pesa_id",
+      "psicosocial_id",
+      "seqn",
+      "session",
+      "session_id",
+      "session_uid",
+      "sex",
+      "subject",
+      "subject_id",
+      "subject_uid",
+      "visit",
+      "visit_id"
+    ],
+    "identifier_prefixes": [
+      "codigo",
+      "codigoprueba"
+    ]
+  },
+  "local_project_id": "local_db",
+  "default_visit_label": "4",
+  "visits": {
+    "plaque": "3",
+    "pesa_brain": "4",
+    "ia_pet_v5": "5"
+  },
+  "clinical_metadata_columns": [
+    "age_at_mri",
+    "age_c",
+    "apoe",
+    "bmi",
+    "bpxdim",
+    "bpxpls",
+    "bpxsym",
+    "height",
+    "hematocrit",
+    "lbdldl",
+    "lbxhdd",
+    "lbxtc",
+    "left_carotid_plaque_vol",
+    "pedframi10",
+    "pedframi30",
+    "pp",
+    "psqto000",
+    "right_carotid_plaque_vol",
+    "score2",
+    "sex",
+    "tacsctot",
+    "tacsctot_group",
+    "tad",
+    "tas",
+    "total_carotid_plaque_vol",
+    "total_femoral_plaque_vol",
+    "total_plaque_vol",
+    "visit",
+    "weight"
+  ],
+  "sources": [
+    {
+      "filename": "PESABrain_All_IDs.xlsx",
+      "sheet": "Sheet1",
+      "source_kind": "subject_ids",
+      "domain": "metadata",
+      "layout": "wide",
+      "cohort_id": "PESA-Brain",
+      "batch_id": "All",
+      "default_visit_label": "4"
+    },
+    {
+      "filename": "PESABrain_All_4DFlow_IDs.xlsx",
+      "sheet": "Sheet1",
+      "source_kind": "subject_ids",
+      "domain": "metadata",
+      "layout": "wide",
+      "cohort_id": "PESA-Brain",
+      "batch_id": "4DFlow-Processed",
+      "default_visit_label": "4"
+    },
+    {
+      "filename": "PESABrain_SubjectCatalog_AllXNAT_20260216.xlsx",
+      "sheet": "Datos",
+      "source_kind": "subject_catalog",
+      "domain": "metadata",
+      "layout": "wide",
+      "cohort_id": "PESA-Brain",
+      "batch_id": "All",
+      "default_visit_label": "4"
+    },
+    {
+      "filename": "PESABrain_Clinical_20260216.xlsx",
+      "sheet": "Sheet1",
+      "source_kind": "clinical_wide",
+      "domain": "clinical",
+      "layout": "wide",
+      "cohort_id": "PESA-Brain",
+      "batch_id": "All",
+      "default_visit_label": "4"
+    },
+    {
+      "filename": "PESABrain_Clinical_AllXNAT_20260216.xlsx",
+      "sheet": "Datos",
+      "source_kind": "clinical_wide",
+      "domain": "clinical",
+      "layout": "wide",
+      "cohort_id": "PESA-Brain",
+      "batch_id": "All",
+      "default_visit_label": "4"
+    },
+    {
+      "filename": "PESABrain_APOE_20260318.xlsx",
+      "sheet": "Sheet1",
+      "source_kind": "clinical_wide",
+      "domain": "clinical",
+      "layout": "wide",
+      "cohort_id": "PESA-Brain",
+      "batch_id": "All",
+      "default_visit_label": "4"
+    },
+    {
+      "filename": "PESABrain_TAC_20260318.xlsx",
+      "sheet": "Sheet1",
+      "source_kind": "clinical_wide",
+      "domain": "clinical",
+      "layout": "wide",
+      "cohort_id": "PESA-Brain",
+      "batch_id": "All",
+      "default_visit_label": "4"
+    },
+    {
+      "filename": "PESABrain_Echography_CarotidePlaque_20260216.xlsx",
+      "sheet": "Sheet1",
+      "source_kind": "clinical_wide",
+      "domain": "clinical",
+      "layout": "wide",
+      "cohort_id": "PESA-Brain",
+      "batch_id": "All",
+      "default_visit_label": "3"
+    },
+    {
+      "filename": "PESABrain_4DFlow_LocalizedPI_20260216.xlsx",
+      "sheet": "PESABrain_AnalysisDB_Batch1",
+      "source_kind": "image_wide",
+      "domain": "image",
+      "layout": "wide",
+      "modality": "4dflow",
+      "cohort_id": "PESA-Brain",
+      "batch_id": "4DFlow-Processed",
+      "default_visit_label": "4",
+      "default_pipeline_id": "4dflow_v1"
+    },
+    {
+      "filename": "PESABrain_4DFlow_LocalizedTimeAvgFlow_20260216.xlsx",
+      "sheet": "PESABrain_AnalysisDB_Batch1",
+      "source_kind": "image_wide",
+      "domain": "image",
+      "layout": "wide",
+      "modality": "4dflow",
+      "cohort_id": "PESA-Brain",
+      "batch_id": "4DFlow-Processed",
+      "default_visit_label": "4",
+      "default_pipeline_id": "4dflow_v1"
+    },
+    {
+      "filename": "PESABrain_4DFlow_LocalizedTimeseriesFlow_Wide_20260216.xlsx",
+      "sheet": "Datos",
+      "source_kind": "image_timeseries_wide",
+      "domain": "image",
+      "layout": "wide",
+      "modality": "4dflow",
+      "cohort_id": "PESA-Brain",
+      "batch_id": "4DFlow-Processed",
+      "default_visit_label": "4",
+      "default_pipeline_id": "4dflow_v1"
+    },
+    {
+      "filename": "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx",
+      "sheet": "Sheet1",
+      "source_kind": "image_wide",
+      "domain": "image",
+      "layout": "wide",
+      "modality": "4dflow",
+      "cohort_id": "PESA-Brain",
+      "batch_id": "4DFlow-Processed",
+      "default_visit_label": "4",
+      "default_pipeline_id": "4dflow_v2"
+    },
+    {
+      "filename": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "sheet": "Sheet1",
+      "source_kind": "image_wide",
+      "domain": "image",
+      "layout": "wide",
+      "modality": "4dflow",
+      "cohort_id": "PESA-Brain",
+      "batch_id": "4DFlow-Processed",
+      "default_visit_label": "4",
+      "default_pipeline_id": "4dflow_v2"
+    },
+    {
+      "filename": "PESABrain_4DFlowv2_LocalizedTimeseriesFlow_Wide_202602410.xlsx",
+      "sheet": "Sheet1",
+      "source_kind": "image_timeseries_wide",
+      "domain": "image",
+      "layout": "wide",
+      "modality": "4dflow",
+      "cohort_id": "PESA-Brain",
+      "batch_id": "4DFlow-Processed",
+      "default_visit_label": "4",
+      "default_pipeline_id": "4dflow_v2"
+    },
+    {
+      "filename": "PESABrain_ASLPerfusion_ThrMeanCBF_20260216.xlsx",
+      "sheet": "Sheet1",
+      "source_kind": "image_wide",
+      "domain": "image",
+      "layout": "wide",
+      "modality": "asl",
+      "cohort_id": "PESA-Brain",
+      "batch_id": "All",
+      "default_visit_label": "4",
+      "default_pipeline_id": "asl_v1"
+    },
+    {
+      "filename": "PESABrain_ASLPerfusion_CovCBF_20260216.xlsx",
+      "sheet": "Sheet1",
+      "source_kind": "image_wide",
+      "domain": "image",
+      "layout": "wide",
+      "modality": "asl",
+      "cohort_id": "PESA-Brain",
+      "batch_id": "All",
+      "default_visit_label": "4",
+      "default_pipeline_id": "asl_v1"
+    },
+    {
+      "filename": "PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx",
+      "sheet": "Sheet1",
+      "source_kind": "image_wide",
+      "domain": "image",
+      "layout": "wide",
+      "modality": "asl",
+      "cohort_id": "PESA-Brain",
+      "batch_id": "All",
+      "default_visit_label": "4",
+      "default_pipeline_id": "asl_v1"
+    },
+    {
+      "filename": "PESABrain_ASLPerfusion_VascularAtlas_MeanATT_20260216.xlsx",
+      "sheet": "Sheet1",
+      "source_kind": "image_wide",
+      "domain": "image",
+      "layout": "wide",
+      "modality": "asl",
+      "cohort_id": "PESA-Brain",
+      "batch_id": "All",
+      "default_visit_label": "4",
+      "default_pipeline_id": "asl_v1"
+    },
+    {
+      "filename": "PESABrain_ASLPerfusion_VascularAtlas_MedianATT_20260216.xlsx",
+      "sheet": "Sheet1",
+      "source_kind": "image_wide",
+      "domain": "image",
+      "layout": "wide",
+      "modality": "asl",
+      "cohort_id": "PESA-Brain",
+      "batch_id": "All",
+      "default_visit_label": "4",
+      "default_pipeline_id": "asl_v1"
+    }
+  ],
+  "local_presets": [
+    {
+      "preset_id": "qvtpy",
+      "label": "QVTpy (4D flow)",
+      "config_module": "nvitk.pipes.qvtpy.config",
+      "layout": "flat",
+      "subject_globs": [
+        "PESA*"
+      ],
+      "show_batch": false,
+      "default_batch": "",
+      "pesa_fat_layout": false
+    },
+    {
+      "preset_id": "pesa_fat",
+      "label": "PESA-Fat (Dixon + CT-PET)",
+      "config_module": "nvitk.pipes.pesa_fat.common.paths",
+      "layout": "batch",
+      "subject_globs": [
+        "PESA*"
+      ],
+      "show_batch": true,
+      "default_batch": "",
+      "pesa_fat_layout": true
+    },
+    {
+      "preset_id": "pesa_fat_ctpet",
+      "label": "PESA-Fat CT-PET v5",
+      "config_module": "nvitk.pipes.pesa_fat.common.paths",
+      "layout": "batch",
+      "subject_globs": [
+        "PESA*"
+      ],
+      "show_batch": true,
+      "default_batch": "",
+      "pesa_fat_layout": true
+    },
+    {
+      "preset_id": "pesa_fat_dixon",
+      "label": "PESA-Fat Dixon v5",
+      "config_module": "nvitk.pipes.pesa_fat.common.paths",
+      "layout": "batch",
+      "subject_globs": [
+        "PESA*"
+      ],
+      "show_batch": true,
+      "default_batch": "",
+      "pesa_fat_layout": true
+    }
+  ],
+  "cohort_dir_rules": {
+    "reject_prefixes": [
+      "."
+    ],
+    "reject_startswith": [
+      "res_"
+    ],
+    "reject_upper_prefixes": [
+      "PESA"
+    ],
+    "accept_regex": [
+      "^\\d{6}_Week\\d+$"
+    ],
+    "accept_regex_flags": "i",
+    "accept_upper_prefixes": [
+      "DIXON_"
+    ],
+    "accept_prefixes": [
+      "Visit-"
+    ]
+  },
+  "plaque_source_filename": "PESABrain_Echography_CarotidePlaque_20260216.xlsx"
+}

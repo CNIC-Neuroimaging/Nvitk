@@ -36,6 +36,24 @@ from qtpy.QtGui import QColor, QPainter, QPainterPath, QPen
 
 #: Metadata key holding a layer's folder path (``""`` / missing = top level).
 FOLDER_KEY = "nvitk_folder"
+#: Layer metadata: ``{folder path: visible}`` remembered when a folder was switched off.
+VIS_MEMORY_KEY = "nvitk_vis_memory"
+
+
+def _vis_memory(layer: Any) -> dict[str, bool]:
+    meta = getattr(layer, "metadata", None) or {}
+    value = meta.get(VIS_MEMORY_KEY)
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _store_vis_memory(layer: Any, memory: dict[str, bool]) -> None:
+    try:
+        if memory:
+            layer.metadata[VIS_MEMORY_KEY] = dict(memory)
+        else:
+            layer.metadata.pop(VIS_MEMORY_KEY, None)
+    except Exception:  # noqa: BLE001 (a layer without writable metadata)
+        pass
 #: Height of one folder header band, and the indent per nesting level (px).
 HEADER_H = 24
 INDENT = 14
@@ -500,9 +518,29 @@ class LayerFolders(QObject):
         self.invalidate()
 
     def set_folder_visible(self, folder: str, visible: bool) -> None:
-        """Show or hide every layer in *folder*."""
-        for layer in self.members(folder):
-            layer.visible = bool(visible)
+        """Hide every layer in *folder*, or show again the ones that were on.
+
+        Turning a folder off remembers each member's own visibility (per folder, so nested
+        folders keep theirs); turning it back on restores exactly those, rather than switching
+        on layers that were deliberately off. When nothing was remembered, or nothing was on,
+        everything comes on.
+        """
+        members = self.members(folder)
+        if not visible:
+            for layer in members:
+                memory = _vis_memory(layer)
+                memory.setdefault(folder, bool(getattr(layer, "visible", True)))
+                _store_vis_memory(layer, memory)
+                layer.visible = False
+        else:
+            remembered = [(layer, _vis_memory(layer).get(folder)) for layer in members]
+            any_on = any(bool(state) for _layer, state in remembered)
+            for layer, state in remembered:
+                # A layer that joined the folder while it was off has no memory: it comes on.
+                layer.visible = (bool(state) if state is not None else True) if any_on else True
+                memory = _vis_memory(layer)
+                memory.pop(folder, None)
+                _store_vis_memory(layer, memory)
         self.invalidate()
 
     def select_folder(self, folder: str, *, add: bool = False) -> None:

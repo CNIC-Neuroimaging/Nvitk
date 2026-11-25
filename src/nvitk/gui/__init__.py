@@ -1,4 +1,4 @@
-"""Napari GUI for nvitk (``nvitk-gui`` console script).
+"""Napari GUI for nvitk (``nvitk`` console script, alias ``nvitk-gui``).
 
 Package layout:
 

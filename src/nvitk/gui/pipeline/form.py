@@ -26,6 +26,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from nvitk.gui.core.design import COLOR_MUTED, FONT_S
 from nvitk.gui.core.design import clear_layout
 from nvitk.gui.pipeline.stages import (
     PipelineStageDef,
@@ -287,7 +288,7 @@ class PipelineStageForm(QGroupBox):
             cb.toggled.connect(self._refresh_stage_inputs)
             desc = QLabel(stage.description)
             desc.setWordWrap(True)
-            desc.setStyleSheet("color: palette(mid); font-size: 10px; font-weight: normal;")
+            desc.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_S}px; font-weight: normal;")
             inputs_host = QWidget()
             inputs_form = _wrapping_form()
             inputs_host.setLayout(inputs_form)

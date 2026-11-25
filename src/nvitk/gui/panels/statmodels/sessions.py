@@ -41,6 +41,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from nvitk.gui.core.design import FONT_M
 from nvitk.core.logger import Logger
 from nvitk.gui.core.design import COLOR_CONTROL_HOVER, COLOR_MUTED, COLOR_TEXT
 from nvitk.gui.core.geometry import fit_to_screen
@@ -95,11 +96,10 @@ def _bar_button(glyph: str, tooltip: str) -> QPushButton:
     button.setFlat(True)
     button.setAutoFillBackground(False)
     button.setToolTip(tooltip)
-    button.setCursor(Qt.PointingHandCursor)
     button.setFixedSize(_BUTTON_PX, _BUTTON_PX)
     button.setStyleSheet(
         f"QPushButton {{ color: {COLOR_MUTED}; background: transparent; border: none;"
-        f" padding: 0px; margin: 0px; font-size: 11px;"
+        f" padding: 0px; margin: 0px; font-size: {FONT_M}px;"
         f" min-width: {_BUTTON_PX}px; max-width: {_BUTTON_PX}px;"
         f" min-height: {_BUTTON_PX}px; max-height: {_BUTTON_PX}px; }}"
         f"QPushButton:hover {{ color: {COLOR_TEXT};"

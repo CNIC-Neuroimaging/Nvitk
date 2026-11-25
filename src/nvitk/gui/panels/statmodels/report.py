@@ -40,6 +40,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from nvitk.gui.core.design import FONT_L, FONT_S
 from nvitk.stats.mixedlm import significance_stars
 
 from .theme import (
@@ -224,10 +225,10 @@ class _StatChip(QFrame):
         lay.setSpacing(0)
 
         caption = QLabel(title)
-        caption.setStyleSheet(f"color: {COLOR_MUTED}; font-weight: normal; font-size: 10px;")
+        caption.setStyleSheet(f"color: {COLOR_MUTED}; font-weight: normal; font-size: {FONT_S}px;")
         body = QLabel(value)
         body.setStyleSheet(
-            f"color: {accent or COLOR_TEXT}; font-weight: bold; font-size: 13px; border: none;"
+            f"color: {accent or COLOR_TEXT}; font-weight: bold; font-size: {FONT_L}px; border: none;"
         )
         lay.addWidget(caption)
         lay.addWidget(body)

@@ -47,6 +47,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from nvitk.gui.core.design import FONT_S
 from nvitk.core.array import to_numpy
 from nvitk.core.backend import get_global_backend, using
 from nvitk.gui.core.design import COLOR_MUTED, SPACE, SPACE_TIGHT, Card
@@ -209,7 +210,7 @@ class SpectralPanel(QWidget):
         note = QLabel("nvitk's derivation from the spectral base images (photoelectric / Compton model), "
                       "not Philips' calibrated results — expect the same picture, not the same numbers to the HU.")
         note.setWordWrap(True)
-        note.setStyleSheet(f"color: {COLOR_MUTED}; font-size: 10px;")
+        note.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_S}px;")
         card.add(note)
         return card
 

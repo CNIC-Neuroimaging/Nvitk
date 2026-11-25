@@ -40,7 +40,7 @@ from .xnat import (
 )
 from .xnat_config import XnatConnectionConfig, load_xnat_profile, resolve_xnat_connection
 from .xnat_projects import (
-    classify_experiment_ia_pet_v5,
+    classify_experiment,
     classify_scan_for_project,
     default_sequences_for_project,
     get_xnat_project,
@@ -258,8 +258,8 @@ def _classified_scan_items(project_id: str, experiment: Any, experiment_label: s
     except KeyError:
         project_spec = None
 
-    if project_spec is not None and project_spec.classifier == "ia_pet_v5":
-        return classify_experiment_ia_pet_v5(scans, experiment_label=experiment_label)
+    if project_spec is not None and project_spec.experiment_level:
+        return classify_experiment(project_id, scans, experiment_label=experiment_label)
 
     items: list[tuple[Any, str, str, str, dict[str, Any]]] = []
     for scan in scans:

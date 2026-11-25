@@ -257,6 +257,16 @@ def all_schemas() -> dict[str, LabelSchema]:
     return _SCHEMAS
 
 
+def register_schema(schema: LabelSchema) -> LabelSchema:
+    """Add (or replace) *schema* in the catalog, e.g. an imported atlas's label table.
+
+    Registered schemas are offered in every label picker and found by
+    :func:`guess_schema_from_layer` like the built-in ones.
+    """
+    all_schemas()[schema.key] = schema
+    return schema
+
+
 def schema_keys() -> list[str]:
     """Sorted schema keys (generic first, then pipelines, then TotalSegmentator)."""
     schemas = all_schemas()
@@ -267,7 +277,7 @@ def schema_keys() -> list[str]:
         order = {"General": 0, "Segmentation / vessels": 1, "Pipelines / QVTpy": 2,
                  "Pipelines / TopBrain": 3,
                  "Pipelines / PESA-FAT": 4, "Pipelines / PESA-FAT Dixon": 5,
-                 "TotalSegmentator": 6, "FastSurfer": 7}
+                 "TotalSegmentator": 6, "FastSurfer": 7, "Atlases": 8}
         return (order.get(s.group, 99), s.title)
 
     return sorted(schemas.keys(), key=_sort_key)
@@ -404,7 +414,62 @@ def guess_schema_from_layer(layer: Any | None) -> str | None:
             return key
     # Only reached when nothing in the path named a label set; TopBrain masks routinely land
     # here, so fall back to inspecting the data itself.
-    return _guess_topbrain_schema(layer, blob)
+    guess = _guess_topbrain_schema(layer, blob)
+    if guess is not None:
+        return guess
+    # Nothing named it: rank every vocabulary by how well it covers the ids actually present,
+    # and take a clear winner only (a weak match is worse than "generic").
+    ranked = rank_schemas(layer, top=2)
+    if ranked and ranked[0][1] >= 0.9 and (len(ranked) == 1 or ranked[0][1] - ranked[1][1] >= 0.15):
+        return ranked[0][0]
+    return None
+
+
+def _name_tokens(text: str) -> set[str]:
+    import re
+
+    return {t for t in re.split(r"[^a-z0-9]+", str(text).lower()) if len(t) > 2}
+
+
+def rank_schemas(layer: Any | None, *, top: int = 3) -> list[tuple[str, float]]:
+    """Vocabularies ranked for *layer*, best first, as ``(key, score)`` with a score in 0..~2.
+
+    The score adds how much of the layer's id set the vocabulary names (the main term), a
+    penalty for ids it lacks beyond its range, and a bonus when the layer's name, source or
+    series description shares words with the vocabulary's title or key (``"aseg"``, ``"dkt"``,
+    ``"totalseg"``, an atlas name...). Name rules that recognise a pipeline output outright
+    (:func:`guess_schema_from_layer`) still win before this is consulted.
+    """
+    if layer is None:
+        return []
+    try:
+        from nvitk.gui.labels.visibility import layer_label_ids
+
+        ids = {int(i) for i in layer_label_ids(layer) if int(i) != 0}
+    except Exception:  # noqa: BLE001
+        ids = set()
+    from nvitk.gui.core.spatial import nvitk_metadata_from_layer
+
+    meta = nvitk_metadata_from_layer(layer)
+    tokens = _name_tokens(" ".join(str(x) for x in (meta.get("source"), getattr(layer, "name", ""), meta.get("series_description")) if x))
+    scored: list[tuple[str, float]] = []
+    for key, schema in all_schemas().items():
+        if key == "generic" or not schema.id_to_name:
+            continue
+        named = set(int(i) for i in schema.id_to_name)
+        score = 0.0
+        if ids:
+            covered = len(ids & named) / len(ids)
+            beyond = len({i for i in ids if i > max(named)}) / len(ids)
+            score += covered - beyond
+            # A huge vocabulary trivially covers a few ids; prefer the one that fits the count.
+            score -= 0.1 * min(abs(len(named) - len(ids)) / max(len(named), 1), 1.0)
+        overlap = tokens & (_name_tokens(schema.title) | _name_tokens(key))
+        if overlap:
+            score += 0.5
+        scored.append((key, round(score, 3)))
+    scored.sort(key=lambda kv: kv[1], reverse=True)
+    return [kv for kv in scored[: max(int(top), 1)] if kv[1] > 0]
 
 
 #: Attribute holding the vocabulary chosen (or guessed) for a layer's ids. On the
@@ -520,6 +585,8 @@ __all__ = [
     "label_display",
     "label_name",
     "layer_schema_key",
+    "rank_schemas",
+    "register_schema",
     "remember_layer_schema",
     "schema_for_totalsegmentator_task",
     "schema_keys",

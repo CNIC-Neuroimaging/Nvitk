@@ -351,8 +351,34 @@ class ResultsWindow(QWidget):
         root.addLayout(toolbar)
         root.addLayout(self._build_filter_row())
         root.addWidget(self._colour_row)
-        root.addWidget(self._controls_box)
-        root.addWidget(self._table, stretch=1)
+        # Table and plot of the same rows: the plot follows the filters and the history.
+        from qtpy.QtWidgets import QSplitter, QTabWidget
+
+        self._views = QTabWidget()
+        self._views.addTab(self._table, "Table")
+        self._plot: Any = None
+        self._plot_host = QWidget()
+        self._plot_host_layout = QVBoxLayout(self._plot_host)
+        self._plot_host_layout.setContentsMargins(0, 0, 0, 0)
+        self._views.addTab(self._plot_host, "Plot")
+        self._views.currentChanged.connect(lambda _i: self._sync_plot())
+        # The shown result's own controls above the table / plot, on a splitter: a result with a
+        # tall control block (morphometrics, lesions) no longer squeezes the table to a strip.
+        self._body_split = QSplitter(Qt.Vertical)
+        self._body_split.setChildrenCollapsible(False)
+        from qtpy.QtWidgets import QFrame, QScrollArea
+
+        # Scrolled, so the handle can make the controls shorter than their content.
+        self._controls_scroll = QScrollArea()
+        self._controls_scroll.setWidgetResizable(True)
+        self._controls_scroll.setFrameShape(QFrame.NoFrame)
+        self._controls_scroll.setWidget(self._controls_box)
+        self._controls_scroll.setVisible(False)
+        self._body_split.addWidget(self._controls_scroll)
+        self._body_split.addWidget(self._views)
+        self._body_split.setStretchFactor(0, 0)
+        self._body_split.setStretchFactor(1, 1)
+        root.addWidget(self._body_split, stretch=1)
         root.addWidget(self._note)
 
     def _build_filter_row(self) -> QHBoxLayout:
@@ -381,6 +407,12 @@ class ResultsWindow(QWidget):
         return row
 
     def _apply_filters(self) -> None:
+        """Hide the rows and columns that do not match the search fields (the plot follows)."""
+        self._apply_table_filters()
+        if hasattr(self, "_views"):
+            self._sync_plot()
+
+    def _apply_table_filters(self) -> None:
         """Hide the rows and columns that do not match the search fields."""
         table = self._table
         n_rows, n_cols = table.rowCount(), table.columnCount()
@@ -625,6 +657,8 @@ class ResultsWindow(QWidget):
                 widget.setParent(None)
                 widget.deleteLater()
         self._controls_box.setVisible(False)
+        if getattr(self, "_controls_scroll", None) is not None:
+            self._controls_scroll.setVisible(False)
 
     def _show_controls(self, result: _Result) -> None:
         """Swap in the shown result's own controls (or none)."""
@@ -638,6 +672,14 @@ class ResultsWindow(QWidget):
         if widget is not None:
             self._controls_layout.addWidget(widget)
         self._controls_box.setVisible(widget is not None)
+        self._controls_scroll.setVisible(widget is not None)
+        split = getattr(self, "_body_split", None)
+        if widget is not None and split is not None:
+            # Start the controls at their own height (at most half); the handle moves it after.
+            total = sum(split.sizes())
+            if total > 0:
+                want = min(self._controls_box.sizeHint().height(), total // 2)
+                split.setSizes([want, max(total - want, 1)])
 
     def add_result(
         self,
@@ -707,6 +749,22 @@ class ResultsWindow(QWidget):
         if 0 <= index < len(self._results):
             self._show(self._results[index])
 
+    def _sync_plot(self) -> None:
+        """Feed the shown table (as filtered) to the plot tab, when it is the one on screen."""
+        if self._views.currentWidget() is not self._plot_host:
+            return
+        if self._plot is None:
+            from nvitk.gui.analysis.plot_builder import PlotBuilder
+
+            self._plot = PlotBuilder()
+            self._plot_host_layout.addWidget(self._plot)
+        try:
+            frame = self.table_frame()
+        except Exception:  # noqa: BLE001
+            frame = None
+        if frame is not None:
+            self._plot.set_frame(frame)
+
     def _copy(self) -> None:
         """Put the displayed result on the clipboard."""
         clipboard = QApplication.clipboard()
@@ -757,6 +815,12 @@ class ResultsWindow(QWidget):
         self._notify_row(self._shown, None)
 
     def _show(self, result: _Result) -> None:
+        """Lay *result* out in the table (and the plot tab, when it is open)."""
+        self._show_table(result)
+        if hasattr(self, "_views"):
+            self._sync_plot()
+
+    def _show_table(self, result: _Result) -> None:
         """Lay *result* out in the table."""
         if self._shown is not None and self._shown is not result:
             self._notify_row(self._shown, None)

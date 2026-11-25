@@ -999,6 +999,25 @@ def install_panel_manager(viewer: Any) -> PanelManager | None:
     return manager
 
 
+def list_panels(viewer: Any) -> list[tuple[str, str]]:
+    """``(object name, title)`` of every nvitk panel dock (tabs and inspection panels), by title.
+
+    What the search bars offer under "Panels": typing a panel's name opens it.
+    """
+    manager = getattr(viewer, "_nvitk_panel_manager", None)
+    if manager is None:
+        return []
+    out: dict[str, str] = {}
+    for dock in manager.all_docks():
+        name = dock.objectName()
+        if not (name.startswith("nvitk:") or name.startswith("nvitk_")):
+            continue
+        title = str(dock.windowTitle() or name).strip()
+        if title:
+            out[name] = title
+    return sorted(out.items(), key=lambda kv: kv[1].lower())
+
+
 def raise_panel(viewer: Any, object_name: str) -> bool:
     """Bring the panel dock *object_name* (``nvitk:tools``, ``nvitk:mesh``, ...) to the front,
     wherever it lives (the main window or a panel window). False when there is no such dock."""
@@ -1006,11 +1025,15 @@ def raise_panel(viewer: Any, object_name: str) -> bool:
     dock = manager.find(object_name) if manager is not None else None
     if dock is None:
         return False
+    shell = getattr(viewer, "_nvitk_shell", None)
+    if shell is not None:
+        shell.show_dock(object_name)  # its module first: the panel lives behind an activity icon
     manager.show_dock(dock)
     return True
 
 
 __all__ = [
+    "list_panels",
     "raise_panel",
     "LABELS_SHORTCUT",
     "TAB_HINT",

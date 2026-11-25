@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from nvitk.gui.core.design import FONT_L
 
 
 def _napari_left_layer_docks(viewer: Any) -> tuple[Any | None, Any | None]:
@@ -24,11 +25,16 @@ def attach_left_inspection_dock(
     title: str,
     tabify_with: str | list[str] | None = None,
     minimum_width: int = 280,
+    frame: bool = True,
 ) -> Any:
     """Attach *panel* on Napari's left edge, optionally tabified with another dock.
 
     ``tabify_with`` may be a single dock object name or an ordered list of
     candidates; the first existing dock is used as the tab target.
+
+    With *frame* (the default) the panel sits in an
+    :class:`~nvitk.gui.viz.inspector_frame.InspectorFrame` and the title bar gets the shared
+    inspector actions (figure / table export, help) and the panel's icon.
     """
     try:
         from qtpy.QtCore import Qt
@@ -50,20 +56,54 @@ def attach_left_inspection_dock(
             existing = child
             break
 
+    body = panel
+    extras: list[Any] | None = None
+    lead = None
+    if frame:
+        from nvitk.gui.viz.inspector_frame import InspectorFrame, inspector_kind, title_icon
+
+        current = existing.widget() if existing is not None else None
+        if current is not None and getattr(current, "panel", None) is panel:
+            body = current
+        else:
+            body = InspectorFrame(panel, object_name=object_name)
+        lead = title_icon(inspector_kind(object_name))
+
     if existing is not None:
         existing.setWindowTitle(title)
-        existing.setWidget(panel)
+        existing.setWidget(body)
         existing.show()
         existing.raise_()
         return existing
 
     dock = QDockWidget(title, win)
     dock.setObjectName(object_name)
-    dock.setWidget(panel)
+    dock.setWidget(body)
+    if frame:
+        from nvitk.gui.viz.inspector_frame import inspector_kind, title_bar_actions
+
+        extras = title_bar_actions(dock, inspector_kind(object_name))
     dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
     panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
     panel.setMinimumSize(minimum_width, 220)
     dock.setMinimumWidth(minimum_width)
+
+    if getattr(viewer, "_nvitk_shell", None) is not None:
+        # With the module shell, the left edge holds the module panels and the layer list:
+        # inspection panels (cross-sections, CPR, lesions, QC tables...) open on the right,
+        # tabbed with whichever is there already.
+        win.addDockWidget(Qt.RightDockWidgetArea, dock)
+        candidates = [tabify_with] if isinstance(tabify_with, str) else list(tabify_with or [])
+        others = [c for c in win.findChildren(QDockWidget)
+                  if c is not dock and not c.isHidden() and win.dockWidgetArea(c) == Qt.RightDockWidgetArea]
+        named = {c.objectName(): c for c in others}
+        target = next((named[n] for n in candidates if n in named), others[0] if others else None)
+        if target is not None:
+            win.tabifyDockWidget(target, dock)
+        install_expand_button(dock, title, extras=extras, lead=lead)
+        dock.show()
+        dock.raise_()
+        return dock
 
     controls, layer_list = _napari_left_layer_docks(viewer)
     win.addDockWidget(Qt.LeftDockWidgetArea, dock)
@@ -107,7 +147,7 @@ def attach_left_inspection_dock(
     elif controls is not None:
         win.splitDockWidget(controls, dock, Qt.Vertical)
 
-    install_expand_button(dock, title)
+    install_expand_button(dock, title, extras=extras, lead=lead)
     dock.show()
     dock.raise_()
     return dock
@@ -122,11 +162,12 @@ _BUTTON_PX = 22
 _FLOAT_FALLBACK = (1100, 700)
 
 
-def install_expand_button(dock: Any, title: str, *, extras: list[Any] | None = None) -> Any:
+def install_expand_button(dock: Any, title: str, *, extras: list[Any] | None = None,
+                          lead: Any = None) -> Any:
     """Put an expand/restore button in *dock*'s title bar.
 
     *extras* are widgets placed in the bar ahead of its own buttons (the theme
-    toggle on the Tools panel).
+    toggle on the Tools panel); *lead* goes before the caption (an inspector's icon).
 
     Napari's own docks carry only a float and a close button, and floating one
     leaves it at whatever size the sidebar had, so every panel that wants room
@@ -155,7 +196,6 @@ def install_expand_button(dock: Any, title: str, *, extras: list[Any] | None = N
         widget.setFlat(True)
         widget.setAutoFillBackground(False)
         widget.setFixedSize(_BUTTON_PX, _BUTTON_PX)
-        widget.setCursor(Qt.PointingHandCursor)
         # Every geometry property is set explicitly, not just the colours. A host
         # stylesheet styles *all* its buttons (Napari caps title-bar buttons at
         # 12x12, the statmodels window pads them by 5x12), and either one leaves a
@@ -166,7 +206,7 @@ def install_expand_button(dock: Any, title: str, *, extras: list[Any] | None = N
             f" border: none; padding: 0px; margin: 0px;"
             f" min-width: {_BUTTON_PX}px; max-width: {_BUTTON_PX}px;"
             f" min-height: {_BUTTON_PX}px; max-height: {_BUTTON_PX}px;"
-            f" font-size: 13px; text-align: center; }}"
+            f" font-size: {FONT_L}px; text-align: center; }}"
             f"QPushButton:hover {{ color: {COLOR_ACCENT};"
             f" background: {COLOR_CONTROL_HOVER}; border-radius: 3px; }}"
             f"QPushButton:pressed {{ color: {COLOR_ACCENT}; background: transparent; }}"
@@ -187,6 +227,8 @@ def install_expand_button(dock: Any, title: str, *, extras: list[Any] | None = N
     layout = QHBoxLayout(bar)
     layout.setContentsMargins(6, 2, 4, 2)
     layout.setSpacing(2)
+    if lead is not None:
+        layout.addWidget(lead)
     caption = QLabel(title)
     caption.setStyleSheet(f"color: {COLOR_TEXT}; font-weight: bold;")
     layout.addWidget(caption)

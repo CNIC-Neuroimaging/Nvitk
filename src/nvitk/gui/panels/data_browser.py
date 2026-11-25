@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
-from qtpy.QtCore import Qt, QThread, Signal
+from qtpy.QtCore import Qt, Signal
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -57,6 +57,7 @@ from nvitk.db.xnat_projects import (
     list_xnat_project_ids,
 )
 from nvitk.gui.io.napari_io import open_paths_with_nvitk
+from nvitk.gui.core.thread_worker import ThreadWorker
 from nvitk.gui.core.log_panel import gui_log
 from nvitk.gui.pipeline.data_presets import (
     LocalAsset,
@@ -177,7 +178,7 @@ def _resolve_repo() -> tuple[DataRepo, Path]:
         return DataRepo(root, auto_scaffold=True), root
 
 
-class _XnatDownloadWorker(QThread):
+class _XnatDownloadWorker(ThreadWorker):
     """Background thread that downloads selected XNAT scans/pipeline resources to disk, so the GUI
     stays responsive during network I/O."""
 
@@ -373,14 +374,30 @@ class DataBrowserPanel(QWidget):
         layout.addWidget(self._header_label)
         layout.addWidget(self._stack)
         layout.addWidget(self._xnat_scan_filter_group)
-        layout.addWidget(QLabel("Subject"))
-        layout.addWidget(self._subject_search)
-        layout.addWidget(self._subject_list)
-        layout.addWidget(self._resource_label)
-        layout.addWidget(self._resource_list)
+        # Subjects above their scans, on a splitter: both lists get the panel's height and the
+        # handle between them shares it (they were two fixed strips before).
+        from qtpy.QtWidgets import QSplitter
+
+        subjects_pane = QWidget()
+        sp = QVBoxLayout(subjects_pane)
+        sp.setContentsMargins(0, 0, 0, 0)
+        sp.addWidget(QLabel("Subject"))
+        sp.addWidget(self._subject_search)
+        sp.addWidget(self._subject_list, 1)
+        scans_pane = QWidget()
+        rp = QVBoxLayout(scans_pane)
+        rp.setContentsMargins(0, 0, 0, 0)
+        rp.addWidget(self._resource_label)
+        rp.addWidget(self._resource_list, 1)
+        self._lists_split = QSplitter(Qt.Vertical)
+        self._lists_split.setChildrenCollapsible(False)
+        self._lists_split.addWidget(subjects_pane)
+        self._lists_split.addWidget(scans_pane)
+        self._lists_split.setStretchFactor(0, 1)
+        self._lists_split.setStretchFactor(1, 1)
+        layout.addWidget(self._lists_split, 1)
         layout.addWidget(self._action_btn)
         layout.addWidget(self._status)
-        layout.addStretch(1)
         self.setLayout(layout)
 
         self._source_combo.currentIndexChanged.connect(self._on_source_changed)
@@ -525,11 +542,11 @@ class DataBrowserPanel(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(self._xnat_scan_filters_host)
-        scroll.setMaximumHeight(120)
 
         lay = QVBoxLayout()
         lay.addWidget(self._xnat_filter_count_label)
-        lay.addWidget(scroll)
+        from nvitk.gui.core.widgets import resizable  # drag the handle under it to resize
+        lay.addWidget(resizable(scroll, height=120, pref_key="data_browser.scroll"))
         lay.addWidget(self._xnat_match_all)
         lay.addWidget(clear_btn)
         group.setLayout(lay)

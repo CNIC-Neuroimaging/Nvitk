@@ -162,7 +162,17 @@ def _compute_is_label_like(layer: Any) -> bool:
         arr = to_numpy(label_source_data(layer))
     except (ValueError, TypeError):
         return False
+    return array_is_label_like(arr)
+
+
+def array_is_label_like(arr: Any) -> bool:
+    """Whether a 2D / 3D array holds a label map: integer-valued, between 1 and
+    :data:`_MAX_LABEL_LIKE_IDS` distinct non-zero ids (the test :func:`is_label_like_layer`
+    applies to a layer's data, usable before there is a layer)."""
+    arr = np.asarray(arr)
     if arr.ndim not in (2, 3):
+        return False
+    if not (np.issubdtype(arr.dtype, np.integer) or np.issubdtype(arr.dtype, np.floating) or arr.dtype == bool):
         return False
 
     flat = arr.ravel()
@@ -852,6 +862,7 @@ def restore_label_visibility(
 
 
 __all__ = [
+    "array_is_label_like",
     "LABEL_COLORMAPS",
     "NO_VALUE_RGBA",
     "NVITK_LAYER_METADATA_KEYS",

@@ -1,4 +1,4 @@
-"""``nvitk-gui`` entry point: Napari workbench for nvitk tools."""
+"""``nvitk`` entry point (alias ``nvitk-gui``): the Napari workbench for nvitk tools."""
 
 from __future__ import annotations
 
@@ -14,23 +14,26 @@ from nvitk.core.click_config import config_dir_click_option
 @config_dir_click_option()
 @backend_click_option(default="cpu")
 def main(backend: str) -> None:
-    """Launch the Napari workbench for nvitk image tools.
-
-    Every import that reads configuration happens inside this function rather than at module
-    level, so the eager ``--config-dir`` callback has already redirected the lookup by the time
-    any of them run.
-    """
+    """Launch the nvitk workbench (also available as ``nvitk-gui``)."""
+    # Every import that reads configuration happens inside this function rather than at module
+    # level, so the eager ``--config-dir`` callback has already redirected the lookup by the time
+    # any of them run.
     try:
         import napari  
     except ImportError as exc:
         print(
-            "nvitk-gui requires napari. Install with: pip install 'nvitk[gui]'",
+            "nvitk requires napari. Install with: pip install 'nvitk[gui]'",
             file=sys.stderr,
         )
         raise SystemExit(1) from exc
 
     from nvitk.gui.app import run_app
+    from nvitk.gui.core.design import apply_napari_font_size
     from nvitk.gui.core.warnings import install_napari_display_warnings
+
+    # Napari's chrome is sized from its own settings, which load on first use: the override has
+    # to be in place before anything asks for them.
+    apply_napari_font_size()
 
     # Qt refuses to load its web engine once a QApplication exists unless a shared GL context was
     # requested first, and napari builds one as it starts. The Statmodels window's interactive

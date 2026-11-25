@@ -65,7 +65,7 @@ segmentation, measurements, statistics, and the CPU/GPU backend.
 :::{grid-item-card} {octicon}`device-desktop` Napari GUI
 :link: gui/index
 :link-type: doc
-`nvitk-gui` — a Napari workbench with a 91-tool catalog, GPU toggle, mesh reconstruction,
+`nvitk` — a Napari workbench with a 91-tool catalog, GPU toggle, mesh reconstruction,
 and pipeline export.
 :::
 
@@ -90,7 +90,7 @@ SGE-cluster execution.
 - **One codebase, two backends** — write code once against `nvitk.core`'s NumPy/CuPy proxy
   (`setup()`, `using()`, `get_current_backend()`) and switch between CPU and GPU execution
   per-call, per-scope, or process-wide, without branching your code.
-- **A real GUI, not a demo** — the Napari workbench (`nvitk-gui`) exposes nearly the entire
+- **A real GUI, not a demo** — the Napari workbench (`nvitk`) exposes nearly the entire
   tool catalog through a form-driven dock, with its own prioritized NIfTI/DICOM/TIFF/ND2
   reader plugin.
 - **A dedicated stats workbench** — `nvitk-statsmodels` runs standalone (no Napari/GPU

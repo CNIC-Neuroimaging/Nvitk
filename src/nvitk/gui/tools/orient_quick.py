@@ -15,7 +15,7 @@ from qtpy.QtWidgets import QMenu, QToolButton
 
 from nvitk.gui.core.orientation import (
     ORIENTATION_CODES,
-    apply_target_orientation,
+    apply_target_orientation_many,
     layer_orientation_codes,
 )
 
@@ -34,6 +34,48 @@ def _is_reorientable(layer: Any | None) -> bool:
     return layer is not None and layer_orientation_codes(layer) is not None
 
 
+def selected_reorientable(viewer: Any) -> list[Any]:
+    """The selected layers that can be reoriented (the active layer when only it is)."""
+    layers = [l for l in viewer.layers if l in viewer.layers.selection and _is_reorientable(l)]
+    if not layers:
+        active = _active_layer(viewer)
+        layers = [active] if _is_reorientable(active) else []
+    return layers
+
+
+def reorient_selected(viewer: Any, target: str) -> None:
+    """Reorient every selected 3D layer to *target* (one view reset), reporting the outcome."""
+    from nvitk.gui.tools.runner import log_tool_failure, notify
+    from nvitk.gui.viz.main_canvas import world_geometry
+
+    layers = selected_reorientable(viewer)
+    if not layers:
+        notify("Select one or more 3D image / mask layers with an affine first.", error=True)
+        return
+    try:
+        # Real placement: the reorientation composes with each layer's affine.
+        with world_geometry(viewer):
+            results = apply_target_orientation_many(viewer, layers, target)
+    except Exception as exc:  # noqa: BLE001
+        log_tool_failure(exc)
+        notify(f"Could not reorient to {target}: {exc}", error=True)
+        return
+    from nvitk.gui.core.journal import record
+
+    record(viewer, "orient", target, inputs=[str(l.name) for l, _p, _a, err in results if err is None], label=f"Reorient to {target}")
+    changed = [f"“{l.name}” {p} → {a}" for l, p, a, err in results if err is None and p != a]
+    failed = [f"“{l.name}” ({err})" for l, _p, _a, err in results if err]
+    unchanged = [l.name for l, p, a, err in results if err is None and p == a]
+    parts = []
+    if changed:
+        parts.append("Reoriented " + ", ".join(changed))
+    if unchanged:
+        parts.append(f"already {target}: " + ", ".join(unchanged))
+    if failed:
+        parts.append("could not reorient " + ", ".join(failed))
+    notify(". ".join(parts) + ".", error=bool(failed) and not changed)
+
+
 def build_orientation_quick_button(viewer: Any) -> QToolButton:
     """Menu button that reorients the active image/mask layer to a chosen orientation.
 
@@ -50,27 +92,8 @@ def build_orientation_quick_button(viewer: Any) -> QToolButton:
     btn.setMenu(menu)
 
     def _apply(target: str) -> None:
-        """Reorient the active layer to *target*, logging the outcome."""
-        from nvitk.gui.tools.runner import log_tool_failure, notify
-
-        layer = _active_layer(viewer)
-        if not _is_reorientable(layer):
-            notify("Select a 3D image or mask layer with an affine first.", error=True)
-            return
-        from nvitk.gui.viz.main_canvas import world_geometry
-
-        try:
-            # Real placement: the reorientation composes with the layer's affine.
-            with world_geometry(viewer):
-                previous, applied = apply_target_orientation(viewer, layer, target)
-        except Exception as exc:  # noqa: BLE001
-            log_tool_failure(exc)
-            notify(f"Could not reorient to {target}: {exc}", error=True)
-            return
-        if previous == applied:
-            notify(f"“{layer.name}” is already {applied}.")
-        else:
-            notify(f"Reoriented “{layer.name}” {previous} → {applied}.")
+        """Reorient the selected layers (the active one when none) to *target*."""
+        reorient_selected(viewer, target)
         sync()
 
     for code in ORIENTATION_CODES:

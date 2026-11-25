@@ -27,6 +27,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from nvitk.gui.core.design import FONT_S
 from nvitk.gui.core.design import COLOR_MUTED, SPACE, SPACE_TIGHT, apply_theme
 from nvitk.gui.tools import quick_ops
 
@@ -194,7 +195,7 @@ class QuickOpDialog(QDialog):
         for hint in hints:
             label = QLabel(hint)
             label.setWordWrap(True)
-            label.setStyleSheet(f"color: {COLOR_MUTED}; font-size: 10px;")
+            label.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_S}px;")
             root.addWidget(label)
 
         if op_name in ("gaussian", "median") and self._source is not None:
@@ -205,7 +206,7 @@ class QuickOpDialog(QDialog):
             if too_big:
                 note = QLabel("Volume too large to preview live — OK applies it.")
                 note.setWordWrap(True)
-                note.setStyleSheet(f"color: {COLOR_MUTED}; font-size: 10px;")
+                note.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_S}px;")
                 root.addWidget(note)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)

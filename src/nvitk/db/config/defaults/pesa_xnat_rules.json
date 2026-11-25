@@ -1,0 +1,366 @@
+{
+  "$schema": "nvitk-xnat-rules/1",
+  "name": "PESA",
+  "description": "XNAT project mapping reproducing nvitk's original PESA_Brain / IA_PET_V5 classification.",
+  "default_visit_label": "4",
+  "default_classifier": "pesabrain",
+  "visit_labels": {
+    "PESA_Brain": "4",
+    "IA_PET_V5": "5",
+    "local_db": "4"
+  },
+  "classifiers": {
+    "pesabrain": {
+      "quality": {
+        "accept": [
+          "usable"
+        ],
+        "strip": false
+      },
+      "rules": [
+        {
+          "name": "VWI_BB (BrainVIEW T1W)",
+          "match": {
+            "series_description": "csai.*brainview|brainview.*t1w"
+          },
+          "ignore_quality": true,
+          "extract": {
+            "variant": {
+              "type": "regex_group",
+              "field": "series_description",
+              "pattern": "^\\s*(strong|weak|default)\\b",
+              "flags": "i",
+              "group": 1,
+              "lower": true,
+              "fallback_quality_in": [
+                "strong",
+                "default",
+                "weak"
+              ],
+              "required": true
+            }
+          },
+          "result": {
+            "modality": "mri",
+            "orientation": null,
+            "sequence": "VWI_BB",
+            "variant": "{variant}"
+          }
+        },
+        {
+          "name": "TOF",
+          "match": {
+            "series_description": "cs3di_mc|tof|mra"
+          },
+          "result": {
+            "modality": "tof",
+            "orientation": null,
+            "sequence": "TOF"
+          }
+        },
+        {
+          "name": "4D flow",
+          "match": {
+            "series_description": "4d.?q?flow|^\\s*(?:AP|RL|FH)\\s*$"
+          },
+          "extract": {
+            "orientation": {
+              "type": "substring_map",
+              "field": "series_description",
+              "upper": true,
+              "map": {
+                "AP": [
+                  "AP",
+                  "PA",
+                  "FA"
+                ],
+                "RL": [
+                  "RL",
+                  "LR",
+                  "RC",
+                  "CR"
+                ],
+                "FH": [
+                  "FH",
+                  "HF",
+                  "SI",
+                  "IS"
+                ]
+              },
+              "default": "GENERIC"
+            }
+          },
+          "result": {
+            "modality": "4dflow",
+            "orientation": "{orientation}",
+            "sequence": "4DFLOW_{orientation}"
+          }
+        },
+        {
+          "name": "Resting-state fMRI",
+          "match": {
+            "series_description": "resting\\s*state|resting-state|\\brsfmri\\b|\\brsf?mri\\b|rest\\s*fmri|fmri\\s*rest|bold.*rest|epi.*rest|task\\s*rest|mb\\s*epi|multiband.*rest"
+          },
+          "result": {
+            "modality": "fmri",
+            "orientation": null,
+            "sequence": "RESTING_STATE_MB"
+          }
+        },
+        {
+          "name": "Carotid QF",
+          "match": {
+            "series_description": "carotid.*qf|qf.*carotid|carotid_qf|carotid\\s*4d"
+          },
+          "result": {
+            "modality": "mra",
+            "orientation": null,
+            "sequence": "CAROTID_QF"
+          }
+        },
+        {
+          "name": "QSM",
+          "match": {
+            "series_description": "\\bqsm\\b|quantitative\\s*suscept|suscept.*map"
+          },
+          "not_match": {
+            "series_description": "\\bswi\\b|susceptibility\\s*weighted"
+          },
+          "result": {
+            "modality": "qsm",
+            "orientation": null,
+            "sequence": "QSM"
+          }
+        },
+        {
+          "name": "SWI",
+          "match": {
+            "series_description": "\\bswi\\b|swi\\s*/\\s*qsm|susceptibility\\s*weighted"
+          },
+          "result": {
+            "modality": "swi",
+            "orientation": null,
+            "sequence": "SWI_QSM"
+          }
+        },
+        {
+          "name": "3D FLAIR",
+          "match": {
+            "series_description": "3d.*flair|flair.*3d|space.*flair|\\bflair\\b.*\\b3d\\b"
+          },
+          "result": {
+            "modality": "flair",
+            "orientation": null,
+            "sequence": "3D_FLAIR"
+          }
+        },
+        {
+          "name": "3D T2 HR",
+          "match": {
+            "series_description": "3d.*t2.*(?:hr|high\\s*res)|t2.*(?:hr|high\\s*res).*(?:3d|space)|\\bt2\\s*space\\b|space\\s*t2"
+          },
+          "result": {
+            "modality": "t2",
+            "orientation": null,
+            "sequence": "3D_T2_HR"
+          }
+        },
+        {
+          "name": "3D T1",
+          "match": {
+            "series_description": "\\b3d\\s*t1\\b|\\bt1\\b.*\\b3d\\b|\\bmprage\\b|mp[_\\s-]?rage|t1_mpr|t1\\s*mprage|t1w?\\s*3d"
+          },
+          "result": {
+            "modality": "t1",
+            "orientation": null,
+            "sequence": "3D_T1"
+          }
+        }
+      ]
+    },
+    "ia_pet_v5": {
+      "quality": {
+        "accept": [
+          "usable"
+        ],
+        "strip": true
+      },
+      "rules": [
+        {
+          "name": "Dixon candidate (region assigned per experiment)",
+          "match": {
+            "series_description": "mdixon|dixon.?quant"
+          },
+          "result": {
+            "modality": "mr",
+            "orientation": null,
+            "dixon": true
+          }
+        },
+        {
+          "name": "Low-dose CT",
+          "match": {
+            "series_description": "body.*low\\s*dose\\s*ct|low\\s*dose\\s*ct"
+          },
+          "result": {
+            "modality": "ct",
+            "orientation": null,
+            "sequence": "CT"
+          }
+        },
+        {
+          "name": "PET (CTAC)",
+          "match": {
+            "series_description": "detailwb.*ctac|ctac.*vascular|\\[detailwb_ctac\\]"
+          },
+          "result": {
+            "modality": "pt",
+            "orientation": null,
+            "sequence": "PET"
+          }
+        }
+      ],
+      "experiment": {
+        "steps": [
+          {
+            "type": "dixon_regions",
+            "candidate_flag": "dixon",
+            "result": {
+              "modality": "mr",
+              "orientation": null
+            }
+          }
+        ],
+        "dedupe_sequences": true
+      }
+    }
+  },
+  "projects": {
+    "PESA_Brain": {
+      "display_name": "PESA Brain",
+      "cohort_id": "PESA-Brain",
+      "classifier": "pesabrain",
+      "default_sequences": [
+        "TOF",
+        "4DFLOW_AP",
+        "4DFLOW_RL",
+        "4DFLOW_FH",
+        "VWI_BB",
+        "3D_T1",
+        "3D_T2_HR",
+        "3D_FLAIR",
+        "SWI_QSM",
+        "QSM",
+        "CAROTID_QF",
+        "RESTING_STATE_MB"
+      ]
+    },
+    "IA_PET_V5": {
+      "display_name": "IA PET v5 (PESA-Fat)",
+      "cohort_id": "IA-PET-V5",
+      "classifier": "ia_pet_v5",
+      "default_sequences": [
+        "DIXON_HEAD",
+        "DIXON_THORAX",
+        "DIXON_LEGS",
+        "CT",
+        "PET"
+      ]
+    }
+  },
+  "sequence_aliases": {
+    "4DFLOW": [
+      "4DFLOW_AP",
+      "4DFLOW_RL",
+      "4DFLOW_FH"
+    ],
+    "4DFLOW_ALL": [
+      "4DFLOW_AP",
+      "4DFLOW_RL",
+      "4DFLOW_FH"
+    ],
+    "VWI_BB": [
+      "VWI_BB"
+    ],
+    "BRAINVIEW": [
+      "VWI_BB"
+    ],
+    "VWI": [
+      "VWI_BB"
+    ],
+    "BLACK_BLOOD": [
+      "VWI_BB"
+    ]
+  },
+  "asset_slots": {
+    "TOF": "tof",
+    "4DFLOW_AP": "4dflow_ap",
+    "4DFLOW_FH": "4dflow_fh",
+    "4DFLOW_RL": "4dflow_rl",
+    "4DFLOW_GENERIC": "4dflow",
+    "3D_T1": "t1_3d",
+    "3D_T2_HR": "t2_hr_3d",
+    "3D_FLAIR": "flair_3d",
+    "SWI_QSM": "swi",
+    "QSM": "qsm",
+    "CAROTID_QF": "carotid_qf",
+    "RESTING_STATE_MB": "resting_state_mb",
+    "VWI_BB": "vwi_bb",
+    "DIXON_HEAD": "dixon_head",
+    "DIXON_THORAX": "dixon_thorax",
+    "DIXON_LEGS": "dixon_legs",
+    "CT": "ct",
+    "PET": "pet"
+  },
+  "asset_slot_labels": {
+    "tof": "TOF",
+    "4dflow_ap": "4DFLOW AP",
+    "4dflow_fh": "4DFLOW FH",
+    "4dflow_rl": "4DFLOW RL",
+    "4dflow": "4DFLOW",
+    "t1_3d": "3D T1",
+    "t2_hr_3d": "3D T2 HR",
+    "flair_3d": "3D FLAIR",
+    "swi": "SWI/QSM",
+    "qsm": "QSM",
+    "carotid_qf": "Carotid QF",
+    "resting_state_mb": "Resting state MB",
+    "vwi_bb": "VWI BB",
+    "dixon_head": "DIXON HEAD",
+    "dixon_thorax": "DIXON THORAX",
+    "dixon_legs": "DIXON LEGS",
+    "ct": "CT",
+    "pet": "PET",
+    "pipeline_eicab": "eICAB results",
+    "pipeline_qvtpy": "QVTPy results",
+    "pipeline_4dflows": "4DFlows results"
+  },
+  "pipeline_resources": {
+    "eicab": {
+      "asset_slot": "pipeline_eicab",
+      "pipeline_id": "eicab_v1",
+      "name": "eICAB",
+      "bundle": true,
+      "gui": true
+    },
+    "qvtpy": {
+      "asset_slot": "pipeline_qvtpy",
+      "pipeline_id": "qvtpy_v1",
+      "name": "QVTPy",
+      "bundle": true,
+      "gui": true
+    },
+    "4dflows": {
+      "asset_slot": "pipeline_4dflows",
+      "pipeline_id": "4dflows_v1",
+      "name": "4DFlows",
+      "bundle": false,
+      "gui": true
+    }
+  },
+  "pipeline_filter_slots": [
+    "pipeline_eicab",
+    "pipeline_qvtpy",
+    "pipeline_4dflows"
+  ]
+}

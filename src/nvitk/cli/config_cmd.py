@@ -1,8 +1,9 @@
 """``nvitk-config``: inspect and scaffold nvitk's configuration.
 
-nvitk reads its site settings from four JSON files (``sge.json``, ``settings.json``,
-``xnat.json``, and ``gui.json``, which the GUI writes for itself) found in a configuration
-directory. This command answers the three questions a
+nvitk reads its site settings from JSON files (``sge.json``, ``settings.json``,
+``xnat.json``, ``gui.json``, which the GUI writes for itself, and the optional ``dataset.json``
+and ``xnat_rules.json`` describing how a dataset is imported and how XNAT scans are classified)
+found in a configuration directory. This command answers the three questions a
 new install raises: *where does that directory go*, *which file am I using*, and
 *what do I have to fill in*.
 
@@ -12,6 +13,8 @@ new install raises: *where does that directory go*, *which file am I using*, and
     nvitk-config init              # create a starter config from the bundled templates
     nvitk-config show              # resolved values, and which file each came from
     nvitk-config validate          # report settings that are missing or still placeholders
+    nvitk-config generate-pesa     # write the PESA dataset / XNAT rules (a worked example)
+    nvitk-config test-xnat-rules "3D T1 MPRAGE" --project MY_PROJECT   # how a scan classifies
 """
 
 from __future__ import annotations
@@ -28,7 +31,10 @@ from nvitk.core import config_paths
 #: rather than only from a source checkout.
 TEMPLATE_DIR = Path(__file__).resolve().parent / "config_templates"
 
-CONFIG_FILES = ("sge.json", "settings.json", "xnat.json", "gui.json")
+CONFIG_FILES = ("sge.json", "settings.json", "xnat.json", "gui.json", "dataset.json", "xnat_rules.json")
+
+#: Files that are optional: without them nvitk uses its packaged PESA defaults.
+OPTIONAL_FILES = ("dataset.json", "xnat_rules.json")
 
 #: Keys whose value is an opaque blob rather than a setting: printing a few
 #: hundred characters of base64 into a settings listing helps nobody.
@@ -195,9 +201,19 @@ def validate_cmd() -> None:
     for name in CONFIG_FILES:
         source = config_paths.config_file(name)
         if source is None:
-            click.echo(f"{name}: not found")
+            if name in OPTIONAL_FILES:
+                click.echo(f"{name}: not found (optional; the packaged PESA default is used)")
+            else:
+                click.echo(f"{name}: not found")
             continue
         doc = config_paths.load_json(name) if name != "xnat.json" else _read_any(source)
+        schema_problems = _schema_problems(name, doc)
+        if schema_problems:
+            problems += len(schema_problems)
+            click.echo(click.style(f"{name}: {len(schema_problems)} problem(s)", fg="red"))
+            for line in schema_problems:
+                click.echo(f"   {line}")
+            continue
         pending = _placeholders(doc)
         if pending:
             problems += len(pending)
@@ -214,6 +230,83 @@ def validate_cmd() -> None:
             "nvitk reports a missing key by name when a command actually requires it."
         )
         raise SystemExit(1)
+
+
+def _schema_problems(name: str, doc: dict) -> list[str]:
+    """Schema and cross-reference problems of the optional dataset / XNAT rules files."""
+    if name == "dataset.json":
+        from nvitk.db.config.dataset_config import validate
+
+        return validate(doc)
+    if name == "xnat_rules.json":
+        from nvitk.db.config.xnat_rules import validate
+
+        return validate(doc)
+    return []
+
+
+@main.command("generate-pesa")
+@click.option(
+    "--dir", "target_dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help="Directory to write into (default: the directory holding your configuration).",
+)
+@click.option("--force", is_flag=True, help="Overwrite files that already exist.")
+def generate_pesa_cmd(target_dir: Path | None, force: bool) -> None:
+    """Write dataset.json and xnat_rules.json reproducing nvitk's PESA setup.
+
+    These are the rules nvitk applies when neither file exists (PESA-Brain spreadsheets,
+    PESA_Brain / IA_PET_V5 XNAT projects), written out to edit or to learn the format from.
+    """
+    from nvitk.db.config import dataset_config, xnat_rules
+
+    if target_dir is None:
+        existing = config_paths.config_dir()
+        target_dir = existing if existing is not None else config_paths.default_config_dir()
+    target_dir = Path(target_dir).expanduser()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for name, doc in (
+        (dataset_config.CONFIG_NAME, dataset_config.default_document()),
+        (xnat_rules.CONFIG_NAME, xnat_rules.default_document()),
+    ):
+        destination = target_dir / name
+        if destination.exists() and not force:
+            click.echo(f"exists   {destination}  (use --force to overwrite)")
+            continue
+        destination.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        click.echo(f"created  {destination}")
+
+
+@main.command("test-xnat-rules")
+@click.argument("descriptions", nargs=-1, required=True)
+@click.option("--project", default=None, help="Classify with this project's classifier (default: the default one).")
+@click.option("--quality", default=None, help="Scan quality to classify with (default: unknown).")
+@click.option("--rules", "rules_path", type=click.Path(dir_okay=False, path_type=Path), default=None,
+              help="Rules file to test (default: the one in force).")
+def test_xnat_rules_cmd(descriptions: tuple[str, ...], project: str | None, quality: str | None, rules_path: Path | None) -> None:
+    """Show how series descriptions classify, and which rule decided."""
+    from nvitk.db.config.xnat_rules import load_xnat_rules
+
+    rules = load_xnat_rules(rules_path)
+    classifier = rules.classifier_for(project) if project else rules.default()
+    click.echo(f"rules: {rules.source or 'packaged PESA default'}  classifier: {classifier.name}")
+    for description in descriptions:
+        scan = {"series_description": description, "quality": quality}
+        hit = None
+        for rule in classifier.rules:
+            if not classifier.quality_ok(quality) and not rule.ignore_quality:
+                continue
+            result = rule.apply(scan)
+            if result is not None:
+                hit = (rule.name, result)
+                break
+        if hit is None:
+            click.echo(f"  {description!r:<40} -> (no match)")
+        else:
+            result = hit[1]
+            slot = rules.asset_slot(str(result.get("sequence") or "")) if result.get("sequence") else "-"
+            click.echo(f"  {description!r:<40} -> {result.get('sequence') or result}  slot={slot}  [{hit[0]}]")
 
 
 if __name__ == "__main__":

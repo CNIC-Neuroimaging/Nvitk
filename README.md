@@ -92,7 +92,7 @@ confirm they're on `PATH`/the relevant env var. nvitk's CLIs will notify for any
 ## 2. Tool Catalog
  
 Every command below is a registered entry point; run any with `--help`, or browse them
-all interactively with `pyhelp`. All tools are also individually included on the main GUI `nvitk-gui`.
+all interactively with `pyhelp`. All tools are also individually included on the main GUI, `nvitk`.
  
 ### Conversion
  
@@ -172,8 +172,8 @@ defaults in `.nvitk/sge.json`.
  
 | Command | Purpose |
 |---|---|
-| `nvitk-gui` | Napari workbench — Tool catalog dock (imaging | mesh), pipeline export, ... |
-| `nvitk-statsmodels` | Statistical modeling workbench — Python and R models |
+| `nvitk` (alias `nvitk-gui`) | Napari workbench — Tool catalog dock (imaging | mesh), pipeline export, ... |
+| `nvitk-statsmodels` | Statistical modeling workbench as a standalone window (deprecated: use `nvitk` → Analysis → Statistical models) |
  
 ### General
  

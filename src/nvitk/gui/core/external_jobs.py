@@ -41,6 +41,7 @@ from qtpy.QtWidgets import (
 from nvitk.gui.core.activity import elapsed_text, start_task
 from nvitk.gui.core.design import COLOR_MUTED, COLOR_TEXT
 from nvitk.gui.core.log_panel import gui_log
+from nvitk.gui.core.design import FONT_S
 
 #: Seconds a cancelled job gets to stop on SIGTERM before it is killed.
 _TERM_GRACE_S = 5.0
@@ -230,7 +231,7 @@ class _JobRow(QWidget):
         self._title = QLabel(job.title)
         self._title.setStyleSheet(f"color: {COLOR_TEXT}; font-weight: bold;")
         self._stage = QLabel("")
-        self._stage.setStyleSheet(f"color: {COLOR_MUTED}; font-size: 10px;")
+        self._stage.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_S}px;")
         self._stage.setWordWrap(True)
         text.addWidget(self._title)
         text.addWidget(self._stage)

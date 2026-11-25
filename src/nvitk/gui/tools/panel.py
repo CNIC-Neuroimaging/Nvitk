@@ -1492,6 +1492,8 @@ def build_tool_panel(
                     "source_layer": layer.name,
                     "output_layer": name,
                     "params": params,
+                    "target_mode": target_mode,
+                    "label_ids": ids or None,
                 }
             )
         notify(f"Applied {operation} → {name}")

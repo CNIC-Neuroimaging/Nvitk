@@ -27,6 +27,7 @@ from __future__ import annotations
 
 # Dependencies
 import json
+import re
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -170,15 +171,19 @@ from nvitk.stats import (
 from nvitk.db.importers import read_tabular_source, tabular_sheet_names
 from nvitk.stats.frame_ops import (
     COLUMN_TYPES,
+    IDENTIFIER_RE,
     DerivedColumn,
     FilterRule,
+    apply_column_renames,
     apply_column_types,
     apply_derived_columns,
     apply_reference_levels,
     apply_filter_rules,
     default_derived_name,
+    derived_column_references,
     ensure_unique_columns,
     filtered_columns,
+    rename_derived_references,
 )
 from nvitk.stats.mediation import (
     MediationSpec,
@@ -479,6 +484,9 @@ class StatmodelsWindow(QMainWindow):
         # Treatment reference per factor. Both patsy and R contrast against a factor's first level,
         # so this is applied by reordering categories rather than by rewriting the formula.
         self._reference_levels: dict[str, str] = {}
+        # Column renames, ``{name in the data: name in the frame}``. Applied to the loaded frame and
+        # again after a reshape, since a column a melt creates (``pwv``) can be renamed too.
+        self._column_renames: dict[str, str] = {}
 
         # result state
         self._last_result = None
@@ -564,7 +572,6 @@ class StatmodelsWindow(QMainWindow):
         )
         self.resizeDocks([self._docks["frame"]], [260], Qt.Vertical)
 
-        self._build_menus()
 
         status = self.statusBar()
         self._status = QLabel(f"Dataset: {self._repo.root}  |  qvtpy pipeline: {QVTPY_PIPELINE_ID}")
@@ -589,6 +596,13 @@ class StatmodelsWindow(QMainWindow):
         # switch finds one if this process has one, and does without if it does not.
         self._btn_theme = theme_toggle_button(parent=self)
         status.addPermanentWidget(self._btn_theme)
+
+        # The workflow rail and the Explore dock (relayout.py), then the View menu, which lists
+        # every dock, Explore included.
+        from .relayout import install_relayout
+
+        install_relayout(self)
+        self._build_menus()
 
         # Snapshot the pristine arrangement for View -> Reset panel layout.
         self._default_dock_state = self.saveState()
@@ -855,7 +869,6 @@ class StatmodelsWindow(QMainWindow):
 
         form = QFormLayout()
         self._formula = QPlainTextEdit(DEFAULT_FORMULA)
-        self._formula.setFixedHeight(80)
         self._formula.setToolTip(
             "Patsy formula. The left-hand side should be a column of the analysis frame — add a "
             "derived column (e.g. log_pi) rather than writing log(pi) here, so the transformed "
@@ -937,7 +950,9 @@ class StatmodelsWindow(QMainWindow):
         )
         self._lmrob_setting_label = QLabel("Preset")
 
-        form.addRow("Formula", self._formula)
+        from nvitk.gui.core.widgets import resizable  # drag the handle under it to resize
+
+        form.addRow("Formula", resizable(self._formula, height=80, pref_key="statmodels.formula"))
         form.addRow(self._groups_label, self._groups)
         form.addRow(self._re_label, self._re_formula)
         form.addRow(self._vc_label, self._vc_formula)
@@ -1741,6 +1756,8 @@ class StatmodelsWindow(QMainWindow):
         self._frame_view.dropRequested.connect(self._on_drop_column)
         self._frame_view.restoreRequested.connect(self._on_restore_columns)
         self._frame_view.typeChangeRequested.connect(self._on_change_column_type)
+        self._frame_view.renameRequested.connect(self._on_rename_column)
+        self._frame_view.renameFamilyRequested.connect(self._on_rename_family)
         self._frame_view.referenceRequested.connect(self._on_set_reference_level)
         self._frame_view.plotXRequested.connect(self._on_set_plot_x)
         self._frame_view.fileDropped.connect(self._on_import_frame_file)
@@ -1773,6 +1790,12 @@ class StatmodelsWindow(QMainWindow):
     #: hiding the results to make room for the figure takes away half of what the
     #: figure is being looked at for.
     FOCUS_KEEPS: tuple[str, ...] = ("results",)
+
+    def _sync_explore(self) -> None:
+        """Hand the working frame to the Explore dock (see :mod:`.relayout`)."""
+        from .relayout import sync_explore
+
+        sync_explore(self)
 
     def _on_focus_plot(self, focused: bool) -> None:
         """Hide the panels around the plot, keeping the ones it is read against."""
@@ -2400,7 +2423,16 @@ class StatmodelsWindow(QMainWindow):
         )
         self._sync_column_combos(working)
         self._sync_nonlinear_columns(working)
+        self._sync_explore()
         self._mediation_form.set_columns(working)
+
+    def _base_frame(self) -> pd.DataFrame | None:
+        """``_analysis_df`` with the column renames applied: the input of every later stage."""
+        base = self._analysis_df
+        if base is None or not self._column_renames:
+            return base
+        renamed, _ = apply_column_renames(base, self._column_renames)
+        return renamed
 
     def _recompute_frame(self, *, announce: bool = True) -> None:
         """
@@ -2420,6 +2452,7 @@ class StatmodelsWindow(QMainWindow):
         if self._prebuilt_frame:
             self._adopt_prebuilt_frame(base)
             return
+        base, rename_errors = apply_column_renames(base, self._column_renames)
 
         # Region algebra before derived columns: a derived column may well be built from a
         # combination (``log(TCBF)``), and the reverse never happens; a combination reads one
@@ -2434,7 +2467,7 @@ class StatmodelsWindow(QMainWindow):
         # after the reshape.
         post_derive = self._reshape_active()
         post_combine = bool(self._combinations) and not self._combinations_applicable(base)
-        derived_errors: list[str] = []
+        derived_errors: list[str] = list(rename_errors)
         if post_combine:
             combined = base
         else:
@@ -2469,8 +2502,13 @@ class StatmodelsWindow(QMainWindow):
         # measurements were loaded on the subject grain, in which case the button was never pressed
         # and _wide_mode is False. The frame's own columns decide, not how it got that way.
         if self._melt_families:
-            working = self._melt_working(working)
+            working, melt_errors = self._melt_stage(working)
+            derived_errors.extend(melt_errors)
             reshaped = True
+        if reshaped:
+            # Second rename pass, for the columns only the reshape produced.
+            working, late_renames = apply_column_renames(working, self._column_renames)
+            derived_errors.extend(e for e in late_renames if e not in derived_errors)
 
         if post_combine:
             # The reshape has just produced the region column, so the combinations can run at last.
@@ -2479,7 +2517,7 @@ class StatmodelsWindow(QMainWindow):
             derived_errors.extend(late_combo)
 
         if post_derive:
-            working, derr = apply_derived_columns(working, self._derived)
+            working, derr = apply_derived_columns(working, self._derived_after_reshape())
             derived_errors.extend(derr)
             # The unfiltered frame in the shape the table shows: the chip bar's "n of N" needs the
             # denominator, so this pass repeats the reshape and any deferred combinations without
@@ -2487,7 +2525,7 @@ class StatmodelsWindow(QMainWindow):
             reference = self._apply_reshape(combined)
             if post_combine:
                 reference, _, _ = apply_region_combinations(reference, self._combinations)
-            derived_frame, _ = apply_derived_columns(reference, self._derived)
+            derived_frame, _ = apply_derived_columns(reference, self._derived_after_reshape())
 
         # Visits down the rows last: the cross-visit derived columns above needed the wide
         # <variable>_v<visit> columns this removes.
@@ -2550,6 +2588,7 @@ class StatmodelsWindow(QMainWindow):
         )
         self._sync_column_combos(working)
         self._sync_nonlinear_columns(working)
+        self._sync_explore()
         self._mediation_form.set_columns(working)
 
         if announce:
@@ -2924,13 +2963,58 @@ class StatmodelsWindow(QMainWindow):
         return bool(self._wide_mode or self._melt_families)
 
     def _apply_reshape(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Apply wide pivot and/or melt without derived columns or filter rules."""
+        """
+        Apply wide pivot and/or melt without filter rules.
+
+        Derived columns are left out except those the melt itself needs (see
+        :meth:`_split_derived`); the rest are evaluated on the result by the caller.
+        """
         working = df
         if self._wide_mode:
             working = self._to_wide(working)
         if self._melt_families:
-            working = self._melt_working(working)
+            working, _ = self._melt_stage(working)
+        if self._reshape_active():
+            working, _ = apply_column_renames(working, self._column_renames)
         return working
+
+    def _split_derived(self) -> tuple[list[DerivedColumn], list[DerivedColumn]]:
+        """
+        Split the derived columns into ``(feeds the melt, evaluated after the reshape)``.
+
+        Derived columns normally run after a reshape, so that ``log(pi)`` can read the melted
+        ``pi``. A derived column *named* like a family member (``pwv__RICA``) is the opposite case:
+        it is an input of the melt, and evaluating it afterwards left the melt with no ``pwv__``
+        column at all. Those, and any earlier derived column they read, run just before the melt.
+        """
+        if not self._melt_families or not self._derived:
+            return [], list(self._derived)
+        prefixes = tuple(f"{family}__" for family in self._melt_families)
+        names = {d.name for d in self._derived}
+        feed = {d.name for d in self._derived if d.name.startswith(prefixes)}
+        frontier = set(feed)
+        while frontier:
+            reads: set[str] = set()
+            for spec in self._derived:
+                if spec.name in frontier:
+                    reads |= derived_column_references(spec) & names
+            frontier = reads - feed
+            feed |= frontier
+        before = [d for d in self._derived if d.name in feed]
+        after = [d for d in self._derived if d.name not in feed]
+        return before, after
+
+    def _derived_after_reshape(self) -> list[DerivedColumn]:
+        """The derived columns evaluated on the reshaped frame (all but the melt's inputs)."""
+        return self._split_derived()[1]
+
+    def _melt_stage(self, df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+        """Evaluate the melt's derived inputs on *df*, then melt. Returns ``(frame, errors)``."""
+        before, _after = self._split_derived()
+        errors: list[str] = []
+        if before:
+            df, errors = apply_derived_columns(df, before)
+        return self._melt_working(df), errors
 
     def _combined_base_frame(self) -> pd.DataFrame | None:
         """
@@ -2943,7 +3027,7 @@ class StatmodelsWindow(QMainWindow):
         and columns the user just created, which is how the filter dialog came to offer a level
         list without the synthetic territory in it.
         """
-        base = self._analysis_df
+        base = self._base_frame()
         if base is None:
             return None
         if self._combinations_applicable(base):
@@ -2963,7 +3047,8 @@ class StatmodelsWindow(QMainWindow):
         combined = self._combined_base_frame()
         if combined is None:
             return pd.DataFrame(), []
-        return apply_derived_columns(combined, self._derived)
+        derived = self._derived_after_reshape() if self._reshape_active() else self._derived
+        return apply_derived_columns(combined, derived)
 
     def _melt_working(self, df: pd.DataFrame) -> pd.DataFrame:
         """Melt ``self._melt_families``' per-region columns back to long, or return *df* unchanged."""
@@ -3170,6 +3255,136 @@ class StatmodelsWindow(QMainWindow):
             f"The dataset is unchanged; restore from any column's right-click menu.{note}"
         )
         notify(f"Dropped {column}.{note}")
+
+    def _on_rename_column(self, column: str) -> None:
+        """Ask for a new name for one column and apply it."""
+        if not column or self._rename_refused(column):
+            return
+        new, ok = QInputDialog.getText(
+            self, "Rename column", f"New name for “{column}”:", text=column
+        )
+        new = str(new or "").strip()
+        if ok and new and new != column:
+            self._rename_columns({column: new})
+
+    def _on_rename_family(self, family: str) -> None:
+        """Rename a measurement family: every ``<family>__<region>`` column at once."""
+        frame = self._working_df
+        if not family or frame is None:
+            return
+        prefix = f"{family}__"
+        members = [str(c) for c in frame.columns if str(c).startswith(prefix)]
+        if not members:
+            return
+        new, ok = QInputDialog.getText(
+            self,
+            "Rename measurement",
+            f"New name for “{family}” (its {len(members)} region column(s) keep their region "
+            f"suffix):",
+            text=family,
+        )
+        new = str(new or "").strip()
+        if not ok or not new or new == family:
+            return
+        if "__" in new:
+            notify("A measurement name cannot contain '__': that separates it from the region.",
+                   error=True)
+            return
+        mapping = {c: f"{new}{c[len(family):]}" for c in members}
+        if self._rename_columns(mapping) and family in self._melt_families:
+            # The melt is keyed on the family prefix, which has just changed.
+            self._melt_families = [new if f == family else f for f in self._melt_families]
+            self._btn_melt.setText(self._melt_button_text())
+            self._recompute_frame(announce=False)
+
+    def _rename_refused(self, column: str) -> bool:
+        """Refuse, with a message, to rename a column the frame is built on."""
+        protected = self._structural_columns() | {"group_key", "territory", "region_id"}
+        if column in protected:
+            notify(
+                f"“{column}” is a key the frame is built on (subject, region or the primary "
+                f"measurement); renaming it would break the reshape and the filters. Add a derived "
+                f"column under the new name instead.",
+                error=True,
+            )
+            return True
+        return False
+
+    def _rename_columns(self, mapping: dict[str, str]) -> bool:
+        """
+        Rename columns ``{old: new}`` everywhere the frame recipe names them.
+
+        A derived column is renamed in its own definition; any other column gets an entry in
+        ``_column_renames``. Either way the column types, reference levels, dropped set, filter
+        rules, region combinations and the derived columns that read it follow the new name, so
+        the recipe keeps meaning the same thing. Model formulas are the user's text and are left
+        alone; the status line says when one still names an old column.
+        """
+        from dataclasses import replace
+
+        mapping = {str(o): str(n).strip() for o, n in mapping.items() if str(n).strip() != str(o)}
+        if not mapping:
+            return False
+        bad = [n for n in mapping.values() if not IDENTIFIER_RE.match(n)]
+        if bad:
+            notify(
+                f"Not a valid column name: {', '.join(bad)} (letters, digits and '_', not starting "
+                f"with a digit).",
+                error=True,
+            )
+            return False
+        existing: set[str] = set()
+        for frame in (self._working_df, self._combined_base_frame()):
+            if frame is not None:
+                existing |= set(map(str, frame.columns))
+        existing |= {d.name for d in self._derived}
+        clash = [n for n in mapping.values() if n in existing and n not in mapping]
+        if clash or len(set(mapping.values())) < len(mapping):
+            notify(f"Column already exists: {', '.join(clash) or 'duplicate new names'}.", error=True)
+            return False
+
+        derived_names = {d.name for d in self._derived}
+        for old, new in mapping.items():
+            if old not in derived_names:
+                # Chain onto an earlier rename (a → b, then b → c is a → c), dropping a rename back.
+                source = next((k for k, v in self._column_renames.items() if v == old), old)
+                self._column_renames.pop(source, None)
+                if source != new:
+                    self._column_renames[source] = new
+            self._derived = [rename_derived_references(d, old, new) for d in self._derived]
+            for table in (self._column_types, self._reference_levels):
+                if old in table:
+                    table[new] = table.pop(old)
+            if old in self._dropped_columns:
+                self._dropped_columns.discard(old)
+                self._dropped_columns.add(new)
+            self._combinations = [
+                replace(c, value_column=new) if c.value_column == old else c
+                for c in self._combinations
+            ]
+
+        rules = []
+        for rule in self._chips.rules():
+            changes: dict[str, Any] = {}
+            if rule.column in mapping:
+                changes["column"] = mapping[rule.column]
+            if rule.by in mapping:
+                changes["by"] = mapping[rule.by]
+            rules.append(replace(rule, **changes) if changes else rule)
+        self._chips.set_rules(rules, [])
+
+        self._recompute_frame(announce=False)
+        formulas = " ".join(
+            w.text() if hasattr(w, "text") else w.toPlainText()
+            for w in (self._formula, self._groups, self._re_formula, self._vc_formula)
+        )
+        stale = [o for o in mapping if re.search(rf"(?<![A-Za-z0-9_]){re.escape(o)}(?![A-Za-z0-9_])", formulas)]
+        note = f"  The model formula still names {', '.join(stale)}." if stale else ""
+        shown = ", ".join(f"{o} → {n}" for o, n in list(mapping.items())[:3])
+        more = f" (+{len(mapping) - 3})" if len(mapping) > 3 else ""
+        self._status.setText(f"Renamed {shown}{more}. The dataset is unchanged.{note}")
+        notify(f"Renamed {shown}{more}.{note}")
+        return True
 
     def _on_change_column_type(self, column: str, kind: str) -> None:
         """Recast one column, or clear its override with ``auto``."""
@@ -5974,6 +6189,7 @@ class StatmodelsWindow(QMainWindow):
             # columns dropped cannot be reproduced from a long frame that still has them.
             "dropped_columns": sorted(self._dropped_columns),
             "column_types": dict(self._column_types),
+            "column_renames": dict(self._column_renames),
             "reference_levels": dict(self._reference_levels),
             "wide": self._wide_mode,
             "melt_families": list(self._melt_families),
@@ -6098,6 +6314,9 @@ class StatmodelsWindow(QMainWindow):
         }
         self._reference_levels = {
             str(k): str(v) for k, v in (cfg.get("reference_levels") or {}).items()
+        }
+        self._column_renames = {
+            str(k): str(v) for k, v in (cfg.get("column_renames") or {}).items()
         }
         self._wide_mode = bool(cfg.get("wide", False))
         raw_families = cfg.get("melt_families")

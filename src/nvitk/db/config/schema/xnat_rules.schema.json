@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nvitk-xnat-rules/1",
+  "title": "nvitk XNAT rules",
+  "description": "XNAT projects, scan classification rules and asset slots (see nvitk.db.config.xnat_rules).",
+  "type": "object",
+  "required": ["projects", "classifiers"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "name": {"type": "string"},
+    "description": {"type": "string"},
+    "_comment": {},
+    "default_visit_label": {"type": "string"},
+    "default_classifier": {"type": "string", "description": "Classifier used by classify_scan() when no project is given"},
+    "visit_labels": {"type": "object", "additionalProperties": {"type": "string"}},
+    "projects": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["classifier"],
+        "properties": {
+          "display_name": {"type": "string"},
+          "cohort_id": {"type": "string"},
+          "classifier": {"type": "string"},
+          "visit_label": {"type": "string"},
+          "default_sequences": {"type": "array", "items": {"type": "string"}},
+          "_comment": {}
+        },
+        "additionalProperties": false
+      }
+    },
+    "classifiers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["rules"],
+        "properties": {
+          "_comment": {},
+          "quality": {
+            "type": "object",
+            "properties": {
+              "accept": {"type": "array", "items": {"type": "string"}},
+              "strip": {"type": "boolean"}
+            },
+            "additionalProperties": false
+          },
+          "rules": {"type": "array", "items": {"$ref": "#/$defs/rule"}},
+          "experiment": {
+            "type": "object",
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["type"],
+                  "properties": {
+                    "type": {"type": "string"},
+                    "candidate_flag": {"type": "string"},
+                    "result": {"type": "object"}
+                  }
+                }
+              },
+              "dedupe_sequences": {"type": "boolean"}
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "sequence_aliases": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}},
+    "asset_slots": {"type": "object", "additionalProperties": {"type": "string"}},
+    "asset_slot_labels": {"type": "object", "additionalProperties": {"type": "string"}},
+    "pipeline_resources": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["asset_slot"],
+        "properties": {
+          "asset_slot": {"type": "string"},
+          "pipeline_id": {"type": "string"},
+          "name": {"type": "string"},
+          "bundle": {"type": "boolean"},
+          "gui": {"type": "boolean"}
+        }
+      }
+    },
+    "pipeline_filter_slots": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "required": ["match", "result"],
+      "properties": {
+        "name": {"type": "string"},
+        "_comment": {},
+        "match": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}},
+        "not_match": {"type": "object", "additionalProperties": {"type": "string"}},
+        "flags": {"type": "string", "pattern": "^[imsx]*$"},
+        "ignore_quality": {"type": "boolean"},
+        "extract": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {"type": {"type": "string"}, "required": {"type": "boolean"}}
+          }
+        },
+        "result": {"type": "object"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

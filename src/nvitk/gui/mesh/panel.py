@@ -217,9 +217,9 @@ class LabelChecklist(QWidget):
         lay.addLayout(row)
         self._list = QListWidget()
         self._list.setMinimumHeight(90)
-        self._list.setMaximumHeight(170)
         self._list.setStyleSheet(_INPUT_STYLE)
-        lay.addWidget(self._list)
+        from nvitk.gui.core.widgets import resizable  # drag the handle under it to resize
+        lay.addWidget(resizable(self._list, height=170, pref_key="mesh.list"))
         self._count = _muted()
         lay.addWidget(self._count)
         self._list.itemChanged.connect(lambda _i: self._update_count())
@@ -572,6 +572,19 @@ class MeshPanel(QWidget):
 
     def _build_operation_card(self) -> Card:
         ops = Card("Operation")
+        # Every operation by task section, VMTK and MeshLab filters badged inside them; picking
+        # one selects it in the combos below (kept, folded away, as the form's state).
+        from nvitk.gui.mesh.operations import all_operations
+        from nvitk.gui.mesh.taxonomy import SECTIONS as MESH_SECTIONS, mesh_help, mesh_meta
+        from nvitk.gui.tools.browser import ToolBrowser
+
+        self._browser = ToolBrowser(
+            all_operations(), sections=MESH_SECTIONS, meta_fn=mesh_meta, help_fn=mesh_help,
+            tag_filters=False, prefs_key="gui.mesh_browser",
+        )
+        self._browser.setMinimumHeight(260)
+        self._browser.tool_selected.connect(self.select)
+        ops.add(self._browser)
         pickers = QFormLayout()
         pickers.setContentsMargins(0, 0, 0, 0)
         pickers.setVerticalSpacing(SPACE_TIGHT)
@@ -589,7 +602,11 @@ class MeshPanel(QWidget):
             combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         pickers.addRow("Category", self._category)
         pickers.addRow("Operation", self._operation)
-        ops.add_layout(pickers)
+        self._pickers_box = QWidget()
+        self._pickers_box.setLayout(pickers)
+        # The browser above picks the operation; the combos stay as its state, out of sight.
+        self._pickers_box.setVisible(False)
+        ops.add(self._pickers_box)
         self._description = _muted()
         ops.add(self._description)
         self._docs = QLabel()
@@ -1315,6 +1332,12 @@ class MeshPanel(QWidget):
             return None
         self._status.setText(result.message)
         _notify(result.message)
+        try:
+            from nvitk.gui.core.journal import record
+
+            record(self._viewer, "mesh_op", op.id, params=self.params(), inputs=[str(getattr(layer, "name", ""))], label=f"Mesh: {op.label}")
+        except Exception:  # noqa: BLE001
+            pass
         if result.table:
             try:
                 from nvitk.gui.viz.results_window import show_results

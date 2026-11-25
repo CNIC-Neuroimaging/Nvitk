@@ -106,6 +106,7 @@ from nvitk.gui.labels.visibility import (
     set_label_color,
     stored_visible_ids,
 )
+from nvitk.gui.core.design import FONT_S
 
 #: Dock object name, the key the saved layout knows it by.
 LABELING_DOCK_NAME = "nvitk:labeling"
@@ -395,15 +396,21 @@ class LabelingPanel(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(SPACE_TIGHT, SPACE, SPACE_TIGHT, SPACE)
         root.setSpacing(SPACE)
-        root.addWidget(self._build_layer_card())
-        root.addWidget(self._build_controls_section())
-        root.addWidget(self._build_label_card())
-        root.addWidget(self._build_draw_card())
-        root.addWidget(self._build_area_card())
-        root.addWidget(self._build_box_card())
-        root.addWidget(self._build_refine_card())
-        root.addWidget(self._build_slices_card())
-        root.addWidget(self._build_manage_card())
+        # The cards grouped into collapsible sections, in the order of a labeling session:
+        # which layer, which label, draw, constrain (area, box), refine, fill between slices,
+        # tidy up. Each section remembers whether it is open.
+        root.setSpacing(SPACE_TIGHT)
+        layer = self._section("Layer", "layers", "blue", "layer", self._build_layer_card())
+        layer.add(self._build_controls_section())
+        root.addWidget(layer)
+        root.addWidget(self._section("Label & vocabulary", "tag", "orange", "label", self._build_label_card()))
+        root.addWidget(self._section("Brush & tools", "brush", "green", "draw", self._build_draw_card()))
+        root.addWidget(self._section("Editable area", "masks", "purple", "area", self._build_area_card(), expanded=False))
+        root.addWidget(self._section("Box (ROI)", "roi_box", "cyan", "box", self._build_box_card(), expanded=False))
+        root.addWidget(self._section("Refine", "wand", "pink", "refine", self._build_refine_card(), expanded=False))
+        root.addWidget(self._section("Interpolate between slices", "layout_axes_col", "olive", "slices",
+                                     self._build_slices_card(), expanded=False))
+        root.addWidget(self._section("Manage labels", "sliders", "brown", "manage", self._build_manage_card(), expanded=False))
         self._status = QLabel("")
         self._status.setWordWrap(True)
         root.addWidget(self._status)
@@ -448,6 +455,31 @@ class LabelingPanel(QWidget):
         self._on_active_changed()
 
     # building
+
+    @staticmethod
+    def _section(title: str, icon_name: str, hue: str, key: str, card: Card, *, expanded: bool = True) -> QWidget:
+        """*card* as the body of a collapsible :class:`~nvitk.gui.core.widgets.Section`.
+
+        The card keeps its rows and its flattening of child styles; its own heading and border
+        give way to the section's header.
+        """
+        from nvitk.gui.core.widgets import Section
+
+        body = card.body()
+        first = body.itemAt(0).widget() if body.count() else None
+        if isinstance(first, QLabel) and first.text().isupper():
+            first.hide()
+        card.setStyleSheet(
+            "QFrame#card { background: transparent; border: none; }"
+            " QWidget { background: transparent; border: none; }"
+        )
+        body.setContentsMargins(0, 0, 0, 0)
+        section = Section(title, icon_name=icon_name, hue=hue, expanded=expanded, pref_key=f"labeling.{key}")
+        tip = card.toolTip()
+        if tip:
+            section.setToolTip(tip)
+        section.add(card)
+        return section
 
     def _build_layer_card(self) -> Card:
         card = Card("Layer")
@@ -532,7 +564,11 @@ class LabelingPanel(QWidget):
         self._list.itemDoubleClicked.connect(lambda item: self._rename_from_list(int(item.data(Qt.ItemDataRole.UserRole))))
         self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._list.customContextMenuRequested.connect(self._list_menu)
-        card.add(self._list)
+        # The height is the user's (drag the handle under the list; double-click resets it).
+        from nvitk.gui.core.widgets import resizable
+
+        self._list_box = resizable(self._list, height=150, minimum=60, pref_key="labeling.labels")
+        card.add(self._list_box)
         self._stats = QLabel("")
         self._stats.setStyleSheet(f"color: {COLOR_MUTED};")
         go = _button("Go to", "Show the active label: its centre's slice, the camera on it.", self.go_to)
@@ -561,7 +597,7 @@ class LabelingPanel(QWidget):
             grid.addWidget(button, i // 4, i % 4)
         card.add_layout(grid)
         more = QLabel("Vessels & flooding")
-        more.setStyleSheet(f"color: {COLOR_MUTED}; font-size: 10px; font-weight: bold;")
+        more.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_S}px; font-weight: bold;")
         card.add(more)
         grid_more = QGridLayout()
         grid_more.setSpacing(SPACE_TIGHT)
@@ -579,7 +615,7 @@ class LabelingPanel(QWidget):
         card.add_layout(grid_more)
         self._draw_hint = QLabel("")
         self._draw_hint.setWordWrap(True)
-        self._draw_hint.setStyleSheet(f"color: {COLOR_MUTED}; font-size: 10px;")
+        self._draw_hint.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_S}px;")
         self._pan_key_edit = QKeySequenceEdit(self._pan_key)
         self._pan_key_edit.setToolTip("Hold this key to pan — on the canvas and in the orthogonal views — and let "
                                       "go to get the tool in use back. Click, then press the new key.")
@@ -629,7 +665,7 @@ class LabelingPanel(QWidget):
 
         self._tool_hint = QLabel("")
         self._tool_hint.setWordWrap(True)
-        self._tool_hint.setStyleSheet(f"color: {COLOR_MUTED}; font-size: 10px;")
+        self._tool_hint.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_S}px;")
         card.add(self._tool_hint)
         self._tool_hint.hide()
         card.add(self._build_wand_box())
@@ -662,14 +698,13 @@ class LabelingPanel(QWidget):
         self._over_on.toggled.connect(self._on_over_toggled)
         self._preserve.toggled.connect(self._on_preserve_toggled)
         self._over_count = QLabel("")
-        self._over_count.setStyleSheet(f"color: {COLOR_MUTED}; font-size: 10px;")
+        self._over_count.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_S}px;")
         lay.addLayout(_row(self._over_on, self._over_count, stretch_last=True))
         self._over_box = QWidget()
         box = QVBoxLayout(self._over_box)
         box.setContentsMargins(0, 0, 0, 0)
         box.setSpacing(2)
         self._over_list = QListWidget()
-        self._over_list.setMaximumHeight(130)
         self._over_list.setToolTip("Tick the labels the rule is about: the ones to paint over, or the ones "
                                    "to leave alone.")
         self._over_list.itemChanged.connect(self._on_over_ticked)
@@ -679,7 +714,8 @@ class LabelingPanel(QWidget):
         self._over_mode.setToolTip("Paint only over the ticked labels, or anywhere but over them.")
         self._over_mode.activated.connect(lambda _i: self._on_over_mode())
         box.addWidget(self._over_mode)
-        box.addWidget(self._over_list)
+        from nvitk.gui.core.widgets import resizable  # drag the handle under it to resize
+        box.addWidget(resizable(self._over_list, height=130, pref_key="labeling.over_list"))
         box.addLayout(_row(
             _button("All labels", "Every label of the layer, now and as new ones are drawn, not the "
                     "background: paint only inside what is already labelled.", lambda: self._tick_over(True)),
@@ -878,7 +914,7 @@ class LabelingPanel(QWidget):
                                        "tube's radius, so noise does not punch holes or read as the wall.")
         self._tracer_reach = QLabel("")
         self._tracer_reach.setWordWrap(True)
-        self._tracer_reach.setStyleSheet(f"color: {COLOR_MUTED}; font-size: 10px;")
+        self._tracer_reach.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_S}px;")
         self._tracer_info = QLabel("No points yet.")
         self._tracer_info.setWordWrap(True)
         self._tracer_info.setStyleSheet(f"color: {COLOR_MUTED};")
@@ -1074,13 +1110,13 @@ class LabelingPanel(QWidget):
         self._inside_mode.activated.connect(lambda _i: self._on_inside_mode())
         box.addWidget(self._inside_mode)
         self._inside_ids = QListWidget()
-        self._inside_ids.setMaximumHeight(130)
         self._inside_ids.setToolTip("Tick the labels of that layer the area is made of (inside) or kept out of "
                                     "(outside).")
         self._inside_ids.itemChanged.connect(self._on_inside_ticked)
         self._inside_count = QLabel("")
-        self._inside_count.setStyleSheet(f"color: {COLOR_MUTED}; font-size: 10px;")
-        box.addWidget(self._inside_ids)
+        self._inside_count.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_S}px;")
+        from nvitk.gui.core.widgets import resizable  # drag the handle under it to resize
+        box.addWidget(resizable(self._inside_ids, height=130, pref_key="labeling.inside_ids"))
         box.addLayout(_row(self._inside_count,
                            _button("All", "Every label of that layer.", lambda: self._tick_inside(True)),
                            _button("None", "No label (nothing is editable).", lambda: self._tick_inside(False))))
@@ -1562,6 +1598,8 @@ class LabelingPanel(QWidget):
 
     def _fit_list(self) -> None:
         """The list as tall as its rows, between a few and a screenful-ish."""
+        if getattr(self, "_list_box", None) is not None:
+            return  # sized by its drag handle
         lo, hi = _LIST_ROWS
         row = self._list.sizeHintForRow(0) if self._list.count() else 20
         rows = min(max(self._list.count(), lo), hi)

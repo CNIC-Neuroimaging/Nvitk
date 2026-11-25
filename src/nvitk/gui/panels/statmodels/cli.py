@@ -1,5 +1,9 @@
 """
-``nvitk-statsmodels``: launch the Statmodels explorer as a standalone window.
+``nvitk-statsmodels``: launch the Statmodels explorer as a standalone window (deprecated).
+
+Deprecated: the explorer now lives in the ``nvitk`` workbench (Analysis module > Statistical
+models), next to the table explorer and plot builder that can send it any table. The standalone
+window keeps working.
 
 Description
 -----------
@@ -120,6 +124,11 @@ def main(argv: list[str] | None = None) -> int:
 
     args = build_parser().parse_args(argv)
     Logger(level=args.log_level)
+    log.warning(
+        "nvitk-statsmodels (the standalone window) is deprecated: Statmodels now lives in the "
+        "nvitk workbench, Analysis module > Statistical models, where any table can be sent to it. "
+        "This command keeps working for now."
+    )
 
     # Qt is imported here rather than at module import so ``--help`` works on a headless box with no
     # Qt platform plugin available.

@@ -39,11 +39,75 @@ from nvitk.gui.core.warnings import install_napari_display_warnings
 
 def _record_step(state: dict[str, Any], step: dict[str, Any]) -> None:
     """Append a timestamped *step* to the app's pipeline recording, if recording is enabled."""
-    if not state.get("record_enabled", False):
+    from nvitk.gui.core.journal import journal, record
+
+    viewer = state.get("viewer")
+    recording = bool(state.get("record_enabled", False)) or (viewer is not None and journal(viewer).recording)
+    if not recording:
         return
     step = dict(step)
     step.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
     state["steps"].append(step)
+    if viewer is None:
+        return
+    kind = str(step.get("type", "other"))
+    if kind == "tool":
+        params = dict(step.get("params") or {})
+        params["target_mode"] = step.get("target_mode") or "raw"
+        params["label_ids"] = step.get("label_ids")
+        record(viewer, "tool", str(step.get("tool")), params=params, inputs=[str(step.get("source_layer", ""))],
+               outputs=[str(step.get("output_layer", ""))], label=f"{step.get('category', '')} → {step.get('operation', '')}")
+    else:
+        record(viewer, kind, str(step.get("path") or step.get("name") or step.get("layer") or ""),
+               params={k: v for k, v in step.items() if k not in ("type", "timestamp")})
+
+
+def _atlas_panel(viewer: Any) -> Any:
+    """Atlases from FSL, FreeSurfer, ANTsXNet, nilearn and settings, loaded as layers."""
+    from nvitk.gui.panels.atlas_importer import AtlasImporterPanel
+
+    return AtlasImporterPanel(viewer)
+
+
+def _dataset_setup_panel() -> Any:
+    """Configure / create / fill the dataset and test the XNAT scan mapping."""
+    from nvitk.gui.panels.dataset_setup import DatasetSetupPanel
+
+    return DatasetSetupPanel()
+
+
+def _flush_deferred_deletes() -> None:
+    """Delete what closing the viewer scheduled for deletion, while Python is still running.
+
+    Closing the window only *schedules* its deletion (``deleteLater``), and the event loop has
+    already stopped. Left for PyQt's exit cleanup, the main window was then deleted in the middle
+    of PyQt's walk over its wrappers, and the interpreter crashed on exit (SIGSEGV in
+    ``sip_api_visit_wrappers``) once the Labeling panel had been shown.
+    """
+    try:
+        from qtpy.QtCore import QEvent
+        from qtpy.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app is not None:
+            app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            app.processEvents()
+    except Exception:  # noqa: BLE001 (exit tidy-up only)
+        pass
+
+
+def _analysis_panel(viewer: Any, statmodels_panel: Any) -> Any:
+    """The Analysis module: tables (dataset, Results, files), plots, and the Statmodels launcher."""
+    from nvitk.gui.analysis.workbench import AnalysisWorkbench
+
+    return AnalysisWorkbench(viewer, statmodels_panel)
+
+
+def _record_panel(viewer: Any, app_state: dict[str, Any]) -> Any:
+    """The Record panel (Export & record module): the journal of actions, replay and export."""
+    from nvitk.gui.panels.record_panel import RecordPanel
+
+    return RecordPanel(viewer, app_state)
 
 
 def _layer_display_kwargs(layer: Any, *, name: str, ndim: int | None = None) -> dict[str, Any]:
@@ -171,15 +235,29 @@ def run_app() -> None:
     # palette on the first frame, rather than flashing Napari's default dark.
     theme_id = register_napari_theme()
 
-    viewer = napari.Viewer(title="nvitk")
+    # Not shown yet: the central viewport takes Napari's viewer widget into its 3D pane first, so
+    # the canvas's GL context is created where it will stay.
+    viewer = napari.Viewer(title="nvitk", show=False)
     _ = viewer.window
+    try:
+        from nvitk.gui.viewport import install_viewport
+
+        install_viewport(viewer)
+        from nvitk.gui.core.interpolation_link import install_interpolation_link
+
+        install_interpolation_link(viewer)  # the layer controls' interpolation drives 2D and 3D
+    except Exception as exc:  # noqa: BLE001 (the plain Napari canvas still works)
+        from nvitk.gui.core.log_panel import gui_log as _gui_log
+
+        _gui_log(f"Central viewport unavailable, using the Napari canvas: {exc}", error=True)
+    viewer.window.show()
     try:
         viewer.theme = theme_id
     except Exception:
         pass
     try:
         # The main canvas opens in 3D (gui.json "gui.ndisplay": 2 for 2D); the
-        # orthogonal views dock gives the slices.
+        # viewport's slice panes give the slices.
         from nvitk.gui.core.orientation import default_ndisplay
 
         viewer.dims.ndisplay = default_ndisplay()
@@ -207,6 +285,9 @@ def run_app() -> None:
         "sge_last_connection": {},
     }
     viewer._nvitk_app_state = app_state
+    # The module shell is installed below, after the docks: panels built before it already lay
+    # themselves out for it (the Tools dock leaves its compute buttons to the activity bar).
+    viewer._nvitk_shell_pending = True
 
     layer_list = QListWidget()
 
@@ -248,9 +329,10 @@ def run_app() -> None:
         data_tab_label = "Data"
 
     try:
-        from nvitk.gui.panels.qc import QcPanel
+        # One QC tab for every pipeline: QVTPy, eICAB and PESA-Fat (panels/qc_hub.py).
+        from nvitk.gui.panels.qc_hub import QcHub
 
-        qc_panel = QcPanel(
+        qc_panel = QcHub(
             viewer,
             app_state,
             on_inputs_opened=_on_xnat_inputs_opened,
@@ -485,25 +567,41 @@ def run_app() -> None:
     layers_layout.setAlignment(Qt.AlignTop)
     layers_layout.setContentsMargins(SPACE_TIGHT, SPACE, SPACE_TIGHT, SPACE)
     layers_layout.setSpacing(SPACE)
+    # The "Display" panel (Inspect module): orientation, CT windowing, mask overlay. The layer
+    # summary list it used to hold duplicated Napari's layer list and is no longer shown.
     layers_layout.addWidget(orientation_label)
-    layers_layout.addWidget(layer_list)
-    layers_layout.addWidget(layers_panel.native)
-    layers_layout.addWidget(layers_refresh_panel.native)
     layers_layout.addWidget(ct_window_panel)
+    layers_layout.addWidget(layers_panel.native)
     layers_layout.addStretch(1)
     layers_tab.setLayout(layers_layout)
+    # Kept (the summary timer and the old pipeline form still drive them) but not shown. Each is
+    # parented to the tab: a parentless, Python-owned widget is deleted by PyQt's exit cleanup
+    # while it walks its object map, and the children going with it crashed the interpreter on
+    # exit (SIGSEGV in sip_api_visit_wrappers).
+    for hidden in (layer_list, layers_refresh_panel.native, export_panel.native):
+        hidden.setParent(layers_tab)
+        hidden.setVisible(False)
 
     export_tab = QWidget()
     export_layout = QVBoxLayout()
     export_layout.setAlignment(Qt.AlignTop)
     export_layout.setContentsMargins(SPACE_TIGHT, SPACE, SPACE_TIGHT, SPACE)
     export_layout.setSpacing(SPACE)
-    export_layout.addWidget(export_view_png_panel.native)
-    export_layout.addWidget(export_view_gif_panel.native)
-    export_layout.addWidget(save_panel.native)
+    # One collapsible section per kind of output (see core.widgets.Section), so the tab reads
+    # as four tasks rather than four forms stacked edge to edge.
+    from nvitk.gui.core.widgets import Section
     from nvitk.gui.io.scene import build_scene_panel
 
-    export_layout.addWidget(build_scene_panel(viewer))
+    export_layout.setSpacing(SPACE_TIGHT)
+    for title, icon_name, hue, key, widget, expanded in (
+        ("Screenshot (PNG)", "camera", "blue", "png", export_view_png_panel.native, True),
+        ("Animation (GIF)", "film", "purple", "gif", export_view_gif_panel.native, False),
+        ("Save layer to file", "save", "green", "save", save_panel.native, True),
+        ("Scenes", "layers", "orange", "scene", build_scene_panel(viewer), False),
+    ):
+        section = Section(title, icon_name=icon_name, hue=hue, expanded=expanded, pref_key=f"export.{key}")
+        section.add(widget)
+        export_layout.addWidget(section)
     export_layout.addStretch(1)
     export_tab.setLayout(export_layout)
 
@@ -562,10 +660,12 @@ def run_app() -> None:
         data_dock,
         labeling_dock,
         _panel_dock(qc_panel, "qc", "QC"),
-        _panel_dock(statmodels_panel, "statmodels", "Statmodels"),
+        _panel_dock(_dataset_setup_panel(), "dataset_config", "Dataset & XNAT setup"),
+        _panel_dock(_atlas_panel(viewer), "atlases", "Atlases"),
+        _panel_dock(_analysis_panel(viewer, statmodels_panel), "statmodels", "Analysis"),
         _panel_dock(export_tab, "export", "Export"),
-        _panel_dock(layers_tab, "layers", "Layers"),
-        _panel_dock(_top_aligned(export_panel.native), "pipeline", "Pipeline"),
+        _panel_dock(layers_tab, "display", "Display"),
+        _panel_dock(_record_panel(viewer, app_state), "pipeline", "Record"),
     ]
     qt_main.addDockWidget(Qt.RightDockWidgetArea, tools_dock)
     for panel_dock in panel_docks[1:]:
@@ -601,15 +701,18 @@ def run_app() -> None:
 
     # The orthogonal views open with the window. Created before the saved layout
     # is restored, so a position the user gave the dock last time is honoured.
-    ortho_panel = None
-    try:
-        from nvitk.gui.viz.ortho_panel import open_ortho_views
+    # They live in the central viewport (installed with the window); without it (it failed to
+    # build) they fall back to the old left dock.
+    ortho_panel = getattr(viewer, "_nvitk_ortho_panel", None)
+    if ortho_panel is None:
+        try:
+            from nvitk.gui.viz.ortho_panel import open_ortho_views
 
-        ortho_panel = open_ortho_views(viewer, None)
-    except Exception as exc:  # noqa: BLE001 (a missing panel must not block a launch)
-        from nvitk.gui.core.log_panel import gui_log as _gui_log
+            ortho_panel = open_ortho_views(viewer, None)
+        except Exception as exc:  # noqa: BLE001 (a missing panel must not block a launch)
+            from nvitk.gui.core.log_panel import gui_log as _gui_log
 
-        _gui_log(f"Orthogonal views unavailable: {exc}", error=True)
+            _gui_log(f"Orthogonal views unavailable: {exc}", error=True)
 
     # Both nvitk docks now exist, so a saved layout has something to match
     # against. Napari's own restore ran inside ``napari.Viewer(...)`` far above,
@@ -632,8 +735,21 @@ def run_app() -> None:
         # the main layout is then restored around the ones that stay.
         if panel_manager is not None:
             panel_manager.restore()
-        restore_dock_state(qt_main)
-        if legacy_layout:
+        restored = restore_dock_state(qt_main)
+        # The module shell (left activity bar). Layouts older than v7 had every panel tabbed on
+        # the right: put them in the left module group once; a v7 layout is restored as saved.
+        try:
+            from nvitk.gui.shell.activity_bar import install_shell, stored_module
+
+            shell = install_shell(viewer)
+            if stored_version < 7 or not restored:
+                shell.arrange()
+            shell.show_module(stored_module(), remember=False)
+        except Exception as exc:  # noqa: BLE001 (the plain tabbed docks still work)
+            gui_log(f"Module bar unavailable: {exc}", error=True)
+        if stored_version < 7:
+            pass
+        elif legacy_layout:
             # Saved when the panels were tabs of one "nvitk" dock: the state
             # places Napari's docks and the ortho views, but knows none of the
             # panel docks, and Qt stacks those one under another. Tab them back
@@ -660,6 +776,17 @@ def run_app() -> None:
         pass
     if panel_manager is not None:
         panel_manager.watch_all()
+    # Layer controls open per layer from the layer list (right-click ▸ Controls…), so Napari's
+    # permanent dock starts hidden (Window ▸ layer controls, or gui.json
+    # "gui.layer_controls_dock": true, brings it back).
+    try:
+        from nvitk.gui.core.prefs import load_prefs
+        from nvitk.gui.labels.layer_popover import hide_layer_controls_dock
+
+        if not bool(load_prefs().get("gui.layer_controls_dock", False)):
+            hide_layer_controls_dock(viewer)
+    except Exception:  # noqa: BLE001
+        pass
     # On screen at launch whatever the stored layout says: a layout saved before
     # the dock existed (or with it closed) would otherwise leave it hidden.
     ortho_dock = getattr(ortho_panel, "_nvitk_dock", None)
@@ -808,3 +935,4 @@ def run_app() -> None:
         _save_layer_dialog()
 
     napari.run()
+    _flush_deferred_deletes()

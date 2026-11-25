@@ -50,6 +50,8 @@ FILE_ENV_VARS: dict[str, str] = {
     "settings.json": "NVITK_SETTINGS_JSON",
     "xnat.json": "NVITK_XNAT_CONFIG",
     "gui.json": "NVITK_GUI_JSON",
+    "dataset.json": "NVITK_DATASET_CONFIG",
+    "xnat_rules.json": "NVITK_XNAT_RULES",
 }
 
 #: Files a person fills in. ``gui.json`` is excluded: the GUI writes it, and

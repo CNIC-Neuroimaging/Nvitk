@@ -108,9 +108,9 @@ class Voxelwise3DPanel(QDialog):
 
         self._contrasts = QListWidget()
         self._contrasts.setSelectionMode(QAbstractItemView.MultiSelection)
-        self._contrasts.setMaximumHeight(70)
         self._contrasts.setToolTip("Contrasts to draw. Several at once are drawn as separate layers.")
-        form.addRow("Contrasts", self._contrasts)
+        from nvitk.gui.core.widgets import resizable  # drag the handle under it to resize
+        form.addRow("Contrasts", resizable(self._contrasts, height=70, pref_key="voxelwise3d.contrasts"))
         return box
 
     def _build_threshold_group(self) -> QGroupBox:

@@ -88,6 +88,9 @@ class GuiToolSpec:
     #: nearest-neighbour, and returns a label map (like its ``nvitk-transform`` counterpart)
     #: instead of transforming the binary union the label target modes reduce the layer to.
     geometric: bool = False
+    #: Where the tool browser places it (a :class:`~nvitk.gui.tools.taxonomy.ToolMeta`); ``None``
+    #: lets :data:`~nvitk.gui.tools.taxonomy.TABLE` (or the category) decide.
+    meta: Any = None
 
 
 #: Ids of tools since folded into another: ``old id -> (new id, params the old id fixes)``.
@@ -2978,6 +2981,11 @@ _ASL_TOOLS: tuple[GuiToolSpec, ...] = (
 )
 
 _TOOLS = _TOOLS + _ASL_TOOLS
+
+# ANTsPy / ANTsPyNet tools (their own module, placed in the browser by their inline meta).
+from nvitk.gui.tools.ants_registry import ANTS_TOOLS as _ANTS_TOOLS  # noqa: E402
+
+_TOOLS = _TOOLS + _ANTS_TOOLS
 
 
 

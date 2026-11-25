@@ -170,8 +170,8 @@ class MediationFormPanel(QGroupBox):
 
         lay.addWidget(QLabel("Covariates (adjusted for in both models)"))
         self._covariates = QListWidget()
-        self._covariates.setMaximumHeight(110)
-        lay.addWidget(self._covariates)
+        from nvitk.gui.core.widgets import resizable  # drag the handle under it to resize
+        lay.addWidget(resizable(self._covariates, height=110, pref_key="mediation.covariates"))
 
         self._hint = QLabel("")
         self._hint.setWordWrap(True)

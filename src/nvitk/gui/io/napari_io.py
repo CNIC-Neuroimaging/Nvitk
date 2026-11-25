@@ -378,7 +378,13 @@ def _read_layer_data(path: str) -> list[LayerData] | None:
     out = []
     for i, img in enumerate(images):
         _name_image(img, pth, f"_{i}" if len(images) > 1 else "")
-        out.append(_prepare_layer_tuple(img, pth))
+        data, meta, kind = _prepare_layer_tuple(img, pth)
+        if kind == "image" and not meta.get("rgb") and _holds_labels(data):
+            # Dropped / opened through Napari's reader: label maps arrive as Labels too.
+            keep = {"name", "metadata", "scale", "affine", "translate", "axis_labels", "units", "opacity", "visible"}
+            out.append((_as_label_ids(data), {k: v for k, v in meta.items() if k in keep}, "labels"))
+        else:
+            out.append((data, meta, kind))
     return out or None
 
 
@@ -402,6 +408,26 @@ def read_paths(path: str | list[str]) -> ReaderFunc | list[LayerData] | None:
     return _read_layer_data
 
 
+def _holds_labels(data: Any) -> bool:
+    """Whether a read volume is a label map (see :func:`~nvitk.gui.labels.visibility.array_is_label_like`)."""
+    try:
+        from nvitk.gui.labels.visibility import array_is_label_like
+
+        return bool(array_is_label_like(np.asarray(data)))
+    except Exception:  # noqa: BLE001 (when in doubt, an image)
+        return False
+
+
+def _as_label_ids(data: Any) -> np.ndarray:
+    """*data* as integer label ids (floats rounded; small integer types kept)."""
+    arr = np.asarray(data)
+    if np.issubdtype(arr.dtype, np.floating):
+        return np.rint(arr).astype(np.int32)
+    if arr.dtype == bool:
+        return arr.astype(np.uint8)
+    return arr
+
+
 def _add_image_to_viewer(viewer: Any, img: Image, path: Path) -> Any:
     """Add *img* to *viewer* as an Image layer using :func:`_prepare_layer_tuple`'s display kwargs,
     then apply nvitk's viewer/dims configuration for the new layer."""
@@ -419,7 +445,14 @@ def _add_image_to_viewer(viewer: Any, img: Image, path: Path) -> Any:
     if "rgb" in layer_meta:
         kwargs["rgb"] = layer_meta["rgb"]
     with suppress_nonorthogonal_slice_warning():
-        layer = viewer.add_image(data, **kwargs)
+        if not layer_meta.get("rgb") and _holds_labels(data):
+            # A label map (a segmentation, a mask): straight in as a Napari Labels layer, as
+            # right-click > Convert to labels would make it, so painting, per-label colours and
+            # the label vocabulary work from the start.
+            kwargs.pop("rgb", None)
+            layer = viewer.add_labels(_as_label_ids(data), **kwargs)
+        else:
+            layer = viewer.add_image(data, **kwargs)
     configure_viewer_for_layer(
         viewer,
         layer,

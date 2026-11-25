@@ -27,7 +27,7 @@ import shlex
 from pathlib import Path
 from typing import Any, Sequence
 
-from qtpy.QtCore import Qt, QThread, Signal
+from qtpy.QtCore import Qt, Signal
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -49,6 +49,7 @@ from qtpy.QtWidgets import (
 )
 
 from nvitk.core.logger import Logger
+from nvitk.gui.core.thread_worker import ThreadWorker
 from nvitk.gui.core.log_panel import gui_log, run_subprocess_logged
 
 log = Logger()
@@ -70,7 +71,7 @@ PIPELINE_KINDS: tuple[tuple[str, str, str], ...] = (
 
 
 # Workers
-class _IntersectionWorker(QThread):
+class _IntersectionWorker(ThreadWorker):
     """Compute ``images ∩ cohort ∩ complete cases`` without merging anything.
 
     Off the GUI thread because the design frame is several ``repo.image()`` queries (seconds on
@@ -165,7 +166,7 @@ class _IntersectionWorker(QThread):
         )
 
 
-class _RunWorker(QThread):
+class _RunWorker(ThreadWorker):
     """Run one ``nvitk-voxelwise`` command line, streaming its output into the GUI log."""
 
     finished_ok = Signal(int)
@@ -195,7 +196,7 @@ class VoxelwisePanel(QDialog):
         self.setWindowTitle("Voxelwise analysis (FSL randomise)")
         self.setMinimumWidth(640)
         self._viewer = viewer
-        self._worker: QThread | None = None
+        self._worker: ThreadWorker | None = None
         self._runner: _RunWorker | None = None
         self._out_dir: Path | None = None
 
@@ -299,9 +300,9 @@ class VoxelwisePanel(QDialog):
         layout.addWidget(QLabel("Explanatory variables (order is the design's):"))
         self._evs = QListWidget()
         self._evs.setSelectionMode(QAbstractItemView.MultiSelection)
-        self._evs.setMaximumHeight(120)
         self._evs.itemSelectionChanged.connect(self._on_evs_changed)
-        layout.addWidget(self._evs)
+        from nvitk.gui.core.widgets import resizable  # drag the handle under it to resize
+        layout.addWidget(resizable(self._evs, height=120, pref_key="voxelwise.evs"))
 
         self._ev_hint = QLabel("Pick a cohort and press “Check cohort” to list the columns.")
         self._ev_hint.setWordWrap(True)
@@ -327,8 +328,8 @@ class VoxelwisePanel(QDialog):
         layout.addLayout(pf_row)
 
         self._prefilters = QListWidget()
-        self._prefilters.setMaximumHeight(70)
-        layout.addWidget(self._prefilters)
+        from nvitk.gui.core.widgets import resizable  # drag the handle under it to resize
+        layout.addWidget(resizable(self._prefilters, height=70, pref_key="voxelwise.prefilters"))
 
         layout.addWidget(QLabel("Contrasts (+ev:name, -ev:name, or weights 0,1,0:name):"))
         row = QHBoxLayout()
@@ -345,8 +346,8 @@ class VoxelwisePanel(QDialog):
         layout.addLayout(row)
 
         self._contrasts = QListWidget()
-        self._contrasts.setMaximumHeight(90)
-        layout.addWidget(self._contrasts)
+        from nvitk.gui.core.widgets import resizable  # drag the handle under it to resize
+        layout.addWidget(resizable(self._contrasts, height=90, pref_key="voxelwise.contrasts"))
         return box
 
     def _build_prepared_group(self) -> QGroupBox:
