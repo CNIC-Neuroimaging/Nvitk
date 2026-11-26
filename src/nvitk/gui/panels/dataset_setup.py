@@ -4,8 +4,9 @@
   PESA defaults), with buttons to write a starter or the PESA configuration, open the files and
   validate them.
 * **New dataset**: scaffold an empty dataset folder (catalog, schemas, tables).
-* **Import a spreadsheet**: clinical or image measurements from a CSV / Excel sheet into the
-  dataset, with a source batch id (the version tag of that import) and, for images, a modality.
+* **Import a spreadsheet**: opens the import editor (:mod:`nvitk.gui.panels.import_editor`): edit
+  the sheet, map its columns to variables (and, for images, regions and a pipeline version), check
+  what would change, import, and keep the mapping as a recipe.
 * **Refresh from XNAT**: what ``nvitk-xnat-sync`` does, from here: the dataset's ``subjects``,
   ``sessions``, ``scans``, ``assets`` and ``subject_ids`` tables re-read from an XNAT project and
   classified under the scan mapping, optionally with the pipeline results (``nvitk-xnat-pipeline-sync``),
@@ -97,6 +98,10 @@ class DatasetSetupPanel(QWidget):
         root.setSpacing(design.SPACE_TIGHT)
 
         cfg = Section("Configuration", icon_name="sliders", hue="blue", pref_key="setup.config")
+        from nvitk.gui.core.dataset_root import DatasetRootButton, dataset_bus
+
+        cfg.add_header_widget(DatasetRootButton())
+        dataset_bus().changed.connect(lambda _r: self.refresh())
         self._config_text = hint_label("")
         cfg.add(self._config_text)
         row = QHBoxLayout()
@@ -129,29 +134,22 @@ class DatasetSetupPanel(QWidget):
         root.addWidget(new)
 
         imp = Section("Import a spreadsheet", icon_name="import", hue="orange", pref_key="setup.import", expanded=False)
-        form = QFormLayout()
-        self._file = QLineEdit()
-        pick = QPushButton("…")
-        pick.clicked.connect(self._pick_file)
-        frow = QHBoxLayout()
-        frow.addWidget(self._file, 1)
-        frow.addWidget(pick)
-        form.addRow("File", frow)
-        self._sheet = QComboBox()
-        form.addRow("Sheet", self._sheet)
-        self._kind = QComboBox()
-        self._kind.addItems(["clinical", "image"])
-        form.addRow("Kind", self._kind)
-        self._modality = QLineEdit()
-        self._modality.setPlaceholderText("image modality, e.g. asl, t1, 4dflow")
-        form.addRow("Modality", self._modality)
-        self._batch = QLineEdit()
-        self._batch.setPlaceholderText("source batch id (version tag), e.g. clinical_2026-11")
-        form.addRow("Batch id", self._batch)
-        imp.add_layout(form)
-        go = QPushButton("Import into the dataset")
-        go.clicked.connect(self._import)
-        imp.add(go)
+        imp.add(hint_label(
+            "Open a CSV / Excel sheet in the import editor: edit the table (rename, drop, filter rows, "
+            "convert units…), say what each column is (subject id, visit, a variable, for images its "
+            "region and pipeline version), check what would change, then import. The edits and mapping "
+            "can be saved as a recipe for the next file of the same layout."))
+        row = QHBoxLayout()
+        open_editor = QPushButton("Open a spreadsheet…")
+        open_editor.setToolTip("Open a file in the import editor")
+        open_editor.clicked.connect(self._open_import_editor)
+        empty_editor = QPushButton("Import editor")
+        empty_editor.setToolTip("Open the import editor (drop a file on it, or apply a recipe)")
+        empty_editor.clicked.connect(lambda: self._open_import_editor(ask=False))
+        row.addWidget(open_editor)
+        row.addWidget(empty_editor)
+        row.addStretch(1)
+        imp.add_layout(row)
         self._import_text = hint_label("")
         imp.add(self._import_text)
         root.addWidget(imp)
@@ -270,6 +268,12 @@ class DatasetSetupPanel(QWidget):
         for name, module in (("dataset.json", dataset_config), ("xnat_rules.json", xnat_rules)):
             path = module.config_path()
             lines.append(f"{name}: {path if path is not None else 'not found — the packaged PESA default is used'}")
+        try:
+            from nvitk.gui.core.dataset_root import current_root
+
+            lines.insert(0, f"Working dataset: {current_root() or 'none'}")
+        except Exception:  # noqa: BLE001
+            pass
         self._config_text.setText("\n".join(lines))
         editor = getattr(self, "_rules_editor", None)
         if editor is not None and not editor._dirty:
@@ -353,36 +357,16 @@ class DatasetSetupPanel(QWidget):
         except Exception as exc:  # noqa: BLE001
             self._new_root.setText(f"Could not create: {exc}")
 
-    def _pick_file(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Spreadsheet", "", "Tables (*.xlsx *.xls *.csv *.tsv *.parquet)")
-        if not path:
-            return
-        self._file.setText(path)
-        from nvitk.db.importers import tabular_sheet_names
+    def _open_import_editor(self, ask: bool = True) -> None:
+        from nvitk.gui.panels.import_editor import open_import_editor
 
-        self._sheet.clear()
-        try:
-            self._sheet.addItems([str(s) for s in tabular_sheet_names(path)] or ["0"])
-        except Exception:  # noqa: BLE001
-            self._sheet.addItem("0")
-
-    def _import(self) -> None:
-        from nvitk.db.importers import import_measurements_from_source
-        from nvitk.db.repo import get_repo
-
-        path = self._file.text().strip()
-        batch = self._batch.text().strip()
-        if not path or not batch:
-            self._import_text.setText("Choose a file and give the import a batch id.")
-            return
-        sheet: Any = self._sheet.currentText() or 0
-        try:
-            result = import_measurements_from_source(
-                get_repo(), path, kind=self._kind.currentText(), source_batch_id=batch,
-                modality=self._modality.text().strip() or None, sheet_name=sheet,
-            )
-            self._import_text.setText(f"Imported {len(result)} measurement rows from {Path(path).name} ({batch}).")
-        except Exception as exc:  # noqa: BLE001
-            self._import_text.setText(f"Import failed: {exc}")
+        path = ""
+        if ask:
+            path, _ = QFileDialog.getOpenFileName(self, "Spreadsheet", "", "Tables (*.xlsx *.xls *.csv *.tsv *.parquet)")
+            if not path:
+                return
+        editor = open_import_editor(self.window(), path=path or None)
+        editor.imported.connect(lambda result: self._import_text.setText(
+            f"Imported {result.get('written', result.get('rows'))} row(s) into {result.get('table')}."))
 
 __all__ = ["DatasetSetupPanel"]

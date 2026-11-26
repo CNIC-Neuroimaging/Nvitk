@@ -142,6 +142,17 @@ class Controls3D(QWidget):
         panel._cross3d_box.toggled.connect(panel._on_cross3d_toggled)
         card.add(panel._cross3d_box)
 
+        panel._cross3d_click = QCheckBox("Click in 3D moves the crosshair")
+        panel._cross3d_click.setToolTip(
+            "On: a click on the 3D canvas moves the crosshair (and the slice views) to the point "
+            "clicked: on a shown slice, else what the rendering shows there; drag the crosshair's "
+            "centre to slide it. A drag anywhere else still turns the view.\n"
+            "Off: the 3D crosshair only follows the slice views (Ctrl+click still picks)."
+        )
+        panel._cross3d_click.setChecked(bool(_ortho_prefs().get("crosshair_3d_click", False)))
+        panel._cross3d_click.toggled.connect(panel._on_cross3d_click_toggled)
+        card.add(panel._cross3d_click)
+
         panel._show_slice_image = QCheckBox("…and the slice image, not just its outline")
         panel._show_slice_image.setToolTip(
             "The coloured outline — red, green and blue for the three axes — is "

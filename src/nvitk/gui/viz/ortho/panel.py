@@ -364,6 +364,7 @@ class OrthoViewerPanel(QWidget):
         self._label_editor = OrthoLabelEditor(self)
         for cell, view in enumerate(self._slice_views):
             view.edit_handler = functools.partial(self._label_editor.handle, cell)
+            view.box_handler = functools.partial(self._label_editor.box_edge, cell)
         # Painted-label refreshes during a stroke, folded to one per event-loop turn.
         self._painted: list[Any] = []
         if not self._embedded:
@@ -661,6 +662,10 @@ class OrthoViewerPanel(QWidget):
             and self._data is not None
             and _grid_key(layer) == _grid_key(self._layer)
         )
+        # On another grid the crosshair keeps its place in the world: the new layer's voxel
+        # there (clipped to its volume), not the middle of the new volume, so clicking
+        # between layers does not move the slices the views show.
+        carried = None if (same_layer or same_grid) else self._crosshair_world()
         self._layer = layer
         self._data = _layer_volume(layer, self._time)
         if self._data is None:
@@ -697,7 +702,15 @@ class OrthoViewerPanel(QWidget):
         self._spacing = tuple(float(s) for s in (spacing or (1.0, 1.0, 1.0)))[:3]
         if len(self._spacing) < 3:
             self._spacing = (1.0, 1.0, 1.0)
-        if not (same_layer or same_grid) or len(self._position) != self._data.ndim:
+        moved_to = self._voxel_at_world(layer, carried) if carried is not None else None
+        if moved_to is not None and len(moved_to) == self._data.ndim:
+            self._position = moved_to
+            # The exact point, while the crosshair stays on the voxel it landed on: hopping
+            # through a coarser grid and back would otherwise round it a voxel away.
+            import weakref
+
+            self._world_anchor = (np.asarray(carried, dtype=float), tuple(moved_to), weakref.ref(layer))
+        elif not (same_layer or same_grid) or len(self._position) != self._data.ndim:
             self._position = [int(s) // 2 for s in self._data.shape]
         else:
             self._position = [
@@ -722,6 +735,58 @@ class OrthoViewerPanel(QWidget):
             return
         self._rebuild_sources()
         self._redraw(force=True)
+
+    def _crosshair_world(self) -> np.ndarray | None:
+        """The crosshair centre in world coordinates (the bound layer's real placement:
+        resampling off on the canvas does not change it), ``None`` without a 3D volume."""
+        layer = self._layer
+        if layer is None or self._data is None or self._flat_axis is not None:
+            return None
+        anchor = getattr(self, "_world_anchor", None)
+        if anchor is not None and anchor[2]() is layer and anchor[1] == tuple(self._position):
+            return np.array(anchor[0], dtype=float)
+        found = self._position_world_layer()
+        if found is None:
+            return None
+        try:
+            from nvitk.gui.viz.main_canvas import real_data_to_world
+
+            matrix = real_data_to_world(layer)
+            _layer, point = found
+            if matrix.shape != (len(point) + 1, len(point) + 1):
+                return None
+            world = matrix @ np.append(point, 1.0)
+        except Exception:  # noqa: BLE001 (a layer mid-change: start from the middle)
+            return None
+        t_ax = layer_time_axis(layer)
+        spatial = [d for d in range(int(layer.ndim)) if d != t_ax][-3:]
+        return np.asarray(world[spatial], dtype=float) if len(spatial) == 3 else None
+
+    def _voxel_at_world(self, layer: Any, world: np.ndarray) -> list[int] | None:
+        """*layer*'s voxel (spatial axes, clipped to the volume) at the world point *world*."""
+        if flat_axis(layer) is not None or self._data is None or self._data.ndim != 3:
+            return None
+        try:
+            from nvitk.gui.viz.main_canvas import real_data_to_world
+
+            matrix = real_data_to_world(layer)
+            nd = int(layer.ndim)
+            if matrix.shape != (nd + 1, nd + 1):
+                return None
+            t_ax = layer_time_axis(layer)
+            spatial = [d for d in range(nd) if d != t_ax][-3:]
+            full = np.zeros(nd + 1)
+            full[spatial] = world
+            full[-1] = 1.0
+            if t_ax is not None:
+                # The time row of the matrix: whatever frame, it does not move the space axes.
+                full[t_ax] = (matrix @ np.append(np.eye(nd)[t_ax] * float(self._time), 1.0))[t_ax]
+            data = np.linalg.solve(matrix, full)
+        except Exception:  # noqa: BLE001
+            return None
+        if not np.all(np.isfinite(data)):
+            return None
+        return [int(np.clip(int(round(float(data[d]))), 0, int(n) - 1)) for d, n in zip(spatial, self._data.shape)]
 
     # render sources
 
@@ -1792,6 +1857,92 @@ class OrthoViewerPanel(QWidget):
     def _on_cross3d_toggled(self, enabled: bool) -> None:
         _save_ortho_pref("crosshair_3d", bool(enabled))
         self._sync_cross3d()
+        click = getattr(self, "_cross3d_click", None)
+        if not enabled and click is not None and click.isChecked():
+            click.setChecked(False)  # nothing to grab without the lines
+
+    def _on_cross3d_click_toggled(self, enabled: bool) -> None:
+        _save_ortho_pref("crosshair_3d_click", bool(enabled))
+        box = getattr(self, "_cross3d_box", None)
+        if enabled and box is not None and not box.isChecked():
+            box.setChecked(True)  # the crosshair has to show to be clicked about
+
+    def cross3d_interactive(self) -> bool:
+        """True while a plain click on the 3D canvas moves the crosshair."""
+        click = getattr(self, "_cross3d_click", None)
+        return click is not None and click.isChecked()
+
+    def _position_world_layer(self) -> tuple[Any, np.ndarray] | None:
+        """``(bound layer, crosshair point as a full data vector)`` (time axis at the shown frame)."""
+        layer = self._layer
+        if layer is None or self._data is None or self._flat_axis is not None:
+            return None
+        nd = int(layer.ndim)
+        t_ax = layer_time_axis(layer)
+        spatial = [d for d in range(nd) if d != t_ax][-3:]
+        point = np.zeros(nd, dtype=float)
+        for k, d in enumerate(spatial):
+            point[d] = float(self._position[k])
+        if t_ax is not None:
+            point[t_ax] = float(self._time)
+        return layer, point
+
+    def cross3d_grab(self, position: Sequence[float], view_direction: Sequence[float]) -> np.ndarray | None:
+        """The crosshair point (data vector) when the cursor is over it on the 3D canvas."""
+        from nvitk.gui.viz.ray3d import closest_on_ray, ray_in_data, screen_px
+
+        found = self._position_world_layer()
+        if found is None or view_direction is None:
+            return None
+        layer, point = found
+        P, D = ray_in_data(layer, position, view_direction)
+        on_ray, _t = closest_on_ray(P, D, point)
+        return point if screen_px(self._viewer, layer, on_ray, point) <= 10.0 else None
+
+    def cross3d_drag_to(self, position: Sequence[float], view_direction: Sequence[float], anchor: np.ndarray) -> None:
+        """Slide the crosshair, grabbed at *anchor*, to the cursor (in the plane facing the camera)."""
+        from nvitk.gui.viz.ray3d import drag_point
+
+        found = self._position_world_layer()
+        if found is None:
+            return
+        layer, _point = found
+        hit = drag_point(layer, position, view_direction, anchor)
+        if hit is None:
+            return
+        t_ax = layer_time_axis(layer)
+        spatial = [d for d in range(int(layer.ndim)) if d != t_ax][-3:]
+        voxel = [int(round(float(hit[d]))) for d in spatial]
+        if voxel != [int(v) for v in self._position[:3]]:
+            self.set_position(voxel)
+
+    def pick_3d_click(self, position: Sequence[float], view_direction: Sequence[float],
+                      dims_displayed: Sequence[int]) -> tuple[int, int, int] | None:
+        """Where a click on the 3D canvas puts the crosshair: on the nearest shown slice the ray
+        meets, else what the rendering shows there (:meth:`pick_3d`)."""
+        from nvitk.gui.viz.ray3d import ray_in_data
+
+        found = self._position_world_layer()
+        planes = getattr(self, "_show_planes", None)
+        if found is not None and planes is not None and planes.isChecked():
+            layer, _point = found
+            t_ax = layer_time_axis(layer)
+            spatial = [d for d in range(int(layer.ndim)) if d != t_ax][-3:]
+            P, D = ray_in_data(layer, position, view_direction)
+            shape = [int(n) for n in self._data.shape[:3]]
+            best = None
+            for k, d in enumerate(spatial):
+                if abs(float(D[d])) < 1e-9:
+                    continue
+                t = (float(self._position[k]) - float(P[d])) / float(D[d])
+                hit = P + t * D
+                voxel = [int(round(float(hit[e]))) for e in spatial]
+                voxel[k] = int(self._position[k])
+                if all(-0.5 <= float(hit[e]) <= n - 0.5 for e, n in zip(spatial, shape)) and (best is None or t < best[0]):
+                    best = (t, voxel)
+            if best is not None:
+                return tuple(int(min(max(v, 0), n - 1)) for v, n in zip(best[1], shape))
+        return self.pick_3d(position, view_direction, dims_displayed)
 
     def _sync_planes(self) -> None:
         """Move the 3D cuts to the crosshair, if they are showing."""
@@ -2129,21 +2280,51 @@ def connect_ortho_panel(viewer: Any, panel: OrthoViewerPanel) -> None:
         panel.refresh_overlay_choices()
 
     def _pick_in_3d(viewer_: Any, event: Any) -> Any:
-        """Ctrl+click (no drag) on the 3D canvas: move the crosshair to the voxel clicked."""
-        if viewer_.dims.ndisplay != 3 or "Control" not in set(getattr(event, "modifiers", ()) or ()):
+        """A click (no drag) on the 3D canvas moves the crosshair to the point clicked: with
+        Ctrl always, without it while "Click in 3D moves the crosshair" is on, when a drag on
+        the crosshair's centre slides it too."""
+        if viewer_.dims.ndisplay != 3 or int(getattr(event, "button", 1) or 1) != 1:
             return
         if _qt_deleted(panel) or panel.bound_layer() is None:
             return
+        mods = set(getattr(event, "modifiers", ()) or ())
+        interactive = panel.cross3d_interactive() and not mods
+        if "Control" not in mods and not interactive:
+            return
+        if getattr(viewer_, "_nvitk_drag_owner", None):
+            return  # the press grabbed something else (an edge of the ROI box)
+        active = viewer_.layers.selection.active
+        mode = str(getattr(getattr(active, "mode", "pan_zoom"), "value", getattr(active, "mode", "pan_zoom")))
+        if interactive and mode not in ("pan_zoom", "transform", "select"):
+            return  # a layer tool (painting in 3D...) has the click
         start = np.asarray(event.position, dtype=float)
         direction, displayed = event.view_direction, list(event.dims_displayed)
-        yield
-        moved = False
-        while event.type == "mouse_move":
-            moved = moved or float(np.abs(np.asarray(event.position, dtype=float) - start).max()) > 1e-6
+        grabbed = None
+        if interactive:
+            try:
+                grabbed = panel.cross3d_grab(start, direction)
+            except Exception:  # noqa: BLE001
+                grabbed = None
+        held = None
+        if grabbed is not None:
+            held = bool(viewer_.camera.mouse_pan)
+            viewer_.camera.mouse_pan = False
+            viewer_._nvitk_drag_owner = "crosshair"
+        try:
             yield
+            moved = False
+            while event.type == "mouse_move":
+                moved = moved or float(np.abs(np.asarray(event.position, dtype=float) - start).max()) > 1e-6
+                if grabbed is not None and moved:
+                    panel.cross3d_drag_to(event.position, event.view_direction, grabbed)
+                yield
+        finally:
+            if held is not None:
+                viewer_.camera.mouse_pan = held
+                viewer_._nvitk_drag_owner = None
         if moved or direction is None:
-            return  # a Ctrl+drag rotates the camera, as without Ctrl
-        voxel = panel.pick_3d(start, direction, displayed)
+            return  # a drag turned the camera (or slid the crosshair)
+        voxel = panel.pick_3d_click(start, direction, displayed) if interactive else panel.pick_3d(start, direction, displayed)
         if voxel is not None:
             panel.set_position(voxel)
 

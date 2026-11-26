@@ -6,6 +6,11 @@ volumes on different grids) the box has to live in the space they share: :class:
 axis-aligned box in world (scanner) millimetres, and each layer is cropped to the voxels it
 covers through that layer's own transform. It converts to and from the Labeling box, fits a
 label map's extent, and saves to / loads from JSON.
+
+There is one box per viewer. A world box set here is put on a volume's grid as the Labeling box
+(the views' volume, else the active image or label layer), which draws the only outline and is
+edited by dragging its edges; :func:`current_box` reads it back in world space. Only a box that
+overlaps no loaded volume is kept apart, drawn as its own outline (:data:`OUTLINE_NAME`).
 """
 
 from __future__ import annotations
@@ -20,8 +25,9 @@ import numpy as np
 
 from nvitk.core.array import to_numpy
 
-#: Name of the outline layer drawn for the box.
-OUTLINE_NAME = "▭ ROI box"
+#: Name of the outline drawn for a box that is on no volume's grid (the usual box is the Labeling
+#: box, :data:`nvitk.gui.labels.roi_box.BOX_LAYER_NAME`).
+OUTLINE_NAME = "▭ ROI box (world)"
 
 
 def _spatial_dims(layer: Any) -> list[int]:
@@ -149,21 +155,102 @@ class WorldBox:
 
 
 # viewer-level state and operations
+def _grid_layers(viewer: Any) -> list[Any]:
+    """The volumes a box may go on, best first: the views' (so they draw it), the Labeling box's
+    own, the active layer, then every other image or label volume."""
+    from nvitk.gui.labels.roi_box import roi_box
+
+    def volume(layer: Any) -> bool:
+        try:
+            return type(layer).__name__ in ("Image", "Labels") and not getattr(layer, "rgb", False) \
+                and len(_spatial_dims(layer)) == 3
+        except Exception:  # noqa: BLE001
+            return False
+
+    candidates = []
+    panel = getattr(viewer, "_nvitk_ortho_panel", None)
+    try:
+        candidates.append(panel.bound_layer() if panel is not None else None)
+    except Exception:  # noqa: BLE001
+        pass
+    candidates.append(roi_box(viewer).layer)
+    candidates.append(viewer.layers.selection.active)
+    candidates.extend(viewer.layers)
+    out: list[Any] = []
+    for layer in candidates:
+        if layer is not None and layer in viewer.layers and volume(layer) and not any(layer is o for o in out):
+            out.append(layer)
+    return out
+
+
 def current_box(viewer: Any) -> WorldBox | None:
     """The ROI box set on *viewer* (``None`` when there is none)."""
-    return getattr(viewer, "_nvitk_world_box", None)
+    if getattr(viewer, "_nvitk_world_box_apart", False):
+        return getattr(viewer, "_nvitk_world_box", None)
+    try:
+        return WorldBox.from_roi_box(viewer)
+    except Exception:  # noqa: BLE001 (a layer mid-change)
+        return None
+
+
+def _on_roi_changed(viewer: Any) -> None:
+    """The Labeling box changed (drawn, dragged, cleared): it is the box again."""
+    from nvitk.gui.labels.roi_box import roi_box
+
+    if getattr(viewer, "_nvitk_world_box_apart", False) and roi_box(viewer).active:
+        viewer._nvitk_world_box_apart = False
+        viewer._nvitk_world_box = None
+        hide_outline(viewer)
+
+
+def _link(viewer: Any) -> None:
+    from nvitk.gui.labels.roi_box import roi_box
+
+    if getattr(viewer, "_nvitk_world_box_linked", False):
+        return
+    box = roi_box(viewer)
+    box.changed.connect(lambda: _on_roi_changed(viewer))
+    viewer._nvitk_world_box_linked = True
+    try:
+        viewer.layers.events.removed.connect(lambda event: _on_layer_removed(viewer, event))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _on_layer_removed(viewer: Any, event: Any) -> None:
+    """The user deleted the outline of a box kept apart: that deletes the box."""
+    layer = getattr(event, "value", None)
+    if layer is not None and str(getattr(layer, "name", "")) == OUTLINE_NAME \
+            and not getattr(viewer, "_nvitk_hiding_world_outline", False):
+        viewer._nvitk_world_box = None
+        viewer._nvitk_world_box_apart = False
 
 
 def set_box(viewer: Any, box: WorldBox | None, *, outline: bool = True) -> None:
-    """Make *box* the viewer's ROI box (and draw / remove its outline)."""
-    try:
-        viewer._nvitk_world_box = box
-    except Exception:  # noqa: BLE001
-        pass
-    if outline and box is not None:
-        show_outline(viewer, box)
-    elif box is None:
+    """Make *box* the viewer's ROI box (``None``: no box).
+
+    It goes on a volume's grid as the Labeling box (one outline, edges draggable in every view);
+    a box that overlaps no volume is kept in world space with an outline of its own.
+    """
+    from nvitk.gui.labels.roi_box import roi_box
+
+    _link(viewer)
+    roi = roi_box(viewer)
+    if box is None:
+        viewer._nvitk_world_box, viewer._nvitk_world_box_apart = None, False
         hide_outline(viewer)
+        if roi.active:
+            roi.clear()
+        return
+    for layer in _grid_layers(viewer):
+        if box.to_roi_box(viewer, layer):
+            return  # the first volume it overlaps; _on_roi_changed hides any world outline
+    viewer._nvitk_world_box, viewer._nvitk_world_box_apart = box, True
+    if roi.active:
+        roi.clear()
+        viewer._nvitk_world_box, viewer._nvitk_world_box_apart = box, True
+    if outline:
+        show_outline(viewer, box)
 
 
 def show_outline(viewer: Any, box: WorldBox) -> Any:
@@ -188,9 +275,13 @@ def show_outline(viewer: Any, box: WorldBox) -> Any:
 
 
 def hide_outline(viewer: Any) -> None:
-    for layer in list(viewer.layers):
-        if layer.name == OUTLINE_NAME:
-            viewer.layers.remove(layer)
+    viewer._nvitk_hiding_world_outline = True
+    try:
+        for layer in list(viewer.layers):
+            if layer.name == OUTLINE_NAME:
+                viewer.layers.remove(layer)
+    finally:
+        viewer._nvitk_hiding_world_outline = False
 
 
 def _add_like(viewer: Any, layer: Any, data: Any, lo: Sequence[int], suffix: str) -> Any:

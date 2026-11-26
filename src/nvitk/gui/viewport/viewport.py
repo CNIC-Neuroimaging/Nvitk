@@ -148,6 +148,20 @@ class Viewport(QWidget):
         else:
             self._cross3d_btn.setEnabled(False)
         row.addWidget(self._cross3d_btn)
+        # And whether the 3D crosshair is live: a click on the 3D canvas moves the crosshair (and
+        # the slice views), a drag on its centre slides it. Off, it only follows the slice views.
+        self._cross3d_click_btn = IconButton(
+            "crosshair_click", "Click in the 3D view to move the crosshair (and the slice views); "
+            "drag its centre to slide it. Off: the 3D crosshair only follows the slice views "
+            "(Ctrl+click still picks)", checkable=True, icon_size=15)
+        click = getattr(self._panel, "_cross3d_click", None)
+        if click is not None:
+            self._cross3d_click_btn.setChecked(click.isChecked())
+            self._cross3d_click_btn.toggled.connect(self._panel_click_toggled)
+            click.toggled.connect(self._cross3d_click_btn_follow)
+        else:
+            self._cross3d_click_btn.setEnabled(False)
+        row.addWidget(self._cross3d_click_btn)
         from nvitk.gui.viz.roi_box_tool import roi_box_button
 
         row.addWidget(roi_box_button(self._viewer))
@@ -167,6 +181,15 @@ class Viewport(QWidget):
         readout.setTextInteractionFlags(Qt.TextSelectableByMouse)
         row.addWidget(readout)
         return bar
+
+    def _panel_click_toggled(self, on: bool) -> None:
+        click = getattr(self._panel, "_cross3d_click", None)
+        if click is not None and click.isChecked() != on:
+            click.setChecked(on)
+
+    def _cross3d_click_btn_follow(self, on: bool) -> None:
+        if self._cross3d_click_btn.isChecked() != on:
+            self._cross3d_click_btn.setChecked(on)
 
     def _fill_layout_menu(self) -> None:
         menu = self._layout_menu

@@ -14,7 +14,6 @@ from qtpy.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QGridLayout,
-    QGroupBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -29,7 +28,6 @@ from qtpy.QtWidgets import (
 )
 
 from nvitk.core.logger import Logger
-from nvitk.core import config_paths
 from nvitk.db.repo import DataRepo, _default_dataset_root, get_repo_from_settings
 from nvitk.db.pipeline_assets import PIPELINE_FILTER_SLOTS
 from nvitk.db.xnat import (
@@ -339,12 +337,25 @@ class DataBrowserPanel(QWidget):
         self._worker: _XnatDownloadWorker | None = None
         self._temp_session_root: Path | None = None
 
+        # The source: the combo carries the state (scripts set it), the segmented switch shows it.
+        from nvitk.gui.core import design
+        from nvitk.gui.core.widgets import SegmentedButtons, hint_label
+
         self._source_combo = QComboBox()
         self._source_combo.addItem("XNAT (catalog)", SOURCE_XNAT)
         self._source_combo.addItem("Local pipeline", SOURCE_LOCAL)
+        self._source_combo.setVisible(False)
+        self._source_switch = SegmentedButtons(
+            [(SOURCE_XNAT, "XNAT", "server", "Subjects and scans indexed in the dataset catalog, downloaded from XNAT"),
+             (SOURCE_LOCAL, "Local pipeline", "folder", "Pipeline folders on disk (DICOM, NIfTI, results)")],
+            current=SOURCE_XNAT,
+        )
+        self._source_switch.changed.connect(
+            lambda key: self._source_combo.setCurrentIndex(self._source_combo.findData(key)))
+        self._source_combo.currentIndexChanged.connect(
+            lambda _i: self._source_switch.set_current(self._source_combo.currentData()))
 
-        self._header_label = QLabel()
-        self._header_label.setWordWrap(True)
+        self._header_label = hint_label("")
 
         self._stack = QStackedWidget()
         self._stack.addWidget(self._build_xnat_page())
@@ -354,40 +365,73 @@ class DataBrowserPanel(QWidget):
 
         self._subject_search = QLineEdit()
         self._subject_search.setPlaceholderText("Search subjects…")
+        self._subject_search.setClearButtonEnabled(True)
         self._subject_list = QListWidget()
         self._subject_list.setMinimumHeight(100)
+        self._subject_list.setAlternatingRowColors(True)
 
-        self._resource_label = QLabel("Scans (check to download)")
+        self._resource_label = QLabel("Scans")
         self._resource_list = QListWidget()
         self._resource_list.setMinimumHeight(140)
+        self._resource_list.setAlternatingRowColors(True)
+        self._subject_count = hint_label("")
+        self._resource_count = hint_label("")
+        for heading in (self._resource_label,):
+            heading.setStyleSheet("font-weight: bold;")
 
         self._action_btn = QPushButton("Download selected scans")
+        self._action_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {design.COLOR_ACCENT_DEEP}; color: {design.COLOR_ON_ACCENT};"
+            " border-radius: 4px; padding: 6px; font-weight: bold; }"
+            f"QPushButton:disabled {{ background-color: {design.COLOR_BUTTON_OFF}; color: {design.COLOR_DISABLED}; }}")
         self._action_btn.clicked.connect(self._on_action)
 
-
-        self._status = QLabel("Select a data source.")
-        self._status.setWordWrap(True)
+        self._status = hint_label("Select a data source.")
 
         layout = QVBoxLayout()
-        layout.addWidget(QLabel("Data source"))
+        layout.setContentsMargins(design.SPACE_TIGHT, design.SPACE_TIGHT, design.SPACE_TIGHT, design.SPACE_TIGHT)
+        layout.setSpacing(design.SPACE_TIGHT)
+        # Top bar: where the data comes from, and the dataset it is indexed in (switchable for
+        # the whole GUI: Analysis, Statmodels and QC follow).
+        from nvitk.gui.core.dataset_root import DatasetRootButton, dataset_bus
+
+        source_head = QHBoxLayout()
+        source_head.setSpacing(design.SPACE_TIGHT)
+        source_head.addWidget(self._source_switch)
+        source_head.addStretch(1)
+        self._dataset_button = DatasetRootButton()
+        source_head.addWidget(self._dataset_button)
+        layout.addLayout(source_head)
         layout.addWidget(self._source_combo)
-        layout.addWidget(self._header_label)
+        dataset_bus().changed.connect(self._on_dataset_changed)
         layout.addWidget(self._stack)
         layout.addWidget(self._xnat_scan_filter_group)
         # Subjects above their scans, on a splitter: both lists get the panel's height and the
-        # handle between them shares it (they were two fixed strips before).
+        # handle between them shares it.
         from qtpy.QtWidgets import QSplitter
 
         subjects_pane = QWidget()
         sp = QVBoxLayout(subjects_pane)
-        sp.setContentsMargins(0, 0, 0, 0)
-        sp.addWidget(QLabel("Subject"))
+        sp.setContentsMargins(0, design.SPACE_TIGHT, 0, 0)
+        sp.setSpacing(2)
+        subjects_head = QHBoxLayout()
+        subjects_title = QLabel("Subjects")
+        subjects_title.setStyleSheet("font-weight: bold;")
+        subjects_head.addWidget(subjects_title)
+        subjects_head.addStretch(1)
+        subjects_head.addWidget(self._subject_count)
+        sp.addLayout(subjects_head)
         sp.addWidget(self._subject_search)
         sp.addWidget(self._subject_list, 1)
         scans_pane = QWidget()
         rp = QVBoxLayout(scans_pane)
-        rp.setContentsMargins(0, 0, 0, 0)
-        rp.addWidget(self._resource_label)
+        rp.setContentsMargins(0, design.SPACE_TIGHT, 0, 0)
+        rp.setSpacing(2)
+        scans_head = QHBoxLayout()
+        scans_head.addWidget(self._resource_label)
+        scans_head.addStretch(1)
+        scans_head.addWidget(self._resource_count)
+        rp.addLayout(scans_head)
         rp.addWidget(self._resource_list, 1)
         self._lists_split = QSplitter(Qt.Vertical)
         self._lists_split.setChildrenCollapsible(False)
@@ -400,6 +444,13 @@ class DataBrowserPanel(QWidget):
         layout.addWidget(self._status)
         self.setLayout(layout)
 
+        self._resource_list.itemChanged.connect(self._on_resources_edited)
+        model = self._resource_list.model()
+        for signal in (model.rowsInserted, model.rowsRemoved, model.modelReset):
+            signal.connect(self._on_resources_edited)
+        from nvitk.gui.core.xnat_profile import profile_bus
+
+        profile_bus().changed.connect(self._on_profile_changed)
         self._source_combo.currentIndexChanged.connect(self._on_source_changed)
         self._source_combo.currentIndexChanged.connect(lambda _i: self._sync_dicom_to_browser())
         self._scan_format.currentIndexChanged.connect(lambda _i: self._sync_dicom_to_browser())
@@ -452,27 +503,29 @@ class DataBrowserPanel(QWidget):
         return len(paths)
 
     def _build_xnat_page(self) -> QWidget:
-        """Build the XNAT-source page: project picker, config path, download folder/temp-cache
-        toggle, and raw-scan reader format selector."""
+        """Build the XNAT-source page: the project and the connection profile (found from the
+        configuration, switchable), then the download options, folded away."""
+        from nvitk.gui.core import design
+        from nvitk.gui.core.widgets import Section, hint_label
+        from nvitk.gui.core.xnat_profile import XnatProfileButton
+
         page = QWidget()
         self._project_combo = QComboBox()
         for pid in list_xnat_project_ids():
             self._project_combo.addItem(get_xnat_project(pid).display_name, pid)
 
-        self._config_path = QLineEdit()
-        self._config_path.setPlaceholderText("XNAT YAML/JSON config path")
-        default_cfg = config_paths.config_file("xnat.json")
-        if default_cfg is not None:
-            self._config_path.setText(str(default_cfg))
-        browse_config = QPushButton("Browse…")
-        browse_config.clicked.connect(self._browse_config)
+        # The profile (server, user, project defaults) comes from the configuration; the button
+        # names its server and switches to another profile file when there is one.
+        self._profile_button = XnatProfileButton()
+        self._profile_button.setSizePolicy(self._profile_button.sizePolicy().horizontalPolicy(),
+                                           self._profile_button.sizePolicy().verticalPolicy())
 
         self._download_path = QLineEdit()
-        self._download_path.setPlaceholderText("Optional save folder (empty = temp, removed on exit)")
+        self._download_path.setPlaceholderText("Save folder (empty = temporary, removed on exit)")
         browse_download = QPushButton("Folder…")
         browse_download.clicked.connect(self._browse_download_folder)
 
-        self._temp_only = QCheckBox("Use temporary cache only (default)")
+        self._temp_only = QCheckBox("Temporary cache only (removed on exit)")
         self._temp_only.setChecked(True)
         self._temp_only.toggled.connect(self._on_temp_only_toggled)
 
@@ -486,52 +539,90 @@ class DataBrowserPanel(QWidget):
             "Format used to download and open raw scan series. "
             "Pipeline result resources are always opened as NIfTI."
         )
-        scan_format_hint = QLabel(
-            "Raw scans: choose DICOM or NIfTI reader. "
-            "Pipeline resources always use NIfTI."
-        )
-        scan_format_hint.setWordWrap(True)
-        scan_format_hint.setStyleSheet("color: #888;")
 
-        config_row = QHBoxLayout()
-        config_row.addWidget(self._config_path, stretch=1)
-        config_row.addWidget(browse_config)
+        source = Section("XNAT", icon_name="server", hue="purple", pref_key="data.xnat")
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setVerticalSpacing(design.SPACE_TIGHT)
+        form.addRow("Project", self._project_combo)
+        profile_row = QHBoxLayout()
+        profile_row.setContentsMargins(0, 0, 0, 0)
+        profile_row.addWidget(self._profile_button)
+        profile_row.addStretch(1)
+        form.addRow("Profile", profile_row)
+        source.add_layout(form)
+        source.add(self._header_label)
 
+        download = Section("Download", icon_name="import", hue="blue", expanded=False, pref_key="data.download")
+        self._download_summary = hint_label("")
+        download.add_header_widget(self._download_summary)
+        dform = QFormLayout()
+        dform.setContentsMargins(0, 0, 0, 0)
+        dform.setVerticalSpacing(design.SPACE_TIGHT)
+        dform.addRow("Raw scans as", self._scan_format)
         download_row = QHBoxLayout()
+        download_row.setContentsMargins(0, 0, 0, 0)
         download_row.addWidget(self._download_path, stretch=1)
         download_row.addWidget(browse_download)
-
-        scan_format_row = QHBoxLayout()
-        scan_format_row.addWidget(QLabel("Raw scan reader"))
-        scan_format_row.addWidget(self._scan_format, stretch=1)
+        dform.addRow(self._temp_only)
+        dform.addRow("Save to", download_row)
+        download.add_layout(dform)
+        self._dicom_to_browser = self._make_dicom_to_browser_box()
+        download.add(self._dicom_to_browser)
+        download.add(hint_label("Pipeline results (eICAB, QVTPy, 4D flow) always open as NIfTI."))
 
         lay = QVBoxLayout()
-        lay.addWidget(QLabel("XNAT project"))
-        lay.addWidget(self._project_combo)
-        lay.addWidget(QLabel("XNAT config file"))
-        lay.addLayout(config_row)
-        lay.addWidget(self._temp_only)
-        lay.addLayout(download_row)
-        lay.addLayout(scan_format_row)
-        self._dicom_to_browser = self._make_dicom_to_browser_box()
-        lay.addWidget(self._dicom_to_browser)
-        lay.addWidget(scan_format_hint)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(design.SPACE_TIGHT)
+        lay.addWidget(source)
+        lay.addWidget(download)
         page.setLayout(lay)
 
+        # The profile's own project first, before the combo is wired: the rest of the panel is
+        # not built yet (the source switch loads the catalog once it is).
+        self._on_profile_changed()
         self._project_combo.currentIndexChanged.connect(self._reload_xnat_catalog)
+        self._scan_format.currentIndexChanged.connect(lambda _i: self._sync_download_summary())
+        self._temp_only.toggled.connect(lambda _c: self._sync_download_summary())
+        self._download_path.textChanged.connect(lambda _t: self._sync_download_summary())
+        self._sync_download_summary()
         return page
 
-    def _build_xnat_scan_filter_group(self) -> QGroupBox:
-        """Build the collapsible group of scan-type checkboxes used to filter the XNAT subject list."""
-        group = QGroupBox("Filter subjects by indexed assets")
-        self._xnat_filter_count_label = QLabel("Select scan types to filter the subject list.")
-        self._xnat_filter_count_label.setWordWrap(True)
+    def _sync_download_summary(self) -> None:
+        """The folded Download section's header says what a download will do."""
+        fmt = "DICOM" if self._scan_reader_is_dicom() else "NIfTI"
+        folder = self._download_path.text().strip()
+        where = "temporary" if self._temp_only.isChecked() or not folder else (Path(folder).name or folder)
+        self._download_summary.setText(f"{fmt} · {where}")
+
+    def _on_profile_changed(self, _path: str = "") -> None:
+        """A new XNAT profile: pick its default project when the catalog has it."""
+        from nvitk.gui.core.xnat_profile import current_profile, profile_summary
+
+        project = profile_summary(current_profile())["project"]
+        if project:
+            index = self._project_combo.findData(project)
+            if index < 0:
+                index = self._project_combo.findText(project)
+            if index >= 0 and index != self._project_combo.currentIndex():
+                self._project_combo.setCurrentIndex(index)
+
+    def _build_xnat_scan_filter_group(self) -> QWidget:
+        """Build the collapsible section of scan-type checkboxes that filter the XNAT subject list."""
+        from nvitk.gui.core.widgets import Section, hint_label
+
+        group = Section("Filter subjects by scans", icon_name="filter", hue="green", expanded=False,
+                        pref_key="data.filter")
+        self._xnat_filter_active = hint_label("")
+        group.add_header_widget(self._xnat_filter_active)
+        self._xnat_filter_count_label = hint_label("Select scan types to filter the subject list.")
 
         self._xnat_match_all = QCheckBox("Subject must have all selected scans")
         self._xnat_match_all.setChecked(True)
         self._xnat_match_all.toggled.connect(self._filter_subjects)
 
-        clear_btn = QPushButton("Clear scan filters")
+        clear_btn = QPushButton("Clear")
+        clear_btn.setToolTip("Uncheck every scan type")
         clear_btn.clicked.connect(self._clear_xnat_scan_filters)
 
         self._xnat_scan_filters_host = QWidget()
@@ -543,18 +634,23 @@ class DataBrowserPanel(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setWidget(self._xnat_scan_filters_host)
 
-        lay = QVBoxLayout()
-        lay.addWidget(self._xnat_filter_count_label)
         from nvitk.gui.core.widgets import resizable  # drag the handle under it to resize
-        lay.addWidget(resizable(scroll, height=120, pref_key="data_browser.scroll"))
-        lay.addWidget(self._xnat_match_all)
-        lay.addWidget(clear_btn)
-        group.setLayout(lay)
+
+        group.add(resizable(scroll, height=120, pref_key="data_browser.scroll"))
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(self._xnat_match_all, 1)
+        row.addWidget(clear_btn)
+        group.add_layout(row)
+        group.add(self._xnat_filter_count_label)
         return group
 
     def _build_local_page(self) -> QWidget:
-        """Build the local-source page: pipeline preset, cohort/batch, DICOM/NIfTI/results root
-        fields, and asset-type include checkboxes."""
+        """Build the local-source page: pipeline preset and cohort, then the DICOM / NIfTI /
+        results roots and which kinds of assets to list."""
+        from nvitk.gui.core import design
+        from nvitk.gui.core.widgets import Section
+
         page = QWidget()
         self._preset_combo = QComboBox()
         for pid in list_pipeline_preset_ids():
@@ -569,35 +665,49 @@ class DataBrowserPanel(QWidget):
         self._nifti_root = QLineEdit()
         self._results_root = QLineEdit()
 
-        form = QFormLayout()
-        form.addRow("DICOM root", self._path_row(self._dicom_root))
-        form.addRow("NIfTI root", self._path_row(self._nifti_root))
-        form.addRow("Results root", self._path_row(self._results_root))
-
-        self._include_dicom = QCheckBox("DICOM series")
+        self._include_dicom = QCheckBox("DICOM")
         self._include_dicom.setChecked(True)
-        self._include_nifti = QCheckBox("NIfTI volumes")
+        self._include_nifti = QCheckBox("NIfTI")
         self._include_nifti.setChecked(True)
-        self._include_results = QCheckBox("Results masks")
+        self._include_results = QCheckBox("Results")
         self._include_results.setChecked(True)
 
         refresh_btn = QPushButton("Apply roots / refresh subjects")
         refresh_btn.clicked.connect(self._apply_local_roots)
 
-        lay = QVBoxLayout()
-        lay.addWidget(QLabel("Pipeline preset"))
-        lay.addWidget(self._preset_combo)
-        lay.addWidget(QLabel("Cohort / batch folder"))
-        lay.addWidget(self._batch_combo)
-        lay.addLayout(form)
+        pipeline = Section("Pipeline", icon_name="pipeline", hue="orange", pref_key="data.local")
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setVerticalSpacing(design.SPACE_TIGHT)
+        form.addRow("Preset", self._preset_combo)
+        self._batch_label = QLabel("Cohort")
+        form.addRow(self._batch_label, self._batch_combo)
         types_row = QHBoxLayout()
+        types_row.setContentsMargins(0, 0, 0, 0)
         types_row.addWidget(self._include_dicom)
         types_row.addWidget(self._include_nifti)
         types_row.addWidget(self._include_results)
-        lay.addLayout(types_row)
+        types_row.addStretch(1)
+        form.addRow("List", types_row)
+        pipeline.add_layout(form)
         self._dicom_to_browser_local = self._make_dicom_to_browser_box()
-        lay.addWidget(self._dicom_to_browser_local)
-        lay.addWidget(refresh_btn)
+        pipeline.add(self._dicom_to_browser_local)
+
+        roots = Section("Folders", icon_name="folder", hue="olive", expanded=False, pref_key="data.local_roots")
+        rform = QFormLayout()
+        rform.setContentsMargins(0, 0, 0, 0)
+        rform.setVerticalSpacing(design.SPACE_TIGHT)
+        rform.addRow("DICOM", self._path_row(self._dicom_root))
+        rform.addRow("NIfTI", self._path_row(self._nifti_root))
+        rform.addRow("Results", self._path_row(self._results_root))
+        roots.add_layout(rform)
+        roots.add(refresh_btn)
+
+        lay = QVBoxLayout()
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(design.SPACE_TIGHT)
+        lay.addWidget(pipeline)
+        lay.addWidget(roots)
         page.setLayout(lay)
 
         self._preset_combo.currentIndexChanged.connect(self._on_preset_changed)
@@ -638,6 +748,15 @@ class DataBrowserPanel(QWidget):
         self._app_state["xnat_temp_dirs"] = []
         self._temp_session_root = None
 
+    def _on_dataset_changed(self, _root: str) -> None:
+        """The working dataset changed: re-open it and reload the subject list."""
+        try:
+            self._repo, self._repo_root = _resolve_repo()
+        except Exception as exc:  # noqa: BLE001
+            self._status.setText(f"Could not open the dataset: {exc}")
+            return
+        self._on_source_changed()
+
     def _is_xnat(self) -> bool:
         """True if the currently selected data source is XNAT (vs. a local pipeline preset)."""
         return int(self._source_combo.currentData() or SOURCE_XNAT) == SOURCE_XNAT
@@ -649,15 +768,16 @@ class DataBrowserPanel(QWidget):
         self._stack.setCurrentIndex(SOURCE_XNAT if is_xnat else SOURCE_LOCAL)
         self._xnat_scan_filter_group.setVisible(is_xnat)
         if is_xnat:
-            self._header_label.setText(f"Dataset catalog: {self._repo_root}")
-            self._resource_label.setText("Scans & pipeline results (check to download)")
-            self._action_btn.setText("Download selected resources")
+            self._header_label.setText(
+                f"Subjects and scans indexed in the dataset {Path(str(self._repo_root)).name}; "
+                "check the ones to download.")
+            self._header_label.setToolTip(f"Dataset catalog: {self._repo_root}")
+            self._resource_label.setText("Scans & pipeline results")
             self._reload_xnat_catalog()
         else:
-            self._header_label.setText("Browse pipeline directories on disk.")
-            self._resource_label.setText("Assets (check to load)")
-            self._action_btn.setText("Load selected in Napari")
+            self._resource_label.setText("Assets")
             self._on_preset_changed()
+        self._update_resource_count()
 
     def _on_preset_changed(self) -> None:
         """Load the newly selected pipeline preset's default roots into the local-page fields and
@@ -669,6 +789,7 @@ class DataBrowserPanel(QWidget):
             spec = get_pipeline_preset(preset_id)
             roots = load_preset_roots(preset_id)
             self._batch_combo.setVisible(spec.show_batch)
+            self._batch_label.setVisible(spec.show_batch)
             self._dicom_root.setText(str(roots.dicom_root))
             self._nifti_root.setText(str(roots.nifti_root))
             self._results_root.setText(str(roots.results_root))
@@ -786,17 +907,6 @@ class DataBrowserPanel(QWidget):
             self._refresh_resources_for_subject(item.text())
         else:
             self._resource_list.clear()
-
-    def _browse_config(self) -> None:
-        """Open a file picker for the XNAT config file and set the config-path field."""
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select XNAT config",
-            str(Path.home()),
-            "Config (*.yaml *.yml *.json);;All (*)",
-        )
-        if path:
-            self._config_path.setText(path)
 
     def _browse_download_folder(self) -> None:
         """Open a directory picker for the persistent download folder and disable temp-only mode."""
@@ -924,6 +1034,7 @@ class DataBrowserPanel(QWidget):
                 continue
             self._subject_list.addItem(subj)
         shown = self._subject_list.count()
+        self._subject_count.setText(f"{shown} of {total}" if shown != total else f"{total}")
 
         if self._is_xnat():
             required = self._selected_xnat_scan_slots()
@@ -933,17 +1044,40 @@ class DataBrowserPanel(QWidget):
                 self._xnat_filter_count_label.setText(
                     f"{shown} of {total} subject(s) have {mode} of: {labels}"
                 )
+                self._xnat_filter_active.setText(f"{len(required)} active")
                 self._status.setText(
                     f"{shown} / {total} subject(s) in {self._current_project_id()} "
                     f"(scan filter: {mode} of {len(required)} type(s))."
                 )
             else:
                 self._xnat_filter_count_label.setText(
-                    f"{total} subject(s) in catalog — check scan types above to filter."
+                    f"{total} subject(s) in the catalog: check scan types to keep only those having them."
                 )
+                self._xnat_filter_active.setText("")
                 self._status.setText(f"{shown} subject(s) in {self._current_project_id()}.")
         elif self._local_roots is not None:
             self._status.setText(f"{shown} local subject(s).")
+
+    def _checked_resource_count(self) -> int:
+        return sum(1 for i in range(self._resource_list.count())
+                   if self._resource_list.item(i).checkState() == Qt.Checked)
+
+    def _on_resources_edited(self, *_args: Any) -> None:
+        try:
+            self._update_resource_count()
+        except RuntimeError:  # the lists go before the panel while it is destroyed
+            pass
+
+    def _update_resource_count(self) -> None:
+        """The scans list's count, and the action button naming how many are checked."""
+        total = self._resource_list.count()
+        checked = self._checked_resource_count()
+        self._resource_count.setText(f"{checked} of {total} checked" if checked else (f"{total}" if total else ""))
+        verb = "Download" if self._is_xnat() else "Load"
+        if checked:
+            self._action_btn.setText(f"{verb} {checked} selected" + ("" if self._is_xnat() else " in Napari"))
+        else:
+            self._action_btn.setText("Download checked resources" if self._is_xnat() else "Load checked assets in Napari")
 
     def _on_subject_selected(
         self,
@@ -1141,14 +1275,14 @@ class DataBrowserPanel(QWidget):
             notify("Download already in progress.", error=True)
             return
 
-        config_text = self._config_path.text().strip()
+        from nvitk.gui.core.xnat_profile import current_profile
+
+        config_text = current_profile()
         if not config_text:
-            notify("Select an XNAT config file.", error=True)
+            notify("No XNAT profile found: add xnat.json to the nvitk config directory, or choose one "
+                   "with the Profile button.", error=True)
             return
-        config_path = Path(config_text).expanduser()
-        if not config_path.is_file():
-            notify(f"Config not found: {config_path}", error=True)
-            return
+        config_path = Path(config_text)
 
         items = self._selected_xnat_rows()
         if not items:

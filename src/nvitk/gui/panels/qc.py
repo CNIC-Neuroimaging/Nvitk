@@ -259,6 +259,9 @@ class QcPanel(QWidget):
 
             self._repo = _DR(_default_dataset_root(), auto_scaffold=True)
 
+        from nvitk.gui.core.dataset_root import dataset_bus
+
+        dataset_bus().changed.connect(self._on_dataset_changed)
         self._status = QLabel("Select a QC source, pipeline and subject, then Load.")
         self._status.setWordWrap(True)
 
@@ -489,6 +492,18 @@ class QcPanel(QWidget):
                 self._qc_statuses = subject_qc_status_summary(repo=self._repo)
         except Exception:
             self._qc_statuses = {}
+
+    def _on_dataset_changed(self, _root: str) -> None:
+        """The working dataset changed (Data / Analysis / Statmodels switch): reload from it."""
+        try:
+            repo = get_repo_from_settings()
+            self._repo = repo[0] if isinstance(repo, tuple) else repo
+        except Exception:  # noqa: BLE001
+            return
+        try:
+            self._reload_subjects()
+        except Exception:  # noqa: BLE001
+            pass
 
     def _reload_subjects(self) -> None:
         """Refresh QC statuses and reload the subject list from the currently selected source."""

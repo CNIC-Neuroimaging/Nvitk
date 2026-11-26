@@ -2,8 +2,13 @@
 
 * **Source**: a dataset table (``subjects``, ``clinical_measurements``, ``image_measurements``...,
   wide-pivoted on request), the table shown in Results, or a CSV / Excel / Parquet file.
-* **Table**: sortable, with a quick text filter and a pandas query; cells are editable, and an
-  edited dataset table can be written back (a confirmation shows how many rows change).
+* **Table**: sortable, with a quick text filter and a pandas query; right-click a column header
+  for its distinct values (tick the ones to keep), a numeric range, sorting and hiding, or a cell
+  for *Only / Exclude this value* (:mod:`.column_filters`); the active filters show as chips.
+  Cells are editable, and an edited dataset table can be written back (a confirmation shows how
+  many rows change).
+* **Dataset**: the database button switches the working dataset for the whole GUI
+  (:mod:`nvitk.gui.core.dataset_root`).
 * **Plot**: the :class:`~nvitk.gui.analysis.plot_builder.PlotBuilder` on the filtered rows.
 * **Statistical models**: the Statmodels launcher (mixed models, OLS, GLM, mediation...), as
   before; its standalone window is kept while its tools move here.
@@ -14,7 +19,7 @@ from __future__ import annotations
 from typing import Any
 
 import pandas as pd
-from qtpy.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt
+from qtpy.QtCore import QAbstractTableModel, QModelIndex, Qt
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -29,6 +34,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from nvitk.gui.analysis.column_filters import ColumnFilterProxy, FilterChips, install_header_filters
 from nvitk.gui.analysis.plot_builder import PlotBuilder
 from nvitk.gui.core import design
 from nvitk.gui.core.widgets import Section, hint_label
@@ -133,6 +139,11 @@ class AnalysisWorkbench(QWidget):
             root.addWidget(models)
 
         source = Section("Table", icon_name="table", hue="blue", pref_key="analysis.source")
+        from nvitk.gui.core.dataset_root import DatasetRootButton, dataset_bus
+
+        self._dataset_button = DatasetRootButton()
+        source.add_header_widget(self._dataset_button)
+        dataset_bus().changed.connect(self._dataset_changed)
         row = QHBoxLayout()
         self._db_tables = QComboBox()
         self._db_tables.setToolTip("Dataset tables (the configured nvitk dataset)")
@@ -154,6 +165,11 @@ class AnalysisWorkbench(QWidget):
             button = QPushButton(text)
             button.clicked.connect(slot)
             row.addWidget(button)
+        to_import = QPushButton("Import into the dataset…")
+        to_import.setToolTip("Open the rows shown (filters applied) in the import editor, to map them to variables "
+                             "and write them into the dataset as measurements")
+        to_import.clicked.connect(self._to_import_editor)
+        row.addWidget(to_import)
         self._write_back = QPushButton("Write edits to dataset")
         self._write_back.setEnabled(False)
         self._write_back.clicked.connect(self._write_db)
@@ -171,7 +187,7 @@ class AnalysisWorkbench(QWidget):
         root.addWidget(source)
 
         self._model = FrameModel(parent=self)
-        self._proxy = QSortFilterProxyModel(self)
+        self._proxy = ColumnFilterProxy(self)
         self._proxy.setSourceModel(self._model)
         self._proxy.setSortRole(Qt.UserRole)
         self._proxy.setFilterKeyColumn(-1)
@@ -180,11 +196,22 @@ class AnalysisWorkbench(QWidget):
         self._filter.textChanged.connect(self._proxy.setFilterFixedString)
         self._table = QTableView()
         self._table.setModel(self._proxy)
+        # Table order until a header is clicked (Qt would sort by the first column, descending).
+        self._table.horizontalHeader().setSortIndicator(-1, Qt.AscendingOrder)
         self._table.setSortingEnabled(True)
         self._table.setAlternatingRowColors(True)
+        install_header_filters(self._table, self._proxy)
+        self._chips = FilterChips(self._proxy)
+        self._proxy.filters_changed.connect(self._filters_changed)
         self._plot = PlotBuilder()
+        table_box = QWidget()
+        table_lay = QVBoxLayout(table_box)
+        table_lay.setContentsMargins(0, 0, 0, 0)
+        table_lay.setSpacing(2)
+        table_lay.addWidget(self._chips)
+        table_lay.addWidget(self._table, 1)
         split = QSplitter(Qt.Vertical)
-        split.addWidget(self._table)
+        split.addWidget(table_box)
         split.addWidget(self._plot)
         split.setSizes([300, 400])
         root.addWidget(split, 1)
@@ -205,6 +232,16 @@ class AnalysisWorkbench(QWidget):
                 self._summary.setText(f"No dataset: {exc}")
                 return None
         return self._repo
+
+    def _dataset_changed(self, root: str) -> None:
+        """Another dataset was chosen (here or in another panel): list its tables."""
+        self._repo = None
+        self._list_db_tables()
+        if self._table_name:
+            # A dataset table on screen belongs to the old dataset: it can no longer be written back.
+            self._table_name = None
+            self._write_back.setEnabled(False)
+        self._summary.setText(f"Dataset: {root or 'none'} (load a table)")
 
     def _list_db_tables(self) -> None:
         repo = self._repo_or_none()
@@ -270,6 +307,11 @@ class AnalysisWorkbench(QWidget):
         self._full = frame.reset_index(drop=True)
         self._table_name = table
         self._label = label
+        # Filters on columns this table has carry over (the same table reloaded); the rest go.
+        before = len(self._proxy.filters())
+        self._proxy.prune(self._full.columns)
+        if len(self._proxy.filters()) != before:
+            self._chips.refresh()
         self._apply_query()
 
     def _apply_query(self) -> None:
@@ -281,15 +323,40 @@ class AnalysisWorkbench(QWidget):
             except Exception as exc:  # noqa: BLE001
                 self._summary.setText(f"Query error: {exc}")
                 return
+        frame = self._proxy.filter_frame(frame) if self._truncated_filters() else frame
         self._truncated = len(frame) > DISPLAY_LIMIT
         self._table.setSortingEnabled(False)
         self._model.set_frame(frame.head(DISPLAY_LIMIT).copy())
         self._table.setSortingEnabled(True)
         self._write_back.setEnabled(False)
-        shown = f" (showing the first {DISPLAY_LIMIT:,}; narrow with a query to edit)" if self._truncated else ""
-        self._summary.setText(f"{getattr(self, '_label', '')}: {len(frame):,} of {len(self._full):,} rows, {len(frame.columns)} columns{shown}")
+        self._show_summary(len(frame), len(frame.columns))
+        self._replot()
+
+    def _truncated_filters(self) -> bool:
+        """Column filters act on the whole table (before the display cap) when it is capped."""
+        return bool(self._proxy.filters()) and len(self._full) > DISPLAY_LIMIT
+
+    def _show_summary(self, n_rows: int | None = None, n_cols: int | None = None) -> None:
+        shown_rows = self._proxy.rowCount()
+        total = len(self._full)
+        n_cols = len(self._full.columns) if n_cols is None else n_cols
+        cap = f" (showing the first {DISPLAY_LIMIT:,}; narrow with a query or a filter to edit)" if self._truncated else ""
+        filtered = f", {shown_rows:,} after the column filters" if self._proxy.filters() and not self._truncated else ""
+        self._summary.setText(f"{getattr(self, '_label', '')}: {n_rows if n_rows is not None else shown_rows:,} of "
+                              f"{total:,} rows{filtered}, {n_cols} columns{cap}")
+
+    def _replot(self) -> None:
+        frame = self.model_frame()
         plot_frame = frame.sample(PLOT_LIMIT, random_state=0) if len(frame) > PLOT_LIMIT else frame
         self._plot.set_frame(plot_frame)
+
+    def _filters_changed(self) -> None:
+        if len(self._full) > DISPLAY_LIMIT:
+            # The display is capped: filter the whole table, then cap again.
+            self._apply_query()
+            return
+        self._show_summary()
+        self._replot()
 
     def current_frame(self) -> pd.DataFrame:
         """The rows shown (query and quick filter applied), in the table's order."""
@@ -301,7 +368,8 @@ class AnalysisWorkbench(QWidget):
         if not self._truncated:
             return self.current_frame()
         text = self._query.text().strip()
-        return self._full.query(text, engine="python") if text else self._full
+        frame = self._full.query(text, engine="python") if text else self._full
+        return self._proxy.filter_frame(frame)
 
     def _to_statmodels(self) -> None:
         frame = self.model_frame()
@@ -314,6 +382,17 @@ class AnalysisWorkbench(QWidget):
             self._summary.setText(f"Sent {len(frame):,} rows to a new Statmodels session.")
         except Exception as exc:  # noqa: BLE001
             self._summary.setText(f"Statmodels could not take the table: {exc}")
+
+    def _to_import_editor(self) -> None:
+        frame = self.model_frame()
+        if frame.empty:
+            self._summary.setText("No rows: load a table or a file first.")
+            return
+        from nvitk.gui.panels.import_editor import open_import_editor
+
+        label = str(getattr(self, "_label", "") or "table")
+        name = label.split(" · ")[-1]
+        open_import_editor(self.window(), frame=frame, source_name=name.rsplit("/", 1)[-1])
 
     def _write_db(self) -> None:
         repo = self._repo_or_none()

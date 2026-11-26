@@ -49,6 +49,10 @@ ICONS: dict[str, str] = {
         '<path d="M12 3v18M3 12h18"/><path d="M5.5 18.5l13-13"/>'
         '<path d="M8 4h8l4 4v8M4 8v8l4 4h8" stroke-dasharray="2 2.2"/>'
     ),
+    "crosshair_click": (
+        '<path d="M14 4.1 12 6M5.1 8l-2.9-.8M6 12l-1.9 2M7.2 2.2 8 5.1"/>'
+        '<path d="M9.04 9.69a.5.5 0 0 1 .65-.65l11 4.5a.5.5 0 0 1-.07.95l-4.35 1.04a1 1 0 0 0-.74.74l-1.04 4.35a.5.5 0 0 1-.95.07z"/>'
+    ),
     "target": '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1" fill="currentColor"/>',
     "eye": '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     "eye_off": (

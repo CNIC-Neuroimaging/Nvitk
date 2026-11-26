@@ -19,6 +19,14 @@
   visual, which makes every later addition fail too. A hidden layer now gets
   the empty slice of the current display (2D or 3D); it is sliced for real
   when it is shown, as before.
+* **The 3D view jumping at the start of a drag.** VisPy's 3D camera turns the view
+  from the cursor position it saw last and forgets it only on a mouse release. Napari
+  hands the camera a release only while ``camera.mouse_pan`` is on and the event is
+  not handled, and its own mouse callbacks run first: a drag callback that locks the
+  camera again as its drag ends (a tool that lets a drag off its target turn the
+  view) left the position of that drag behind, and the next drag began by turning
+  the view from there to the cursor: a sudden reorientation before it followed the
+  mouse. Every press and release on the canvas now clears that drag state.
 * **Hiding a layer on the main canvas only.** Napari has one visibility per
   layer, shared by the layer list, the canvas and everything nvitk draws from
   it (the orthogonal views). A layer carrying ``_nvitk_canvas_hidden = True``
@@ -190,6 +198,38 @@ def _fix_canvas_only_visibility() -> None:
     VispyScalarFieldBaseLayer._on_data_change = _on_data_change
 
 
+def _reset_camera_drag(canvas: Any) -> None:
+    """Forget the cameras' in-progress drag state (VisPy's ``_event_value``)."""
+    cameras = [getattr(getattr(canvas, "view", None), "camera", None)]
+    for wrapper in [getattr(canvas, "camera", None), *list(getattr(canvas, "grid_cameras", []) or [])]:
+        cameras += [getattr(wrapper, "_3D_camera", None), getattr(wrapper, "_2D_camera", None)]
+    for camera in cameras:
+        if camera is not None and hasattr(camera, "_event_value"):
+            camera._event_value = None
+
+
+def _fix_camera_drag_state() -> None:
+    from napari._vispy.canvas import VispyCanvas
+
+    if getattr(VispyCanvas, "_nvitk_drag_state_fix", False):
+        return
+    press, release = VispyCanvas._on_mouse_press, VispyCanvas._on_mouse_release
+
+    def _on_mouse_press(self: Any, event: Any) -> None:
+        _reset_camera_drag(self)  # a new drag starts from where it is pressed
+        press(self, event)
+
+    def _on_mouse_release(self: Any, event: Any) -> None:
+        try:
+            release(self, event)
+        finally:
+            _reset_camera_drag(self)  # whether or not the camera itself hears the release
+
+    VispyCanvas._on_mouse_press = _on_mouse_press
+    VispyCanvas._on_mouse_release = _on_mouse_release
+    VispyCanvas._nvitk_drag_state_fix = True
+
+
 def install_napari_fixes() -> None:
     """Install every fix above (idempotent; a missing Napari internal skips its fix)."""
     for fix in (
@@ -197,6 +237,7 @@ def install_napari_fixes() -> None:
         _fix_labels_3d_brush,
         _fix_hidden_layer_slices,
         _fix_canvas_only_visibility,
+        _fix_camera_drag_state,
     ):
         try:
             fix()

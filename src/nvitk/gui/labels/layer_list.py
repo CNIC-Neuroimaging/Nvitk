@@ -884,6 +884,45 @@ def _fill_layer_menu(menu: Any, viewer: Any, layer: Any, pos: Any) -> None:
 
     controls.triggered.connect(_open)
     kind = type(layer).__name__
+    selection = viewer.layers.selection
+
+    def _targets() -> list[Any]:
+        chosen = [l for l in viewer.layers if l in selection]
+        return chosen if layer in chosen else [layer]
+
+    if kind in ("Image", "Labels", "Surface", "Points"):
+        export = menu.addAction(icon("save"), "Export…")
+        export.setToolTip("Save this layer to a file: path, format and affine options, in a pop-over.")
+
+        def _export() -> None:
+            from nvitk.gui.io.export_popover import show_export_popover
+
+            show_export_popover(viewer, layer, pos)
+
+        export.triggered.connect(_export)
+    centre = menu.addAction(icon("target"), "Center 3D view on this")
+    centre.setToolTip("Centre the 3D view on this layer (the selected ones, if it is among them) and zoom "
+                      "to fit, keeping the viewing angle.")
+
+    def _centre() -> None:
+        from nvitk.gui.viz.main_canvas import center_view_on
+
+        center_view_on(viewer, _targets())
+
+    centre.triggered.connect(_centre)
+    mesh_panel = getattr(viewer, "_nvitk_mesh_panel", None)
+    if mesh_panel is not None and kind in ("Surface", "Points"):
+        try:
+            from nvitk.gui.mesh.layers import layer_kind
+
+            is_shape = layer_kind(layer) in ("mesh", "series", "points")
+        except Exception:  # noqa: BLE001
+            is_shape = kind == "Surface"
+        if is_shape:
+            display = menu.addAction(icon("droplet"), "Mesh display…")
+            display.setToolTip("The Meshlab panel's Display (colour by a field, colormap, opacity, wireframe, "
+                               "points…) for this layer, in a pop-over.")
+            display.triggered.connect(lambda: mesh_panel.show_display_popover(layer, pos))
     if kind in ("Image", "Labels"):
         from nvitk.gui.labels.layer_popover import show_inspect_popover
         from nvitk.gui.panels.dicom_tags import layer_has_dicom_tags
@@ -897,12 +936,6 @@ def _fill_layer_menu(menu: Any, viewer: Any, layer: Any, pos: Any) -> None:
         tags.setToolTip("The DICOM header this layer was read from, searchable, in a pop-over."
                         if has_tags else "This layer was not read from DICOM (no tags kept).")
         tags.triggered.connect(lambda: show_inspect_popover(viewer, layer, "dicom", pos))
-    selection = viewer.layers.selection
-
-    def _targets() -> list[Any]:
-        chosen = [l for l in viewer.layers if l in selection]
-        return chosen if layer in chosen else [layer]
-
     if kind in ("Image", "Labels"):
         from nvitk.gui.viz.render_presets import build_preset_menu
 

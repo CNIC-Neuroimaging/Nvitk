@@ -35,6 +35,9 @@ from nvitk.gui.viz.ortho.constants import (
     _HANDLE_TOL_PX,
     _HANDLE_MIN_FRACTION,
 )
+
+#: How close (canvas pixels) the cursor must be to an edge of the box to grab it.
+_BOX_GRAB_PX = 6.0
 from nvitk.gui.viz.ortho.geometry import AxisView
 from nvitk.gui.viz.ortho.render import (
     PaintRun,
@@ -99,6 +102,13 @@ class SliceView(QWidget):
         #: and whether the slice is inside the box's depth (drawn faint when not).
         self._box: tuple[float, float, float, float] | None = None
         self._box_inside = True
+        #: Dragging the box's edges: ``handler(kind, edges, (row, col), event) -> bool`` with
+        #: *kind* press / move / release, *edges* a set of ``r0 c0 r1 c1`` (or ``{"move"}``)
+        #: and fractional slice-pixel coordinates; True on press means it took the drag.
+        self.box_handler: Any | None = None
+        self._box_grab: frozenset[str] | None = None
+        self._box_hover: frozenset[str] | None = None
+        self._draw_cursor = False
         #: A traced vessel's path and clicked points, as (row, column) slice pixels.
         self._trace: list[tuple[float, float]] = []
         self._trace_marks: list[tuple[float, float]] = []
@@ -244,10 +254,83 @@ class SliceView(QWidget):
 
     def set_draw_cursor(self, drawing: bool) -> None:
         """A cross cursor while a drawing tool is on (a click edits, not moves)."""
-        if drawing:
+        self._draw_cursor = bool(drawing)
+        self._apply_cursor()
+
+    def _apply_cursor(self) -> None:
+        edges = self._box_grab or self._box_hover
+        if edges:
+            if edges == {"move"}:
+                shape = Qt.SizeAllCursor
+            elif len(edges) == 2:
+                diagonal = edges in ({"r0", "c0"}, {"r1", "c1"})
+                shape = Qt.SizeFDiagCursor if diagonal else Qt.SizeBDiagCursor
+            else:
+                shape = Qt.SizeVerCursor if next(iter(edges)) in ("r0", "r1") else Qt.SizeHorCursor
+            self._canvas.setCursor(shape)
+        elif self._draw_cursor:
             self._canvas.setCursor(Qt.CrossCursor)
         else:
             self._canvas.unsetCursor()
+
+    def _box_screen_rect(self) -> tuple[float, float, float, float] | None:
+        """The box's rectangle on the canvas: ``(x0, y0, x1, y1)`` (``None``: no box)."""
+        geometry = self._geometry()
+        if geometry is None or self._box is None:
+            return None
+        scaled_w, scaled_h, off_x, off_y = geometry
+        h, w = self._rgb.shape[:2]
+        r0, c0, r1, c1 = self._box
+        x0, x1 = sorted((off_x + c0 / max(w, 1) * scaled_w, off_x + c1 / max(w, 1) * scaled_w))
+        y0, y1 = sorted((off_y + r0 / max(h, 1) * scaled_h, off_y + r1 / max(h, 1) * scaled_h))
+        return x0, y0, x1, y1
+
+    def _box_edges_at(self, event: Any) -> frozenset[str] | None:
+        """The box edges under the cursor (a corner grabs two; Alt inside the box moves it)."""
+        if self.box_handler is None:
+            return None
+        rect = self._box_screen_rect()
+        if rect is None:
+            return None
+        x0, y0, x1, y1 = rect
+        x, y = self._cursor_xy(event)
+        tol = _BOX_GRAB_PX
+        if event.modifiers() & Qt.AltModifier:
+            inside = x0 <= x <= x1 and y0 <= y <= y1
+            return frozenset({"move"}) if inside else None
+        within_y = y0 - tol <= y <= y1 + tol
+        within_x = x0 - tol <= x <= x1 + tol
+        edges = set()
+        if within_y:
+            near = [(abs(x - x0), "c0"), (abs(x - x1), "c1")]
+            d, edge = min(near)
+            if d <= tol:
+                edges.add(edge)
+        if within_x:
+            near = [(abs(y - y0), "r0"), (abs(y - y1), "r1")]
+            d, edge = min(near)
+            if d <= tol:
+                edges.add(edge)
+        return frozenset(edges) or None
+
+    def _pixel_f(self, event: Any) -> tuple[float, float] | None:
+        """The cursor in fractional slice pixels (row, column), off the slice too."""
+        geometry = self._geometry()
+        if geometry is None:
+            return None
+        scaled_w, scaled_h, off_x, off_y = geometry
+        h, w = self._rgb.shape[:2]
+        x, y = self._cursor_xy(event)
+        return (y - off_y) / max(scaled_h, 1) * h, (x - off_x) / max(scaled_w, 1) * w
+
+    def _box_call(self, kind: str, event: Any) -> bool:
+        handler = self.box_handler
+        if handler is None or self._box_grab is None:
+            return False
+        try:
+            return bool(handler(kind, set(self._box_grab), self._pixel_f(event), event))
+        except Exception:  # noqa: BLE001 (an editor fault must not wedge the view)
+            return False
 
     def set_crosshair_visible(self, visible: bool) -> None:
         """Draw the crosshair lines, or hide them (the crosshair still moves with clicks)."""
@@ -556,6 +639,14 @@ class SliceView(QWidget):
                 self.set_zoom(1.0)
             return True
         if event.type() == QEvent.MouseButtonPress:
+            if event.button() == Qt.LeftButton and not (event.modifiers() & (Qt.ShiftModifier | Qt.ControlModifier)):
+                edges = self._box_edges_at(event)
+                if edges:
+                    self._box_grab = edges
+                    if self._box_call("press", event):
+                        self._apply_cursor()
+                        return True
+                    self._box_grab = None
             if self._is_pan(event):
                 self._drag_from = self._cursor_xy(event)
                 self._pan_origin = self._drag_from
@@ -570,6 +661,19 @@ class SliceView(QWidget):
             self._emit_click(event)
             return True
         if event.type() == QEvent.MouseMove:
+            if self._box_grab is not None:
+                self._box_call("move", event)
+                return True
+            if not event.buttons():
+                hover = self._box_edges_at(event)
+                if hover is not None:
+                    try:
+                        hover = hover if self.box_handler("can", set(hover), None, event) else None
+                    except Exception:  # noqa: BLE001
+                        hover = None
+                if hover != self._box_hover:
+                    self._box_hover = hover
+                    self._apply_cursor()
             if self._brush is not None:
                 self._hover = self._cursor_xy(event)
             if self._drag_from is not None and event.buttons() & (Qt.LeftButton | Qt.MiddleButton):
@@ -592,6 +696,11 @@ class SliceView(QWidget):
             self._emit_click(event)
             return True
         if event.type() == QEvent.MouseButtonRelease:
+            if self._box_grab is not None:
+                self._box_call("release", event)
+                self._box_grab = None
+                self._apply_cursor()
+                return True
             origin, self._pan_origin = self._pan_origin, None
             self._drag_from = None
             self._rotating = None

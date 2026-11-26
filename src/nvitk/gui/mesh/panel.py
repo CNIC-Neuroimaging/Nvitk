@@ -1,12 +1,16 @@
 """The Meshlab panel (dock): MeshLab / ParaView basics for surfaces and point clouds, over time too.
 
-Top to bottom: the active layer (size, area, volume) with open / save; the
-selection tools; the operation pickers, the selected operation's parameters and Run; how the layer is
+Top to bottom: the active layer (size, area, volume) with open / save, and the
+operation (pickers, the selected operation's parameters and Run), always open; then
+collapsible sections (their open / folded state is remembered): Selection; how the layer is
 drawn (Display: colour by a field, colormap, solid colour, opacity, wireframe,
 point size...); moving it by hand (Move: live, then Apply or Reset); a frame
 slider for mesh time series; and a plot for profiles and curves over time.
 
-The Selection card, always on screen under the active layer, holds the
+Display also opens as a pinnable pop-over: right-click a surface or point cloud, in the layer
+list (*Mesh display…*) or on the canvas (a right click without dragging, on the surface).
+
+The Selection section holds the
 selection tools: Brush, Box and Piece stay on (every stroke, box or click
 selects) until clicked again, and follow the active layer; Add / Remove /
 Replace say how each one combines with the selection; All, Invert, Clear, Grow,
@@ -70,6 +74,7 @@ from nvitk.gui.core.design import (
     clear_layout,
     style_figure,
 )
+from nvitk.gui.core.widgets import Section, hint_label
 from nvitk.gui.mesh.layers import (
     BUILTIN_FIELDS,
     COLORMAPS,
@@ -321,16 +326,18 @@ class MeshPanel(QWidget):
         root.setSpacing(SPACE)
         root.setAlignment(Qt.AlignTop)
 
+        # Active layer, then the operation: always open, at the top. The rest fold away.
         root.addWidget(self._build_info_card())
-        root.addWidget(self._build_selection_card())
         root.addWidget(self._build_operation_card())
+        root.addWidget(self._build_selection_card())
         self._display_card = self._build_display_card()
         root.addWidget(self._display_card)
         self._move_card = self._build_move_card()
         root.addWidget(self._move_card)
         self._time_card = self._build_time_card()
         root.addWidget(self._time_card)
-        self._plot_card = Card("Plot")
+        self._display_popover: Any = None
+        self._plot_card = Section("Plot", icon_name="chart", hue="purple", pref_key="mesh.plot")
         self._plot_canvas = None
         self._plot_card.setVisible(False)
         root.addWidget(self._plot_card)
@@ -370,7 +377,7 @@ class MeshPanel(QWidget):
 
     def _build_selection_card(self) -> Card:
         """Always on screen: the selection tools and what to do with a selection."""
-        card = Card("Selection")
+        card = Section("Selection", icon_name="wand", hue="red", pref_key="mesh.selection")
         card.setToolTip("Select vertices / points on the active surface or points layer (drawn red), then "
                         "delete, keep or copy them, or run a selection-based filter on them.")
         tools = QHBoxLayout()
@@ -607,6 +614,11 @@ class MeshPanel(QWidget):
         # The browser above picks the operation; the combos stay as its state, out of sight.
         self._pickers_box.setVisible(False)
         ops.add(self._pickers_box)
+        # The selected operation's name (and where it sits in the browser), as on the Imaging tab.
+        self._op_title = QLabel("")
+        self._op_title.setWordWrap(True)
+        self._op_title.setTextFormat(Qt.RichText)
+        ops.add(self._op_title)
         self._description = _muted()
         ops.add(self._description)
         self._docs = QLabel()
@@ -638,11 +650,27 @@ class MeshPanel(QWidget):
         ops.add(self._status)
         return ops
 
-    def _build_display_card(self) -> Card:
-        card = Card("Display")
+    def _build_display_card(self) -> Section:
+        card = Section("Display", icon_name="droplet", hue="blue", pref_key="mesh.display")
+        pop = QPushButton()
+        pop.setFlat(True)
+        pop.setText("⇱")
+        pop.setFixedWidth(24)
+        pop.setToolTip("Open Display in a pop-over (also: right-click a surface)")
+        pop.clicked.connect(lambda: self.show_display_popover())
+        card.add_header_widget(pop)
+        # Everything Display holds sits in one widget, which the pop-over borrows while open.
+        self._display_body = QWidget()
+        body = QVBoxLayout(self._display_body)
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(SPACE_TIGHT)
+        self._display_away = hint_label("Display is open in its pop-over; close it to bring the controls back here.")
+        self._display_away.setVisible(False)
+        card.add(self._display_away)
+        card.add(self._display_body)
         self._display_note = _muted()
         self._display_note.setVisible(False)
-        card.add(self._display_note)
+        body.addWidget(self._display_note)
         grid = QFormLayout()
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setVerticalSpacing(SPACE_TIGHT)
@@ -727,9 +755,9 @@ class MeshPanel(QWidget):
         self._pts_opts.setLayout(pts_row)
         self._pts_label = QLabel("Points")
         grid.addRow(self._pts_label, self._pts_opts)
-        card.add_layout(grid)
+        body.addLayout(grid)
         self._field_info = _muted()
-        card.add(self._field_info)
+        body.addWidget(self._field_info)
 
         self._colour_by.currentIndexChanged.connect(lambda _i: self._on_display_changed())
         self._cmap.currentTextChanged.connect(lambda _t: self._on_display_changed())
@@ -751,8 +779,8 @@ class MeshPanel(QWidget):
         card.setVisible(False)
         return card
 
-    def _build_move_card(self) -> Card:
-        card = Card("Move by hand")
+    def _build_move_card(self) -> Section:
+        card = Section("Move by hand", icon_name="move", hue="orange", pref_key="mesh.move")
         hint = _muted("Live preview; Apply bakes it into the vertices, Reset puts it back. "
                       "Rotation and scale are about the centre of everything selected.")
         card.add(hint)
@@ -802,8 +830,8 @@ class MeshPanel(QWidget):
         card.setVisible(False)
         return card
 
-    def _build_time_card(self) -> Card:
-        card = Card("Time series")
+    def _build_time_card(self) -> Section:
+        card = Section("Time series", icon_name="clock", hue="cyan", pref_key="mesh.time")
         row = QHBoxLayout()
         row.setSpacing(SPACE_TIGHT)
         self._play = _button("▶", checkable=True)
@@ -897,6 +925,7 @@ class MeshPanel(QWidget):
         self._form_op = op
         clear_layout(self._form)
         self._widgets = {}
+        self._sync_op_title(op)
         if op is None:
             return
         pick = ""
@@ -939,6 +968,24 @@ class MeshPanel(QWidget):
         self._replace.setVisible(op.replaceable)
         self._run.setText(self._run_label(op))
         self._update_run_state()
+
+    def _sync_op_title(self, op: Any) -> None:
+        """Name the operation the form below belongs to: label, suite badge, section › subsection."""
+        if op is None:
+            self._op_title.setText("")
+            return
+        from nvitk.gui.core import design as _design
+        from nvitk.gui.mesh.taxonomy import SECTIONS as MESH_SECTIONS, mesh_meta
+
+        meta = mesh_meta(op)
+        section = next((sec.title for sec in MESH_SECTIONS if sec.key == meta.section), meta.section)
+        where = " › ".join(p for p in (section, meta.subsection) if p)
+        suite = "" if meta.suite == "nvitk" else (
+            f" &nbsp;<span style='color:{_design.suite_color(meta.suite)}'>{meta.suite}</span>")
+        self._op_title.setText(
+            f"<b style='font-size:{_design.FONT_L}px'>{op.label}</b>{suite}"
+            f"<br><span style='color:{_design.COLOR_MUTED}; font-size:{_design.FONT_S}px'>{where}</span>"
+        )
 
     def _groups_field(self, edit: QWidget) -> QWidget:
         """The groups text plus "Add ticked labels as a group"."""
@@ -1768,6 +1815,59 @@ class MeshPanel(QWidget):
         self._status.setText(f"Undone on {', '.join(restored)} ({len(self._undo_steps)} more step(s) to undo).")
         self._on_active()
 
+    # display pop-over
+
+    def show_display_popover(self, layer: Any = None, global_pos: Any = None) -> Any:
+        """Display's controls in a pinnable pop-over, for *layer* (made active) or the current targets.
+
+        The pop-over borrows the section's widgets (one set of controls, one state); closing it
+        puts them back.
+        """
+        from qtpy.QtGui import QCursor
+
+        from nvitk.gui.core import design
+        from nvitk.gui.core.widgets import Popover
+
+        if layer is not None:
+            selection = self._viewer.layers.selection
+            if layer not in selection:
+                selection.active = layer
+            elif selection.active is not layer:
+                selection.active = layer
+        self._sync_targets()
+        targets = self._targets()
+        if not targets:
+            return None
+        popover = self._display_popover
+        if popover is None:
+            parent = getattr(getattr(self._viewer, "window", None), "_qt_window", None)
+            popover = Popover(title="Display", parent=parent)
+            popover.closed.connect(lambda: QTimer.singleShot(0, self._return_display_body))
+            self._display_popover = popover
+        if popover.content() is not self._display_body:
+            popover.set_content(self._display_body)
+            design.apply_theme(self._display_body)
+        self._display_away.setVisible(True)
+        names = ", ".join(t.name for t in targets[:3]) + ("…" if len(targets) > 3 else "")
+        popover.set_title(f"Display · {names}")
+        self._display_body.setMinimumWidth(360)
+        if not popover.isVisible():
+            popover.show_at_point(global_pos if global_pos is not None else QCursor.pos())
+        else:
+            popover.raise_()
+        return popover
+
+    def _return_display_body(self) -> None:
+        popover = self._display_popover
+        if popover is None or popover.isVisible():
+            return  # pinning re-shows it (a hide, then a show)
+        if self._display_body.parent() is not self._display_card._body:
+            popover._content = None
+            self._display_body.setMinimumWidth(0)
+            self._display_card.add(self._display_body)
+            self._display_body.show()
+        self._display_away.setVisible(False)
+
     # display
 
     def _sync_display_card(self) -> None:
@@ -2220,7 +2320,75 @@ def build_mesh_panel(viewer: Any) -> MeshPanel:
     """The Meshlab dock's widget."""
     panel = MeshPanel(viewer)
     viewer._nvitk_mesh_panel = panel
+    install_mesh_context_click(viewer, panel)
     return panel
 
 
-__all__ = ["LabelChecklist", "MeshPanel", "build_mesh_panel", "ray_hit"]
+def mesh_under_cursor(viewer: Any, position: Any, view_direction: Any = None) -> Any:
+    """The visible surface (or point cloud) a click at *position* lands on, nearest the camera
+    in 3D; in 2D, the one with a vertex within 3 mm (world) of the click."""
+    pos = np.asarray(position, dtype=float)[-3:]
+    best, best_depth = None, np.inf
+    three_d = int(viewer.dims.ndisplay) == 3 and view_direction is not None
+    direction = np.asarray(view_direction, dtype=float)[-3:] if view_direction is not None else None
+    if direction is not None:
+        direction = direction / (np.linalg.norm(direction) or 1.0)
+    for layer in reversed(list(viewer.layers)):
+        if not getattr(layer, "visible", False) or layer.name == _MARKER_NAME:
+            continue
+        kind = type(layer).__name__
+        try:
+            if kind == "Surface":
+                mesh = layer_to_mesh(layer)
+                if three_d:
+                    hit = ray_hit(pos, direction, mesh.triangles)
+                    if hit is not None and float(hit @ direction) < best_depth:
+                        best, best_depth = layer, float(hit @ direction)
+                elif len(mesh.vertices) and float(np.min(np.linalg.norm(mesh.vertices - pos, axis=1))) <= 3.0:
+                    return layer
+            elif kind == "Points" and layer_kind(layer) in _SHAPE_KINDS and len(layer.data):
+                pts = layer_to_point_cloud(layer).points
+                size = float(np.mean(np.asarray(layer.size))) if np.size(layer.size) else 1.0
+                rel = pts - pos
+                if three_d:
+                    perp = np.linalg.norm(rel - np.outer(rel @ direction, direction), axis=1)
+                    near = perp <= max(size, 1e-6)
+                    if near.any():
+                        depth = float((pts[near] @ direction).min())
+                        if depth < best_depth:
+                            best, best_depth = layer, depth
+                elif float(np.min(np.linalg.norm(rel, axis=1))) <= max(size, 3.0):
+                    return layer
+        except Exception:  # noqa: BLE001 (a layer this cannot read as a mesh)
+            continue
+    return best
+
+
+def install_mesh_context_click(viewer: Any, panel: MeshPanel) -> None:
+    """A right click (no drag) on a surface or point cloud opens its Display pop-over."""
+
+    def on_drag(_viewer: Any, event: Any):  # noqa: ANN202 (a Napari drag generator)
+        if getattr(event, "button", None) != 2:
+            return
+        start = np.asarray(getattr(event, "pos", (0, 0)), dtype=float)
+        position = tuple(event.position)
+        view_direction = getattr(event, "view_direction", None)
+        moved = False
+        yield
+        while event.type == "mouse_move":
+            if np.abs(np.asarray(getattr(event, "pos", start), dtype=float) - start).max() > 4:
+                moved = True
+            yield
+        if moved:
+            return
+        layer = mesh_under_cursor(viewer, position, view_direction)
+        if layer is not None:
+            QTimer.singleShot(0, lambda: panel.show_display_popover(layer))
+
+    try:
+        viewer.mouse_drag_callbacks.append(on_drag)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+__all__ = ["LabelChecklist", "MeshPanel", "build_mesh_panel", "install_mesh_context_click", "mesh_under_cursor", "ray_hit"]

@@ -16,6 +16,9 @@ touching how any of those panels work:
   the session's *working* frame (derived columns, filters, reshape and drops applied), so any
   column can be looked at (scatter, box, violin, histogram, heatmap, facets, a pandas query)
   before or beside a model, with no fit needed.
+* **Working dataset**: a database button in the status bar switches the dataset for the whole
+  GUI (:mod:`nvitk.gui.core.dataset_root`); :func:`switch_dataset` points the window's forms,
+  covariate lists and pipeline lists at the new one (the loaded frame stays until Reload).
 * **Frames from Analysis**: :func:`adopt_frame` makes any DataFrame a session's analysis
   frame, as a dropped spreadsheet is. The Analysis workbench uses it to send the table it shows
   (filtered) to a new Statmodels session.
@@ -57,6 +60,60 @@ def install_relayout(window: Any) -> None:
     _install_explore(window)
     _install_rail(window)
     _install_single_column(window)
+    _install_dataset_switch(window)
+
+
+# Working dataset
+def _install_dataset_switch(window: Any) -> None:
+    from nvitk.gui.core.dataset_root import DatasetRootButton, dataset_bus
+
+    try:
+        status = window.statusBar()
+    except Exception:  # noqa: BLE001
+        return
+    button = DatasetRootButton(window)
+    status.insertWidget(0, button)
+    window._dataset_button = button
+    dataset_bus().changed.connect(lambda root, w=window: switch_dataset(w, root))
+
+
+def switch_dataset(window: Any, root: str | None = None) -> bool:
+    """Point *window* at the dataset *root* (the working one when omitted): its repo, the data
+    forms, the measurement list, the covariate and pipeline lists. The analysis frame already
+    loaded stays (Reload data reads the new dataset). Returns whether it switched."""
+    import logging
+
+    from nvitk.db.repo import get_repo
+
+    try:
+        repo = get_repo(root=root) if root else get_repo()
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).warning("Statmodels could not open %s: %s", root, exc)
+        return False
+    if getattr(window, "_repo", None) is not None and str(window._repo.root) == str(repo.root):
+        return False
+    window._repo = repo
+    for name in ("_data_form", "_measurements"):
+        widget = getattr(window, name, None)
+        if widget is not None:
+            widget._repo = repo
+    form = getattr(window, "_data_form", None)
+    if form is not None and hasattr(form, "_populate_pipeline_combo"):
+        try:
+            form._populate_pipeline_combo()
+        except Exception:  # noqa: BLE001
+            pass
+    if hasattr(window, "_visit_catalog"):
+        window._visit_catalog = {}
+    if hasattr(window, "_refresh_covariate_lists"):
+        try:
+            window._refresh_covariate_lists()
+        except Exception:  # noqa: BLE001
+            pass
+    status = getattr(window, "_status", None)
+    if status is not None:
+        status.setText(f"Dataset: {repo.root}  (switched: Reload data to read it)")
+    return True
 
 
 # Explore
@@ -364,4 +421,7 @@ def adopt_frame(window: Any, frame: pd.DataFrame, *, label: str = "table") -> No
     window._status.setText(f"Analysis frame: {label} ({len(frame)} rows × {frame.shape[1]} columns), from the Analysis module.")
 
 
-__all__ = ["STEPS", "TOGGLES", "adopt_frame", "column_open", "install_relayout", "normalize_column", "show_step", "sync_explore"]
+__all__ = [
+    "STEPS", "TOGGLES", "adopt_frame", "column_open", "install_relayout", "normalize_column", "show_step",
+    "switch_dataset", "sync_explore",
+]

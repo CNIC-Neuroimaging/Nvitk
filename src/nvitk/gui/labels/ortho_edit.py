@@ -21,7 +21,9 @@ Labels layer:
 * **Right-drag**: erases with the brush whatever the tool (one stroke, one
   Ctrl+Z); the tool is back as soon as the button is released;
 * **Box** (the Labeling tab's Box card, Draw box): a drag sets the box on the
-  view's two axes. The box and a traced path are drawn in every view.
+  view's two axes. The box and a traced path are drawn in every view. With no
+  drawing tool on, the box's edges can be dragged (a corner moves two sides,
+  Alt+drag inside it moves it).
 
 With any other tool (Pan, Polygon) a click moves the crosshair, as it always
 did; with a drawing tool, Ctrl+click does. Shift+drag pans and the wheel scrolls
@@ -78,6 +80,12 @@ class OrthoLabelEditor:
             self._viewer.layers.selection.events.active.connect(self.refresh)
         except Exception:  # noqa: BLE001
             pass
+        self._edgedrag: dict[str, Any] | None = None
+        # The box drawn in the views follows it wherever it changes (a 3D edge drag, the ROI
+        # panel, deleting its layer), not only through the Labeling tab.
+        from nvitk.gui.labels.roi_box import roi_box
+
+        roi_box(self._viewer).moved.connect(self._on_box_moved)
 
     # what is drawn on, with what
 
@@ -393,8 +401,9 @@ class OrthoLabelEditor:
         box = getattr(self._viewer, "_nvitk_roi_box", None)
         anchor = panel.bound_layer()
         views = panel._slice_views
-        if (box is None or not box.active or anchor is None or panel._data is None or panel.is_oblique()
-                or not box.applies(anchor) or len(spatial_dims(anchor)) != 3):
+        if (box is None or not box.active or not getattr(box, "shown", True) or anchor is None
+                or panel._data is None or panel.is_oblique() or not box.applies(anchor)
+                or len(spatial_dims(anchor)) != 3):
             for view in views:
                 view.set_box(None)
             return
@@ -411,6 +420,89 @@ class OrthoLabelEditor:
             c0, c1 = edges(view.cols, view.flip_cols)
             inside = box.lo[view.axis] <= int(panel._position[view.axis]) < box.hi[view.axis]
             views[i].set_box((r0, c0, r1, c1), inside=inside)
+
+    def _on_box_moved(self) -> None:
+        try:
+            self.show_box()
+        except Exception:  # noqa: BLE001 (views already gone while the viewer closes)
+            pass
+
+    # dragging the box's edges
+
+    def _edge_box(self) -> tuple[Any, Any] | None:
+        """``(box, layer)`` when the views show the box and its edges can be dragged."""
+        from nvitk.gui.labels.roi_box import roi_box, spatial_dims
+
+        panel = self._panel
+        box = roi_box(self._viewer)
+        anchor = panel.bound_layer()
+        if (not box.active or not box.shown or anchor is None or panel._data is None or panel.is_oblique()
+                or not box.applies(anchor) or len(spatial_dims(anchor)) != 3):
+            return None
+        if self.tool() not in (None, "box"):
+            return None  # a drawing tool draws, even over the box's edge
+        layer = box.layer if box.layer is not None and box.applies(box.layer) else anchor
+        return box, layer
+
+    def box_edge(self, view_index: int, kind: str, edges: set[str], rc: tuple[float, float] | None,
+                 event: Any) -> bool:
+        """A drag on the box's edges in view *view_index* (see ``SliceView.box_handler``): an
+        edge moves that side, a corner two, ``move`` (Alt) the whole box; one undo-free change,
+        announced when the button comes up."""
+        if kind == "can":
+            return self._edge_box() is not None
+        if kind == "press":
+            found = self._edge_box()
+            if found is None or rc is None:
+                return False
+            box, layer = found
+            self._edgedrag = {"view": int(view_index), "layer": layer, "edges": set(edges), "start": rc,
+                              "lo": list(box.lo), "hi": list(box.hi), "moved": False}
+            return True
+        drag = self._edgedrag
+        if drag is None:
+            return False
+        from nvitk.gui.labels.roi_box import roi_box
+
+        box = roi_box(self._viewer)
+        if kind == "release":
+            self._edgedrag = None
+            if drag["moved"]:
+                box.changed.emit()
+                self.refresh()
+            return True
+        if rc is None:
+            return True
+        view = self._panel._views[drag["view"]]
+        shape = [int(n) for n in self._panel._data.shape[:3]]
+        lo, hi = list(drag["lo"]), list(drag["hi"])
+        for edge in drag["edges"]:
+            if edge == "move":
+                for axis, flip, start, now in ((view.rows, view.flip_rows, drag["start"][0], rc[0]),
+                                               (view.cols, view.flip_cols, drag["start"][1], rc[1])):
+                    step = int(round(now - start)) * (-1 if flip else 1)
+                    size = hi[axis] - lo[axis]
+                    lo[axis] = min(max(lo[axis] + step, 0), shape[axis] - size)
+                    hi[axis] = lo[axis] + size
+                continue
+            rows = edge[0] == "r"
+            axis = view.rows if rows else view.cols
+            flip = view.flip_rows if rows else view.flip_cols
+            value = int(round(rc[0] if rows else rc[1]))
+            n = shape[axis]
+            first = edge[1] == "0"
+            # A flipped axis draws hi..lo: its first edge on screen is the box's last voxel.
+            if flip:
+                value, first = n - value, not first
+            if first:
+                lo[axis] = min(max(value, 0), hi[axis] - 1)
+            else:
+                hi[axis] = max(min(value, n), lo[axis] + 1)
+        if lo != box.lo or hi != box.hi:
+            box.set(drag["layer"], lo, hi, emit=False)
+            drag["moved"] = True
+            self.show_box()
+        return True
 
     # a traced vessel
 

@@ -4,7 +4,9 @@ A :class:`RenderPreset` bundles what Napari's layer controls spread over half a 
 rendering mode (MIP, attenuated MIP, MinIP, iso-surface, translucent), colormap, contrast (in
 the modality's units, e.g. Hounsfield, or as percentiles of the volume), gamma, attenuation,
 iso threshold, opacity and blending. Built-in presets cover neuro / body / cardiac CT, CT
-angiography, structural MRI, MR angiography (TOF), SWI, 4D-flow magnitude, PET and label maps;
+angiography, body tissues (CT through a Hounsfield transfer function: fat, muscle, vessels and bone
+in their colours, :mod:`nvitk.gui.viz.tissue_render`, adjustable from *Body tissues: adjust…*),
+structural MRI, MR angiography (TOF), SWI, 4D-flow magnitude, PET and label maps;
 :func:`save_user_preset` stores the current look of a layer as a preset of your own
 (``render_presets.json`` beside ``gui.json``).
 
@@ -45,6 +47,9 @@ class RenderPreset:
     labels: bool = False
     modalities: tuple[str, ...] = field(default_factory=tuple)
     description: str = ""
+    #: A body-tissue look (:data:`nvitk.gui.viz.tissue_render.TISSUE_PRESETS` key): the CT drawn
+    #: through a Hounsfield transfer function instead of the fields above.
+    tissues: str | None = None
 
 
 BUILTIN_PRESETS: tuple[RenderPreset, ...] = (
@@ -60,6 +65,16 @@ BUILTIN_PRESETS: tuple[RenderPreset, ...] = (
                  attenuation=0.05, modalities=("cta",), description="Opacified vessels over soft tissue."),
     RenderPreset("cta_iso", "CTA: vessel surface", "CT", "iso", "red", ("hu", 0, 800), iso=("hu", 180),
                  modalities=("cta",), description="Iso-surface at 180 HU (lumen with contrast)."),
+    RenderPreset("ct_tissues", "Body tissues: realistic", "CT tissues", modalities=("ct", "cta"), tissues="realistic",
+                 description="Fat, muscle and bone in their colours, translucent (adjust in Body tissues…)."),
+    RenderPreset("ct_tissues_skin_bone", "Body tissues: skin and bone", "CT tissues", modalities=("ct",),
+                 tissues="skin_bone", description="A faint skin envelope over the skeleton."),
+    RenderPreset("ct_tissues_vessels", "Body tissues: vessels and bone", "CT tissues", modalities=("cta",),
+                 tissues="vessels_bone", description="Contrast-filled vessels in red over bone (CTA)."),
+    RenderPreset("ct_tissues_lungs", "Body tissues: lungs and airways", "CT tissues", modalities=("ct",),
+                 tissues="lungs", description="Lung parenchyma in pink, airways dark."),
+    RenderPreset("ct_tissues_bone", "Body tissues: bone only", "CT tissues", modalities=("ct",), tissues="bone",
+                 description="Cancellous and cortical bone."),
     RenderPreset("mra_mip", "MRA / TOF: MIP", "MRI", "mip", "gray", ("pct", 50.0, 99.8),
                  modalities=("tof", "mra"), description="Classic TOF maximum-intensity projection."),
     RenderPreset("mra_iso", "MRA / TOF: vessel surface", "MRI", "iso", "red", ("pct", 50.0, 99.9), iso=("pct", 99.0),
@@ -89,7 +104,7 @@ _HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("swi", "qsm", "swan"), "mri_minip"),
     (("4dflow", "4d_flow", "pcmra", "magnitude", "_m.nii"), "flow_mag"),
     (("t1", "t2", "flair", "mprage", "dixon"), "mri_struct"),
-    (("ct",), "ct_soft"),
+    (("ct",), "ct_tissues"),
 )
 
 
@@ -155,6 +170,66 @@ def _range(preset: RenderPreset, values: np.ndarray) -> tuple[float, float]:
     return (lo_v, hi_v) if hi_v > lo_v else (lo_v, lo_v + 1.0)
 
 
+#: What a preset changes, in the order to put it back (the colormap before its contrast).
+_RENDER_ATTRS = ("colormap", "contrast_limits", "gamma", "rendering", "opacity", "blending", "interpolation3d",
+                 "attenuation", "iso_threshold", "depiction")
+#: Metadata a preset (or the tissue render) leaves on a layer.
+_RENDER_META = ("nvitk_render_preset", "nvitk_tissues")
+
+
+def remember_default(layer: Any) -> None:
+    """Keep *layer*'s look before the first preset touches it (:func:`restore_default` puts it
+    back). Taken once; later presets do not overwrite it."""
+    if getattr(layer, "_nvitk_render_default", None) is not None:
+        return
+    state: dict[str, Any] = {}
+    for attr in _RENDER_ATTRS:
+        try:
+            value = getattr(layer, attr)
+        except Exception:  # noqa: BLE001 (an attribute this layer type lacks)
+            continue
+        state[attr] = tuple(float(v) for v in value) if attr == "contrast_limits" else value
+    meta = getattr(layer, "metadata", {}) or {}
+    state["_meta"] = {k: meta[k] for k in _RENDER_META if k in meta}
+    try:
+        layer._nvitk_render_default = state
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def restore_default(layers: Iterable[Any]) -> list[str]:
+    """Put each layer back to its look before any preset (:func:`remember_default`); a layer no
+    preset touched this session gets Napari's defaults (grey MIP over its full range). Returns
+    the names of the layers changed."""
+    changed: list[str] = []
+    for layer in layers:
+        kind = type(layer).__name__
+        if kind not in ("Image", "Labels") or getattr(layer, "rgb", False):
+            continue
+        state = getattr(layer, "_nvitk_render_default", None)
+        if state is None:
+            if kind == "Labels":
+                state = {"rendering": "iso_categorical", "opacity": 0.7, "blending": "translucent"}
+            else:
+                state = {"colormap": "gray", "gamma": 1.0, "rendering": "mip", "opacity": 1.0,
+                         "blending": "translucent", "interpolation3d": "linear", "attenuation": 0.05,
+                         "depiction": "volume"}
+                try:
+                    layer.reset_contrast_limits()
+                except Exception:  # noqa: BLE001
+                    pass
+        for attr in _RENDER_ATTRS:
+            if attr in state:
+                _set(layer, attr, state[attr])
+        meta = getattr(layer, "metadata", None)
+        if isinstance(meta, dict):
+            for key in _RENDER_META:
+                meta.pop(key, None)
+            meta.update(state.get("_meta", {}))
+        changed.append(str(layer.name))
+    return changed
+
+
 def apply_preset(layers: Iterable[Any], preset: RenderPreset | str) -> list[str]:
     """Apply *preset* to every image (or, for label presets, labels) layer in *layers*.
 
@@ -169,6 +244,8 @@ def apply_preset(layers: Iterable[Any], preset: RenderPreset | str) -> list[str]
     changed: list[str] = []
     for layer in layers:
         kind = type(layer).__name__
+        if kind in ("Image", "Labels"):
+            remember_default(layer)
         if preset.labels:
             if kind != "Labels":
                 continue
@@ -177,6 +254,12 @@ def apply_preset(layers: Iterable[Any], preset: RenderPreset | str) -> list[str]
             changed.append(str(layer.name))
             continue
         if kind != "Image" or getattr(layer, "rgb", False):
+            continue
+        if preset.tissues:
+            from nvitk.gui.viz.tissue_render import apply_tissue_render, default_settings
+
+            if apply_tissue_render(layer, default_settings(preset.tissues)):
+                changed.append(str(layer.name))
             continue
         values = _sample(layer)
         lo, hi = _range(preset, values)
@@ -232,7 +315,7 @@ def suggest_preset(layer: Any) -> str | None:
 
         values = _sample(layer)
         if values.size and looks_like_hounsfield(float(values.min()), float(values.max())):
-            return "ct_soft"
+            return "ct_tissues"
     except Exception:  # noqa: BLE001
         pass
     return "mri_struct"
@@ -277,6 +360,18 @@ def build_preset_menu(menu: Any, layers_getter: Any, *, on_applied: Any = None) 
             on_applied(key, changed)
 
     layers = list(layers_getter() or [])
+    default = menu.addAction("↺  Default rendering")
+    default.setToolTip("Back to how the selected layers were drawn before any preset (as loaded); a layer "
+                       "no preset changed gets Napari's defaults (grey MIP over its full range)")
+    default.setEnabled(any(type(ly).__name__ in ("Image", "Labels") for ly in layers))
+
+    def _default() -> None:
+        changed = restore_default(list(layers_getter() or []))
+        if on_applied is not None:
+            on_applied("default", changed)
+
+    default.triggered.connect(_default)
+    menu.addSeparator()
     suggestion = suggest_preset(layers[0]) if layers else None
     if suggestion:
         found = get_preset(suggestion)
@@ -293,6 +388,20 @@ def build_preset_menu(menu: Any, layers_getter: Any, *, on_applied: Any = None) 
             action = sub.addAction(preset.label)
             action.setToolTip(preset.description)
             action.triggered.connect(lambda _=False, k=preset.key: _apply(k))
+    images = [ly for ly in layers if type(ly).__name__ == "Image" and not getattr(ly, "rgb", False)]
+    tissues = menu.addAction("Body tissues: adjust…")
+    tissues.setToolTip("CT as tissues: HU ranges, colours and opacities per tissue (fat, muscle, vessels, bone…), "
+                       "tissue layers and a tissue label map")
+    tissues.setEnabled(bool(images))
+
+    def _tissues() -> None:
+        import napari
+
+        from nvitk.gui.viz.tissue_render import show_tissue_popover
+
+        show_tissue_popover(napari.current_viewer(), images[0])
+
+    tissues.triggered.connect(_tissues)
     menu.addSeparator()
     save = menu.addAction("Save the active layer's look as a preset…")
 
@@ -317,6 +426,8 @@ __all__ = [
     "build_preset_menu",
     "get_preset",
     "preset_from_layer",
+    "remember_default",
+    "restore_default",
     "save_user_preset",
     "suggest_preset",
     "user_presets",

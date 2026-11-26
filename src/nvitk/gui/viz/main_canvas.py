@@ -74,6 +74,20 @@ def true_transform(layer: Any) -> dict[str, np.ndarray] | None:
     return value if isinstance(value, dict) else None
 
 
+def real_data_to_world(layer: Any) -> np.ndarray:
+    """*layer*'s full data -> world matrix in its real placement, whether or not the canvas
+    draws it on its own grid (resampling off) right now."""
+    parts = true_transform(layer)
+    if parts is None:
+        return _composite(layer)
+    from napari.utils.transforms import CompositeAffine
+
+    n = len(parts["scale"])
+    inner = CompositeAffine(scale=parts["scale"], translate=parts["translate"], rotate=parts["rotate"],
+                            shear=parts["shear"], ndim=n)
+    return np.asarray(parts["affine"], dtype=float) @ np.asarray(inner.affine_matrix, dtype=float)
+
+
 def _set_parts(layer: Any, parts: dict[str, np.ndarray]) -> None:
     from nvitk.gui.core.orientation import suppress_nonorthogonal_slice_warning
 
@@ -487,15 +501,70 @@ def world_geometry(viewer: Any) -> Iterator[None]:
         yield
 
 
+def layers_world_extent(viewer: Any, layers: Any) -> np.ndarray | None:
+    """``(2, ndim)`` world bounding box of *layers* as the canvas draws them (voxel edges
+    included), in the viewer's full world axes; ``None`` when none has an extent."""
+    nd = int(viewer.dims.ndim)
+    boxes = []
+    for layer in layers:
+        try:
+            ext = getattr(layer, "_extent_world_augmented", None)
+            ext = np.asarray(layer.extent.world if ext is None else ext, dtype=float)
+        except Exception:  # noqa: BLE001
+            continue
+        if ext.ndim != 2 or ext.shape[0] != 2 or not np.all(np.isfinite(ext)):
+            continue
+        full = np.full((2, nd), np.nan)
+        full[:, nd - ext.shape[1]:] = ext[:, -nd:]
+        boxes.append(full)
+    if not boxes:
+        return None
+    stack = np.stack(boxes)
+    with np.errstate(all="ignore"):
+        lo, hi = np.nanmin(stack[:, 0], axis=0), np.nanmax(stack[:, 1], axis=0)
+    lo, hi = np.nan_to_num(lo), np.nan_to_num(hi)
+    return np.vstack([lo, hi])
+
+
+def center_view_on(viewer: Any, layers: Any, *, margin: float = 0.05) -> bool:
+    """Centre the main (3D) canvas on *layers* and zoom so they fill it, keeping the current
+    viewing angle; the other layers stay where they are. ``False`` when nothing to fit."""
+    extent = layers_world_extent(viewer, list(layers))
+    if extent is None:
+        return False
+    shown = list(viewer.dims.displayed)
+    ext = extent[:, shown]
+    size = ext[1] - ext[0]
+    if not np.any(size > 0):
+        return False
+    camera = viewer.camera
+    center = tuple(float(v) for v in (ext[0] + size / 2.0))
+    try:
+        scale = 1.0 - float(margin)
+        if viewer.dims.ndisplay == 3:
+            zoom = viewer._get_3d_camera_zoom(ext, scale)
+        else:
+            zoom = viewer._get_2d_camera_zoom(size, scale)
+    except Exception:  # noqa: BLE001 (private Napari helpers: keep the zoom, still centre)
+        zoom = None
+    camera.center = center
+    if zoom is not None and np.isfinite(zoom) and zoom > 0:
+        camera.zoom = float(zoom)
+    return True
+
+
 __all__ = [
     "KEEP_OFF_CANVAS_ATTR",
     "MainCanvasFilter",
     "PREF_CANVAS",
     "PREF_RESAMPLE",
     "TRUE_ATTR",
+    "center_view_on",
+    "layers_world_extent",
     "main_canvas_filter",
     "overridable",
     "keep_off_canvas",
+    "real_data_to_world",
     "true_transform",
     "world_geometry",
 ]

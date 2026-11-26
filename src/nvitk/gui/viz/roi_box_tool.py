@@ -1,9 +1,10 @@
 """ROI box panel: set a world-space box and crop / mask any selected layers with it.
 
-Opened from the viewport's top bar (the dashed-box icon) and from the layer menu. The box comes
-from the Labeling box (drawn in the views), from the active label map's extent (optionally with
-a margin), from the whole active layer, or typed in millimetres; it can be saved and loaded as
-JSON and sent back to the Labeling box on any grid.
+Opened from the viewport's top bar (the dashed-box icon) and from the layer menu. There is one
+box (the Labeling panel's Box card edits the same one): drawn in a view, fitted to the active
+label map's extent (optionally with a margin) or to the whole active layer, or typed in
+millimetres; it can be saved and loaded as JSON. Once set, drag its edges in the slice views or
+on the 3D canvas to adjust it.
 """
 
 from __future__ import annotations
@@ -42,7 +43,6 @@ class RoiBoxPanel(QWidget):
         source = Section("Set the box", icon_name="roi_box", hue="cyan", pref_key="roi.source")
         row = QHBoxLayout()
         for text, tip, slot in (
-            ("From Labeling box", "The box drawn in the views with the Labeling panel's box tool.", self._from_labeling),
             ("Fit labels", "Around the active label map's non-zero voxels (plus the margin).", self._from_labels),
             ("Whole layer", "Around all of the active layer.", self._from_layer),
         ):
@@ -54,7 +54,8 @@ class RoiBoxPanel(QWidget):
         self._draw = QPushButton("Draw in a view")
         self._draw.setCheckable(True)
         self._draw.setToolTip("Drag a rectangle in an orthogonal view (or the 2D canvas); the box takes "
-                              "its two in-plane sides, then drag in another view for the third.")
+                              "its two in-plane sides and the whole depth. Then drag its edges in any slice "
+                              "view or on the 3D canvas to adjust each side.")
         self._draw.toggled.connect(self._arm_draw)
         source.add(self._draw)
         margin_row = QHBoxLayout()
@@ -95,7 +96,6 @@ class RoiBoxPanel(QWidget):
         for text, tip, slot in (
             ("Crop", "A cropped copy of each selected image / label layer, placed where it was.", self._crop),
             ("Mask outside", "A copy of each with everything outside the box set to 0 (same grid).", self._mask),
-            ("To Labeling box", "Make this the Labeling box on the active layer's grid.", self._to_labeling),
         ):
             button = QPushButton(text)
             button.setToolTip(tip)
@@ -109,6 +109,12 @@ class RoiBoxPanel(QWidget):
             row.addWidget(button)
         apply.add_layout(row)
         root.addWidget(apply)
+        root.addWidget(hint_label("Drag the box's edges in the slice views or on the 3D canvas to adjust it; "
+                                  "Alt+drag inside it in a slice view moves it. Deleting its layer deletes it."))
+        from nvitk.gui.labels.roi_box import roi_box
+
+        # A method of this widget: PyQt drops the connection when the pop-over's panel goes.
+        roi_box(viewer).changed.connect(self._sync_spins)
         self._sync_spins()
 
     # drawing (the Labeling panel's box tool draws; the box follows it)
@@ -141,9 +147,7 @@ class RoiBoxPanel(QWidget):
     def _on_drawn(self) -> None:
         if not self._draw.isChecked():
             return
-        box = WorldBox.from_roi_box(self._viewer)
-        if box is not None:
-            self._set(box)
+        self._sync_spins()
         self._draw.blockSignals(True)
         self._draw.setChecked(False)
         self._draw.blockSignals(False)
@@ -155,13 +159,6 @@ class RoiBoxPanel(QWidget):
     def _set(self, box: WorldBox | None) -> None:
         set_box(self._viewer, box)
         self._sync_spins()
-
-    def _from_labeling(self) -> None:
-        box = WorldBox.from_roi_box(self._viewer)
-        if box is None:
-            _notify("Draw a box first (Labeling ▸ Box, then drag in a view).", error=True)
-            return
-        self._set(box)
 
     def _from_labels(self) -> None:
         layer = self._active()
@@ -229,14 +226,6 @@ class RoiBoxPanel(QWidget):
             return
         made, skipped = mask_outside(self._viewer, self._targets(), box)
         _notify(f"Masked {len(made)} layer(s) outside the box" + (f"; skipped {', '.join(skipped)}" if skipped else "") + ".")
-
-    def _to_labeling(self) -> None:
-        box = self._require()
-        layer = self._active()
-        if box is None or layer is None:
-            return
-        if not box.to_roi_box(self._viewer, layer):
-            _notify(f"The box does not overlap “{layer.name}”.", error=True)
 
     def _save(self) -> None:
         box = self._require()

@@ -6,7 +6,13 @@ layer with that spatial shape (a scan and its labels alike). Its corners are
 voxel indices along the layer's spatial axes (the time axis of a 3D+t layer is
 never cut). The Labeling tab's Box card edits it; the canvas shows it as an
 outline (a rectangle on the slice in 2D, the twelve edges in 3D), the
-orthogonal views as a rectangle in each plane.
+orthogonal views as a rectangle in each plane. It is also the viewer's ROI box
+(:mod:`nvitk.gui.core.roi_world` reads it as a world box), so there is one box
+and one outline layer: deleting that layer clears the box everywhere.
+
+Its edges can be dragged: in the orthogonal views (see
+:mod:`nvitk.gui.labels.ortho_edit`) and on the 3D canvas, where grabbing one of
+the twelve edges moves it across (the two faces it joins follow).
 
 Cropping (:func:`crop_layers`) adds a copy of each layer cut to the box, placed
 where it came from: its affine (and the file affine export writes) shift by
@@ -20,6 +26,8 @@ from typing import Any, Sequence
 
 from qtpy.QtCore import QObject, Signal
 
+import numpy
+
 from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup
 from nvitk.gui.labels import editing as E
@@ -27,7 +35,9 @@ from nvitk.gui.labels import editing as E
 setup(globals())
 
 #: The box's outline on the canvas (an internal Shapes layer).
-BOX_LAYER_NAME = "▭ box (Labeling)"
+BOX_LAYER_NAME = "▭ ROI box"
+#: How close (screen pixels) the cursor must be to an edge to grab it on the 3D canvas.
+_GRAB_PX = 9.0
 _EDGE = "#4dd2ff"
 
 
@@ -45,6 +55,8 @@ class RoiBox(QObject):
     """The viewer's box (see the module docstring); ``changed`` fires on every change."""
 
     changed = Signal()
+    #: Every change, mid-drag ones included (``changed`` waits for the end of a drag).
+    moved = Signal()
 
     def __init__(self, viewer: Any) -> None:
         super().__init__()
@@ -60,12 +72,36 @@ class RoiBox(QObject):
             viewer.layers.events.removed.connect(self._on_removed)
         except Exception:  # noqa: BLE001
             pass
+        self._removing_outline = False
+        self._hovering_edge = False
+        self._cursor_before: str | None = None
+        try:
+            viewer.mouse_drag_callbacks.insert(0, self._drag_edge_3d)
+            viewer.mouse_move_callbacks.append(self._hover_edge_3d)
+        except Exception:  # noqa: BLE001 (a stand-in viewer without callbacks)
+            pass
 
     # state
 
     @property
     def active(self) -> bool:
         return self.shape is not None and bool(self.lo)
+
+    @property
+    def shown(self) -> bool:
+        """True unless the user switched the box's outline layer off (the eye in the layer
+        list): hidden, it is drawn in no view and its edges cannot be grabbed, but it still
+        limits edits and crops."""
+        return not getattr(self, "_outline_hidden", False)
+
+    def _on_outline_visible(self, event: Any = None) -> None:
+        outline = self._outline()
+        if outline is None:
+            return
+        hidden = not bool(outline.visible)
+        if hidden != getattr(self, "_outline_hidden", False):
+            self._outline_hidden = hidden
+            self.moved.emit()
 
     @property
     def layer(self) -> Any | None:
@@ -92,6 +128,7 @@ class RoiBox(QObject):
         self.shape, self.lo, self.hi = shape, a, b
         self._outline_dropped = False
         self.sync_outline()
+        self.moved.emit()
         if emit:
             self.changed.emit()
 
@@ -115,7 +152,9 @@ class RoiBox(QObject):
     def clear(self) -> None:
         self.shape, self.lo, self.hi = None, [], []
         self._layer = lambda: None
+        self._outline_hidden = False
         self.sync_outline()
+        self.moved.emit()
         self.changed.emit()
 
     def index(self, layer: Any) -> tuple[Any, ...]:
@@ -188,8 +227,19 @@ class RoiBox(QObject):
 
     def _on_removed(self, event: Any) -> None:
         if getattr(event, "value", None) is self._outline():
-            self._outline = lambda: None
-            self._outline_dropped = True
+            self._outline_deleted()
+
+    def _outline_deleted(self) -> None:
+        """The outline left the viewer without us removing it: the user deleted it (or the
+        viewer is closing). That is deleting the box, in every view."""
+        self._outline = lambda: None
+        self._outline_dropped = True
+        if not self._removing_outline and self.active:
+            self.shape, self.lo, self.hi = None, [], []
+            self._layer = lambda: None
+            self._outline_hidden = False
+            self.moved.emit()
+            self.changed.emit()
 
     def _corner_world(self, layer: Any, voxel: Sequence[float]) -> list[float]:
         return [float(v) for v in layer.data_to_world(list(voxel))]
@@ -247,16 +297,12 @@ class RoiBox(QObject):
             # Removed from outside, and Napari's own dims update for that removal can run
             # before _on_removed hears of it: count it as dropped here too, or each removal
             # re-adds an outline that the viewer's closing loop removes again, forever.
-            self._outline = lambda: None
-            self._outline_dropped = True
+            self._outline_deleted()
             return
         layer = self.layer
         if not self.active or layer is None:
             if outline is not None:
-                try:
-                    self._viewer.layers.remove(outline)
-                except Exception:  # noqa: BLE001
-                    pass
+                self._remove_outline(outline)
             self._outline = lambda: None
             return
         try:
@@ -270,12 +316,15 @@ class RoiBox(QObject):
         try:
             if outline is None or int(outline.ndim) != len(shapes[0][0]):
                 if outline is not None:
-                    self._viewer.layers.remove(outline)
+                    self._remove_outline(outline)
                 active = self._viewer.layers.selection.active
                 outline = self._viewer.add_shapes(shapes, shape_type=kind, edge_color=colours, face_color="transparent",
                                                   edge_width=width, name=BOX_LAYER_NAME, opacity=0.9)
                 outline._nvitk_internal = True
                 self._outline = weakref.ref(outline)
+                if getattr(self, "_outline_hidden", False):
+                    outline.visible = False  # redrawn on another grid: still switched off
+                outline.events.visible.connect(self._on_outline_visible)
                 if active is not None and active in self._viewer.layers:
                     self._viewer.layers.selection.active = active
             else:
@@ -283,6 +332,132 @@ class RoiBox(QObject):
                 outline.data = []
                 outline.add(shapes, shape_type=kind, edge_color=colours, face_color="transparent", edge_width=width)
         except Exception:  # noqa: BLE001 (the outline is a convenience)
+            pass
+
+
+    def _remove_outline(self, outline: Any) -> None:
+        """Take the outline off the canvas ourselves (not the user deleting the box)."""
+        self._removing_outline = True
+        try:
+            self._viewer.layers.remove(outline)
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            self._removing_outline = False
+
+    # dragging an edge on the 3D canvas
+
+    def _edge_hit(self, event: Any) -> dict[str, Any] | None:
+        """The box edge under the cursor on the 3D canvas (closest to the camera), or ``None``."""
+        from nvitk.gui.viz.ray3d import ray_in_data, screen_px, segment_ray_closest
+
+        layer = self.layer
+        if layer is None or getattr(event, "view_direction", None) is None:
+            return None
+        dims = spatial_dims(layer)
+        if len(dims) != 3:
+            return None
+        P, D = ray_in_data(layer, event.position, event.view_direction)
+        faces = {d: (self.lo[k] - 0.5, self.hi[k] - 0.5) for k, d in enumerate(dims)}
+        best = None
+        for k_axis in dims:
+            i_axis, j_axis = [d for d in dims if d != k_axis]
+            for si in (0, 1):
+                for sj in (0, 1):
+                    a = P.copy()
+                    a[i_axis], a[j_axis] = faces[i_axis][si], faces[j_axis][sj]
+                    a[k_axis] = faces[k_axis][0]
+                    b = a.copy()
+                    b[k_axis] = faces[k_axis][1]
+                    on_ray, on_edge, t = segment_ray_closest(P, D, a, b)
+                    px = screen_px(self._viewer, layer, on_ray, on_edge)
+                    # An edge pointing at the camera is only a corner on screen: the sides
+                    # drawn as lines through that corner are what the cursor is on.
+                    norm = float(numpy.linalg.norm(D[dims])) or 1.0
+                    if abs(float(D[k_axis])) / norm > 0.95:
+                        px += _GRAB_PX / 2
+                    if px <= _GRAB_PX and (best is None or (px, t) < (best["px"], best["t"])):
+                        best = {"px": px, "t": t, "along": k_axis, "axes": (i_axis, j_axis), "sides": (si, sj),
+                                "point": on_edge}
+        return best
+
+    def _edge_drag_allowed(self, viewer: Any, event: Any) -> bool:
+        if not self.active or self._outline() is None or not self.shown or not E.is_3d_view(viewer):
+            return False
+        if int(getattr(event, "button", 1) or 1) != 1 or set(getattr(event, "modifiers", ()) or ()):
+            return False
+        labeling = getattr(viewer, "_nvitk_labeling_panel", None)
+        try:
+            if labeling is not None and (labeling.box_armed() or labeling.extra_tool() is not None):
+                return False
+        except Exception:  # noqa: BLE001
+            pass
+        active = viewer.layers.selection.active
+        mode = str(getattr(getattr(active, "mode", "pan_zoom"), "value", getattr(active, "mode", "pan_zoom")))
+        return mode in ("pan_zoom", "transform", "select")
+
+    def _drag_edge_3d(self, viewer: Any, event: Any) -> Any:
+        """Grab an edge of the box on the 3D canvas and drag it (the camera holds still)."""
+        if not self._edge_drag_allowed(viewer, event):
+            return
+        try:
+            hit = self._edge_hit(event)
+        except Exception:  # noqa: BLE001 (a layer mid-change)
+            hit = None
+        if hit is None:
+            return
+        from nvitk.gui.viz.ray3d import drag_point
+
+        layer = self.layer
+        dims = spatial_dims(layer)
+        camera = viewer.camera
+        held = bool(camera.mouse_pan)
+        camera.mouse_pan = False
+        viewer._nvitk_drag_owner = "roi_box"
+        lo0, hi0 = list(self.lo), list(self.hi)
+        moved = False
+        try:
+            yield
+            while event.type == "mouse_move":
+                point = drag_point(layer, event.position, event.view_direction, hit["point"], hit["along"])
+                if point is not None:
+                    lo, hi = list(lo0), list(hi0)
+                    for axis, side in zip(hit["axes"], hit["sides"]):
+                        k = dims.index(axis)
+                        edge = int(round(float(point[axis]) + 0.5))
+                        if side == 0:
+                            lo[k] = min(edge, hi[k] - 1)
+                        else:
+                            hi[k] = max(edge, lo[k] + 1)
+                    if lo != self.lo or hi != self.hi:
+                        self.set(layer, lo, hi, emit=False)
+                        moved = True
+                yield
+        finally:
+            camera.mouse_pan = held
+            viewer._nvitk_drag_owner = None
+            if moved:
+                self.changed.emit()
+
+    def _hover_edge_3d(self, viewer: Any, event: Any) -> None:
+        """A pointing cursor over a box edge on the 3D canvas (it can be dragged)."""
+        over = False
+        if self._edge_drag_allowed(viewer, event):
+            try:
+                over = self._edge_hit(event) is not None
+            except Exception:  # noqa: BLE001
+                over = False
+        if over == self._hovering_edge:
+            return
+        self._hovering_edge = over
+        try:
+            if over:
+                self._cursor_before = str(viewer.cursor.style)
+                viewer.cursor.style = "pointing"
+            elif self._cursor_before is not None:
+                viewer.cursor.style = self._cursor_before
+                self._cursor_before = None
+        except Exception:  # noqa: BLE001
             pass
 
 

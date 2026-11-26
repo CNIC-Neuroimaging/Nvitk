@@ -231,6 +231,21 @@ def run_app() -> None:
         apply_performance()
     except Exception:  # noqa: BLE001 (a preference must never block a launch)
         pass
+    # The dataset chosen last time with the dataset switch (Data / Analysis / Statmodels), before
+    # any panel opens one; $NVITK_DATASET_ROOT, when set, wins.
+    try:
+        from nvitk.gui.core.dataset_root import restore_last_root
+
+        restore_last_root()
+    except Exception:  # noqa: BLE001
+        pass
+    # Likewise the XNAT profile picked last time (Data ▸ XNAT); $NVITK_XNAT_CONFIG, when set, wins.
+    try:
+        from nvitk.gui.core.xnat_profile import restore_last_profile
+
+        restore_last_profile()
+    except Exception:  # noqa: BLE001
+        pass
     # Register before the viewer exists so its chrome is painted from the nvitk
     # palette on the first frame, rather than flashing Napari's default dark.
     theme_id = register_napari_theme()

@@ -218,7 +218,8 @@ def label_color_table(label_ids: Sequence[int], lut: dict[int, np.ndarray]) -> n
     Built once per layer rather than per slice: it depends only on the ids and
     their colours, neither of which changes while scrolling.
     """
-    ids = [int(v) for v in label_ids if int(v) != 0]
+    # Negative values (a CT read as a label map) draw as background: the lookup clips them to 0.
+    ids = [int(v) for v in label_ids if int(v) > 0]
     if not ids:
         return np.zeros((1, 4), dtype=np.uint8)
     table = np.zeros((max(ids) + 1, 4), dtype=np.uint8)
