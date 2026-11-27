@@ -79,7 +79,7 @@ brain/vascular plotting.
 :::{grid-item-card} {octicon}`workflow` Pipelines
 :link: pipelines/index
 :link-type: doc
-End-to-end batch pipelines: PESA-Fat (CT/PET, DIXON), QVTPy (4D-flow hemodynamics),
+End-to-end batch pipelines: PESA-Health (CT/PET, DIXON), QVTPy (4D-flow hemodynamics),
 TopBrain (vessel segmentation) and CViT (convolutional vision transformers), local or
 SGE-cluster execution.
 :::
@@ -96,7 +96,7 @@ SGE-cluster execution.
 - **A dedicated stats workbench** — `nvitk-statsmodels` runs standalone (no Napari/GPU
   context needed) for mixed-effects models, MMRM, robust regression, SEM/network models,
   and cluster-bootstrap mediation analysis over cohort measurement tables.
-- **Cluster-aware pipelines** — PESA-Fat and QVTPy run identically `--submit local` or
+- **Cluster-aware pipelines** — PESA-Health and QVTPy run identically `--submit local` or
   `--submit sge`, with per-subject array-job dispatch and dependency chaining.
 - **Deep-learning segmentation on nnU-Net** — TopBrain and CViT train, pre-train and infer on
   vendored nnU-Net / nnssl engines; CViT adds convolutional-token vision transformers with an

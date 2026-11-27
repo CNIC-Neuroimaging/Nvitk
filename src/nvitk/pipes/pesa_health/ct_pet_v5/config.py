@@ -1,0 +1,371 @@
+"""Single source of truth for the CT-PET v5 pipeline.
+
+Everything a stage, runner or orchestrator needs to know about this pipeline
+lives here: filesystem fragments (stage subdirectory names, expected NIfTI
+inputs), TotalSegmentator task plan, SGE defaults and the Singularity
+container / model paths used when the pipeline is submitted to a cluster.
+
+Modifying the pipeline configuration (adding a new TS task, renaming a stage
+output, changing SGE resources) should only require edits to this file and,
+when new stage files are added, to :mod:`run` and :mod:`pyproject.toml`.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+import tempfile
+from pathlib import Path
+
+from nvitk.cluster import sge_json as _sj
+from nvitk.core import config_paths
+from nvitk.pipes.pesa_health.common.paths import DEFAULT_MODEL_ROOT
+from nvitk.pipes.pesa_health.ct_pet_v5.labels import (
+    BODY_LABELS,
+    FAT_LABELS,
+    FAT_BATCH_LABELS,
+    FAT_IM_LABELS,
+    MO_LABELS,
+    MUSCLES_LABELS,
+    ORGANS_LABELS,
+)
+
+
+# Pipeline identity
+
+PIPELINE_NAME: str = "ct-pet-v5"
+SGE_JOB_PREFIX: str = "PESAHealth_CTPET"
+
+
+# Filesystem fragments (relative to BatchLayout.results_dir / nifti_dir)
+
+STAGE1_DIR: str = "res_segmentation_ct"        # <subj>/CT/<task>.nii.gz
+STAGE2_DIR: str = "res_post_processing_ct"     # <subj>/CT/{MO,FAT,BODY,ORGANS,MUSCLES}[_VOL].nii.gz
+STAGE3_DIR: str = "res_measure_suv"            # <batch>_SummaryCodebook.xlsx
+
+# Per-subject CT input file stem under ``BatchLayout.nifti_dir / <subject>``.
+INPUT_STEM: str = "CT"
+PET_STEM: str = "PT"
+
+
+# TotalSegmentator task plan
+
+
+@dataclass(frozen=True)
+class CtTask:
+    """A TotalSegmentator task with its optional ROI subset."""
+
+    name: str
+    roi_subset: tuple[str, ...] = ()
+
+
+# Bone classes of the ``total`` model that make up the skeleton mask. TotalSegmentator
+# has no dedicated skeleton task, so the skeleton is assembled from these classes
+# rather than paid for with a second inference pass: every one of them lives in a
+# sub-model the ``total`` roi_subset below already runs, except the ribs part.
+SKELETON_ROIS: tuple[str, ...] = (
+    "sacrum",
+    *(f"vertebrae_{name}" for name in (
+        "S1",
+        "L5", "L4", "L3", "L2", "L1",
+        "T12", "T11", "T10", "T9", "T8", "T7", "T6", "T5", "T4", "T3", "T2", "T1",
+        "C7", "C6", "C5", "C4", "C3", "C2", "C1",
+    )),
+    *(f"rib_{side}_{i}" for side in ("left", "right") for i in range(1, 13)),
+    "sternum",
+    "costal_cartilages",
+    "humerus_left", "humerus_right",
+    "scapula_left", "scapula_right",
+    "clavicula_left", "clavicula_right",
+    "femur_left", "femur_right",
+    "hip_left", "hip_right",
+    "skull",
+)
+
+
+_TOTAL_ORGAN_ROIS: tuple[str, ...] = (
+    "vertebrae_L4",
+    "vertebrae_L3",
+    "spleen",
+    "kidney_right",
+    "kidney_left",
+    "liver",
+    "pancreas",
+    "autochthon_left",
+    "autochthon_right",
+    "small_bowel",
+    "colon",
+    "urinary_bladder",
+    "gallbladder",
+    "stomach"
+)
+
+
+CT_TASKS: tuple[CtTask, ...] = (
+    CtTask("total"), # tuple(dict.fromkeys(_TOTAL_ORGAN_ROIS + SKELETON_ROIS)), # No ROI subset | Check inference time.
+    CtTask("tissue_4_types"),
+    CtTask("thigh_shoulder_muscles"),
+    CtTask("body"),
+)
+
+# Tissue task the fat masks come from. ``tissue_4_types`` splits intermuscular fat
+# out of the subcutaneous label; the 3-class ``tissue_types`` is read only as a
+# fallback for batches segmented before the switch (FAT_IM is then left empty).
+FAT_TASK: str = "tissue_4_types"
+FAT_TASK_FALLBACK: str = "tissue_types"
+
+
+# Stage-2 post-processing knobs
+
+# Extra in-plane (XY only) erosion steps applied to the L3/L4 bone marrow after the
+# isotropic-in-voxels erosion. CT voxels are ~3x thicker than wide, so that erosion
+# trims far more in Z than in XY and leaves the marrow close to the cortex in-plane.
+MO_XY_ERODE: int = 3
+
+# Bone marrow *volume* mask: raw L3/L4 vertebra voxels below this HU, biggest
+# component. Volumes skip the erosions, so the cortex is stripped by density instead.
+MO_VOL_MAX_HU: float = 400.0
+
+# Muscle labels the skeleton is subtracted from (bone marrow uptake would
+# otherwise contaminate their SUV statistics).
+SKELETON_SUBTRACT_FROM: tuple[str, ...] = (
+    "CUADRICEPS_L",
+    "CUADRICEPS_R",
+    "PARAVERTEBRAL_L",
+    "PARAVERTEBRAL_R",
+    "DELTOIDES_L",
+    "DELTOIDES_R",
+    "TRAPECIOS",
+)
+
+# Muscle labels eroded after skeleton subtraction, and by how many iterations.
+# Shaving the border drops the voxels most contaminated by neighbouring bone and
+# fat, leaving a core the SUV statistics can trust.
+MUSCLE_ERODE_AFTER_SKELETON: dict[str, int] = {
+    "CUADRICEPS_L": 1,
+    "CUADRICEPS_R": 1,
+}
+
+# Muscle labels kept as the biggest connected component *per side* instead of a
+# single biggest component: trapezius is one bilateral label whose halves are
+# often disconnected, and a plain biggest-CC keep silently drops one of them.
+MUSCLES_BIGGEST_CC_PER_SIDE: tuple[str, ...] = ("TRAPECIOS",)
+
+# A side is dropped when its biggest component is smaller than this fraction of
+# the other side's, which keeps stray specks from standing in for a missing half.
+MUSCLES_SIDE_MIN_RATIO: float = 0.1
+
+# Last-bed trim of the SUV (measure) masks. The lowest PET bed is the only one that
+# covers the inferior end of the scan (mid-thigh), so its sensitivity falls towards 0
+# there and the noise rises (x1.7-2.5 at the last slice). Voxels of these MUSCLES
+# labels lying below the plane where the noise reaches PET_EDGE_NOISE_LIMIT times the
+# level between two bed centres (41 mm below the leg-bed centre for the 164 mm field
+# and 100 mm step) are cleared from MUSCLES; MUSCLES_VOL keeps them, so volumes do
+# not change. The plane comes from the PET bed geometry (``PT_beds.json`` written by
+# stage 0 next to PT.nii.gz; see :mod:`nvitk.pipes.pesa_health.common.pet_beds`).
+# Without that geometry nothing is trimmed (with a warning).
+PET_EDGE_TRIM: bool = True
+PET_EDGE_TRIM_LABELS: tuple[str, ...] = ("CUADRICEPS_L", "CUADRICEPS_R")
+PET_EDGE_NOISE_LIMIT: float = 1.25
+
+
+# Stage-3 measurement specs
+
+
+@dataclass(frozen=True)
+class SuvSpec:
+    """SUV measurement spec.
+
+    ``column_prefix`` defines the Excel column prefix, with one column per
+    entry in the ``(suffix, stat)`` pairs in :data:`SUV_STATS`. ``mask_file``
+    is the stage-2 label file name (e.g. ``"MUSCLES.nii"``). ``label_ids``
+    holds the integer labels whose union forms the measurement mask. The stage-2
+    SUV masks are already eroded (``stage2_postprocess.SUV_ERODE``).
+    """
+
+    column_prefix: str
+    mask_file: str
+    label_ids: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class VolSpec:
+    """Volume measurement spec (single column).
+
+    Volumes read the ``*_VOL`` stage-2 masks, which skip the post-processing
+    erosions and the dilations of subtracted structures.
+    """
+
+    column: str
+    mask_file: str
+    label_ids: tuple[int, ...]
+
+
+# (column suffix -> Measurer.suv stat name)
+SUV_STATS: tuple[tuple[str, str], ...] = (
+    ("SUVMAX", "max"),
+    ("SUVmean", "mean"),
+    ("SUV95p", "p95"),
+    ("SUV99p", "p99"),
+)
+
+
+SUV_SPECS: tuple[SuvSpec, ...] = (
+    # Vertebrae / MO
+    SuvSpec("L3", "MO.nii", (MO_LABELS["L3"],)),
+    SuvSpec("L4", "MO.nii", (MO_LABELS["L4"],)),
+    SuvSpec("MO", "MO.nii", (MO_LABELS["L3"], MO_LABELS["L4"])),
+    # Fat
+    SuvSpec("GRASA_V", "FAT.nii", (FAT_LABELS["GRASA_V"],)),
+    SuvSpec("GRASA_SC", "FAT.nii", (FAT_LABELS["GRASA_SC"],)),
+    # Fat Batch
+    SuvSpec("GRASA_V_BATCH", "FAT_BATCH.nii", (FAT_BATCH_LABELS["GRASA_V_BATCH"],)),
+    SuvSpec("GRASA_SC_BATCH", "FAT_BATCH.nii", (FAT_BATCH_LABELS["GRASA_SC_BATCH"],)),
+    # Organs
+    SuvSpec("HIGADO", "ORGANS.nii", (ORGANS_LABELS["HIGADO"],)),
+    SuvSpec("BAZO", "ORGANS.nii", (ORGANS_LABELS["BAZO"],)),
+    SuvSpec("PANCREAS", "ORGANS.nii", (ORGANS_LABELS["PANCREAS"],)),
+    # Muscles (hemisphere-split with bilateral union)
+    SuvSpec("CUADRICEPS_L", "MUSCLES.nii", (MUSCLES_LABELS["CUADRICEPS_L"],)),
+    SuvSpec("CUADRICEPS_R", "MUSCLES.nii", (MUSCLES_LABELS["CUADRICEPS_R"],)),
+    SuvSpec(
+        "CUADRICEPS_LR",
+        "MUSCLES.nii",
+        (MUSCLES_LABELS["CUADRICEPS_L"], MUSCLES_LABELS["CUADRICEPS_R"]),
+    ),
+    SuvSpec("PARAVERTEBRAL_L", "MUSCLES.nii", (MUSCLES_LABELS["PARAVERTEBRAL_L"],)),
+    SuvSpec("PARAVERTEBRAL_R", "MUSCLES.nii", (MUSCLES_LABELS["PARAVERTEBRAL_R"],)),
+    SuvSpec(
+        "PARAVERTEBRAL_LR",
+        "MUSCLES.nii",
+        (MUSCLES_LABELS["PARAVERTEBRAL_L"], MUSCLES_LABELS["PARAVERTEBRAL_R"]),
+    ),
+    SuvSpec("DELTOIDES_L", "MUSCLES.nii", (MUSCLES_LABELS["DELTOIDES_L"],)),
+    SuvSpec("DELTOIDES_R", "MUSCLES.nii", (MUSCLES_LABELS["DELTOIDES_R"],)),
+    SuvSpec(
+        "DELTOIDES_LR",
+        "MUSCLES.nii",
+        (MUSCLES_LABELS["DELTOIDES_L"], MUSCLES_LABELS["DELTOIDES_R"]),
+    ),
+    SuvSpec("TRAPECIOS", "MUSCLES.nii", (MUSCLES_LABELS["TRAPECIOS"],)),
+)
+
+
+VOL_SPECS: tuple[VolSpec, ...] = (
+    VolSpec("GRASA_V_VOL", "FAT_VOL.nii", (FAT_LABELS["GRASA_V"],)),
+    VolSpec("GRASA_SC_VOL", "FAT_VOL.nii", (FAT_LABELS["GRASA_SC"],)),
+    VolSpec("GRASA_V_BATCH_VOL", "FAT_BATCH_VOL.nii", (FAT_BATCH_LABELS["GRASA_V_BATCH"],)),
+    VolSpec("GRASA_SC_BATCH_VOL", "FAT_BATCH_VOL.nii", (FAT_BATCH_LABELS["GRASA_SC_BATCH"],)),
+    VolSpec("GRASA_IM_PIERNAS_VOL", "FAT_IM.nii", (FAT_IM_LABELS["GRASA_IM_PIERNAS"],)),
+    VolSpec("GRASA_IM_TORAX_VOL", "FAT_IM.nii", (FAT_IM_LABELS["GRASA_IM_TORAX"],)),
+    VolSpec("CORP_VOL", "BODY.nii", (BODY_LABELS["BODY"],)),
+    VolSpec("HIGADO_VOL", "ORGANS_VOL.nii", (ORGANS_LABELS["HIGADO"],)),
+    VolSpec("BAZO_VOL", "ORGANS_VOL.nii", (ORGANS_LABELS["BAZO"],)),
+    VolSpec("PANCREAS_VOL", "ORGANS_VOL.nii", (ORGANS_LABELS["PANCREAS"],)),
+    VolSpec("CUADRICEPS_L_VOL", "MUSCLES_VOL.nii", (MUSCLES_LABELS["CUADRICEPS_L"],)),
+    VolSpec("CUADRICEPS_R_VOL", "MUSCLES_VOL.nii", (MUSCLES_LABELS["CUADRICEPS_R"],)),
+    VolSpec("PARAVERTEBRAL_L_VOL", "MUSCLES_VOL.nii", (MUSCLES_LABELS["PARAVERTEBRAL_L"],)),
+    VolSpec("PARAVERTEBRAL_R_VOL", "MUSCLES_VOL.nii", (MUSCLES_LABELS["PARAVERTEBRAL_R"],)),
+    VolSpec("DELTOIDES_L_VOL", "MUSCLES_VOL.nii", (MUSCLES_LABELS["DELTOIDES_L"],)),
+    VolSpec("DELTOIDES_R_VOL", "MUSCLES_VOL.nii", (MUSCLES_LABELS["DELTOIDES_R"],)),
+    VolSpec("TRAPECIOS_VOL", "MUSCLES_VOL.nii", (MUSCLES_LABELS["TRAPECIOS"],)),
+    VolSpec("MO_L3_VOL", "MO_VOL.nii", (MO_LABELS["L3"],)),
+    VolSpec("MO_L4_VOL", "MO_VOL.nii", (MO_LABELS["L4"],)),
+)
+
+
+# SGE / Singularity defaults
+
+SGE_PROJECT: str = "GPU"
+SGE_ACCOUNT: str = "Prod"
+SGE_NGPU: int = 1
+SGE_H_VMEM: str = "50G"
+SGE_QUEUE: str | None = None
+
+SGE_CPU_H_VMEM: str = "32G"
+SGE_CPU_NGPU: int = 0
+
+SGE_LOG_DIR: Path = Path(tempfile.gettempdir()) / "nvitk-sge" / "logs" / "PESAHealth-CT-PET"
+SGE_ERR_DIR: Path = Path(tempfile.gettempdir()) / "nvitk-sge" / "errs" / "PESAHealth-CT-PET"
+
+CONTAINER_PATH: Path | None = None  # sge.json: paths.nvitk_container
+MODELS_PATH: Path = DEFAULT_MODEL_ROOT
+
+def _apply_config() -> None:
+    """Merge ``sge.json`` over this module's defaults.
+
+    Run once at import and again whenever the configuration directory is redirected,
+    so a late ``--config-dir`` reaches these constants too.
+    """
+    global CONTAINER_PATH, SGE_ACCOUNT, SGE_CPU_H_VMEM, SGE_CPU_NGPU, SGE_ERR_DIR, SGE_H_VMEM, SGE_LOG_DIR, SGE_NGPU, SGE_PROJECT, SGE_QUEUE, _er_ct, _lg_ct, _paths_ct, _pipe_ct
+    _pipe_ct = _sj.merged_pipeline_flat("pesa_health_ct_pet")
+    _paths_ct = _sj.paths_section()
+    if (v := _pipe_ct.get("sge_project")) is not None:
+        SGE_PROJECT = str(v)
+    if (v := _pipe_ct.get("sge_account")) is not None:
+        SGE_ACCOUNT = str(v)
+    if (v := _pipe_ct.get("sge_ngpu")) is not None:
+        SGE_NGPU = int(v)
+    if (v := _pipe_ct.get("sge_h_vmem")) is not None:
+        SGE_H_VMEM = str(v)
+    if "sge_queue" in _pipe_ct:
+        SGE_QUEUE = _pipe_ct["sge_queue"]
+    if (v := _pipe_ct.get("sge_cpu_h_vmem")) is not None:
+        SGE_CPU_H_VMEM = str(v)
+    if (v := _pipe_ct.get("sge_cpu_ngpu")) is not None:
+        SGE_CPU_NGPU = int(v)
+    _lg_ct, _er_ct = _sj.resolve_log_err_dirs(
+        paths=_paths_ct,
+        pipe=_pipe_ct,
+        fallback_log=SGE_LOG_DIR,
+        fallback_err=SGE_ERR_DIR,
+    )
+    SGE_LOG_DIR, SGE_ERR_DIR = _lg_ct, _er_ct
+    CONTAINER_PATH = _sj.resolve_nvitk_container(pipe=_pipe_ct, fallback=CONTAINER_PATH)
+
+
+_apply_config()
+config_paths.register_reload_hook(_apply_config)
+if (v := _pipe_ct.get("default_sge_model_root") or _pipe_ct.get("models_path")):
+    MODELS_PATH = Path(os.path.expanduser(str(v)))
+
+
+__all__ = [
+    "PIPELINE_NAME",
+    "SGE_JOB_PREFIX",
+    "STAGE1_DIR",
+    "STAGE2_DIR",
+    "STAGE3_DIR",
+    "INPUT_STEM",
+    "PET_STEM",
+    "CtTask",
+    "CT_TASKS",
+    "FAT_TASK",
+    "FAT_TASK_FALLBACK",
+    "SKELETON_ROIS",
+    "SKELETON_SUBTRACT_FROM",
+    "MUSCLE_ERODE_AFTER_SKELETON",
+    "MUSCLES_BIGGEST_CC_PER_SIDE",
+    "MUSCLES_SIDE_MIN_RATIO",
+    "PET_EDGE_TRIM",
+    "PET_EDGE_TRIM_LABELS",
+    "PET_EDGE_NOISE_LIMIT",
+    "MO_XY_ERODE",
+    "MO_VOL_MAX_HU",
+    "SuvSpec",
+    "VolSpec",
+    "SUV_STATS",
+    "SUV_SPECS",
+    "VOL_SPECS",
+    "SGE_PROJECT",
+    "SGE_ACCOUNT",
+    "SGE_NGPU",
+    "SGE_H_VMEM",
+    "SGE_QUEUE",
+    "SGE_CPU_H_VMEM",
+    "SGE_CPU_NGPU",
+    "SGE_LOG_DIR",
+    "SGE_ERR_DIR",
+    "CONTAINER_PATH",
+    "MODELS_PATH",
+]

@@ -6,10 +6,9 @@
 * :mod:`.xnat_rules`: ``xnat_rules.json``, XNAT projects, the rules that classify a scan's
   series description into a sequence, asset slots and pipeline resources.
 
-Both fall back to packaged defaults (``defaults/pesa_*.json``) that reproduce nvitk's original
-PESA-Brain / PESA-Fat behaviour, so an install without either file behaves as before.
-``nvitk-config generate-pesa`` writes those defaults out for editing; ``nvitk-config init``
-seeds generic starters.
+Both fall back to empty packaged defaults (``defaults/*.json``): an install without either file
+imports nothing and classifies nothing until they are configured. ``nvitk-config init`` seeds
+generic starters.
 """
 
 from __future__ import annotations

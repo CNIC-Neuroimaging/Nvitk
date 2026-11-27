@@ -285,8 +285,8 @@ TABLE: dict[str, ToolMeta] = {
     "viz_voxelwise_3d": T("visualization", "Neuro", "smri asl", "neuro"),
     "viz_brain_vascular_map": T("visualization", "Neuro", "smri mra", "neuro"),
     # Pipelines
-    "pipeline_pesa_fat_ctpet": T("pipelines", "Whole-body", "ct pet", "whole-body"),
-    "pipeline_pesa_fat_dixon": T("pipelines", "Whole-body", "dixon", "whole-body"),
+    "pipeline_pesa_health_ctpet": T("pipelines", "Whole-body", "ct pet", "whole-body"),
+    "pipeline_pesa_health_dixon": T("pipelines", "Whole-body", "dixon", "whole-body"),
     "pipeline_qvtpy": T("pipelines", "Vascular", "4dflow mra", "vascular", suite="QVTpy"),
     "fsl_anat": T("pipelines", "Structural", "smri", "neuro", suite="FSL"),
     # Data

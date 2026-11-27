@@ -1,8 +1,7 @@
 """Dataset & XNAT setup (Data & QC module): configure, create and fill a dataset; map XNAT scans.
 
 * **Configuration**: which ``dataset.json`` / ``xnat_rules.json`` are in force (or the packaged
-  PESA defaults), with buttons to write a starter or the PESA configuration, open the files and
-  validate them.
+  empty defaults), with buttons to write a starter, open the files and validate them.
 * **New dataset**: scaffold an empty dataset folder (catalog, schemas, tables).
 * **Import a spreadsheet**: opens the import editor (:mod:`nvitk.gui.panels.import_editor`): edit
   the sheet, map its columns to variables (and, for images, regions and a pipeline version), check
@@ -106,8 +105,7 @@ class DatasetSetupPanel(QWidget):
         cfg.add(self._config_text)
         row = QHBoxLayout()
         for text, tip, slot in (
-            ("Write PESA config", "dataset.json + xnat_rules.json reproducing the PESA setup, to edit.", self._write_pesa),
-            ("Write starter", "Generic starter files to fill in for another project.", self._write_starter),
+            ("Write starter", "Generic starter files to fill in.", self._write_starter),
             ("Open files", "Open the configuration files in your editor.", self._open_files),
             ("Validate", "Check both files against their schemas.", self._validate),
         ):
@@ -130,7 +128,7 @@ class DatasetSetupPanel(QWidget):
         row.addWidget(browse)
         row.addWidget(create)
         new.add_layout(row)
-        new.add(hint_label("Point settings.json “db.root” (or $NVITK_DATASET_ROOT) at it to use it."))
+        new.add(hint_label("Point settings.json “dataset.root” (or $NVITK_DATASET_ROOT) at it to use it."))
         root.addWidget(new)
         root.addWidget(self._build_from_scratch())
 
@@ -256,7 +254,7 @@ class DatasetSetupPanel(QWidget):
         try:
             from nvitk.db.xnat_config import load_xnat_profile
 
-            default = str(load_xnat_profile(None).get("project") or "")
+            default = str(load_xnat_profile(None).get("default_project") or "")
             if default:
                 self._sync_project.setCurrentText(default)
         except Exception:  # noqa: BLE001
@@ -340,7 +338,7 @@ class DatasetSetupPanel(QWidget):
         lines = []
         for name, module in (("dataset.json", dataset_config), ("xnat_rules.json", xnat_rules)):
             path = module.config_path()
-            lines.append(f"{name}: {path if path is not None else 'not found — the packaged PESA default is used'}")
+            lines.append(f"{name}: {path if path is not None else 'not found — the packaged empty default is used'}")
         try:
             from nvitk.gui.core.dataset_root import current_root
 
@@ -356,24 +354,6 @@ class DatasetSetupPanel(QWidget):
         from nvitk.core import config_paths
 
         return config_paths.config_dir() or config_paths.default_config_dir()
-
-    def _write_pesa(self) -> None:
-        import json
-
-        from nvitk.db.config import dataset_config, xnat_rules
-
-        target = self._config_dir()
-        target.mkdir(parents=True, exist_ok=True)
-        written = []
-        for name, doc in ((dataset_config.CONFIG_NAME, dataset_config.default_document()),
-                          (xnat_rules.CONFIG_NAME, xnat_rules.default_document())):
-            path = target / name
-            if path.exists():
-                continue
-            path.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-            written.append(str(path))
-        self._config_text.setText(("Wrote " + ", ".join(written)) if written else f"Both files already exist in {target}.")
-        self.refresh()
 
     def _write_starter(self) -> None:
         import shutil

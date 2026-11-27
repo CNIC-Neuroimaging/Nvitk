@@ -1,4 +1,4 @@
-"""Atlases a site configures by path: the ``atlas`` block of ``settings.json`` (and its env vars).
+"""Atlases a site configures by path: ``atlas.json`` (and its env vars).
 
 These are the lab's own files nothing can fetch (the Desikan ``aparc+aseg`` in MNI space, the
 arterial-territory atlas), located by :mod:`nvitk.viz.atlas_sources`. The Desikan one is named
@@ -35,7 +35,7 @@ def list_atlases() -> list[AtlasInfo]:
                     source=SOURCE,
                     kind="labels",
                     space="MNI152",
-                    description=f"{path} (settings.json 'atlas' block / {atlas_sources.ENV_ATLAS_ROOT}).",
+                    description=f"{path} (atlas.json / {atlas_sources.ENV_ATLAS_ROOT}).",
                     extra={"image": str(path), "key": key},
                 )
             )

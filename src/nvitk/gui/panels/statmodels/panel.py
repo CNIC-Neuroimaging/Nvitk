@@ -30,7 +30,7 @@ class StatmodelsPanel(QWidget):
             "morphometrics — several measurements at once — plus clinical / cognitive covariates "
             "from the dataset catalog. Each tab is an independent session with its own dataframe "
             "and model; right-click a session's tab to pull its dataframe into the current one. "
-            "Models are saved under db.statmodels_root."
+            "Models are saved under dataset.statmodels_root."
         )
         hint.setWordWrap(True)
 

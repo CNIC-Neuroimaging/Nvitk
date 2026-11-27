@@ -1,6 +1,6 @@
 """Manim animation: the noisy inferior edge of a whole-body PET and the proposed quadriceps trim.
 
-Explains, on one PESA-Fat CT-PET subject, why the last slices of the PET (cut through the thighs)
+Explains, on one PESA-Health CT-PET subject, why the last slices of the PET (cut through the thighs)
 are noisy and what the proposed per-subject trim of the quadriceps SUV mask would do:
 
 1. the whole-body PET ends half-way down the thighs;
@@ -219,7 +219,7 @@ class PetBedEdge(Scene):
     def title_card(self) -> None:
         t1 = T("SUV del cuádriceps en el borde inferior del PET", 34, INK, bold=True)
         t2 = T("por qué los últimos cortes son ruidosos y cuánto recortar en cada sujeto", 22, INK_SOFT)
-        t3 = T("PET-TC de cuerpo entero · PESA-Fat · protocolo PESA PET V5", 18, INK_SOFT)
+        t3 = T("PET-TC de cuerpo entero · PESA-Health · protocolo PESA PET V5", 18, INK_SOFT)
         g = VGroup(t1, t2, t3).arrange(DOWN, buff=0.3)
         self.play(FadeIn(g, shift=UP * 0.15), run_time=1.0)
         self.wait_(2.5)

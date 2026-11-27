@@ -1,5 +1,5 @@
 """Precompute for ``pet_bed_edge_manim.py``: the noisy inferior edge of a whole-body PET and the
-proposed per-subject trim of the quadriceps SUV mask (PESA-Fat CT-PET).
+proposed per-subject trim of the quadriceps SUV mask (PESA-Health CT-PET).
 
 Reads one subject's PET DICOMs, CT and stage-2 masks and writes everything the scene draws:
 

@@ -195,7 +195,7 @@ def tool_models_binding(tool_id: str) -> tuple[Path | None, dict[str, str]]:
     no ``-B`` for models at all, and ``TOTALSEG_HOME_DIR`` pointed at a *host* path
     that does not exist inside the container, which is what made TotalSegmentator
     try to create ``/models/imaging/...`` on the node and fail. ToPBrain's are
-    under ``pipelines.topbrain_paths.cluster_model_root``.
+    under ``pipelines.topbrain.cluster_model_root``.
     """
     tid = str(tool_id)
     if tid == "seg_totalsegmentator":

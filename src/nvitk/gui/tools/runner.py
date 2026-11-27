@@ -1789,7 +1789,7 @@ def _run_gui_tool(
     if tool_id == "seg_eicab":
         notify(
             "eICAB is cluster-oriented. Use: nvitk-eicab --help "
-            "or run the QVTpy / PESA-FAT pipeline stages with eICAB enabled."
+            "or run the QVTpy / PESA-HEALTH pipeline stages with eICAB enabled."
         )
         return None
 

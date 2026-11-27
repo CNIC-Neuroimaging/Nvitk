@@ -1,11 +1,11 @@
-"""The QC tab: one place to review QVTPy, eICAB and PESA-Fat results, subject by subject.
+"""The QC tab: one place to review QVTPy, eICAB and PESA-Health results, subject by subject.
 
-One pipeline choice at the top (QVTPy · 4D flow, eICAB · TOF, PESA-Fat · CT-PET / Dixon) drives
-two sections, laid out like the PESA-Fat review:
+One pipeline choice at the top (QVTPy · 4D flow, eICAB · TOF, PESA-Health · CT-PET / Dixon) drives
+two sections, laid out like the PESA-Health review:
 
 * **Subject**: where the subjects come from and which one to load. QVTPy and eICAB read the XNAT
-  catalog or local NIfTI / results roots (:class:`~nvitk.gui.panels.qc.QcPanel`); PESA-Fat reads
-  the pipeline's data preset (cohort folders) (:class:`~nvitk.gui.panels.pesa_fat_qc.PesaFatQcPanel`).
+  catalog or local NIfTI / results roots (:class:`~nvitk.gui.panels.qc.QcPanel`); PESA-Health reads
+  the pipeline's data preset (cohort folders) (:class:`~nvitk.gui.panels.pesa_health_qc.PesaHealthQcPanel`).
   Subjects already reviewed are tagged ✓ (all decided) or ◑ (some).
 * **Review**: the loaded subject's measurements with a status and a comment per row, saved to
   the dataset:
@@ -16,8 +16,8 @@ two sections, laid out like the PESA-Fat review:
   - eICAB: per vessel geometry / lesion / variant groups of the TOF morphometrics
     (:class:`~nvitk.gui.viz.tof_qc_review.TofReviewPanel`), into ``image_measurements.qc_status``
     (pipeline ``tof_morpho_v2``);
-  - PESA-Fat: per structure segmentation / measurement, tinted by the expected ranges, into
-    ``pesa_fat_qc_reviews``.
+  - PESA-Health: per structure segmentation / measurement, tinted by the expected ranges, into
+    ``pesa_health_qc_reviews``.
 
 The two sections share a splitter, so the subject list and the review table can be given the
 room each needs.
@@ -37,7 +37,7 @@ from nvitk.gui.core.widgets import Section, SegmentedButtons
 PIPELINES: tuple[tuple[str, str, str], ...] = (
     ("qvtpy", "QVTPy · 4D flow", "wave"),
     ("eicab", "eICAB · TOF", "vessel"),
-    ("pesa_fat", "PESA-Fat", "droplet"),
+    ("pesa_health", "PESA-Health", "droplet"),
 )
 PREF_KEY = "qc.pipeline"
 
@@ -58,7 +58,7 @@ class QcHub(QWidget):
     def __init__(self, viewer: Any, app_state: dict[str, Any], *, on_inputs_opened: Any = None,
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        from nvitk.gui.panels.pesa_fat_qc import PesaFatQcPanel
+        from nvitk.gui.panels.pesa_health_qc import PesaHealthQcPanel
         from nvitk.gui.panels.qc import QcPanel
         from nvitk.gui.viz.qc_review_panel import QcMeasurementsPanel
         from nvitk.gui.viz.tof_qc_review import TofReviewPanel
@@ -78,15 +78,15 @@ class QcHub(QWidget):
         self.tof_review = TofReviewPanel()
         self.subjects = QcPanel(viewer, app_state, on_inputs_opened=on_inputs_opened, embedded=True,
                                 review_panel=self.qvtpy_review, tof_review=self.tof_review)
-        self.pesa_fat = PesaFatQcPanel(viewer, embedded=True)
-        self.pesa_fat.setParent(self)
-        self.pesa_fat.hide()
+        self.pesa_health = PesaHealthQcPanel(viewer, embedded=True)
+        self.pesa_health.setParent(self)
+        self.pesa_health.hide()
 
         self._pickers = QStackedWidget()
         self._pickers.addWidget(self.subjects)
-        self._pickers.addWidget(self.pesa_fat.picker)
+        self._pickers.addWidget(self.pesa_health.picker)
         self._reviews = QStackedWidget()
-        for widget in (self.qvtpy_review, self.tof_review, self.pesa_fat.review):
+        for widget in (self.qvtpy_review, self.tof_review, self.pesa_health.review):
             self._reviews.addWidget(widget)
 
         subject = Section("Subject", icon_name="database", hue="blue", pref_key="qc.subject")
@@ -114,14 +114,14 @@ class QcHub(QWidget):
         return self._choice.current()
 
     def set_pipeline(self, key: str, *, remember: bool = True) -> None:
-        """Review pipeline *key* (``qvtpy``, ``eicab`` or ``pesa_fat``)."""
+        """Review pipeline *key* (``qvtpy``, ``eicab`` or ``pesa_health``)."""
         if self._choice.current() != key:
             self._choice.set_current(key)
-        if key == "pesa_fat":
+        if key == "pesa_health":
             self._pickers.setCurrentIndex(1)
             self._reviews.setCurrentIndex(2)
             if self.isVisible():
-                self.pesa_fat.ensure_loaded()
+                self.pesa_health.ensure_loaded()
         else:
             self._pickers.setCurrentIndex(0)
             self._reviews.setCurrentIndex(0 if key == "qvtpy" else 1)
@@ -136,8 +136,8 @@ class QcHub(QWidget):
 
     def showEvent(self, event: Any) -> None:  # noqa: N802
         super().showEvent(event)
-        if self.pipeline() == "pesa_fat":
-            self.pesa_fat.ensure_loaded()
+        if self.pipeline() == "pesa_health":
+            self.pesa_health.ensure_loaded()
 
 
 __all__ = ["PIPELINES", "QcHub"]

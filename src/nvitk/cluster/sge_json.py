@@ -1,7 +1,29 @@
 """Read ``sge.json`` and merge its overlays onto Python defaults.
 
 Where the file lives is decided by :mod:`nvitk.core.config_paths`; this module only knows how
-to interpret its contents.
+to interpret its contents. The document has four groups::
+
+    {
+      "schema": "nvitk.sge.v2",
+      "defaults": {             # qsub settings every pipeline starts from
+        "sge_project", "sge_account", "sge_queue", "sge_ngpu", "sge_h_vmem", "sge_pe_smp"
+      },
+      "paths": {                # host-wide cluster locations
+        "nvitk_src_dir", "nvitk_container", "container_root", "gui_sge_job_root",
+        "sge_scripts_dir", "sge_log_root", "sge_err_root", "cluster_host_aliases"
+      },
+      "sshfs": {                # how cluster storage is mounted on the workstation
+        "mount_root", "extra_roots", "reuse_existing_mounts", "idle_ttl_seconds", "options"
+      },
+      "pipelines": {            # one block per pipeline: qsub overrides *and* data roots
+        "<id>": {"sge_h_vmem": ..., "log_subdir": ..., "local_nifti_root": ...,
+                 "cluster_nifti_root": ..., ...}
+      }
+    }
+
+A pipeline block holds everything about that pipeline: the qsub keys it overrides on top of
+``defaults``, its container / script / log settings, and its data roots (``local_*`` for
+``--submit local``, ``cluster_*`` for ``--submit sge``).
 """
 
 from __future__ import annotations
@@ -68,14 +90,20 @@ def sge_scripts_dir() -> str:
     return str(raw).strip().rstrip("/")
 
 
-#: Default local base for sshfs mountpoints when ``paths.sshfs_mount_root`` is unset.
+def sshfs_section() -> dict[str, Any]:
+    """The ``sshfs`` block of ``sge.json`` (empty dict if absent)."""
+    raw = load_sge_document().get("sshfs")
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+#: Default local base for sshfs mountpoints when ``sshfs.mount_root`` is unset.
 DEFAULT_SSHFS_MOUNT_ROOT = "~/.cache/nvitk/sshfs"
 
 #: Seconds an idle sshfs mount is kept alive before being torn down
-#: (``paths.sshfs_idle_ttl_seconds``).
+#: (``sshfs.idle_ttl_seconds``).
 DEFAULT_SSHFS_IDLE_TTL_SECONDS: float = 300.0
 
-#: ``-o`` options applied to every sshfs mount when ``paths.sshfs_options`` is unset.
+#: ``-o`` options applied to every sshfs mount when ``sshfs.options`` is unset.
 #: ``reconnect`` plus the keepalives matter for long pipeline runs: without them a transient
 #: network drop leaves a mountpoint whose every syscall fails until it is unmounted by hand.
 DEFAULT_SSHFS_OPTIONS: tuple[str, ...] = (
@@ -86,8 +114,8 @@ DEFAULT_SSHFS_OPTIONS: tuple[str, ...] = (
 
 
 def sshfs_mount_root() -> Path:
-    """Local directory sshfs mountpoints are created under (``paths.sshfs_mount_root``)."""
-    raw = paths_section().get("sshfs_mount_root")
+    """Local directory sshfs mountpoints are created under (``sshfs.mount_root``)."""
+    raw = sshfs_section().get("mount_root")
     if raw is None or not str(raw).strip():
         raw = DEFAULT_SSHFS_MOUNT_ROOT
     return Path(os.path.expanduser(str(raw).strip()))
@@ -108,13 +136,13 @@ def resolve_host_alias(host: str) -> str:
 
 
 def sshfs_reuse_existing_mounts() -> bool:
-    """Whether to reuse an sshfs mount somebody else already made (``paths.sshfs_reuse_existing_mounts``).
+    """Whether to reuse an sshfs mount somebody else already made (``sshfs.reuse_existing_mounts``).
 
     On by default. A workstation that already keeps cluster storage mounted -- say
     ``samwise:/BIOIT_IMAGE`` under ``~/NetVolumes`` -- should not gain a second connection to
     the same tree just because nvitk wants a subdirectory of it.
     """
-    raw = paths_section().get("sshfs_reuse_existing_mounts")
+    raw = sshfs_section().get("reuse_existing_mounts")
     if raw is None or not str(raw).strip():
         return True
     return str(raw).strip().lower() not in {"0", "false", "no", "off"}
@@ -130,7 +158,7 @@ def sshfs_idle_ttl_seconds() -> float:
 
     ``0`` restores unmount-as-soon-as-unused.
     """
-    raw = paths_section().get("sshfs_idle_ttl_seconds")
+    raw = sshfs_section().get("idle_ttl_seconds")
     if raw is None or not str(raw).strip():
         return DEFAULT_SSHFS_IDLE_TTL_SECONDS
     try:
@@ -140,8 +168,8 @@ def sshfs_idle_ttl_seconds() -> float:
 
 
 def sshfs_options() -> list[str]:
-    """``-o`` options for every sshfs mount (``paths.sshfs_options``, else the defaults)."""
-    raw = paths_section().get("sshfs_options")
+    """``-o`` options for every sshfs mount (``sshfs.options``, else the defaults)."""
+    raw = sshfs_section().get("options")
     if not isinstance(raw, (list, tuple)) or not raw:
         return list(DEFAULT_SSHFS_OPTIONS)
     return [str(opt).strip() for opt in raw if str(opt).strip()]
@@ -163,12 +191,12 @@ def _cluster_root(value: Any) -> str:
 
 
 def sshfs_extra_roots() -> list[str]:
-    """Extra cluster roots the sshfs layer may mount (``paths.sshfs_extra_roots``).
+    """Extra cluster roots the sshfs layer may mount (``sshfs.extra_roots``).
 
     An escape hatch for cluster directories no ``sge.json`` key names, so adding one does
     not require a code change.
     """
-    raw = paths_section().get("sshfs_extra_roots")
+    raw = sshfs_section().get("extra_roots")
     if not isinstance(raw, (list, tuple)):
         return []
     return [root for root in (_cluster_root(item) for item in raw) if root]
@@ -243,7 +271,8 @@ def defaults_section() -> dict[str, Any]:
 
 
 def pipeline_section(pipeline_id: str) -> dict[str, Any]:
-    """The ``pipelines[pipeline_id]`` block of ``sge.json`` (empty dict if absent)."""
+    """The ``pipelines[pipeline_id]`` block of ``sge.json`` (empty dict if absent): the
+    pipeline's qsub overrides, container/script/log settings and data roots together."""
     doc = load_sge_document()
     pipes = doc.get("pipelines")
     if not isinstance(pipes, dict):

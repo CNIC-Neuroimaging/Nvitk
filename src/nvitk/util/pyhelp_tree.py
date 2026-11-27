@@ -535,7 +535,7 @@ def _render_static_submodule(node: CatalogNode) -> Group:
 
 def _render_static_pipeline_tools(tools: list[ToolEntry]) -> Group:
     """Group pipeline commands by cohort for readability."""
-    pesa = [t for t in tools if "pesa-fat" in t.command]
+    pesa = [t for t in tools if "pesa-health" in t.command]
     brain = [t for t in tools if t.command.startswith("nvitk-qvtpy")]
     other = [t for t in tools if t not in pesa and t not in brain]
 
@@ -554,7 +554,7 @@ def _render_static_pipeline_tools(tools: list[ToolEntry]) -> Group:
         return out
 
     parts: list[RenderableType] = []
-    parts.extend(block("PESA-Fat", pesa, "yellow"))
+    parts.extend(block("PESA-Health", pesa, "yellow"))
     parts.extend(block("PESA-Brain", brain, "bright_blue"))
     parts.extend(block("Other", other, "gold1"))
     return Group(*parts)

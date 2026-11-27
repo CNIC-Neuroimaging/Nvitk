@@ -43,7 +43,7 @@ def open_repo() -> DataRepo:
 def statmodels_root(repo: DataRepo | None = None) -> Path:
     """Ensure and return the directory holding saved model configurations and exports.
 
-    Read from ``settings.json`` ``db.statmodels_root``. Saved models are a researcher's own
+    Read from ``settings.json`` ``dataset.statmodels_root``. Saved models are a researcher's own
     working output rather than dataset content (they are written far more often than the
     dataset changes, and are usefully kept on a backed-up share), so they get their own
     location instead of living inside the dataset tree.
@@ -51,9 +51,9 @@ def statmodels_root(repo: DataRepo | None = None) -> Path:
     Falls back to ``<dataset>/nvitk-statmodels`` when the key is unset, which is where models
     were kept before this was configurable, so an existing setup keeps working untouched.
     """
-    from nvitk.db.settings_paths import load_db_settings_block
+    from nvitk.db.settings_paths import load_dataset_settings_block
 
-    configured = load_db_settings_block().get("statmodels_root")
+    configured = load_dataset_settings_block().get("statmodels_root")
     if configured is not None and str(configured).strip():
         root = Path(os.path.expanduser(str(configured).strip()))
     else:

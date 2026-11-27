@@ -1,6 +1,6 @@
 """Anatomical orientation marker on the 3D canvas: a person and R/L, A/P, H/F arrows.
 
-The same marker the PESA-FAT QC reports draw in their 3D renders
+The same marker the PESA-HEALTH QC reports draw in their 3D renders
 (:mod:`nvitk.viz.orientation_marker`): three double-headed arrows lettered with
 the anatomical direction of each end, and a small standing figure posed in the
 same frame, so the subject's pose can be read off at a glance.

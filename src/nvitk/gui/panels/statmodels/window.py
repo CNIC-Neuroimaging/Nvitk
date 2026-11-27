@@ -7507,7 +7507,7 @@ class StatmodelsWindow(QMainWindow):
         Decide whether to evaluate expression-kind derived columns from a loaded config.
 
         Expressions are code. A config saved by this tool under the configured model directory
-        (``db.statmodels_root``) is the user's own work; one browsed to from anywhere else might
+        (``dataset.statmodels_root``) is the user's own work; one browsed to from anywhere else might
         not be, so ask before evaluating it. The boundary follows :func:`statmodels_root`, so
         pointing that setting elsewhere moves the trusted location with it.
         """

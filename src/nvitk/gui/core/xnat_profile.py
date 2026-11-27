@@ -129,8 +129,8 @@ def profile_summary(path: str | Path | None) -> dict[str, str]:
         return out
     nested = data.get("xnat") if isinstance(data.get("xnat"), dict) else None
     data = nested or data
-    for key in ("server", "project", "user"):
-        value = data.get(key)
+    for key, source in (("server", "server"), ("project", "default_project"), ("user", "user")):
+        value = data.get(source)
         out[key] = str(value).strip() if value is not None else ""
     server = out["server"]
     host = urlparse(server if "://" in server else f"//{server}").hostname if server else ""

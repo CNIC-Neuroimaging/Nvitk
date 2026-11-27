@@ -110,7 +110,7 @@ autoapi_ignore = [
     # Numeric-prefixed one-off validation scripts and a Singularity sitecustomize hook —
     # not part of the documented public API, and their names (leading digits) don't nest
     # cleanly into the package toctree anyway.
-    "*/pipes/pesa_fat/common/validation/*",
+    "*/pipes/pesa_health/common/validation/*",
     "*/segmentation/eicab/cpu_limit_site/sitecustomize.py",
 ]
 

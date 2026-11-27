@@ -1,7 +1,7 @@
 """Atlas importer (Data & QC module): list the atlases installed sources offer, load them as layers.
 
 Sources are FSL, FreeSurfer / FastSurfer, ANTsXNet, nilearn and the atlases configured in
-``settings.json`` (:mod:`nvitk.atlases`). A label atlas loads as a Labels layer coloured by its
+``atlas.json`` (:mod:`nvitk.atlases`). A label atlas loads as a Labels layer coloured by its
 own table, with its names registered as the layer's label vocabulary (the label list, the
 readout and the layer menu then name each region); a template loads as an image; a
 probabilistic atlas loads its max-probability labels, and optionally the 4D probability stack.

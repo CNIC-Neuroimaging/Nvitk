@@ -1,0 +1,362 @@
+"""
+DIXON v5 configuration.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+import tempfile
+from pathlib import Path
+
+from nvitk.cluster import sge_json as _sj
+from nvitk.core import config_paths
+from nvitk.pipes.pesa_health.common.paths import DEFAULT_MODEL_ROOT
+from nvitk.pipes.pesa_health.dixon_v5.labels import (
+    HEAD_LABELS,
+    LEGS_LABELS,
+    THORAX_LABELS,
+)
+
+
+# Pipeline identity (Just naming, nothing important)
+
+PIPELINE_NAME = "dixon-v5"
+SGE_JOB_PREFIX = "PESAHealth_DIXON"
+
+
+# Filesystem fragments
+
+STAGE1_DIR = "res_segmentation_dixon"     # <subj>/DIXON_<REGION>/<task>.nii.gz
+STAGE2_DIR = "res_post_processing_dixon"  # <subj>/{HEAD,THORAX,LEGS}[_VOL].nii.gz
+STAGE3_DIR = "res_measure_dixon"          # <batch>_SummaryCodebook.xlsx
+
+# Expected Dixon input stems: DIXON_<REGION>_<SUFFIX>.nii[.gz]
+INPUT_PREFIX = "DIXON"
+INPUT_SUFFIXES = ("FAT", "WATER", "FAT_FRACTION", "T2STAR")
+
+
+# TotalSegmentator task plan (per Dixon region)
+
+
+@dataclass(frozen=True)
+class MrTask:
+    """MR TotalSegmentator task and which DIXON sequence it uses.
+
+    ``roi_subset`` is forwarded to TotalSegmentator, which then only runs (and
+    crops the image to) the sub-models holding those classes. ``keep_rois``
+    instead runs the full model, so every class competes for the voxels, and
+    stage 1 zeroes all other classes in the saved output afterwards.
+    """
+
+    name: str
+    input_suffix: str                # FAT / WATER / ...
+    roi_subset: tuple[str, ...] = ()
+    output_stem: str | None = None   # stage-1 file stem; defaults to ``name``
+    keep_rois: tuple[str, ...] = ()
+
+    @property
+    def stem(self) -> str:
+        """Stage-1 output file stem (lets one task run twice on different contrasts)."""
+        return self.output_stem or self.name
+
+
+# Stage-1 file stem of the WATER-contrast ``total_mr`` run. The liver is
+# segmented on WATER rather than FAT, so it needs its own output next to the
+# FAT-contrast ``total_mr``.
+THORAX_WATER_STEM: str = "total_mr_water"
+
+# Classes taken from the WATER run instead of the FAT one.
+THORAX_WATER_ROIS: tuple[str, ...] = ("liver",)
+
+# Bone classes of ``total_mr`` forming the LEGS skeleton mask, subtracted from
+# the quadriceps in stage 2. As on CT there is no TotalSegmentator skeleton
+# task; these all live in the same total_mr sub-model, so this is one extra run
+# for the LEGS region rather than a dedicated model.
+SKELETON_ROIS_MR: tuple[str, ...] = (
+    "femur_left",
+    "femur_right",
+    "hip_left",
+    "hip_right",
+)
+
+# LEGS mask labels the skeleton is subtracted from.
+SKELETON_SUBTRACT_FROM_LEGS: tuple[str, ...] = ("L_QM_L", "L_QM_R")
+
+# Skeleton classes dilated (radius in voxels) before that subtraction, so the
+# quadriceps keep clear of the femur. The volume mask (LEGS_VOL) uses the raw bones.
+LEGS_SKELETON_DILATE: dict[str, int] = {"femur_left": 3, "femur_right": 3}
+
+# Liver voxels above this T2* (ms) are vessels and are left out of the liver's
+# FF/T2*/R2*/WF statistics; the liver volume (THORAX_VOL) keeps them.
+LIVER_VESSEL_T2STAR_MS: float = 50.0
+
+
+# ``total_mr`` always runs the full model (no roi_subset) so neighbouring organs
+# such as the gallbladder are segmented too and cannot be swallowed by the ones we
+# keep; ``keep_rois`` trims the saved output to the classes stage 2 uses.
+HEAD_TASKS = (
+    MrTask("total_mr", input_suffix="FAT", keep_rois=("autochthon_left", "autochthon_right")),
+)
+
+THORAX_TASKS = (
+    MrTask(
+        "total_mr",
+        input_suffix="FAT",
+        keep_rois=(
+            "spleen",
+            "kidney_right",
+            "kidney_left",
+            "liver",
+            "pancreas",
+            "autochthon_left",
+            "autochthon_right",
+        ),
+    ),
+    # Liver is segmented on WATER; stage 2 prefers this output over the FAT one,
+    # which is kept only as a fallback for batches segmented before this split.
+    MrTask(
+        "total_mr",
+        input_suffix="WATER",
+        keep_rois=THORAX_WATER_ROIS,
+        output_stem=THORAX_WATER_STEM,
+    ),
+    MrTask("tissue_types_mr", input_suffix="FAT"),
+    MrTask("body_mr", input_suffix="FAT"),
+    MrTask("vertebrae_mr", input_suffix="WATER"),
+)
+
+LEGS_TASKS = (
+    MrTask("thigh_shoulder_muscles_mr", input_suffix="FAT"),
+    MrTask("total_mr", input_suffix="FAT", keep_rois=SKELETON_ROIS_MR),
+    MrTask("tissue_types_mr", input_suffix="FAT"),
+    MrTask("body_mr", input_suffix="FAT"),
+)
+
+
+REGIONS = {
+    "HEAD": HEAD_TASKS,
+    "THORAX": THORAX_TASKS,
+    "LEGS": LEGS_TASKS,
+}
+
+REGION_ORDER = ("HEAD", "THORAX", "LEGS")
+
+
+# Stage-3 measurement specs
+
+
+@dataclass(frozen=True)
+class DixonMeasureSpec:
+    """DIXON stage-3 measurement definition.
+
+    ``prefix`` is the Excel column prefix; each metric in ``metrics`` becomes
+      a column ``f"{prefix}_{metric}"``. 
+    ``region`` selects which stage-2 mask and which Dixon-contrast maps are used; 
+    ``mask_file`` is the stage-2 label file 
+      (under ``RESULTS/<batch>/res_post_processing_dixon/<SUBJECT>``)
+    ``label_ids`` are the integer labels contributing to the mask 
+      (atuple with >1 entries is treated as the union).
+    """
+
+    prefix: str
+    region: str                    # "HEAD" | "THORAX" | "LEGS"
+    mask_file: str                 # "HEAD.nii" | "THORAX.nii" | "LEGS.nii"
+    label_ids: tuple[int, ...]
+    metrics: tuple[str, ...] = ("VOL", "FF", "T2", "R2", "NSlices")
+
+
+def _lr_triplet(
+    prefix_fmt: str,
+    region: str,
+    mask_file: str,
+    labels: dict[str, int],
+    key_l: str,
+    key_r: str,
+    *,
+    metrics: tuple[str, ...] = ("VOL", "FF", "T2", "R2", "NSlices"),
+) -> tuple[DixonMeasureSpec, ...]:
+    """Emit (L, R, LR-union) specs for a bilateral structures."""
+    return (
+        DixonMeasureSpec(
+            prefix_fmt.format(side="L"),
+            region,
+            mask_file,
+            (labels[key_l],),
+            metrics=metrics,
+        ),
+        DixonMeasureSpec(
+            prefix_fmt.format(side="R"),
+            region,
+            mask_file,
+            (labels[key_r],),
+            metrics=metrics,
+        ),
+        DixonMeasureSpec(
+            prefix_fmt.format(side="LR"),
+            region,
+            mask_file,
+            (labels[key_l], labels[key_r]),
+            metrics=metrics,
+        ),
+    )
+
+
+MEASURE_SPECS = (
+    # HEAD paravertebral muscle (H_PVM L/R/LR) is segmented but not measured.
+
+    # THORAX: liver (with WF), pancreas, kidneys L/R/LR, paravertebral L/R/LR,
+    #         and bone-narrow vertebrae L3/L4.
+    DixonMeasureSpec(
+        "DIXON_LIVER",
+        "THORAX",
+        "THORAX.nii",
+        (THORAX_LABELS["LIVER"],),
+        metrics=("VOL", "FF", "T2", "R2", "WF", "NSlices"),
+    ),
+    DixonMeasureSpec(
+        "DIXON_PANCREAS",
+        "THORAX",
+        "THORAX.nii",
+        (THORAX_LABELS["PANCREAS"],),
+    ),
+    *_lr_triplet(
+        "DIXON_KIDNEY_{side}",
+        "THORAX",
+        "THORAX.nii",
+        THORAX_LABELS,
+        "KIDNEY_L",
+        "KIDNEY_R",
+    ),
+    *_lr_triplet(
+        "DIXON_T_PVM_{side}",
+        "THORAX",
+        "THORAX.nii",
+        THORAX_LABELS,
+        "T_PVM_L",
+        "T_PVM_R",
+    ),
+    DixonMeasureSpec(
+        "DIXON_BN_L3", "THORAX", "THORAX.nii", (THORAX_LABELS["BN_L3"],),
+    ),
+    DixonMeasureSpec(
+        "DIXON_BN_L4", "THORAX", "THORAX.nii", (THORAX_LABELS["BN_L4"],),
+    ),
+
+    # LEGS: quadriceps (QM) L, R, LR
+    *_lr_triplet(
+        "DIXON_L_QM_{side}",
+        "LEGS",
+        "LEGS.nii",
+        LEGS_LABELS,
+        "L_QM_L",
+        "L_QM_R",
+    ),
+)
+
+
+# ``WF`` is computed (for LIVER only) as:
+#
+#     WF = mean(water_map_liver) / mean(water_map_PVM) * 100
+#
+# where the denominator is the mean water-map signal pooled over both
+# paravertebral muscle masks (T_PVM_L + T_PVM_R) in the THORAX region.
+WF_REFERENCE_LABELS = (
+    # (region, mask_file, label_key)
+    ("THORAX", "THORAX.nii", "T_PVM_L"),
+    ("THORAX", "THORAX.nii", "T_PVM_R"),
+)
+
+
+# SGE / Singularity defaults
+
+SGE_PROJECT     = "GPU"
+SGE_ACCOUNT     = "Prod"
+SGE_NGPU        = 1
+SGE_H_VMEM      = "50G"
+SGE_QUEUE       = None
+ 
+SGE_CPU_H_VMEM  = "32G"
+SGE_CPU_NGPU    = 0
+ 
+SGE_LOG_DIR     = Path(tempfile.gettempdir()) / "nvitk-sge" / "logs" / "PESAHealth-DIXON"
+SGE_ERR_DIR     = Path(tempfile.gettempdir()) / "nvitk-sge" / "errs" / "PESAHealth-DIXON"
+
+CONTAINER_PATH: Path | None = None  # sge.json: pipelines.pesa_health_dixon.default_sge_container_root
+MODELS_PATH     = DEFAULT_MODEL_ROOT
+
+def _apply_config() -> None:
+    """Merge ``sge.json`` over this module's defaults.
+
+    Run once at import and again whenever the configuration directory is redirected,
+    so a late ``--config-dir`` reaches these constants too.
+    """
+    global SGE_ACCOUNT, SGE_CPU_H_VMEM, SGE_CPU_NGPU, SGE_H_VMEM, SGE_NGPU, SGE_PROJECT, SGE_QUEUE, _er_dx, _lg_dx, _paths_dx, _pipe_dx
+    _pipe_dx = _sj.merged_pipeline_flat("pesa_health_dixon")
+    _paths_dx = _sj.paths_section()
+    if (v := _pipe_dx.get("sge_project")) is not None:
+        SGE_PROJECT = str(v)
+    if (v := _pipe_dx.get("sge_account")) is not None:
+        SGE_ACCOUNT = str(v)
+    if (v := _pipe_dx.get("sge_ngpu")) is not None:
+        SGE_NGPU = int(v)
+    if (v := _pipe_dx.get("sge_h_vmem")) is not None:
+        SGE_H_VMEM = str(v)
+    if "sge_queue" in _pipe_dx:
+        SGE_QUEUE = _pipe_dx["sge_queue"]
+    if (v := _pipe_dx.get("sge_cpu_h_vmem")) is not None:
+        SGE_CPU_H_VMEM = str(v)
+    if (v := _pipe_dx.get("sge_cpu_ngpu")) is not None:
+        SGE_CPU_NGPU = int(v)
+    _lg_dx, _er_dx = _sj.resolve_log_err_dirs(
+        paths=_paths_dx,
+        pipe=_pipe_dx,
+        fallback_log=SGE_LOG_DIR,
+        fallback_err=SGE_ERR_DIR,
+    )
+
+
+_apply_config()
+config_paths.register_reload_hook(_apply_config)
+SGE_LOG_DIR, SGE_ERR_DIR = _lg_dx, _er_dx
+if (v := _pipe_dx.get("default_sge_container_root") or _pipe_dx.get("container_path")):
+    CONTAINER_PATH = Path(os.path.expanduser(str(v)))
+if (v := _pipe_dx.get("default_sge_model_root") or _pipe_dx.get("models_path")):
+    MODELS_PATH = Path(os.path.expanduser(str(v)))
+
+
+__all__ = [
+    "PIPELINE_NAME",
+    "SGE_JOB_PREFIX",
+    "STAGE1_DIR",
+    "STAGE2_DIR",
+    "STAGE3_DIR",
+    "INPUT_PREFIX",
+    "INPUT_SUFFIXES",
+    "MrTask",
+    "THORAX_WATER_STEM",
+    "THORAX_WATER_ROIS",
+    "SKELETON_ROIS_MR",
+    "SKELETON_SUBTRACT_FROM_LEGS",
+    "LEGS_SKELETON_DILATE",
+    "LIVER_VESSEL_T2STAR_MS",
+    "HEAD_TASKS",
+    "THORAX_TASKS",
+    "LEGS_TASKS",
+    "REGIONS",
+    "REGION_ORDER",
+    "DixonMeasureSpec",
+    "MEASURE_SPECS",
+    "WF_REFERENCE_LABELS",
+    "SGE_PROJECT",
+    "SGE_ACCOUNT",
+    "SGE_NGPU",
+    "SGE_H_VMEM",
+    "SGE_QUEUE",
+    "SGE_CPU_H_VMEM",
+    "SGE_CPU_NGPU",
+    "SGE_LOG_DIR",
+    "SGE_ERR_DIR",
+    "CONTAINER_PATH",
+    "MODELS_PATH",
+]

@@ -89,8 +89,7 @@ This works from a plain conda install with no checkout: `dvc get` reads the poin
 out of the public repository and fetches the content from the configured remote. It needs the
 storage mounted and `dvc` installed (`conda install -c conda-forge dvc`).
 
-The dataset is written to `db.local_fallback_root` (or `db.root` if that is unset). With
-neither set, nvitk uses `~/.local/share/nvitk/dataset` for an installed package, or
+The dataset is written to `dataset.root` in `settings.json`. When it is unset, nvitk uses `~/.local/share/nvitk/dataset` for an installed package, or
 `<repo>/dataset/nvitk-dataset` inside a source checkout — so a conda install never invents a
 repository-shaped directory in your home. `nvitk-dataset status` prints the resolved location
 *and which setting produced it*, which is the check worth running before a multi-gigabyte
@@ -103,7 +102,7 @@ pre-existing directory never ends up holding a nested `tables/tables/` copy.
 `--all` is rarely worth it. The SQLite index is derived from the tables and rebuilds locally in
 about 15 seconds — far quicker than transferring 1.3 GB:
 
-    python -m nvitk.db.sqlite_index --dataset-root <db.root>
+    python -m nvitk.db.sqlite_index --dataset-root <dataset.root>
 ```
 
 `nvitk-dataset pull --rev v0.1.0` pins retrieval to a git tag, giving you the dataset as it was
@@ -113,9 +112,9 @@ The two settings it uses, in `settings.json`:
 
 | Key | Meaning |
 |---|---|
-| `db.root` | Where the dataset is written |
-| `db.dvc_repo` | Repository holding the pointer files (defaults to the public nvitk repo) |
-| `db.dvc_remote_url` | Where the content lives. Leave empty to use the repository's own default |
+| `dataset.root` | Where the dataset is written |
+| `dataset.dvc_repo` | Repository holding the pointer files (defaults to the public nvitk repo) |
+| `dataset.dvc_remote_url` | Where the content lives. Leave empty to use the repository's own default |
 
 ### If you are outside the organisation
 
@@ -129,7 +128,7 @@ nvitk-config init
 nvitk-config path        # shows which file is in use
 ```
 
-Only `db.root` in `settings.json` is needed for the library, I/O and image-processing CLIs.
+Only `dataset.root` in `settings.json` is needed for the library, I/O and image-processing CLIs.
 The `sge.json` sections matter only if you run pipelines on a cluster; delete what you do not
 use, and nvitk will name any key it needs but cannot find.
 
@@ -137,13 +136,13 @@ use, and nvitk will name any key it needs but cannot find.
 
 ```python
 from nvitk.db.catalog import DatasetCatalog
-DatasetCatalog.create_scaffold("~/my-dataset")     # then set db.root to this path
+DatasetCatalog.create_scaffold("~/my-dataset")     # then set dataset.root to this path
 ```
 
 This writes the catalog manifests and JSON schemas that define the dataset layout, plus empty
 `tables/` and `cache/` directories, and works from an installed package with no checkout.
 
-**3. Leave the DVC settings empty.** `db.dvc_repo` / `db.dvc_remote_url` only apply to CNIC
+**3. Leave the DVC settings empty.** `dataset.dvc_repo` / `dataset.dvc_remote_url` only apply to CNIC
 storage; `nvitk-dataset` is not used outside the organisation.
 
 ```{note}

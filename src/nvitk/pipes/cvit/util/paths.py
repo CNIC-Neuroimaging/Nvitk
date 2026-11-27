@@ -3,7 +3,7 @@ Filesystem layout for the CViT pipeline (local workstation vs cluster vs contain
 
 Description
 -----------
-Every root comes from ``sge.json``'s ``pipelines.cvit_paths`` section (``local_<key>`` /
+Every root comes from ``sge.json``'s ``pipelines.cvit`` section (``local_<key>`` /
 ``cluster_<key>``) or from the matching ``--*-root`` CLI flag; there are no installation paths in
 this file. A root that is needed but unconfigured raises
 :class:`~nvitk.core.config_paths.ConfigError` naming the key. Configuration is read on use, not on
@@ -37,9 +37,9 @@ from nvitk.cluster import sge_json as _sj
 from nvitk.core import config_paths, lazy_config
 
 #: ``sge.json`` section holding this pipeline's data roots.
-PIPELINE_PATHS_ID = "cvit_paths"
+PIPELINE_PATHS_ID = "cvit"
 
-#: Root keys of ``pipelines.cvit_paths`` (without the ``local_`` / ``cluster_`` prefix).
+#: Root keys of ``pipelines.cvit`` (without the ``local_`` / ``cluster_`` prefix).
 ROOT_KEYS: tuple[str, ...] = (
     "data_root",
     "nnunet_raw",
@@ -83,7 +83,7 @@ def dataset_folder_name(dataset_id: int, name: str) -> str:
 
 
 def _pipe_paths() -> dict:
-    """The ``pipelines.cvit_paths`` block (empty when absent)."""
+    """The ``pipelines.cvit`` block (empty when absent)."""
     return _sj.pipeline_section(PIPELINE_PATHS_ID)
 
 

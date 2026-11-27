@@ -46,14 +46,14 @@ commands backing the entry points in the table below.
 | `nvitk-filter` | Filters |
 | `nvitk-measure` | Metrics |
 | `nvitk-transform` | Geometric transforms |
-| **PESA-Fat pipeline** — see {doc}`../pipelines/pesa-fat` | |
-| `nvitk-pesa-fat` | Batch driver |
-| `nvitk-pesa-fat-ctpet` | CT/PET pipeline |
-| `nvitk-pesa-fat-dixon` | Dixon pipeline |
-| `nvitk-pesa-fat-hotspot` | Hotspot viewer |
-| `nvitk-pesa-fat-qc` | QC report |
-| `nvitk-pesa-fat-qc-portal` | QC review portal |
-| `nvitk-pesa-fat-sync-measurements` | Publish measurements to the DB |
+| **PESA-Health pipeline** — see {doc}`../pipelines/pesa-health` | |
+| `nvitk-pesa-health` | Batch driver |
+| `nvitk-pesa-health-ctpet` | CT/PET pipeline |
+| `nvitk-pesa-health-dixon` | Dixon pipeline |
+| `nvitk-pesa-health-hotspot` | Hotspot viewer |
+| `nvitk-pesa-health-qc` | QC report |
+| `nvitk-pesa-health-qc-portal` | QC review portal |
+| `nvitk-pesa-health-sync-measurements` | Publish measurements to the DB |
 | **PESA-Brain cohort pipelines** — see {doc}`../pipelines/qvtpy` | |
 | `nvitk-qvtpy` | 4D-flow hemodynamics pipeline |
 | `nvitk-qvtpy-flowshow` | 4D-flow interactive viewer |

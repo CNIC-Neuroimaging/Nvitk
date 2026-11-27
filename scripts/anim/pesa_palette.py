@@ -1,4 +1,4 @@
-"""Structure colours shared by the PESA-Fat animations (Dixon and CT-PET): left darker, right
+"""Structure colours shared by the PESA-Health animations (Dixon and CT-PET): left darker, right
 lighter; fat in warm yellows, bone marrow in gold; red marks what a step removes, and the QC
 report's convention is kept for the two mask kinds (red = the eroded measurement mask, blue = the
 volume mask)."""

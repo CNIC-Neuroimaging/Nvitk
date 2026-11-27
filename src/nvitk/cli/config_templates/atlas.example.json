@@ -1,0 +1,14 @@
+{
+  "_comment": [
+    "nvitk atlas locations: the parcellations used for brain / vascular figures that nvitk cannot",
+    "download. Copy to a config directory (see `nvitk-config path`) as 'atlas.json' and replace",
+    "every <PLACEHOLDER>, or delete the keys you do not use.",
+    "",
+    "'root' is a directory nvitk probes for known filenames; 'desikan' / 'vascular' name files",
+    "directly and win over 'root'. Environment overrides: NVITK_ATLAS_ROOT, NVITK_DESIKAN_ATLAS,",
+    "NVITK_VASCULAR_ATLAS."
+  ],
+  "root": "<PATH_TO_ATLAS_DIRECTORY>",
+  "desikan": "<PATH_TO_DESIKAN_PARCELLATION.nii.gz>",
+  "vascular": "<PATH_TO_ARTERIAL_TERRITORY_ATLAS.nii.gz>"
+}

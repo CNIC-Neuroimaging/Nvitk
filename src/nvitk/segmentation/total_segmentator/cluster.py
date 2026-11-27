@@ -18,7 +18,7 @@ from typing import Iterable, Sequence
 
 @dataclass
 class SingularityBinds:
-    """Container bind-points used by the PESA-Fat cluster pipeline."""
+    """Container bind-points used by the PESA-Health cluster pipeline."""
 
     src: str = "/nvitk/src/"
     data: str = "/nvitk/data/"

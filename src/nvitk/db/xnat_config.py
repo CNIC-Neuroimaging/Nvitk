@@ -7,7 +7,7 @@ environment variables (``XNAT_USER`` / ``XNAT_PASSWORD``), ``~/.netrc``, optiona
 Merge precedence for :func:`resolve_xnat_connection` for ``server`` / ``project`` / ``user``:
 
 1. Explicit **overrides** (e.g. CLI flags that are set)
-2. Values from the profile file (JSON/YAML)
+2. Values from the profile file (JSON/YAML); the project is its ``default_project``
 3. Environment variables (``XNAT_SERVER``, ``XNAT_PROJECT``, ``XNAT_USER``)
 """
 
@@ -60,6 +60,9 @@ class XnatConnectionConfig:
         object.__setattr__(self, "project", _coerce_xnat_identifier(self.project, "project"))
 
 KEYRING_SERVICE = "nvitk"
+
+#: Profile key naming the project used when a command does not name one.
+PROJECT_KEY = "default_project"
 
 
 def _default_config_paths() -> list[Path]:
@@ -175,7 +178,7 @@ def resolve_xnat_connection(
         return None
 
     srv = pick_str("server", server, "XNAT_SERVER")
-    proj = pick_str("project", project, "XNAT_PROJECT")
+    proj = pick_str(PROJECT_KEY, project, "XNAT_PROJECT")
     usr = pick_str("user", user, "XNAT_USER")
 
     if not srv or not proj:
@@ -207,7 +210,7 @@ def resolve_xnat_connection(
         if default_netrc.is_file():
             netrc = str(default_netrc)
 
-    # CNIC XNAT uses an internal CA; default to verify=False unless profile/CLI enables it.
+    # Servers behind an internal CA are common; verify only when the profile/CLI enables it.
     ver = verify if verify is not None else bool(p.get("verify", False))
     if not isinstance(ver, bool):
         ver = bool(ver)

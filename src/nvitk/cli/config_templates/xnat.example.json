@@ -12,12 +12,14 @@
     "                          'xnat:<server>'; store it with the `keyring` CLI)",
     "  3. $XNAT_USER / $XNAT_PASSWORD environment variables",
     "",
-    "$XNAT_SERVER and $XNAT_PROJECT likewise override the values below, so a shared profile",
+    "$XNAT_SERVER and $XNAT_PROJECT likewise stand in for 'server' and 'default_project', so a shared profile",
     "can be committed while per-user details stay in the environment."
   ],
 
   "server": "<https://xnat.example.org>",
-  "project": "<XNAT_PROJECT_ID>",
+
+  "_comment_project": "Project used when a command or GUI panel does not name one.",
+  "default_project": "<XNAT_PROJECT_ID>",
 
   "netrc_file": "~/.netrc",
   "password_keyring": false,

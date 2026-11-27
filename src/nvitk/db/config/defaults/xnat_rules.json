@@ -1,0 +1,20 @@
+{
+  "$schema": "nvitk-xnat-rules/1",
+  "name": "default",
+  "description": "Packaged fallback used when no xnat_rules.json is configured: no projects, and a classifier without rules.",
+  "default_visit_label": "1",
+  "default_classifier": "default",
+  "visit_labels": {},
+  "classifiers": {
+    "default": {
+      "quality": {"accept": ["usable"], "strip": false},
+      "rules": []
+    }
+  },
+  "projects": {},
+  "sequence_aliases": {},
+  "asset_slots": {},
+  "asset_slot_labels": {},
+  "pipeline_resources": {},
+  "pipeline_filter_slots": []
+}

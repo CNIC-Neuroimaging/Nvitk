@@ -1,8 +1,9 @@
 """``nvitk-config``: inspect and scaffold nvitk's configuration.
 
 nvitk reads its site settings from JSON files (``sge.json``, ``settings.json``,
-``xnat.json``, ``gui.json``, which the GUI writes for itself, and the optional ``dataset.json``
-and ``xnat_rules.json`` describing how a dataset is imported and how XNAT scans are classified)
+``atlas.json``, ``xnat.json``, ``gui.json``, which the GUI writes for itself, and the optional
+``dataset.json`` and ``xnat_rules.json`` describing how a dataset is imported and how XNAT scans
+are classified)
 found in a configuration directory. This command answers the three questions a
 new install raises: *where does that directory go*, *which file am I using*, and
 *what do I have to fill in*.
@@ -13,7 +14,6 @@ new install raises: *where does that directory go*, *which file am I using*, and
     nvitk-config init              # create a starter config from the bundled templates
     nvitk-config show              # resolved values, and which file each came from
     nvitk-config validate          # report settings that are missing or still placeholders
-    nvitk-config generate-pesa     # write the PESA dataset / XNAT rules (a worked example)
     nvitk-config test-xnat-rules "3D T1 MPRAGE" --project MY_PROJECT   # how a scan classifies
 """
 
@@ -31,9 +31,11 @@ from nvitk.core import config_paths
 #: rather than only from a source checkout.
 TEMPLATE_DIR = Path(__file__).resolve().parent / "config_templates"
 
-CONFIG_FILES = ("sge.json", "settings.json", "xnat.json", "gui.json", "dataset.json", "xnat_rules.json")
+CONFIG_FILES = (
+    "sge.json", "settings.json", "atlas.json", "xnat.json", "gui.json", "dataset.json", "xnat_rules.json",
+)
 
-#: Files that are optional: without them nvitk uses its packaged PESA defaults.
+#: Files that are optional: without them nvitk uses its packaged (empty) defaults.
 OPTIONAL_FILES = ("dataset.json", "xnat_rules.json")
 
 #: Keys whose value is an opaque blob rather than a setting: printing a few
@@ -202,7 +204,7 @@ def validate_cmd() -> None:
         source = config_paths.config_file(name)
         if source is None:
             if name in OPTIONAL_FILES:
-                click.echo(f"{name}: not found (optional; the packaged PESA default is used)")
+                click.echo(f"{name}: not found (optional; the packaged empty default is used)")
             else:
                 click.echo(f"{name}: not found")
             continue
@@ -245,39 +247,6 @@ def _schema_problems(name: str, doc: dict) -> list[str]:
     return []
 
 
-@main.command("generate-pesa")
-@click.option(
-    "--dir", "target_dir",
-    type=click.Path(file_okay=False, path_type=Path),
-    default=None,
-    help="Directory to write into (default: the directory holding your configuration).",
-)
-@click.option("--force", is_flag=True, help="Overwrite files that already exist.")
-def generate_pesa_cmd(target_dir: Path | None, force: bool) -> None:
-    """Write dataset.json and xnat_rules.json reproducing nvitk's PESA setup.
-
-    These are the rules nvitk applies when neither file exists (PESA-Brain spreadsheets,
-    PESA_Brain / IA_PET_V5 XNAT projects), written out to edit or to learn the format from.
-    """
-    from nvitk.db.config import dataset_config, xnat_rules
-
-    if target_dir is None:
-        existing = config_paths.config_dir()
-        target_dir = existing if existing is not None else config_paths.default_config_dir()
-    target_dir = Path(target_dir).expanduser()
-    target_dir.mkdir(parents=True, exist_ok=True)
-    for name, doc in (
-        (dataset_config.CONFIG_NAME, dataset_config.default_document()),
-        (xnat_rules.CONFIG_NAME, xnat_rules.default_document()),
-    ):
-        destination = target_dir / name
-        if destination.exists() and not force:
-            click.echo(f"exists   {destination}  (use --force to overwrite)")
-            continue
-        destination.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        click.echo(f"created  {destination}")
-
-
 @main.command("test-xnat-rules")
 @click.argument("descriptions", nargs=-1, required=True)
 @click.option("--project", default=None, help="Classify with this project's classifier (default: the default one).")
@@ -290,7 +259,7 @@ def test_xnat_rules_cmd(descriptions: tuple[str, ...], project: str | None, qual
 
     rules = load_xnat_rules(rules_path)
     classifier = rules.classifier_for(project) if project else rules.default()
-    click.echo(f"rules: {rules.source or 'packaged PESA default'}  classifier: {classifier.name}")
+    click.echo(f"rules: {rules.source or 'packaged default'}  classifier: {classifier.name}")
     for description in descriptions:
         scan = {"series_description": description, "quality": quality}
         hit = None

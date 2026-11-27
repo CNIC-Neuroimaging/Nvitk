@@ -192,14 +192,14 @@ nvitk-xnat-sync = "nvitk.db.xnat:main"
 nvitk-xnat-pipeline-sync = "nvitk.db.xnat_pipeline_resources:main"
 
 # Pipeline scripts
-# PESA-Fat pipelines
-nvitk-pesa-fat       = "nvitk.pipes.pesa_fat.run_batch:main"
-nvitk-pesa-fat-ctpet = "nvitk.pipes.pesa_fat.ct_pet_v5.run:main"
-nvitk-pesa-fat-dixon = "nvitk.pipes.pesa_fat.dixon_v5.run:main"
-nvitk-pesa-fat-hotspot = "nvitk.pipes.pesa_fat.run_hotspot:main"
-nvitk-pesa-fat-qc = "nvitk.pipes.pesa_fat.common.stage4_qc:main"
-nvitk-pesa-fat-qc-portal = "nvitk.pipes.pesa_fat.qc.portal_cli:main"
-nvitk-pesa-fat-sync-measurements = "nvitk.pipes.pesa_fat.sync_measurements:main"
+# PESA-Health pipelines
+nvitk-pesa-health       = "nvitk.pipes.pesa_health.run_batch:main"
+nvitk-pesa-health-ctpet = "nvitk.pipes.pesa_health.ct_pet_v5.run:main"
+nvitk-pesa-health-dixon = "nvitk.pipes.pesa_health.dixon_v5.run:main"
+nvitk-pesa-health-hotspot = "nvitk.pipes.pesa_health.run_hotspot:main"
+nvitk-pesa-health-qc = "nvitk.pipes.pesa_health.common.stage4_qc:main"
+nvitk-pesa-health-qc-portal = "nvitk.pipes.pesa_health.qc.portal_cli:main"
+nvitk-pesa-health-sync-measurements = "nvitk.pipes.pesa_health.sync_measurements:main"
 
 # PESA-Brain cohort pipelines
 nvitk-qvtpy = "nvitk.pipes.qvtpy.run:main"
@@ -251,8 +251,8 @@ include = ["nvitk", "nvitk.*"]
 # empty dataset. Packaged for the same reason as the config templates: scaffolding a dataset
 # is something an installed user does, and the repo's dataset/ directory is not shipped.
 "nvitk.db" = ["catalog_templates/*.json", "catalog_templates/schema/*.json"]
-# Packaged PESA defaults for dataset.json / xnat_rules.json (used when neither file exists, and
-# written out by `nvitk-config generate-pesa`), and their JSON schemas.
+# Packaged empty defaults for dataset.json / xnat_rules.json (used when neither file exists),
+# and their JSON schemas.
 "nvitk.db.config" = ["defaults/*.json", "schema/*.json"]
 # The local fsl_sub that voxelwise puts in front of FSL's own when running randomise_parallel.
 "nvitk.measure" = ["fsl_sub_local.sh"]

@@ -344,7 +344,7 @@ def run_app() -> None:
         data_tab_label = "Data"
 
     try:
-        # One QC tab for every pipeline: QVTPy, eICAB and PESA-Fat (panels/qc_hub.py).
+        # One QC tab for every pipeline: QVTPy, eICAB and PESA-Health (panels/qc_hub.py).
         from nvitk.gui.panels.qc_hub import QcHub
 
         qc_panel = QcHub(

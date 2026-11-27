@@ -211,7 +211,7 @@ class XnatRulesEditor(QWidget):
 
     def _set_dirty(self, dirty: bool) -> None:
         self._dirty = dirty
-        where = str(self._path) if self._path is not None else "the packaged PESA default (Save writes a copy to the configuration folder)"
+        where = str(self._path) if self._path is not None else "the packaged empty default (Save writes a copy to the configuration folder)"
         self._state.setText(("● unsaved changes — " if dirty else "") + f"Rules from {where}")
         self._save.setEnabled(dirty or self._path is None)
 

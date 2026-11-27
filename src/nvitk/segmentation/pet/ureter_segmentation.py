@@ -1,5 +1,5 @@
 """
-Ureter exclusion mask for CT-PET (PESA-Fat ct-pet-v5 conventions): v2.
+Ureter exclusion mask for CT-PET (PESA-Health ct-pet-v5 conventions): v2.
 
 Key changes versus v1
 ---------------------

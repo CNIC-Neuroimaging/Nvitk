@@ -1,6 +1,6 @@
 """Filesystem layout helpers for qvtpy (local workstation vs cluster).
 
-Every root comes from ``sge.json``'s ``pipelines.qvtpy_paths`` section: there are no
+Every root comes from ``sge.json``'s ``pipelines.qvtpy`` section: there are no
 installation paths in this file. A root that is needed but not configured raises
 :class:`~nvitk.core.config_paths.ConfigError` naming the key and the search path, rather than
 silently resolving to somebody else's filesystem.
@@ -19,11 +19,11 @@ from nvitk.cluster import sge_json as _sj
 from nvitk.core import config_paths, lazy_config
 
 #: ``sge.json`` section holding this pipeline's data roots.
-PIPELINE_PATHS_ID = "qvtpy_paths"
+PIPELINE_PATHS_ID = "qvtpy"
 
 
 def _pipe_paths() -> dict:
-    """The ``pipelines.qvtpy_paths`` block, read fresh (and cached) on each use."""
+    """The ``pipelines.qvtpy`` block, read fresh (and cached) on each use."""
     return _sj.pipeline_section(PIPELINE_PATHS_ID)
 
 

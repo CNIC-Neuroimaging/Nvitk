@@ -66,7 +66,7 @@
           "subject_globs": {"type": "array", "items": {"type": "string"}},
           "show_batch": {"type": "boolean"},
           "default_batch": {"type": "string"},
-          "pesa_fat_layout": {"type": "boolean"}
+          "pesa_health_layout": {"type": "boolean"}
         },
         "additionalProperties": false
       }

@@ -19,8 +19,8 @@ So the geometry has to be *located* rather than fetched. This module answers "wh
 place, with the same precedence for both:
 
 1. an explicit environment variable: the escape hatch for a one-off run or a cluster job;
-2. the ``atlas`` block of ``.nvitk/settings.json``, found by the same search
-   :func:`~nvitk.db.settings_paths.settings_json_path` already uses for the ``db`` block;
+2. ``atlas.json`` in the nvitk configuration directory (found by
+   :mod:`nvitk.core.config_paths`, like every other config file);
 3. an ``ATLAS/`` directory beside the configured dataset root, since that is where these files
    live in the lab tree;
 4. for Desikan only, a FreeSurfer installation's ``fsaverage`` surface labels.
@@ -29,16 +29,14 @@ Nothing here reads the atlas: that is :mod:`~nvitk.viz.brainshow`'s job. These f
 paths (or ``None``) and never raise, so a caller can report *every* place it looked when nothing is
 configured, which is the difference between an actionable error and "atlas not found".
 
-Settings example
-----------------
+``atlas.json`` example
+----------------------
 .. code-block:: json
 
     {
-      "atlas": {
-        "root":     ".../DB/ATLAS/",
-        "desikan":  ".../ATLAS/aparc+aseg_MNI.nii.gz",
-        "vascular": ".../ATLAS/arterial_atlas_watershed_tpm_correct_space.nii.gz"
-      }
+      "root":     ".../ATLAS/",
+      "desikan":  ".../ATLAS/aparc+aseg_MNI.nii.gz",
+      "vascular": ".../ATLAS/arterial_atlas_watershed.nii.gz"
     }
 """
 
@@ -53,7 +51,10 @@ from nvitk.core.logger import Logger
 
 log = Logger()
 
-#: Environment overrides, checked before anything in settings.
+#: The configuration file holding the atlas locations.
+ATLAS_JSON_NAME: str = "atlas.json"
+
+#: Environment overrides, checked before anything in ``atlas.json``.
 ENV_DESIKAN: str = "NVITK_DESIKAN_ATLAS"
 ENV_VASCULAR: str = "NVITK_VASCULAR_ATLAS"
 ENV_ATLAS_ROOT: str = "NVITK_ATLAS_ROOT"
@@ -77,11 +78,10 @@ ATLAS_SUFFIXES: tuple[str, ...] = (".nii", ".nii.gz", ".mgz", ".annot")
 
 # Settings
 def load_atlas_settings_block() -> dict[str, Any]:
-    """The ``atlas`` section of ``settings.json``, or ``{}``."""
-    from nvitk.db.settings_paths import load_settings_document
+    """The parsed ``atlas.json`` (``root`` / ``desikan`` / ``vascular``), or ``{}``."""
+    from nvitk.core import config_paths
 
-    block = load_settings_document().get("atlas")
-    return block if isinstance(block, dict) else {}
+    return config_paths.load_json(ATLAS_JSON_NAME)
 
 
 def _expand(raw: Any) -> Path | None:
@@ -94,11 +94,11 @@ def atlas_root() -> Path | None:
     """
     Directory the parcellation files live in.
 
-    ``NVITK_ATLAS_ROOT`` -> ``atlas.root`` in settings -> an ``ATLAS`` directory beside the configured
+    ``NVITK_ATLAS_ROOT`` -> ``root`` in ``atlas.json`` -> an ``ATLAS`` directory beside the configured
     dataset root, which is where the lab tree keeps them (``.../DB/ATLAS`` next to
     ``.../DB/nvitk-dataset``).
     """
-    from nvitk.db.settings_paths import load_db_settings_block
+    from nvitk.db.settings_paths import load_dataset_settings_block
 
     candidates: list[Path] = []
     env = _expand(os.environ.get(ENV_ATLAS_ROOT))
@@ -108,9 +108,9 @@ def atlas_root() -> Path | None:
     if configured is not None:
         candidates.append(configured)
 
-    db_root = _expand(load_db_settings_block().get("root"))
-    if db_root is not None:
-        candidates += [db_root.parent / "ATLAS", db_root / "ATLAS"]
+    dataset_root = _expand(load_dataset_settings_block().get("root"))
+    if dataset_root is not None:
+        candidates += [dataset_root.parent / "ATLAS", dataset_root / "ATLAS"]
 
     for path in candidates:
         if path.is_dir():
@@ -121,7 +121,7 @@ def atlas_root() -> Path | None:
 def _resolve_atlas_file(
     *, env_var: str, settings_key: str, filenames: tuple[str, ...]
 ) -> Path | None:
-    """Shared precedence for a named parcellation: env -> settings -> the atlas directory."""
+    """Shared precedence for a named parcellation: env -> ``atlas.json`` -> the atlas directory."""
     env = _expand(os.environ.get(env_var))
     if env is not None:
         if env.exists():
@@ -133,7 +133,7 @@ def _resolve_atlas_file(
         if configured.exists():
             return configured
         log.warning(
-            "atlas.%s in .nvitk/settings.json points at %s, which does not exist — ignoring it.",
+            "%s in atlas.json points at %s, which does not exist — ignoring it.",
             settings_key, configured,
         )
 
@@ -238,9 +238,9 @@ def describe_search(kind: str) -> str:
     root = atlas_root()
     parts = [
         f"${env_var}",
-        f'the "atlas.{kind}" key of .nvitk/settings.json',
+        f'the "{kind}" key of atlas.json',
         f"the atlas directory ({root})" if root else
-        f'an ATLAS/ directory beside the dataset root (set "atlas.root" or ${ENV_ATLAS_ROOT})',
+        f'an ATLAS/ directory beside the dataset root (set "root" in atlas.json or ${ENV_ATLAS_ROOT})',
     ]
     if kind == "desikan":
         parts.append("$SUBJECTS_DIR / $FREESURFER_HOME fsaverage ?h.aparc.annot")
@@ -248,6 +248,7 @@ def describe_search(kind: str) -> str:
 
 
 __all__ = [
+    "ATLAS_JSON_NAME",
     "ATLAS_SUFFIXES",
     "ENV_ATLAS_ROOT",
     "ENV_DESIKAN",

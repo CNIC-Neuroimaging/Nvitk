@@ -25,7 +25,7 @@ from pathlib import Path
 import click
 
 from nvitk.core import config_paths
-from nvitk.db.settings_paths import load_db_settings_block
+from nvitk.db.settings_paths import load_dataset_settings_block
 
 #: Default source repository holding the DVC pointer files.
 DEFAULT_DVC_REPO = "https://github.com/ignacio-ms/Nvitk.git"
@@ -42,8 +42,8 @@ TARGETS: tuple[tuple[str, bool, str], ...] = (
 
 
 def _setting(key: str, default: str = "") -> str:
-    """A ``db.<key>`` value from ``settings.json``, or *default*."""
-    raw = load_db_settings_block().get(key)
+    """A ``dataset.<key>`` value from ``settings.json``, or *default*."""
+    raw = load_dataset_settings_block().get(key)
     return str(raw).strip() if raw is not None and str(raw).strip() else default
 
 
@@ -59,29 +59,20 @@ def _require_dvc() -> str:
 
 
 def _dataset_root() -> Path:
-    """Where the dataset should land.
+    """Where the dataset should land: ``dataset.root``, resolved exactly as
+    :class:`~nvitk.db.repo.DataRepo` resolves it, so the data is downloaded to the directory
+    the rest of nvitk reads from."""
+    from nvitk.db.repo import _dataset_root_from_settings
 
-    Uses the *same* resolution as :class:`~nvitk.db.repo.DataRepo` rather than reading
-    ``db.root`` directly: ``local_fallback_root`` takes precedence over ``root`` there, so
-    resolving it independently here would download the data to one directory while the rest of
-    nvitk read from another.
-    """
-    from nvitk.db.repo import _local_dataset_root_from_settings
-
-    db = load_db_settings_block()
-    if not db:
+    block = load_dataset_settings_block()
+    if not str(block.get("root") or "").strip():
         raise click.ClickException(
             "No dataset location configured.\n"
-            f'Set "db.root" in settings.json — looked in: '
+            f'Set "dataset.root" in settings.json — looked in: '
             f"{config_paths.describe_search('settings.json')}\n"
             "Run `nvitk-config init` if you have no configuration yet."
         )
-    if not (str(db.get("local_fallback_root") or "").strip() or str(db.get("root") or "").strip()):
-        raise click.ClickException(
-            'Neither "db.root" nor "db.local_fallback_root" is set in settings.json.\n'
-            f"Looked in: {config_paths.describe_search('settings.json')}"
-        )
-    return Path(_local_dataset_root_from_settings(db)).expanduser()
+    return _dataset_root_from_settings(block).expanduser()
 
 
 def _entries(path: Path) -> list[Path]:
@@ -146,11 +137,7 @@ def _describe(path: Path, name: str) -> tuple[str, str]:
 
 def _root_origin() -> str:
     """Which setting produced the destination, for output that can be sanity-checked."""
-    if _setting("local_fallback_root"):
-        return "from db.local_fallback_root"
-    if _setting("root"):
-        return "from db.root"
-    return "default location — set db.local_fallback_root to choose another"
+    return "from dataset.root" if _setting("root") else "default location — set dataset.root to choose another"
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -189,8 +176,8 @@ def pull_cmd(want_all: bool, rev: str | None, force: bool, dry_run: bool, no_bui
             raise click.ClickException(
                 f"Cannot create the dataset directory {root}\n"
                 f"  {exc.strerror}\n"
-                'If "db.root" is on a network share, mount it first; otherwise point '
-                '"db.root" somewhere writable.'
+                'If "dataset.root" is on a network share, mount it first; otherwise point '
+                '"dataset.root" somewhere writable.'
             ) from exc
 
     selected = [t for t in TARGETS if want_all or not t[1]]
@@ -199,7 +186,7 @@ def pull_cmd(want_all: bool, rev: str | None, force: bool, dry_run: bool, no_bui
     click.echo(f"repository : {repo}")
     click.echo(f"destination: {root}   ({_root_origin()})")
     if remote_url:
-        click.echo(f"remote     : {remote_url}  (from db.dvc_remote_url)")
+        click.echo(f"remote     : {remote_url}  (from dataset.dvc_remote_url)")
     else:
         click.echo("remote     : as configured in the repository's .dvc/config")
     click.echo("")

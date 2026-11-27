@@ -215,11 +215,11 @@ def _tool_from_script(cmd: str, module: str) -> ToolEntry:
 
 
 def _pipeline_tools(scripts: Iterable[tuple[str, str]]) -> list[ToolEntry]:
-    """Tool entries for scripts belonging to a research pipeline (``nvitk-pesa-fat``/``nvitk-qvtpy``
+    """Tool entries for scripts belonging to a research pipeline (``nvitk-pesa-health``/``nvitk-qvtpy``
     prefixes), sorted by command."""
     tools: list[ToolEntry] = []
     for cmd, module in scripts:
-        if cmd.startswith("nvitk-pesa-fat") or cmd.startswith("nvitk-qvtpy"):
+        if cmd.startswith("nvitk-pesa-health") or cmd.startswith("nvitk-qvtpy"):
             tools.append(_tool_from_script(cmd, module))
     return sorted(tools, key=lambda t: t.command)
 
@@ -229,7 +229,7 @@ def _general_tools(scripts: Iterable[tuple[str, str]]) -> list[ToolEntry]:
     sorted by command."""
     known = set(_CMD_TO_SUBMODULE) | {
         c for c, _ in scripts
-        if c.startswith("nvitk-pesa-fat") or c.startswith("nvitk-qvtpy")
+        if c.startswith("nvitk-pesa-health") or c.startswith("nvitk-qvtpy")
     }
     tools: list[ToolEntry] = []
     for cmd, module in scripts:

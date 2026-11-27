@@ -91,7 +91,7 @@ def _qvtpy_stages() -> tuple[PipelineStageSpec, ...]:
 
 
 def _pesa_ctpet_stages() -> tuple[PipelineStageSpec, ...]:
-    """Build the GUI stage list for the PESA-Fat CT-PET pipeline (segment, post-process, measure)."""
+    """Build the GUI stage list for the PESA-Health CT-PET pipeline (segment, post-process, measure)."""
     labels = {
         "stage1": "Segment (TotalSegmentator)",
         "stage2": "Post-process masks",
@@ -112,7 +112,7 @@ def _pesa_ctpet_stages() -> tuple[PipelineStageSpec, ...]:
 
 
 def _pesa_dixon_stages() -> tuple[PipelineStageSpec, ...]:
-    """Build the GUI stage list for the PESA-Fat Dixon pipeline (segment, post-process, measure)."""
+    """Build the GUI stage list for the PESA-Health Dixon pipeline (segment, post-process, measure)."""
     labels = {
         "stage1": "Segment (Dixon fat)",
         "stage2": "Post-process masks",
@@ -219,14 +219,14 @@ _PESA_DIXON_INPUTS: dict[str, tuple[StageInputSpec, ...]] = {
 }
 
 PIPELINE_STAGE_DEFS: dict[str, PipelineStageDef] = {
-    "nvitk-pesa-fat-ctpet": PipelineStageDef(
-        "nvitk-pesa-fat-ctpet",
-        "PESA-Fat CT-PET",
+    "nvitk-pesa-health-ctpet": PipelineStageDef(
+        "nvitk-pesa-health-ctpet",
+        "PESA-Health CT-PET",
         _pesa_ctpet_stages(),
     ),
-    "nvitk-pesa-fat-dixon": PipelineStageDef(
-        "nvitk-pesa-fat-dixon",
-        "PESA-Fat DIXON",
+    "nvitk-pesa-health-dixon": PipelineStageDef(
+        "nvitk-pesa-health-dixon",
+        "PESA-Health DIXON",
         _pesa_dixon_stages(),
     ),
     "nvitk-qvtpy": PipelineStageDef(

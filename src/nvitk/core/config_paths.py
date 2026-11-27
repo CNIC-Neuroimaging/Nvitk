@@ -1,9 +1,11 @@
 """Locate nvitk's JSON configuration files.
 
-nvitk keeps its site configuration in four JSON files: ``sge.json`` (cluster settings and
-pipeline path roots), ``settings.json`` (dataset and atlas roots), ``xnat.json`` (XNAT
-connection profile) and ``gui.json`` (window layout the GUI manages for itself). This module
-is the single place that decides *where those files live*.
+nvitk keeps its site configuration in JSON files: ``sge.json`` (cluster settings and
+pipeline path roots), ``settings.json`` (the dataset), ``atlas.json`` (atlas locations),
+``xnat.json`` (XNAT connection profile), ``external_tools.json`` (third-party tool locations)
+and ``gui.json`` (window layout the GUI manages for itself), plus the optional ``dataset.json``
+and ``xnat_rules.json``. This module is the single place that decides *where those files
+live*.
 
 It exists because the previous arrangement had three separate copies of a
 ``_find_repo_root()`` that ascended from ``__file__`` looking for ``pyproject.toml`` and
@@ -16,7 +18,7 @@ Precedence, highest first:
 
 1. :func:`set_config_dir`: the ``--config-dir`` flag
 2. a per-file environment variable (``NVITK_SGE_JSON``, ``NVITK_SETTINGS_JSON``,
-   ``NVITK_XNAT_CONFIG``), for that one file only
+   ``NVITK_ATLAS_JSON``, ``NVITK_XNAT_CONFIG``, ...), for that one file only
 3. ``$NVITK_CONFIG_DIR``
 4. ``$NVITK_HOME/.nvitk``: retained; this already worked, undocumented
 5. ``$XDG_CONFIG_HOME/nvitk`` or ``~/.config/nvitk``: the standard location for an installed
@@ -48,6 +50,7 @@ ENV_HOME = "NVITK_HOME"
 FILE_ENV_VARS: dict[str, str] = {
     "sge.json": "NVITK_SGE_JSON",
     "settings.json": "NVITK_SETTINGS_JSON",
+    "atlas.json": "NVITK_ATLAS_JSON",
     "xnat.json": "NVITK_XNAT_CONFIG",
     "gui.json": "NVITK_GUI_JSON",
     "dataset.json": "NVITK_DATASET_CONFIG",
@@ -56,7 +59,7 @@ FILE_ENV_VARS: dict[str, str] = {
 
 #: Files a person fills in. ``gui.json`` is excluded: the GUI writes it, and
 #: "is this install configured?" should not be answered yes by a window layout.
-AUTHORED_CONFIG_FILES: tuple[str, ...] = ("sge.json", "settings.json", "xnat.json")
+AUTHORED_CONFIG_FILES: tuple[str, ...] = ("sge.json", "settings.json", "atlas.json", "xnat.json")
 
 # Set by set_config_dir(); wins over every environment variable.
 _override_dir: Path | None = None

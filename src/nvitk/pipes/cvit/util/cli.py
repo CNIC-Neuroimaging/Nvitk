@@ -36,7 +36,7 @@ def root_options(func: Callable) -> Callable:
     for key in reversed(pth.ROOT_KEYS):
         func = click.option(
             f"--{key.replace('_', '-')}", key, type=click.Path(path_type=Path), default=None,
-            help=f"{_ROOT_HELP[key]} Default: sge.json pipelines.cvit_paths.local_{key}.",
+            help=f"{_ROOT_HELP[key]} Default: sge.json pipelines.cvit.local_{key}.",
         )(func)
     return func
 

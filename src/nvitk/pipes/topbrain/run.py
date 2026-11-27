@@ -29,7 +29,7 @@ skip the prompts; the password is always prompted for. ``--no-remote`` stops aft
 
 Data layout
 -----------
-All roots come from ``sge.json`` ``pipelines.topbrain_paths``; see
+All roots come from ``sge.json`` ``pipelines.topbrain``; see
 :mod:`nvitk.pipes.topbrain.util.paths`. Under ``--submit local`` a CLI flag overrides the
 configured root; under ``--submit sge`` the ``cluster_*`` config wins, because a host path is
 meaningless on the cluster.

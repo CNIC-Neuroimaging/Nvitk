@@ -46,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Models are saved under db.statmodels_root (see `nvitk-config show`). "
+            "Models are saved under dataset.statmodels_root (see `nvitk-config show`). "
             "Use --load <name> to reopen one."
         ),
     )

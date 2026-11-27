@@ -71,4 +71,4 @@ reconstruction, a dedicated statistics workbench, and pipeline export — see
 
 - {doc}`api/index` — the full library reference, organized by topic.
 - {doc}`gui/index` and {doc}`stats-gui/index` — the two GUI workbenches.
-- {doc}`pipelines/index` — end-to-end batch pipelines (PESA-Fat, QVTPy).
+- {doc}`pipelines/index` — end-to-end batch pipelines (PESA-Health, QVTPy).

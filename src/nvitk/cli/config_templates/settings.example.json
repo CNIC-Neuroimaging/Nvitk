@@ -1,15 +1,16 @@
 {
   "_comment": [
-    "nvitk dataset and atlas configuration. Copy to a config directory (see",
-    "`nvitk-config path`) as 'settings.json' and replace every <PLACEHOLDER>.",
+    "nvitk dataset configuration. Copy to a config directory (see `nvitk-config path`) as",
+    "'settings.json' and replace every <PLACEHOLDER>.",
     "",
-    "'db.root' is the one key most commands need: it points at an nvitk dataset directory",
-    "(the one containing 'catalog/repository.json'). Everything else is optional."
+    "'dataset.root' is the one key most commands need: it points at the nvitk dataset this machine",
+    "reads and writes (the directory containing 'catalog/repository.json'). Everything else is",
+    "optional. Atlas locations live in atlas.json and the XNAT connection in xnat.json."
   ],
 
-  "version": "1",
+  "version": "0.2.0",
 
-  "db": {
+  "dataset": {
     "root": "<PATH_TO_NVITK_DATASET>",
 
     "_comment_dvc": [
@@ -23,6 +24,9 @@
     "dvc_repo": "https://github.com/ignacio-ms/Nvitk.git",
     "dvc_remote_url": "",
 
+    "_comment_sge": "The dataset as seen from inside a cluster job / container (used with --submit sge).",
+    "sge_root": "<PATH_TO_NVITK_DATASET_ON_CLUSTER>",
+
     "_comment_statmodels": [
       "Where the Stats GUI saves model configurations, reports and exports. Kept separate from",
       "the dataset because these are a researcher's own working output, written far more often",
@@ -30,22 +34,8 @@
     ],
     "statmodels_root": "<PATH_FOR_SAVED_STATS_MODELS>",
 
-    "_comment_fallback": [
-      "Where the dataset actually lives on THIS machine. Takes precedence over 'root', so a",
-      "shared configuration can name the canonical location in 'root' while each user keeps a",
-      "local copy here. '~' expands per user, so one value works for everybody.",
-      "Left unset, nvitk uses ~/.local/share/nvitk/dataset for an installed package, or",
-      "<repo>/dataset/nvitk-dataset inside a source checkout."
-    ],
-    "local_fallback_root": "~/.local/share/nvitk/dataset",
-
-    "_comment_sge": "Dataset root as seen from inside a cluster job / container.",
-    "sge_root": "<PATH_TO_NVITK_DATASET_ON_CLUSTER>",
-
-    "_comment_raw": "Optional roots for raw acquisition data, if not under the dataset.",
+    "_comment_raw": "Optional root for raw acquisition data, if not under the dataset.",
     "raw_mount_root": "<PATH_TO_RAW_DATA_MOUNT>",
-    "local_dicom_root": "<LOCAL_DICOM_ROOT>",
-    "local_nifti_root": "<LOCAL_NIFTI_ROOT>",
 
     "sqlite_index": true,
 
@@ -54,28 +44,6 @@
       "not a dataset yet. Keep it false unless you are deliberately creating one, so that a",
       "mistyped path fails loudly instead of silently producing an empty dataset."
     ],
-    "auto_scaffold": false,
-
-    "_comment_xnat": [
-      "Optional inline XNAT connection. Prefer a separate xnat.json (see xnat.example.json)",
-      "— this block bypasses the netrc/keyring credential chain."
-    ],
-    "xnat_config": {
-      "server": "<https://xnat.example.org>",
-      "project": "<XNAT_PROJECT_ID>",
-      "netrc_file": "~/.netrc",
-      "verify": true
-    }
-  },
-
-  "atlas": {
-    "_comment": [
-      "Parcellations used for brain/vascular figures. 'root' is a directory nvitk probes for",
-      "known filenames; 'desikan'/'vascular' name files directly and win over 'root'.",
-      "Environment overrides: NVITK_ATLAS_ROOT, NVITK_DESIKAN_ATLAS, NVITK_VASCULAR_ATLAS."
-    ],
-    "root": "<PATH_TO_ATLAS_DIRECTORY>",
-    "desikan": "<PATH_TO_DESIKAN_PARCELLATION.nii.gz>",
-    "vascular": "<PATH_TO_ARTERIAL_TERRITORY_ATLAS.nii.gz>"
+    "auto_scaffold": false
   }
 }

@@ -2,7 +2,7 @@
 
 Description
 -----------
-Every root comes from ``sge.json``'s ``pipelines.topbrain_paths`` section: there are no
+Every root comes from ``sge.json``'s ``pipelines.topbrain`` section: there are no
 installation paths in this file. A root that is needed but unconfigured raises
 :class:`~nvitk.core.config_paths.ConfigError` naming the key, rather than silently resolving
 to somebody else's filesystem. Configuration is read on use, not on import, so ``--config-dir``
@@ -38,7 +38,7 @@ from nvitk.core import config_paths, lazy_config
 from nvitk.pipes.topbrain import labels as _labels
 
 #: ``sge.json`` section holding this pipeline's data roots.
-PIPELINE_PATHS_ID = "topbrain_paths"
+PIPELINE_PATHS_ID = "topbrain"
 
 # Release layout constants
 
@@ -120,7 +120,7 @@ STAGE6_SELFTRAIN_DIR: str = "stage6_selftrain"
 #: which is what lets a cluster run be watched locally.
 TENSORBOARD_DIR: str = "tensorboard"
 
-#: Root keys of ``pipelines.topbrain_paths``, without the ``local_``/``cluster_`` prefix.
+#: Root keys of ``pipelines.topbrain``, without the ``local_``/``cluster_`` prefix.
 ROOT_KEYS: tuple[str, ...] = (
     "challenge_root",
     "nnssl_raw",
@@ -136,7 +136,7 @@ ROOT_KEYS: tuple[str, ...] = (
 
 
 def _pipe_paths() -> dict:
-    """The ``pipelines.topbrain_paths`` block, read fresh (and cached) on each use."""
+    """The ``pipelines.topbrain`` block, read fresh (and cached) on each use."""
     return _sj.pipeline_section(PIPELINE_PATHS_ID)
 
 
@@ -444,7 +444,7 @@ def layout_container(**overrides: Path | None) -> TopBrainPaths:
 
     Deliberately reads no configuration. ``sge.json`` is a workstation file and is not mounted
     into the job, so consulting it here made a GUI cluster launch die on
-    ``pipelines.topbrain_paths.local_challenge_root`` -- a key naming a machine that is not
+    ``pipelines.topbrain.local_challenge_root`` -- a key naming a machine that is not
     involved in the run. The job exports the roots it bound (see
     :data:`nvitk.gui.tools.topbrain_models.CONTAINER_ROOT_ENV`); every other root is marked
     :data:`UNAVAILABLE_ROOT` instead of being resolved.

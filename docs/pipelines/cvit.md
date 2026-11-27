@@ -147,7 +147,7 @@ Always `--emit-script` + `--dry-run` and read the blocks first.
 ## Configuration
 
 `sge.json` → `pipelines.cvit` (SGE project/account/memory/queue, container, script and log
-directories) and `pipelines.cvit_paths` (`local_*` / `cluster_*` twins of `data_root`,
+directories, and the `local_*` / `cluster_*` twins of `data_root`,
 `nnunet_raw`, `nnunet_preprocessed`, `nnunet_results`, `nnssl_raw`, `nnssl_preprocessed`,
 `nnssl_results`, `corpus_root`, `results_root`, `model_root`). Every root can also be passed as
 `--<root>` (e.g. `--nnunet-results`). The usual precedence applies: under `--submit local` the

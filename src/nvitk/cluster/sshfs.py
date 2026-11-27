@@ -627,7 +627,7 @@ def resolve_mount_root(remote_path: str | Path) -> str:
     raise SshfsRootNotAllowed(
         f"{target!r} is not under any configured cluster working root, so nvitk will not "
         f"mount it. Add the root to sge.json -- as a pipeline 'cluster_*' path or in "
-        f"'paths.sshfs_extra_roots'. Currently configured roots: "
+        f"'sshfs.extra_roots'. Currently configured roots: "
         f"{', '.join(roots) if roots else '(none)'}"
     )
 

@@ -789,7 +789,7 @@ class DataBrowserPanel(QWidget):
             self._dicom_root.setText(str(roots.dicom_root))
             self._nifti_root.setText(str(roots.nifti_root))
             self._results_root.setText(str(roots.results_root))
-            self._refresh_cohort_combo(spec.pesa_fat_layout)
+            self._refresh_cohort_combo(spec.pesa_health_layout)
             if roots.batch:
                 self._set_batch_combo_text(roots.batch)
             self._local_roots = roots
@@ -806,9 +806,9 @@ class DataBrowserPanel(QWidget):
         else:
             self._batch_combo.setEditText(batch)
 
-    def _refresh_cohort_combo(self, pesa_fat_layout: bool) -> None:
-        """Populate cohort dropdown from NIfTI/DICOM/RESULTS roots (PESA-Fat)."""
-        if not pesa_fat_layout:
+    def _refresh_cohort_combo(self, pesa_health_layout: bool) -> None:
+        """Populate cohort dropdown from NIfTI/DICOM/RESULTS roots (PESA-Health)."""
+        if not pesa_health_layout:
             return
         current = self._batch_combo.currentText().strip()
         cohorts = list_local_cohorts(
@@ -834,7 +834,7 @@ class DataBrowserPanel(QWidget):
         preset_id = str(self._preset_combo.currentData() or "")
         spec = get_pipeline_preset(preset_id)
         try:
-            self._refresh_cohort_combo(spec.pesa_fat_layout)
+            self._refresh_cohort_combo(spec.pesa_health_layout)
             self._local_roots = load_preset_roots(
                 preset_id,
                 dicom_root=self._dicom_root.text().strip() or None,

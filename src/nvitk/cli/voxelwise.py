@@ -244,7 +244,7 @@ def _submit_sge(
 
     ``qsub`` does not exist on a workstation, so this never shells out to it directly: the script
     is written locally, published over sshfs, and executed over SSH; the same six steps the qvtpy and
-    pesa_fat pipelines take.
+    pesa_health pipelines take.
     """
     from nvitk.cluster import sge_json as sj
     from nvitk.cluster.remote_submit import run_sge_script_ssh_capture

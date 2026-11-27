@@ -1,4 +1,4 @@
-"""Manim animation of the PESA-Fat CT-PET v5 pipeline (stages 1-3) on one subject.
+"""Manim animation of the PESA-Health CT-PET v5 pipeline (stages 1-3) on one subject.
 
 One whole-body CT and its FDG PET:
 
@@ -68,7 +68,7 @@ def solid(color: str, alpha: float, n: int = 8) -> np.ndarray:
 
 
 class PesaCtPet(GLScene):
-    """PESA-Fat CT-PET v5, stages 1-3."""
+    """PESA-Health CT-PET v5, stages 1-3."""
 
     def construct(self) -> None:
         data = np.load(DATA_PATH)
@@ -152,8 +152,8 @@ class PesaCtPet(GLScene):
         dz = z.max() - z
 
         # ------------------------------------------------------------ title + CT / PET
-        title = self.title_card("PESA-Fat · CT-PET", "fat depots, organs, muscles and bone marrow: volume and FDG uptake",
-                                "nvitk.pipes.pesa_fat.ct_pet_v5 · stages 1-3")
+        title = self.title_card("PESA-Health · CT-PET", "fat depots, organs, muscles and bone marrow: volume and FDG uptake",
+                                "nvitk.pipes.pesa_health.ct_pet_v5 · stages 1-3")
         self.play(FadeIn(title), run_time=T(0.8))
 
         def ctx(f: float, b: float = 0.85, s: float = 0.14) -> None:

@@ -3,9 +3,9 @@
 What used to be code (``XNAT_PROJECTS``, the ``classify_scan`` regex cascade, the IA_PET_V5
 classifier, the sequence → asset-slot table, the pipeline resource maps) is a JSON document,
 ``xnat_rules.json``, found by the usual configuration search (``$NVITK_XNAT_RULES`` names it
-outright). Without one, nvitk uses the packaged ``defaults/pesa_xnat_rules.json``, which
-reproduces the original PESA_Brain / IA_PET_V5 behaviour exactly; ``nvitk-config
-generate-pesa`` writes that file out to edit, and ``nvitk-config init`` a generic starter.
+outright). Without one, nvitk uses the packaged ``defaults/xnat_rules.json``: no projects and a
+classifier without rules, so no scan is classified until rules are configured. ``nvitk-config
+init`` seeds a generic starter.
 
 The document, in short (``schema/xnat_rules.schema.json`` has it all)::
 
@@ -58,7 +58,7 @@ CONFIG_NAME = "xnat_rules.json"
 ENV_VAR = "NVITK_XNAT_RULES"
 
 _DEFAULTS_DIR = Path(__file__).with_name("defaults")
-PESA_DEFAULT_PATH = _DEFAULTS_DIR / "pesa_xnat_rules.json"
+DEFAULT_PATH = _DEFAULTS_DIR / "xnat_rules.json"
 _SCHEMA_PATH = Path(__file__).with_name("schema") / "xnat_rules.schema.json"
 
 
@@ -110,7 +110,7 @@ def _dixon_regions_step(
     candidates: list[tuple[Any, str]], step: Mapping[str, Any]
 ) -> dict[str, str]:
     """Dixon station (HEAD / THORAX / LEGS) per scan id, from the scans' slice locations."""
-    from nvitk.pipes.pesa_fat.common.dixon_regions import classify_dixon_scans_by_slice_location
+    from nvitk.pipes.pesa_health.common.dixon_regions import classify_dixon_scans_by_slice_location
 
     scan_ids = [scan_id for _, scan_id in candidates]
     scans_by_id = {scan_id: scan for scan, scan_id in candidates}
@@ -463,14 +463,14 @@ def _load(path_text: str, mtime: float) -> XnatRules:
 
 
 def load_xnat_rules(path: str | Path | None = None) -> XnatRules:
-    """The XNAT rules in force: *path*, else the configured file, else the packaged PESA default."""
-    target = Path(path).expanduser() if path else (config_path() or PESA_DEFAULT_PATH)
+    """The XNAT rules in force: *path*, else the configured file, else the packaged default."""
+    target = Path(path).expanduser() if path else (config_path() or DEFAULT_PATH)
     return _load(str(target), target.stat().st_mtime)
 
 
 def default_document() -> dict[str, Any]:
-    """The packaged PESA default as a JSON document (what ``generate-pesa`` writes out)."""
-    return json.loads(PESA_DEFAULT_PATH.read_text(encoding="utf-8"))
+    """The packaged default as a JSON document (the starting point of a new ``xnat_rules.json``)."""
+    return json.loads(DEFAULT_PATH.read_text(encoding="utf-8"))
 
 
 def classify_with(
@@ -498,7 +498,7 @@ __all__ = [
     "ENV_VAR",
     "EXPERIMENT_STEPS",
     "EXTRACTORS",
-    "PESA_DEFAULT_PATH",
+    "DEFAULT_PATH",
     "ProjectRules",
     "ScanRule",
     "XnatRules",

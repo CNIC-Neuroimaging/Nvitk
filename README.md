@@ -142,16 +142,16 @@ defaults in `.nvitk/sge.json`.
 
 > *(To specify json-specific configuration schemas.)*
  
-### Pipelines — PESA-Fat
+### Pipelines — PESA-Health
  
 | Command | Purpose |
 |---|---|
-| `nvitk-pesa-fat` | Batch driver |
-| `nvitk-pesa-fat-ctpet` | CT/PET pipeline |
-| `nvitk-pesa-fat-dixon` | Dixon pipeline |
-| `nvitk-pesa-fat-qc` | QC stage |
-| `nvitk-pesa-fat-qc-portal` | QC review portal |
-| `nvitk-pesa-fat-sync-measurements` | Sync measurements |
+| `nvitk-pesa-health` | Batch driver |
+| `nvitk-pesa-health-ctpet` | CT/PET pipeline |
+| `nvitk-pesa-health-dixon` | Dixon pipeline |
+| `nvitk-pesa-health-qc` | QC stage |
+| `nvitk-pesa-health-qc-portal` | QC review portal |
+| `nvitk-pesa-health-sync-measurements` | Sync measurements |
  
 ### Pipelines — PESA-Brain (qvtpy)
  

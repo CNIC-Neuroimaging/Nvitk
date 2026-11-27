@@ -49,7 +49,7 @@ _click_command = click.command if click is not None else _cli_decorator
 _click_option = click.option if click is not None else _cli_decorator
 
 def _dataset_config():
-    """The dataset config in force (``dataset.json``, or the packaged PESA default)."""
+    """The dataset config in force (``dataset.json``, or the packaged default)."""
     from nvitk.db.config.dataset_config import load_dataset_config
 
     return load_dataset_config()

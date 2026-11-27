@@ -5,8 +5,7 @@
     "nvitk dataset config: how spreadsheets become the dataset's subjects, visits and measurements.",
     "Copy to your config directory as 'dataset.json' and edit. 'sources' lists each importable",
     "(file, sheet); 'filename' may be a glob so dated exports match. 'default_pipeline_id' is the",
-    "measurement-pipeline version image values belong to (see measurement_pipelines.json).",
-    "`nvitk-config generate-pesa` writes nvitk's PESA configuration, as a worked example."
+    "measurement-pipeline version image values belong to (see measurement_pipelines.json)."
   ],
   "id_columns": {
     "subject": [

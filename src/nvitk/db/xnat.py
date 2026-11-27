@@ -239,7 +239,7 @@ def classify_scan(series_description: str | None, quality: str | None = None) ->
 
 
 def _xnat_rules():
-    """The XNAT rules in force (``xnat_rules.json``, or the packaged PESA default)."""
+    """The XNAT rules in force (``xnat_rules.json``, or the packaged default)."""
     from nvitk.db.config.xnat_rules import load_xnat_rules
 
     return load_xnat_rules()

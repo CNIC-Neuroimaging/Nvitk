@@ -268,7 +268,7 @@ nvitk-voxelwise fetch <dir> --to # pull a finished cluster result back over SFTP
 ### Running on the cluster
 
 `--submit sge` never shells out to a local `qsub` — a workstation does not have one. It follows the
-same path as the `qvtpy` and `pesa_fat` pipelines: write the driver script locally, publish it over
+same path as the `qvtpy` and `pesa_health` pipelines: write the driver script locally, publish it over
 SFTP, run it over SSH, and report the job ids.
 
 `--from-source` says where the inputs are:

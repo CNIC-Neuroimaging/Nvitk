@@ -40,8 +40,8 @@ def categorize_command(cmd: str, module: str) -> str:
         return "Segmentation"
     if cmd.startswith("nvitk-flirt") or cmd in ("nvitk-ants", "nvitk-fireants"):
         return "Registration"
-    if cmd.startswith("nvitk-pesa-fat"):
-        return "PESA-Fat Analysis"
+    if cmd.startswith("nvitk-pesa-health"):
+        return "PESA-Health Analysis"
     if cmd.startswith("nvitk-qvtpy"):
         return "PESA-Brain Analysis"
     if cmd.startswith("nvitk-topbrain"):
@@ -62,7 +62,7 @@ def get_command_color(category: str) -> str:
         "Image Conversion": Colors.OKCYAN,
         "Segmentation": Colors.OKGREEN,
         "Registration": Colors.HEADER,
-        "PESA-Fat Analysis": Colors.WARNING,
+        "PESA-Health Analysis": Colors.WARNING,
         "PESA-Brain Analysis": Colors.OKBLUE,
         "Image Processing": Colors.OKCYAN,
         "General": Colors.WHITE,
@@ -88,7 +88,7 @@ def list_cli_commands_flat() -> None:
         "Segmentation",
         "Registration",
         "Image Processing",
-        "PESA-Fat Analysis",
+        "PESA-Health Analysis",
         "PESA-Brain Analysis",
         "General",
     ]

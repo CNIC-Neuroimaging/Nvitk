@@ -37,8 +37,8 @@ def _invert(name_to_id: Mapping[str, int]) -> dict[int, str]:
 
 def _build_pipeline_schemas() -> dict[str, LabelSchema]:
     """Build the registry of :class:`LabelSchema` entries for every known pipeline label vocabulary
-    (eICAB, QVTpy, PESA-FAT, Dixon)."""
-    from nvitk.pipes.pesa_fat.ct_pet_v5.labels import (
+    (eICAB, QVTpy, PESA-HEALTH, Dixon)."""
+    from nvitk.pipes.pesa_health.ct_pet_v5.labels import (
         BODY_LABELS,
         FAT_BATCH_LABELS,
         FAT_LABELS,
@@ -46,7 +46,7 @@ def _build_pipeline_schemas() -> dict[str, LabelSchema]:
         MUSCLES_LABELS,
         ORGANS_LABELS,
     )
-    from nvitk.pipes.pesa_fat.dixon_v5.labels import HEAD_LABELS, LEGS_LABELS, THORAX_LABELS
+    from nvitk.pipes.pesa_health.dixon_v5.labels import HEAD_LABELS, LEGS_LABELS, THORAX_LABELS
     from nvitk.pipes.qvtpy.labels import EICAB_ID_TO_NAME, QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID
     from nvitk.pipes.topbrain.labels import label_map as topbrain_label_map
 
@@ -72,66 +72,66 @@ def _build_pipeline_schemas() -> dict[str, LabelSchema]:
             dict(QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID),
             "seg_4dflow.nii, centerlines_mask.nii, LOCs.",
         ),
-        "pesa-fat-mo": LabelSchema(
-            "pesa-fat-mo",
-            "PESA-FAT — MO (vertebrae L3/L4)",
-            "Pipelines / PESA-FAT",
+        "pesa-health-mo": LabelSchema(
+            "pesa-health-mo",
+            "PESA-HEALTH — MO (vertebrae L3/L4)",
+            "Pipelines / PESA-HEALTH",
             _invert(MO_LABELS),
             "MO.nii from ct-pet-v5 postprocess.",
         ),
-        "pesa-fat-fat": LabelSchema(
-            "pesa-fat-fat",
-            "PESA-FAT — FAT",
-            "Pipelines / PESA-FAT",
+        "pesa-health-fat": LabelSchema(
+            "pesa-health-fat",
+            "PESA-HEALTH — FAT",
+            "Pipelines / PESA-HEALTH",
             _invert(FAT_LABELS),
             "FAT.nii (visceral / subcutaneous).",
         ),
-        "pesa-fat-fat-batch": LabelSchema(
-            "pesa-fat-fat-batch",
-            "PESA-FAT — FAT batch",
-            "Pipelines / PESA-FAT",
+        "pesa-health-fat-batch": LabelSchema(
+            "pesa-health-fat-batch",
+            "PESA-HEALTH — FAT batch",
+            "Pipelines / PESA-HEALTH",
             _invert(FAT_BATCH_LABELS),
             "FAT_BATCH.nii (vertebra-limited).",
         ),
-        "pesa-fat-body": LabelSchema(
-            "pesa-fat-body",
-            "PESA-FAT — BODY",
-            "Pipelines / PESA-FAT",
+        "pesa-health-body": LabelSchema(
+            "pesa-health-body",
+            "PESA-HEALTH — BODY",
+            "Pipelines / PESA-HEALTH",
             _invert(BODY_LABELS),
             "BODY.nii merged trunk + extremities.",
         ),
-        "pesa-fat-organs": LabelSchema(
-            "pesa-fat-organs",
-            "PESA-FAT — organs",
-            "Pipelines / PESA-FAT",
+        "pesa-health-organs": LabelSchema(
+            "pesa-health-organs",
+            "PESA-HEALTH — organs",
+            "Pipelines / PESA-HEALTH",
             _invert(ORGANS_LABELS),
             "ORGANS.nii (liver, spleen, pancreas).",
         ),
-        "pesa-fat-muscles": LabelSchema(
-            "pesa-fat-muscles",
-            "PESA-FAT — muscles",
-            "Pipelines / PESA-FAT",
+        "pesa-health-muscles": LabelSchema(
+            "pesa-health-muscles",
+            "PESA-HEALTH — muscles",
+            "Pipelines / PESA-HEALTH",
             _invert(MUSCLES_LABELS),
             "MUSCLES.nii (quads, paravertebral, deltoid, trapezius).",
         ),
         "dixon-head": LabelSchema(
             "dixon-head",
             "Dixon — HEAD",
-            "Pipelines / PESA-FAT Dixon",
+            "Pipelines / PESA-HEALTH Dixon",
             _invert(HEAD_LABELS),
             "HEAD.nii from dixon-v5.",
         ),
         "dixon-thorax": LabelSchema(
             "dixon-thorax",
             "Dixon — THORAX",
-            "Pipelines / PESA-FAT Dixon",
+            "Pipelines / PESA-HEALTH Dixon",
             _invert(THORAX_LABELS),
             "THORAX.nii from dixon-v5.",
         ),
         "dixon-legs": LabelSchema(
             "dixon-legs",
             "Dixon — LEGS",
-            "Pipelines / PESA-FAT Dixon",
+            "Pipelines / PESA-HEALTH Dixon",
             _invert(LEGS_LABELS),
             "LEGS.nii from dixon-v5.",
         ),
@@ -276,7 +276,7 @@ def schema_keys() -> list[str]:
         s = schemas[k]
         order = {"General": 0, "Segmentation / vessels": 1, "Pipelines / QVTpy": 2,
                  "Pipelines / TopBrain": 3,
-                 "Pipelines / PESA-FAT": 4, "Pipelines / PESA-FAT Dixon": 5,
+                 "Pipelines / PESA-HEALTH": 4, "Pipelines / PESA-HEALTH Dixon": 5,
                  "TotalSegmentator": 6, "FastSurfer": 7, "Atlases": 8}
         return (order.get(s.group, 99), s.title)
 
@@ -323,13 +323,13 @@ _GUESS_RULES: tuple[tuple[str, str], ...] = (
     ("seg_4dflow", "qvtpy-4dflow"),
     ("centerlines_mask", "qvtpy-4dflow"),
     ("centerline", "qvtpy-4dflow"),
-    ("fat_batch", "pesa-fat-fat-batch"),
-    ("fat.nii", "pesa-fat-fat"),
-    ("fat_", "pesa-fat-fat"),
-    ("mo.nii", "pesa-fat-mo"),
-    ("organs", "pesa-fat-organs"),
-    ("muscles", "pesa-fat-muscles"),
-    ("body.nii", "pesa-fat-body"),
+    ("fat_batch", "pesa-health-fat-batch"),
+    ("fat.nii", "pesa-health-fat"),
+    ("fat_", "pesa-health-fat"),
+    ("mo.nii", "pesa-health-mo"),
+    ("organs", "pesa-health-organs"),
+    ("muscles", "pesa-health-muscles"),
+    ("body.nii", "pesa-health-body"),
     ("head.nii", "dixon-head"),
     ("thorax", "dixon-thorax"),
     ("legs.nii", "dixon-legs"),

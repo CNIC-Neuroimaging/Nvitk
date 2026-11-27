@@ -1,9 +1,9 @@
-"""Precompute for ``pesa_dixon_manim.py``: the PESA-Fat Dixon v5 pipeline on one subject.
+"""Precompute for ``pesa_dixon_manim.py``: the PESA-Health Dixon v5 pipeline on one subject.
 
 Runs in the nvitk environment. For the three Dixon stations (HEAD = neck and shoulders, THORAX =
 abdomen, LEGS = thighs) it reads the four contrasts (FAT, WATER, fat fraction, T2*) and the
 stage-1 TotalSegmentator outputs, then rebuilds stage 2 step by step with the module's own
-functions (:mod:`nvitk.pipes.pesa_fat.dixon_v5.stage2_postprocess`), recording every intermediate
+functions (:mod:`nvitk.pipes.pesa_health.dixon_v5.stage2_postprocess`), recording every intermediate
 mask:
 
 - HEAD: the paravertebral muscles (``autochthon``), biggest component each;
@@ -56,11 +56,11 @@ def compute(nifti_dir: Path, seg_dir: Path) -> tuple[dict, dict]:
     set_global_backend("numpy")
     from nvitk.io import imread
     from nvitk.morphology import dilate, erode
-    from nvitk.pipes.pesa_fat.common.label_erosion import erode_labels
-    from nvitk.pipes.pesa_fat.dixon_v5 import config as cfg
-    from nvitk.pipes.pesa_fat.dixon_v5 import stage2_postprocess as s2
-    from nvitk.pipes.pesa_fat.dixon_v5 import stage3_measure as s3
-    from nvitk.pipes.pesa_fat.dixon_v5.labels import HEAD_LABELS, LEGS_LABELS, THORAX_LABELS
+    from nvitk.pipes.pesa_health.common.label_erosion import erode_labels
+    from nvitk.pipes.pesa_health.dixon_v5 import config as cfg
+    from nvitk.pipes.pesa_health.dixon_v5 import stage2_postprocess as s2
+    from nvitk.pipes.pesa_health.dixon_v5 import stage3_measure as s3
+    from nvitk.pipes.pesa_health.dixon_v5.labels import HEAD_LABELS, LEGS_LABELS, THORAX_LABELS
     from nvitk.segmentation.hull_edt import convex_hull_3d
     from nvitk.segmentation.labels import biggest_cc
     from nvitk.segmentation.total_segmentator.class_maps import get_class_id
@@ -202,7 +202,7 @@ def main() -> None:
     ap.add_argument("--batch", default="202603_Week4")
     ap.add_argument("--subject", default="PESA1993744")
     args = ap.parse_args()
-    from nvitk.pipes.pesa_fat.dixon_v5 import config as cfg
+    from nvitk.pipes.pesa_health.dixon_v5 import config as cfg
     nifti_dir = args.nifti_root / args.batch / args.subject
     seg_dir = args.results_root / args.batch / cfg.STAGE1_DIR / args.subject
     arrays, meta = compute(nifti_dir, seg_dir)

@@ -17,8 +17,8 @@ of one project's files:
   values belong to).
 * ``local_presets`` and ``cohort_dir_rules``: how the Data browser walks pipeline folders on disk.
 
-Without a ``dataset.json``, the packaged ``defaults/pesa_dataset.json`` applies: it reproduces
-nvitk's original PESA setup exactly.
+Without a ``dataset.json``, the packaged ``defaults/dataset.json`` applies: generic identifier
+columns and no sources, so nothing is imported until a dataset is configured.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ CONFIG_NAME = "dataset.json"
 ENV_VAR = "NVITK_DATASET_CONFIG"
 
 _DEFAULTS_DIR = Path(__file__).with_name("defaults")
-PESA_DEFAULT_PATH = _DEFAULTS_DIR / "pesa_dataset.json"
+DEFAULT_PATH = _DEFAULTS_DIR / "dataset.json"
 _SCHEMA_PATH = Path(__file__).with_name("schema") / "dataset.schema.json"
 
 #: Fields a source entry may carry, in :class:`~nvitk.db.importers.SourceSpec` order.
@@ -178,21 +178,21 @@ def _load(path_text: str, mtime: float) -> DatasetConfig:
 
 
 def load_dataset_config(path: str | Path | None = None) -> DatasetConfig:
-    """The dataset config in force: *path*, else the configured file, else the packaged PESA one."""
-    target = Path(path).expanduser() if path else (config_path() or PESA_DEFAULT_PATH)
+    """The dataset config in force: *path*, else the configured file, else the packaged default."""
+    target = Path(path).expanduser() if path else (config_path() or DEFAULT_PATH)
     return _load(str(target), target.stat().st_mtime)
 
 
 def default_document() -> dict[str, Any]:
-    """The packaged PESA default as a JSON document (what ``generate-pesa`` writes out)."""
-    return json.loads(PESA_DEFAULT_PATH.read_text(encoding="utf-8"))
+    """The packaged default as a JSON document (the starting point of a new ``dataset.json``)."""
+    return json.loads(DEFAULT_PATH.read_text(encoding="utf-8"))
 
 
 __all__ = [
     "CONFIG_NAME",
     "DatasetConfig",
     "ENV_VAR",
-    "PESA_DEFAULT_PATH",
+    "DEFAULT_PATH",
     "SOURCE_FIELDS",
     "config_path",
     "default_document",

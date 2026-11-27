@@ -1,0 +1,66 @@
+"""CLI: run the PESA-Health QC portal (static HTML + database-backed reviews)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import click
+
+from nvitk.core.logger import Logger
+from nvitk.pipes.pesa_health.common.paths import DEFAULT_RESULTS_ROOT, layout
+from nvitk.pipes.pesa_health.common.stage4_qc import RES_QC_DIR
+from nvitk.pipes.pesa_health.qc.portal import create_qc_portal_app
+from nvitk.core.click_config import config_dir_click_option
+
+# DEFAULT_RESULTS_ROOT is imported above from common.paths, which resolves it through
+# sge.json. It used to be reassigned here to a hardcoded path, which discarded that override
+# and made the import dead.
+#: Bind address for the review portal. Loopback by default: this serves unblinded QC images,
+#: so exposing it on a routable interface is an explicit `--host` decision, not a default.
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8008
+
+@click.command("nvitk-pesa-health-qc-portal")
+@config_dir_click_option()
+@click.option("--batch", required=False, default=None, help="Optional batch name (e.g. '202602_Week4').")
+@click.option("--results-root", type=click.Path(path_type=Path), default=DEFAULT_RESULTS_ROOT)
+@click.option("--host", default=DEFAULT_HOST, show_default=True)
+@click.option("--port", type=int, default=DEFAULT_PORT, show_default=True)
+@click.option("--log-level", default="INFO", show_default=True)
+def main(
+    batch: str | None,
+    results_root: Path | None,
+    host: str,
+    port: int,
+    log_level: str,
+) -> None:
+    """Serve QC HTML and accept review updates via POST /review (stored in the NVITK DB)."""
+    Logger(level=log_level.upper())
+    results_root_eff = (results_root or DEFAULT_RESULTS_ROOT)
+
+    if batch:
+        lay = layout(batch, results_root=results_root_eff)
+        qc_root = lay.results_dir / RES_QC_DIR
+        if not qc_root.is_dir():
+            raise click.ClickException(f"QC directory not found: {qc_root}")
+    else:
+        # Dashboard mode (no single batch): use RESULTS root as the static tree.
+        qc_root = Path(results_root_eff) / RES_QC_DIR  # unused for file serving; kept for app factory shape
+        qc_root.mkdir(parents=True, exist_ok=True)
+
+    app = create_qc_portal_app(
+        qc_root=qc_root,
+        results_root=Path(results_root_eff),
+        default_batch=batch,
+    )
+    try:
+        import uvicorn
+    except Exception as exc:
+        raise click.ClickException(
+            'uvicorn is required. Install with: pip install "uvicorn>=0.27"'
+        ) from exc
+    uvicorn.run(app, host=str(host), port=int(port), log_level=str(log_level).lower())
+
+
+__all__ = ["main"]
+

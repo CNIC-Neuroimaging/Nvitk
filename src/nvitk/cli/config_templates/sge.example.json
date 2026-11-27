@@ -1,30 +1,41 @@
 {
   "_comment": [
-    "nvitk cluster + pipeline path configuration. Copy to a config directory (see",
+    "nvitk cluster + pipeline configuration. Copy to a config directory (see",
     "`nvitk-config path`) as 'sge.json' and replace every <PLACEHOLDER>.",
     "",
     "Anything you leave out simply stays unset: nvitk reports the missing key by name when a",
-    "command actually needs it, rather than guessing a path. You only need the sections for",
-    "the pipelines you run \u2014 delete the rest.",
+    "command actually needs it, rather than guessing a path. You only need the pipelines you",
+    "run — delete the rest, or add a block for any other pipeline id its documentation names.",
     "",
-    "'defaults' apply to every pipeline; a key repeated under 'pipelines.<id>' overrides it",
-    "for that pipeline only."
+    "  defaults  - qsub settings every pipeline starts from.",
+    "  paths     - host-wide cluster locations.",
+    "  sshfs     - how cluster storage is mounted on the workstation.",
+    "  pipelines - one block per pipeline: the qsub keys it overrides on top of 'defaults',",
+    "              its container / script / log settings and its data roots ('local_*' for",
+    "              --submit local, 'cluster_*' for --submit sge)."
   ],
-  "schema": "nvitk.sge.v1",
+  "schema": "nvitk.sge.v2",
   "defaults": {
+    "_comment": [
+      "Every qsub setting nvitk sets: -P project, -A account, -q queue (null: none),",
+      "-l ngpu (0: CPU only; virtual-GPU projects get their own -l flag), -l h_vmem and",
+      "-pe smp slots (null: no parallel environment). Job names come from each pipeline's",
+      "'sge_job_prefix'."
+    ],
     "sge_project": "<SGE_PROJECT>",
     "sge_account": "<SGE_ACCOUNT>",
     "sge_queue": null,
     "sge_ngpu": 0,
-    "sge_h_vmem": "25G"
+    "sge_h_vmem": "25G",
+    "sge_pe_smp": null
   },
   "paths": {
-    "_comment": "Host-wide locations. nvitk_src_dir/nvitk_container describe the cluster side.",
+    "_comment": "Host-wide locations. nvitk_src_dir / nvitk_container describe the cluster side.",
     "nvitk_src_dir": "<PATH_TO_NVITK_SRC_ON_CLUSTER>",
     "nvitk_container": "<PATH_TO_NVITK_SIF>",
+    "container_root": "<DIR_HOLDING_CLUSTER_SIF_IMAGES>",
     "gui_sge_job_root": "<REMOTE_DIR_FOR_GUI_SUBMITTED_JOBS>",
     "sge_scripts_dir": "<DIR_FOR_GENERATED_JOB_SCRIPTS>",
-    "container_root": "<DIR_HOLDING_CLUSTER_SIF_IMAGES>",
     "sge_log_root": "<DIR_FOR_SGE_STDOUT_LOGS>",
     "sge_err_root": "<DIR_FOR_SGE_STDERR_LOGS>",
     "cluster_host_aliases": {
@@ -32,18 +43,31 @@
       "<CLUSTER_ALIAS>": "<CLUSTER_HOSTNAME_OR_IP>"
     }
   },
-  "pipelines": {
+  "sshfs": {
     "_comment": [
-      "Per-pipeline overrides. '<id>_paths' sections hold data roots; 'local_*' is used when",
-      "running with --submit local, 'cluster_*' when running with --submit sge."
+      "Cluster directories are mounted with sshfs only under the roots this file names",
+      "(the 'paths' log/script roots and every pipeline 'cluster_*' root) plus 'extra_roots'.",
+      "'reuse_existing_mounts' reuses a mount you already keep; 'idle_ttl_seconds' keeps an",
+      "unused mount alive that long (0: unmount at once)."
     ],
+    "mount_root": "~/.cache/nvitk/sshfs",
+    "extra_roots": [],
+    "reuse_existing_mounts": true,
+    "idle_ttl_seconds": 300,
+    "options": [
+      "reconnect",
+      "ServerAliveInterval=15",
+      "ServerAliveCountMax=3"
+    ]
+  },
+  "pipelines": {
     "eicab": {
       "sge_ngpu": 0,
       "sge_h_vmem": "35G",
       "log_subdir": "eICAB",
       "err_subdir": "eICAB",
+      "container_path": "<PATH_TO_EICAB_SIF>",
       "default_sge_scripts_dir": "<DIR_FOR_GENERATED_JOB_SCRIPTS>",
-      "default_sge_container_root": "<PATH_TO_EICAB_SIF>",
       "default_vasculature_host_dir": "<PATH_TO_VASCULATURE_TOOLS>",
       "eicab_thread_limit": 8,
       "eicab_local_metric_scratch": true,
@@ -55,21 +79,14 @@
       "default_sge_model_root": "<PATH_TO_TOTALSEGMENTATOR_WEIGHTS>",
       "default_sge_container_root": "<PATH_TO_NVITK_SIF>"
     },
-    "image_tools": {
-      "log_subdir": "image_tools",
-      "err_subdir": "image_tools",
-      "sge_job_prefix": "nvitk-tool",
-      "default_sge_container_root": "<PATH_TO_NVITK_SIF>"
-    },
     "qvtpy": {
+      "sge_ngpu": 1,
+      "sge_h_vmem": "40G",
       "log_subdir": "QVTPY",
       "err_subdir": "QVTPY",
-      "sge_h_vmem": "40G",
       "default_sge_scripts_dir": "<DIR_FOR_GENERATED_JOB_SCRIPTS>",
       "default_sge_container_root": "<PATH_TO_NVITK_SIF>",
-      "default_sge_model_root": "<PATH_TO_TOTALSEGMENTATOR_WEIGHTS>"
-    },
-    "qvtpy_paths": {
+      "default_sge_model_root": "<PATH_TO_TOTALSEGMENTATOR_WEIGHTS>",
       "local_dicom_root": "<LOCAL_DICOM_ROOT>",
       "local_nifti_root": "<LOCAL_NIFTI_ROOT>",
       "local_results_root": "<LOCAL_RESULTS_ROOT>",
@@ -79,47 +96,42 @@
       "cluster_results_root": "<CLUSTER_RESULTS_ROOT>",
       "cluster_model_root": "<CLUSTER_TOTALSEGMENTATOR_WEIGHTS>"
     },
-    "pesa_fat_ct_pet": {
-      "log_subdir": "PESAFat-CT-PET",
-      "err_subdir": "PESAFat-CT-PET",
-      "default_sge_model_root": "<PATH_TO_TOTALSEGMENTATOR_WEIGHTS>",
-      "default_sge_container_root": "<PATH_TO_NVITK_SIF>"
-    },
-    "pesa_fat_dixon": {
-      "log_subdir": "PESAFat-DIXON",
-      "err_subdir": "PESAFat-DIXON",
-      "default_sge_model_root": "<PATH_TO_TOTALSEGMENTATOR_WEIGHTS>",
-      "default_sge_container_root": "<PATH_TO_NVITK_SIF>"
-    },
-    "pesa_fat_paths": {
-      "local_dicom_root": "<LOCAL_DICOM_ROOT>",
-      "local_nifti_root": "<LOCAL_NIFTI_ROOT>",
+    "topbrain": {
+      "sge_ngpu": 1,
+      "sge_h_vmem": "60G",
+      "sge_job_prefix": "TOPBRAIN",
+      "log_subdir": "TopBrain",
+      "err_subdir": "TopBrain",
+      "default_sge_scripts_dir": "<DIR_FOR_GENERATED_JOB_SCRIPTS>",
+      "default_sge_container_root": "<PATH_TO_NVITK_SIF>",
+      "local_challenge_root": "<LOCAL_CHALLENGE_ROOT>",
+      "local_nnssl_raw": "<LOCAL_NNSSL_RAW>",
+      "local_nnssl_preprocessed": "<LOCAL_NNSSL_PREPROCESSED>",
+      "local_nnssl_results": "<LOCAL_NNSSL_RESULTS>",
+      "local_nnunet_raw": "<LOCAL_NNUNET_RAW>",
+      "local_nnunet_preprocessed": "<LOCAL_NNUNET_PREPROCESSED>",
+      "local_nnunet_results": "<LOCAL_NNUNET_RESULTS>",
       "local_results_root": "<LOCAL_RESULTS_ROOT>",
-      "local_model_root": "<LOCAL_TOTALSEGMENTATOR_WEIGHTS>",
-      "cluster_dicom_root": "<CLUSTER_DICOM_ROOT>",
-      "cluster_nifti_root": "<CLUSTER_NIFTI_ROOT>",
+      "local_model_root": "<LOCAL_MODEL_ROOT>",
+      "local_corpus_root": "<LOCAL_CORPUS_ROOT>",
+      "cluster_challenge_root": "<CLUSTER_CHALLENGE_ROOT>",
+      "cluster_nnssl_raw": "<CLUSTER_NNSSL_RAW>",
+      "cluster_nnssl_preprocessed": "<CLUSTER_NNSSL_PREPROCESSED>",
+      "cluster_nnssl_results": "<CLUSTER_NNSSL_RESULTS>",
+      "cluster_nnunet_raw": "<CLUSTER_NNUNET_RAW>",
+      "cluster_nnunet_preprocessed": "<CLUSTER_NNUNET_PREPROCESSED>",
+      "cluster_nnunet_results": "<CLUSTER_NNUNET_RESULTS>",
       "cluster_results_root": "<CLUSTER_RESULTS_ROOT>",
-      "cluster_model_root": "<CLUSTER_TOTALSEGMENTATOR_WEIGHTS>"
-    },
-    "pesa_fat_validation": {
-      "_comment": "Manual-vs-automatic validation utility (internal).",
-      "base_root": "<VISIT_DATA_ROOT>",
-      "output_root": "<VALIDATION_OUTPUT_ROOT>",
-      "run_name": "Validation_v1",
-      "auto_month": "<YYYYMM>",
-      "auto_weeks": [
-        1,
-        2,
-        3,
-        4
-      ]
+      "cluster_model_root": "<CLUSTER_MODEL_ROOT>",
+      "cluster_corpus_root": "<CLUSTER_CORPUS_ROOT>"
     },
     "voxelwise": {
-      "log_subdir": "voxelwise",
-      "err_subdir": "voxelwise",
-      "sge_job_prefix": "nvitk-voxelwise",
+      "sge_ngpu": 0,
       "sge_h_vmem": "40G",
       "sge_pe_smp": 4,
+      "sge_job_prefix": "nvitk-voxelwise",
+      "log_subdir": "voxelwise",
+      "err_subdir": "voxelwise",
       "default_sge_scripts_dir": "<DIR_FOR_GENERATED_JOB_SCRIPTS>",
       "default_sge_container_root": "<PATH_TO_NVITK_SIF>",
       "local_images_root": "<LOCAL_NORMALISED_IMAGES_ROOT>",
@@ -127,73 +139,12 @@
       "local_results_root": "<LOCAL_VOXELWISE_RESULTS_ROOT>",
       "cluster_results_root": "<CLUSTER_VOXELWISE_RESULTS_ROOT>"
     },
-    "topbrain": {
-      "log_subdir": "TopBrain",
-      "err_subdir": "TopBrain",
-      "sge_job_prefix": "TOPBRAIN",
-      "sge_project": "GPU",
-      "sge_account": "Prod",
-      "sge_ngpu": 1,
-      "sge_h_vmem": "60G",
-      "sge_queue": null,
-      "default_sge_scripts_dir": "/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/",
-      "default_sge_container_root": "/data3/BIOIT_IMAGE/Containers/nvitk_v2026.07.05.sif"
-    },
-    "topbrain_paths": {
-      "local_challenge_root": "<local_challenge_root>",
-      "local_nnssl_raw": "<local_nnssl_raw>",
-      "local_nnssl_preprocessed": "<local_nnssl_preprocessed>",
-      "local_nnssl_results": "<local_nnssl_results>",
-      "local_nnunet_raw": "<local_nnunet_raw>",
-      "local_nnunet_preprocessed": "<local_nnunet_preprocessed>",
-      "local_nnunet_results": "<local_nnunet_results>",
-      "local_results_root": "<local_results_root>",
-      "local_model_root": "<local_model_root>",
-      "local_corpus_root": "<local_corpus_root>",
-      "cluster_challenge_root": "<cluster_challenge_root>",
-      "cluster_nnssl_raw": "<cluster_nnssl_raw>",
-      "cluster_nnssl_preprocessed": "<cluster_nnssl_preprocessed>",
-      "cluster_nnssl_results": "<cluster_nnssl_results>",
-      "cluster_nnunet_raw": "<cluster_nnunet_raw>",
-      "cluster_nnunet_preprocessed": "<cluster_nnunet_preprocessed>",
-      "cluster_nnunet_results": "<cluster_nnunet_results>",
-      "cluster_results_root": "<cluster_results_root>",
-      "cluster_model_root": "<cluster_model_root>",
-      "cluster_corpus_root": "<cluster_corpus_root>"
-    },
-    "cvit": {
-      "log_subdir": "CViT",
-      "err_subdir": "CViT",
-      "sge_job_prefix": "CVIT",
-      "sge_project": "GPU",
-      "sge_account": "Prod",
-      "sge_ngpu": 1,
-      "sge_h_vmem": "60G",
-      "sge_queue": null,
-      "default_sge_scripts_dir": "<DIR_FOR_GENERATED_JOB_SCRIPTS>",
+    "image_tools": {
+      "sge_h_vmem": "40G",
+      "sge_job_prefix": "nvitk-tool",
+      "log_subdir": "image_tools",
+      "err_subdir": "image_tools",
       "default_sge_container_root": "<PATH_TO_NVITK_SIF>"
-    },
-    "cvit_paths": {
-      "local_data_root": "<local_data_root>",
-      "local_nnunet_raw": "<local_nnunet_raw>",
-      "local_nnunet_preprocessed": "<local_nnunet_preprocessed>",
-      "local_nnunet_results": "<local_nnunet_results>",
-      "local_nnssl_raw": "<local_nnssl_raw>",
-      "local_nnssl_preprocessed": "<local_nnssl_preprocessed>",
-      "local_nnssl_results": "<local_nnssl_results>",
-      "local_corpus_root": "<local_corpus_root>",
-      "local_results_root": "<local_results_root>",
-      "local_model_root": "<local_model_root>",
-      "cluster_data_root": "<cluster_data_root>",
-      "cluster_nnunet_raw": "<cluster_nnunet_raw>",
-      "cluster_nnunet_preprocessed": "<cluster_nnunet_preprocessed>",
-      "cluster_nnunet_results": "<cluster_nnunet_results>",
-      "cluster_nnssl_raw": "<cluster_nnssl_raw>",
-      "cluster_nnssl_preprocessed": "<cluster_nnssl_preprocessed>",
-      "cluster_nnssl_results": "<cluster_nnssl_results>",
-      "cluster_corpus_root": "<cluster_corpus_root>",
-      "cluster_results_root": "<cluster_results_root>",
-      "cluster_model_root": "<cluster_model_root>"
     }
   }
 }

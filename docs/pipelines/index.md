@@ -9,7 +9,7 @@ when running on a cluster.
 :maxdepth: 2
 :hidden:
 
-pesa-fat
+pesa-health
 qvtpy
 qvtpy-hemodynamics
 qvtpy-morphometrics
@@ -21,8 +21,8 @@ cvit
 ::::{grid} 1 2 2 2
 :gutter: 3
 
-:::{grid-item-card} {octicon}`flame` PESA-Fat
-:link: pesa-fat
+:::{grid-item-card} {octicon}`flame` PESA-Health
+:link: pesa-health
 :link-type: doc
 Whole-body CT/PET and Dixon fat quantification — TotalSegmentator-based segmentation, SUV
 and volume measurement, batch QC.
@@ -53,6 +53,6 @@ skip controls and an attention-usage probe, portable model export.
 ::::
 
 ```{note}
-This section currently covers PESA-Fat, QVTPy, TopBrain and CViT. Sibling cohort pipelines already exist in
+This section currently covers PESA-Health, QVTPy, TopBrain and CViT. Sibling cohort pipelines already exist in
 <../gui/index>`'s Pipelines category) and are planned for future documentation passes.
 ```

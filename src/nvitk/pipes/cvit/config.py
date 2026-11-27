@@ -5,7 +5,7 @@ CViT host configuration: model / training defaults and SGE settings.
 
 - ``sge.json`` ``pipelines.cvit``: SGE project/account/memory, log and err dirs, container
   path (see :mod:`nvitk.cluster.sge_json`).
-- ``sge.json`` ``pipelines.cvit_paths``: ``local_*`` / ``cluster_*`` data roots
+- ``sge.json`` ``pipelines.cvit``: ``local_*`` / ``cluster_*`` data roots
   (see :mod:`nvitk.pipes.cvit.util.paths`).
 
 Every SGE / path value is read on first use, so ``--config-dir`` is honoured and an unconfigured

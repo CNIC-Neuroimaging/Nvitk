@@ -101,9 +101,9 @@ Both versions stay frame for frame in step. The four
 `.npz` files are git-ignored: they hold image volumes (TOF, CD, velocities) and are 5-20 MB;
 regenerate them with the precomputes. The example subject's identifier is shown nowhere.
 
-## PESA-Fat: Dixon MRI and CT-PET (`pesa_dixon_*.py`, `pesa_ctpet_*.py`)
+## PESA-Health: Dixon MRI and CT-PET (`pesa_dixon_*.py`, `pesa_ctpet_*.py`)
 
-Two outreach animations of the PESA-Fat v5 pipelines (`nvitk.pipes.pesa_fat`), stages 1-3, on one
+Two outreach animations of the PESA-Health v5 pipelines (`nvitk.pipes.pesa_health`), stages 1-3, on one
 Visit-5 subject (PESA1993744, batch 202603_Week4: both a Dixon and a CT-PET, segmented by the
 current stage 1 with `tissue_4_types`, the WATER-contrast liver and the leg skeleton). Same GPU
 renderer as above; red = the eroded measurement / SUV mask, blue = its uneroded volume twin (the QC
@@ -276,7 +276,7 @@ be cached. At 1080p30: blood flood (~1,800 cubes) ~45 min; siphon (~1,460 cubes,
 and eICAB post-process (~1,600 cubes, 64 s) about 35 min each (both can render in parallel). The `*_FAST=1` previews decimate the
 cubes and shorten every beat.
 
-## PET bed edge (PESA-Fat CT-PET) — `pet_bed_edge_*.py`
+## PET bed edge (PESA-Health CT-PET) — `pet_bed_edge_*.py`
 
 `PetBedEdge` (Cairo, 2D, ~1 min to render at 1080p): why the last slices of a whole-body PET cut
 through the thighs are noisy, and the proposed (not implemented) per-subject trim of the

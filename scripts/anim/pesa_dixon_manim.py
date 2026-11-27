@@ -1,4 +1,4 @@
-"""Manim animation of the PESA-Fat Dixon v5 pipeline (stages 1-3) on one subject.
+"""Manim animation of the PESA-Health Dixon v5 pipeline (stages 1-3) on one subject.
 
 Three Dixon MRI stations (neck and shoulders, abdomen, thighs), four images each (FAT, WATER, fat
 fraction, T2*):
@@ -63,7 +63,7 @@ TO_S = {"head": {1: S_PVML, 2: S_PVMR},
 
 
 class PesaDixon(GLScene):
-    """PESA-Fat Dixon v5, stages 1-3."""
+    """PESA-Health Dixon v5, stages 1-3."""
 
     def construct(self) -> None:
         data = np.load(DATA_PATH)
@@ -220,9 +220,9 @@ class PesaDixon(GLScene):
             return g
 
         # ------------------------------------------------------------ title + the stations
-        title = self.title_card("PESA-Fat · Dixon MRI",
+        title = self.title_card("PESA-Health · Dixon MRI",
                                 "fat fraction, T2* and volume of organs, muscles and bone marrow",
-                                "nvitk.pipes.pesa_fat.dixon_v5 · stages 1-3")
+                                "nvitk.pipes.pesa_health.dixon_v5 · stages 1-3")
 
         def show_slices(f: float, op: float = 0.92) -> None:
             for q in quads.values():

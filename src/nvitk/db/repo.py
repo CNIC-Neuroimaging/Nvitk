@@ -66,17 +66,12 @@ def _default_dataset_root() -> Path:
     return config_paths.default_data_dir() / "dataset"
 
 
-def _local_dataset_root_from_settings(db: dict[str, Any]) -> str | Path:
-    """Pick the dataset root from a settings ``db`` block: ``local_fallback_root`` first, then ``root``,
-    then :func:`_default_dataset_root`."""
-    fallback = db.get("local_fallback_root")
-    if fallback is not None and str(fallback).strip():
-        log.info("Using local root: %s", fallback)
-        return fallback
-    root = db.get("root")
+def _dataset_root_from_settings(block: dict[str, Any]) -> Path:
+    """The dataset root named by a settings ``dataset`` block (``root``), else
+    :func:`_default_dataset_root`."""
+    root = block.get("root")
     if root is not None and str(root).strip():
-        log.info("Using remote root: %s", root)
-        return root
+        return Path(str(root).strip())
     return _default_dataset_root()
 
 
@@ -88,11 +83,11 @@ def get_repo(
     auto_scaffold: bool | None = None,
 ) -> DataRepo:
     """Open :class:`DataRepo` using env, SGE root, or workstation settings."""
-    from .settings_paths import load_db_settings_block, sge_dataset_root_path
+    from .settings_paths import load_dataset_settings_block, sge_dataset_root_path
 
-    db = load_db_settings_block()
-    sqlite_index = db.get("sqlite_index", True) if use_sqlite is None else use_sqlite
-    auto_scaff = db.get("auto_scaffold", False) if auto_scaffold is None else auto_scaffold
+    block = load_dataset_settings_block()
+    sqlite_index = block.get("sqlite_index", True) if use_sqlite is None else use_sqlite
+    auto_scaff = block.get("auto_scaffold", False) if auto_scaffold is None else auto_scaffold
 
     if root is not None:
         return DataRepo(
@@ -119,42 +114,28 @@ def get_repo(
             auto_scaffold=auto_scaff,
         )
 
-    local_root = _local_dataset_root_from_settings(db)
     return DataRepo(
-        root=Path(local_root).expanduser().resolve(),
+        root=_dataset_root_from_settings(block).expanduser().resolve(),
         use_sqlite=sqlite_index,
         auto_scaffold=auto_scaff,
     )
 
 
-def get_repo_from_settings(return_xnat_config: bool = False) -> DataRepo | XnatConnectionConfig:
-    """Get :class:`DataRepo` from settings file, optionally with :class:`XnatConnectionConfig`."""
+def get_repo_from_settings(
+    return_xnat_config: bool = False,
+) -> DataRepo | tuple[DataRepo, XnatConnectionConfig]:
+    """Open :class:`DataRepo` from ``settings.json``; with *return_xnat_config*, also the
+    connection resolved from ``xnat.json``."""
     try:
-        from .settings_paths import load_db_settings_block
+        from .settings_paths import load_dataset_settings_block
 
-        db = load_db_settings_block()
-        if not db:
-            raise SettingsError("No db settings found (.nvitk/settings.json missing or empty)")
+        block = load_dataset_settings_block()
+        if not block:
+            raise SettingsError('No "dataset" settings found (settings.json missing or empty)')
 
-        repo = get_repo(use_sqlite=db.get("sqlite_index"), auto_scaffold=db.get("auto_scaffold"))
+        repo = get_repo(use_sqlite=block.get("sqlite_index"), auto_scaffold=block.get("auto_scaffold"))
         if return_xnat_config:
-            if "xnat_config" in db:
-                _net_file, _urs, _pwd = None, None, None
-                try:
-                    _net_file = db["xnat_config"]["netrc_file"]
-                except Exception:
-                    _urs, _pwd = db["xnat_config"]["user"], db["xnat_config"]["password"]
-                finally:
-                    if _net_file is None and (_urs is None or _pwd is None):
-                        raise SettingsError("XNAT config requires netrc_file or user and password")
-                return repo, XnatConnectionConfig(
-                    server=db["xnat_config"]["server"],
-                    project=db["xnat_config"]["project"],
-                    netrc_file=_net_file,
-                    user=_urs,
-                    password=_pwd,
-                    verify=db["xnat_config"]["verify"],
-                )
+            return repo, resolve_xnat_connection(load_xnat_profile(None))
         return repo
     except SettingsError:
         raise

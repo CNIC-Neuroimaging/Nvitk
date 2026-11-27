@@ -4,7 +4,7 @@
 
 - ``sge.json`` ``pipelines.topbrain``: SGE project/account/memory, log and err dirs,
   container path (see :mod:`nvitk.cluster.sge_json`).
-- ``sge.json`` ``pipelines.topbrain_paths``: ``local_*`` / ``cluster_*`` data roots
+- ``sge.json`` ``pipelines.topbrain``: ``local_*`` / ``cluster_*`` data roots
   (see :mod:`nvitk.pipes.topbrain.util.paths`).
 
 **Outputs (constants consumed by stages)**

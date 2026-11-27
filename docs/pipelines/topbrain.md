@@ -256,7 +256,7 @@ so one image serves both sockets.
 
 ## Configuration
 
-`pipelines.topbrain` holds SGE settings; `pipelines.topbrain_paths` holds `local_*` / `cluster_*`
+`pipelines.topbrain` in `sge.json` holds the SGE settings and the `local_*` / `cluster_*`
 twins for `challenge_root`, `nnssl_raw`, `nnssl_preprocessed`, `nnssl_results`, `nnunet_raw`,
 `nnunet_preprocessed`, `nnunet_results`, `results_root`, `model_root`, `corpus_root`.
 

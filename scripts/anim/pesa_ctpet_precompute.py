@@ -1,7 +1,7 @@
-"""Precompute for ``pesa_ctpet_manim.py``: the PESA-Fat CT-PET v5 pipeline on one subject.
+"""Precompute for ``pesa_ctpet_manim.py``: the PESA-Health CT-PET v5 pipeline on one subject.
 
 Runs in the nvitk environment. Stage 2 is the real worker
-(:func:`nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess._process`) run into a temporary folder,
+(:func:`nvitk.pipes.pesa_health.ct_pet_v5.stage2_postprocess._process`) run into a temporary folder,
 with recorders wrapped around the module's own steps: the organ interiors cleared from the fat and
 their safety dilation, the extremities, the urinary bladder grown along the PET uptake, the
 ureter from the PET, the legs / trunk split of the intermuscular fat before and after the
@@ -109,7 +109,7 @@ def slice_noise(pet: np.ndarray, n: int) -> np.ndarray:
 def quad_stats(pet, labels) -> dict:
     """Stage-3 SUV statistics of the quadriceps (L, R, both) in *labels*."""
     from nvitk.measure import Measurer
-    from nvitk.pipes.pesa_fat.ct_pet_v5 import stage3_measure as s3
+    from nvitk.pipes.pesa_health.ct_pet_v5 import stage3_measure as s3
     out = {}
     for name, ids in (("L", (1,)), ("R", (2,)), ("LR", (1, 2))):
         b = s3._build_binary_mask(labels, ids)
@@ -126,9 +126,9 @@ def compute(nifti_dir: Path, seg_dir: Path, dicom_dir: Path | None = None) -> tu
     from nvitk.io import imread
     from nvitk.measure.suv import suv_image
     from nvitk.morphology import erode
-    from nvitk.pipes.pesa_fat.ct_pet_v5 import config as cfg
-    from nvitk.pipes.pesa_fat.ct_pet_v5 import stage2_postprocess as s2
-    from nvitk.pipes.pesa_fat.ct_pet_v5 import stage3_measure as s3
+    from nvitk.pipes.pesa_health.ct_pet_v5 import config as cfg
+    from nvitk.pipes.pesa_health.ct_pet_v5 import stage2_postprocess as s2
+    from nvitk.pipes.pesa_health.ct_pet_v5 import stage3_measure as s3
     from nvitk.segmentation.total_segmentator.class_maps import get_class_id
 
     rec: dict[str, list] = {}
@@ -210,7 +210,7 @@ def compute(nifti_dir: Path, seg_dir: Path, dicom_dir: Path | None = None) -> tu
     mus_pretrim = H(trim_in)
 
     # ---- the last PET bed: geometry, noise model and measured noise at the inferior end
-    from nvitk.pipes.pesa_fat.common.pet_beds import load_pet_beds
+    from nvitk.pipes.pesa_health.common.pet_beds import load_pet_beds
     beds = load_pet_beds(nifti_dir)
     if beds is None or not trim_report.get("applied"):
         raise SystemExit(f"no last-bed trim for this subject: {trim_report.get('reason')}")
@@ -336,7 +336,7 @@ def main() -> None:
     ap.add_argument("--batch", default="202603_Week4")
     ap.add_argument("--subject", default="PESA1993744")
     args = ap.parse_args()
-    from nvitk.pipes.pesa_fat.ct_pet_v5 import config as cfg
+    from nvitk.pipes.pesa_health.ct_pet_v5 import config as cfg
     nifti_dir = args.nifti_root / args.batch / args.subject
     seg_dir = args.results_root / args.batch / cfg.STAGE1_DIR / args.subject / "CT"
     arrays, meta = compute(nifti_dir, seg_dir, args.dicom_root / args.batch / args.subject)

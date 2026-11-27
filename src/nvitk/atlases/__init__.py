@@ -2,7 +2,7 @@
 
 Sources: FSL (``$FSLDIR/data/atlases`` and the MNI152 templates), FreeSurfer / FastSurfer
 (the colour LUT, ``fsaverage`` / ``cvs_avg35`` label volumes), ANTsXNet templates and priors,
-nilearn's atlas fetchers, and the atlases a site configures in ``settings.json``.
+nilearn's atlas fetchers, and the atlases a site configures in ``atlas.json``.
 
 .. code-block:: python
 

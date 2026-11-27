@@ -1,8 +1,7 @@
 """XNAT project registry and project-specific scan classifiers.
 
 The projects, their classifiers and the visit labels come from the XNAT rules in force
-(:mod:`nvitk.db.config.xnat_rules`: ``xnat_rules.json``, or the packaged PESA default that
-reproduces the original PESA_Brain / IA_PET_V5 setup). The names below are kept for the code that
+(:mod:`nvitk.db.config.xnat_rules`: ``xnat_rules.json``, or the packaged empty default). The names below are kept for the code that
 imports them; they are read from those rules when this module loads.
 """
 
@@ -168,7 +167,7 @@ def classify_scan_ia_pet_v5(
     experiment_label: str | None = None,
 ) -> dict[str, Any] | None:
     """
-    Classify a single PESA-Fat IA_PET_V5 scan (Dixon MR + CT/PET), with the rules' ``ia_pet_v5``
+    Classify a single PESA-Health IA_PET_V5 scan (Dixon MR + CT/PET), with the rules' ``ia_pet_v5``
     classifier.
 
     Dixon scans return a candidate marker (``dixon=True``); region assignment

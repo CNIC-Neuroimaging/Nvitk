@@ -17,15 +17,15 @@ class PipelineGuiSpec:
 
 PIPELINE_TOOLS: tuple[PipelineGuiSpec, ...] = (
     PipelineGuiSpec(
-        "pipeline_pesa_fat_ctpet",
-        "PESA-Fat CT-PET",
-        "nvitk-pesa-fat-ctpet",
+        "pipeline_pesa_health_ctpet",
+        "PESA-Health CT-PET",
+        "nvitk-pesa-health-ctpet",
         "CT-PET v5 segmentation, post-processing, and measurement.",
     ),
     PipelineGuiSpec(
-        "pipeline_pesa_fat_dixon",
-        "PESA-Fat DIXON",
-        "nvitk-pesa-fat-dixon",
+        "pipeline_pesa_health_dixon",
+        "PESA-Health DIXON",
+        "nvitk-pesa-health-dixon",
         "Dixon v5 fat segmentation, post-processing, and measurement.",
     ),
     PipelineGuiSpec(

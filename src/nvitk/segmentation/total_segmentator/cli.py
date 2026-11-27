@@ -2,7 +2,7 @@
 Dedicated ``nvitk-totalseg`` CLI for the TotalSegmentator integration.
 
 Runs either locally (thin wrapper over :func:`run_totalsegmentator`) or on an
-SGE cluster via ``qsub`` + ``singularity exec`` (PESA-Fat style), optionally
+SGE cluster via ``qsub`` + ``singularity exec`` (PESA-Health style), optionally
 emitting a bash script and running it over SSH.
 """
 
@@ -126,7 +126,7 @@ def _default_emit_basename(task: str) -> str:
     "src_dir",
     type=click.Path(path_type=Path),
     default=None,
-    help="(sge) Host path to the nvitk source tree (mounted at /PESAFat/src/).",
+    help="(sge) Host path to the nvitk source tree (mounted at /PESAHealth/src/).",
 )
 @click.option(
     "--input-root",

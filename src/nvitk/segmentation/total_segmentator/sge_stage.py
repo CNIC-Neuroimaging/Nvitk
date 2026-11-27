@@ -1,4 +1,4 @@
-"""Submit TotalSegmentator on SGE using PESA-Fat :class:`StageSpec` (emit script or qsub)."""
+"""Submit TotalSegmentator on SGE using PESA-Health :class:`StageSpec` (emit script or qsub)."""
 
 from __future__ import annotations
 

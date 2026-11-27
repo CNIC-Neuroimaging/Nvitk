@@ -1200,13 +1200,13 @@ def _submit_to_cluster(
 @click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
               help="Directory to copy the predictions into, one file per case. Always a directory — a single image is written inside it like any other.")
 @click.option("--nnunet-raw", type=click.Path(path_type=Path), default=None,
-              help="Defaults to sge.json's topbrain_paths (see --config-dir).")
+              help="Defaults to sge.json's topbrain (see --config-dir).")
 @click.option("--nnunet-preprocessed", type=click.Path(path_type=Path), default=None,
-              help="Defaults to sge.json's topbrain_paths.")
+              help="Defaults to sge.json's topbrain.")
 @click.option("--nnunet-results", type=click.Path(path_type=Path), default=None,
-              help="Defaults to sge.json's topbrain_paths.")
+              help="Defaults to sge.json's topbrain.")
 @click.option("--results-root", type=click.Path(path_type=Path), default=None,
-              help="Defaults to sge.json's topbrain_paths.")
+              help="Defaults to sge.json's topbrain.")
 @click.option("--label-set", type=click.Choice(list(lbl.ALL_LABEL_SETS)),
               default="ta36", show_default=True,
               help="Ignored when --model is given; the model records its own.")

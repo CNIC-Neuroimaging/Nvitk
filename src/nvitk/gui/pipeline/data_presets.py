@@ -28,7 +28,7 @@ class PipelinePresetSpec:
     subject_globs: tuple[str, ...]
     show_batch: bool
     default_batch: str
-    pesa_fat_layout: bool = False
+    pesa_health_layout: bool = False
     #: Literal roots (``{"dicom", "nifti", "results"}``), for a pipeline without a config module.
     roots: tuple[tuple[str, str], ...] = ()
 
@@ -44,7 +44,7 @@ class PipelineRoots:
     layout: str
     batch: str | None
     subject_globs: tuple[str, ...]
-    pesa_fat_layout: bool = False
+    pesa_health_layout: bool = False
 
     def subject_dicom_dir(self, subject: str) -> Path:
         """*subject*'s DICOM directory under this preset's DICOM root."""
@@ -85,7 +85,7 @@ def _preset_from_config(entry: dict[str, Any]) -> PipelinePresetSpec:
         subject_globs=tuple(str(g) for g in entry.get("subject_globs") or ("*",)),
         show_batch=bool(entry.get("show_batch", False)),
         default_batch=str(entry.get("default_batch") or ""),
-        pesa_fat_layout=bool(entry.get("pesa_fat_layout", False)),
+        pesa_health_layout=bool(entry.get("pesa_health_layout", False)),
         roots=tuple((str(k), str(v)) for k, v in dict(entry.get("roots") or {}).items()),
     )
 
@@ -95,10 +95,10 @@ PRESET_REGISTRY: tuple[PipelinePresetSpec, ...] = tuple(
     _preset_from_config(entry) for entry in _dataset_config().local_presets
 )
 
-# PESA-Fat on disk:  NIFTI_ROOT / <cohort> / PESA* / *.nii.gz
+# PESA-Health on disk:  NIFTI_ROOT / <cohort> / PESA* / *.nii.gz
 #                    RESULTS_ROOT / <cohort> / res_* / PESA* / ...
-PESA_FAT_SUBJECT_GLOBS: tuple[str, ...] = next(
-    (p.subject_globs for p in PRESET_REGISTRY if p.pesa_fat_layout), ("PESA*",)
+PESA_HEALTH_SUBJECT_GLOBS: tuple[str, ...] = next(
+    (p.subject_globs for p in PRESET_REGISTRY if p.pesa_health_layout), ("PESA*",)
 )
 
 
@@ -138,7 +138,7 @@ def list_local_cohorts(
     dicom_root = None,
     results_root = None,
 ) -> list[str]:
-    """Discover cohort folders (e.g. ``202602_Week1``) at the roots of a PESA-Fat tree."""
+    """Discover cohort folders (e.g. ``202602_Week1``) at the roots of a PESA-Health tree."""
     found = set()
     for raw in (nifti_root, dicom_root, results_root):
         if raw is None:
@@ -153,12 +153,12 @@ def list_local_cohorts(
 
 
 def _cohort_has_pesa_subjects(nifti_root: Path, cohort: str) -> bool:
-    """True if *cohort*'s NIfTI folder contains any PESA-Fat subject directories."""
+    """True if *cohort*'s NIfTI folder contains any PESA-Health subject directories."""
     base = nifti_root / cohort
-    return bool(_list_subject_dirs(base, PESA_FAT_SUBJECT_GLOBS))
+    return bool(_list_subject_dirs(base, PESA_HEALTH_SUBJECT_GLOBS))
 
 
-def resolve_pesa_fat_batch(
+def resolve_pesa_health_batch(
     *,
     nifti_root: Path,
     dicom_root: Path,
@@ -210,8 +210,8 @@ def load_preset_roots(
             "or DEFAULT_RESULTS_ROOT in its config."
         )
     batch_val = (batch if batch is not None else spec.default_batch or "").strip() or None
-    if spec.pesa_fat_layout:
-        batch_val = resolve_pesa_fat_batch(
+    if spec.pesa_health_layout:
+        batch_val = resolve_pesa_health_batch(
             nifti_root=n_root,
             dicom_root=d_root,
             results_root=r_root,
@@ -228,7 +228,7 @@ def load_preset_roots(
         layout=spec.layout,
         batch=batch_val,
         subject_globs=spec.subject_globs,
-        pesa_fat_layout=spec.pesa_fat_layout,
+        pesa_health_layout=spec.pesa_health_layout,
     )
 
 

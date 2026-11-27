@@ -5,19 +5,23 @@ install therefore knows *what* it needs but not *where* anything is, and the fir
 after installing is create a configuration.
 
 ```bash
-nvitk-config init        # writes ~/.config/nvitk/{sge,settings,xnat}.json from templates
+nvitk-config init        # writes ~/.config/nvitk/{sge,settings,atlas,xnat}.json from templates
 nvitk-config path        # show every directory searched, and which one is in use
 nvitk-config validate    # list settings still holding <PLACEHOLDER> values
 nvitk-config show        # resolved values, and the file each came from
 ```
 
-## The three files
+## The files
 
 | File | Holds |
 |---|---|
 | `sge.json` | Cluster/SGE settings and every pipeline's data roots (DICOM, NIfTI, results, model weights, containers). |
-| `settings.json` | The dataset root (`db.root`) and the atlas directory. |
-| `xnat.json` | XNAT server, project and how to obtain credentials. |
+| `settings.json` | The dataset (`dataset.root`, DVC source, cluster root, Stats GUI models). |
+| `atlas.json` | Atlas locations (`root`, `desikan`, `vascular`). |
+| `xnat.json` | XNAT server, `default_project` and how to obtain credentials. |
+| `external_tools.json` | Third-party tool locations (e.g. the FreeSurfer licence). |
+| `gui.json` | Window layout; the GUI writes it for itself. |
+| `dataset.json`, `xnat_rules.json` | Optional: how spreadsheets are imported and how XNAT scans are classified. Without them nvitk uses empty packaged defaults. |
 
 ## Where they are looked for
 
@@ -27,7 +31,7 @@ actually using?" always has one answer, and `nvitk-config path` prints it.
 | # | Location | Typical use |
 |---|---|---|
 | 1 | `--config-dir PATH` | One-off run against a different configuration |
-| 2 | `$NVITK_SGE_JSON` / `$NVITK_SETTINGS_JSON` / `$NVITK_XNAT_CONFIG` | Override a single file |
+| 2 | `$NVITK_SGE_JSON` / `$NVITK_SETTINGS_JSON` / `$NVITK_ATLAS_JSON` / `$NVITK_XNAT_CONFIG` | Override a single file |
 | 3 | `$NVITK_CONFIG_DIR` | Per-shell or per-job configuration |
 | 4 | `$NVITK_HOME/.nvitk` | Legacy; still honoured |
 | 5 | `~/.config/nvitk` | **Default for an installed package** |
@@ -52,12 +56,12 @@ Three independent layers:
 2. **What it says** — `sge.json` is read once and cached.
 3. **Which value wins** — per pipeline, as below.
 
-A CLI flag beats configuration. For qvtpy and pesa_fat this holds under `--submit local` and
+A CLI flag beats configuration. For qvtpy and pesa_health this holds under `--submit local` and
 `--submit sge` alike (cvit and topbrain still prefer `cluster_*` under SGE):
 
 ```
---nifti-root  →  pipelines.<id>_paths.local_nifti_root    →  error   (local)
---nifti-root  →  pipelines.<id>_paths.cluster_nifti_root  →  error   (sge)
+--nifti-root  →  pipelines.<id>.local_nifti_root    →  error   (local)
+--nifti-root  →  pipelines.<id>.cluster_nifti_root  →  error   (sge)
 ```
 
 ```{note}
@@ -69,7 +73,7 @@ Nothing falls back to a built-in path. An unset-but-required value raises immedi
 the key and every location searched:
 
 ```
-Required setting "pipelines.qvtpy_paths.cluster_nifti_root" is not configured in sge.json.
+Required setting "pipelines.qvtpy.cluster_nifti_root" is not configured in sge.json.
 Looked in: $NVITK_CONFIG_DIR (…); ~/.config/nvitk/sge.json; …
 Run `nvitk-config init` to create a starter configuration, then set the key.
 ```
@@ -81,24 +85,28 @@ deleted.
 
 | Section | Used by |
 |---|---|
+| `defaults` | Every qsub setting all pipelines start from: `sge_project`, `sge_account`, `sge_queue`, `sge_ngpu`, `sge_h_vmem`, `sge_pe_smp` |
 | `paths` | Everything: cluster source tree, container image, job-script/log/err roots, host aliases |
-| `defaults` | Baseline SGE project/account/queue/memory for all pipelines |
-| `pipelines.qvtpy`, `pipelines.qvtpy_paths` | {doc}`pipelines/qvtpy` |
-| `pipelines.pesa_fat_ct_pet`, `pipelines.pesa_fat_dixon`, `pipelines.pesa_fat_paths` | {doc}`pipelines/pesa-fat` |
-| `pipelines.topbrain`, `pipelines.topbrain_paths` | {doc}`pipelines/topbrain` |
-| `pipelines.cvit`, `pipelines.cvit_paths` | {doc}`pipelines/cvit` |
+| `sshfs` | How cluster storage is mounted on the workstation: `mount_root`, `extra_roots`, `reuse_existing_mounts`, `idle_ttl_seconds`, `options` |
+| `pipelines.qvtpy` | {doc}`pipelines/qvtpy` |
+| `pipelines.pesa_health_ct_pet`, `pipelines.pesa_health_dixon`, `pipelines.pesa_health_validation` | {doc}`pipelines/pesa-health` |
+| `pipelines.topbrain` | {doc}`pipelines/topbrain` |
+| `pipelines.cvit` | {doc}`pipelines/cvit` |
 | `pipelines.eicab`, `pipelines.totalsegmentator` | The external segmentation engines |
 | `pipelines.image_tools` | The `nvitk-morph` / `-filter` / `-measure` / … CLIs under `--submit sge` |
 | `pipelines.voxelwise` | `nvitk-voxelwise` |
 
-`settings.json`'s `db.root` is needed by anything touching the dataset, including
+Each `pipelines.<id>` block holds everything about that pipeline: the qsub keys it overrides on
+top of `defaults`, its container/script/log settings, and its `local_*` / `cluster_*` data roots.
+
+`settings.json`'s `dataset.root` is needed by anything touching the dataset, including
 {doc}`the Stats GUI <stats-gui/index>`.
 
-`db.statmodels_root` is where the Stats GUI saves model configurations, reports and exports.
+`dataset.statmodels_root` is where the Stats GUI saves model configurations, reports and exports.
 It is deliberately separate from the dataset: saved models are a researcher's own working
 output, written far more often than the dataset changes, and are usually better placed on a
 backed-up share than inside a DVC-tracked dataset. When unset it falls back to
-`<db.root>/nvitk-statmodels`, which is where models lived before the setting existed.
+`<dataset.root>/nvitk-statmodels`, which is where models lived before the setting existed.
 
 ```{note}
 This directory is also a trust boundary. A saved config can define derived columns as Python
@@ -116,7 +124,7 @@ is a better home than the config file:
 2. the system keyring (`"password_keyring": true` — service `nvitk`, key `xnat:<server>`)
 3. `$XNAT_USER` / `$XNAT_PASSWORD`
 
-`$XNAT_SERVER` and `$XNAT_PROJECT` also override the file, so a shared profile can be committed
+`$XNAT_SERVER` and `$XNAT_PROJECT` stand in for `server` and `default_project`, so a shared profile can be committed
 while per-user details stay in the environment.
 
 ## For the CNIC team: the private configuration submodule

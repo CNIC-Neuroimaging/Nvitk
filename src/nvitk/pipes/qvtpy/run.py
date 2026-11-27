@@ -1,6 +1,6 @@
 """qvtpy pipeline master.
 
-This mirrors the PESA-Fat runner shape: local execution vs. SGE submission via
+This mirrors the PESA-Health runner shape: local execution vs. SGE submission via
 a bash script + SSH to the cluster login node.
 
 Stages (select with ``--stages``; default ``stage0_c,stage1``)
@@ -975,7 +975,7 @@ def _submit_qvtpy_sge_subjects_remote(
     show_default=True,
     help=(
         "DICOM source for stage0_c. 'xnat' downloads from the XNAT PESA-Brain "
-        "project before conversion. (Distinct from pesa_fat's --input-source.)"
+        "project before conversion. (Distinct from pesa_health's --input-source.)"
     ),
 )
 @click.option(

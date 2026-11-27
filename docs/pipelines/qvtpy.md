@@ -167,7 +167,7 @@ Known limits:
 
 Stage 0 can also pull directly from XNAT (`--from-source xnat`, with
 `--save-dicoms/--no-save-dicoms` controlling whether downloaded DICOMs persist). Cluster
-defaults live in `.nvitk/sge.json` under `pipelines.qvtpy` / `pipelines.qvtpy_paths` — see
+defaults live in `.nvitk/sge.json` under `pipelines.qvtpy` — see
 {doc}`../api/cluster-registry`.
 
 ## External tool notes
