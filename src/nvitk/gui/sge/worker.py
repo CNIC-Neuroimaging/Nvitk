@@ -69,7 +69,10 @@ def main(job_path: Path) -> None:
     log = Logger()
     spec = json.loads(job_path.read_text(encoding="utf-8"))
     data_dir = job_path.parent
-    output_dir = Path("/nvitk/output")
+    import os
+
+    # The container's output mount; overridable to run a staged job on this machine.
+    output_dir = Path(os.environ.get("NVITK_SGE_OUTPUT_DIR") or "/nvitk/output")
 
     from nvitk.gui.sge.job import GuiSgeJob
     from nvitk.gui.tools.runner import run_gui_tool_headless
@@ -81,14 +84,17 @@ def main(job_path: Path) -> None:
     manifest = None
 
     from nvitk.gui.sge.external import is_external_tool
+    from nvitk.gui.sge.recorded import is_recorded_tool
 
-    if is_external_tool(job.tool_id):
+    if is_external_tool(job.tool_id) or is_recorded_tool(job.tool_id):
         # FastSurfer / FSL: several inputs and outputs, opened from an import manifest.
         from nvitk.gui.sge.external import run_external_job
+        from nvitk.gui.sge.recorded import run_recorded_job
 
+        runner = run_recorded_job if is_recorded_tool(job.tool_id) else run_external_job
         try:
             log.info("Running %s (job %s)", job.tool_id, job.job_id)
-            output_files, manifest = run_external_job(job, data_dir, output_dir)
+            output_files, manifest = runner(job, data_dir, output_dir)
             log.info("%s finished: %d output file(s)", job.tool_id, len(output_files))
         except Exception as exc:  # noqa: BLE001
             exit_code = 1

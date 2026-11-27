@@ -2136,6 +2136,18 @@ def operation(op_id: str) -> MeshOp | None:
     return next((op for op in all_operations() if op.id == op_id), None)
 
 
+def surfaces_per_label(viewer: Any, layer: Any, *, labels: list[int] | None = None, **overrides: Any) -> OpResult:
+    """"Surfaces from labels / mask" with its defaults: one surface per label (named after it, in
+    its colour, gathered in a folder) by marching cubes; *labels* limits it to those ids."""
+    op = operation("surfaces")
+    if op is None:
+        raise KeyError("surfaces")
+    params = {spec.name: spec.default for spec in op.params}
+    params.update(labels=[int(i) for i in (labels or [])], surface_output=SURFACE_OUTPUTS[0])
+    params.update(overrides)
+    return op.run(OpContext(viewer, layer, params))
+
+
 # Several meshes at once
 
 #: Most curves one combined plot draws (a legend past that reads as noise).

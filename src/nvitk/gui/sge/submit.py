@@ -146,7 +146,10 @@ def submit_gui_sge(
     if not tool_id:
         notify("Select a valid operation.", error=True)
         return False
-    external = is_external_tool(tool_id)
+    from nvitk.gui.sge.recorded import is_recorded_tool
+
+    recorded = is_recorded_tool(tool_id)
+    external = is_external_tool(tool_id) or recorded
     spec = tool_by_id(tool_id)
     # FastSurfer / FSL tools that work from paths alone (TBSS, XTRACT, ...) need no layer.
     if not viewer.layers and not (external and spec is not None and not spec.requires_layer):
@@ -206,7 +209,14 @@ def submit_gui_sge(
         with activity(f"SGE: preparing {label}", total=3) as task:
             # The layer is read here, on the GUI thread; the network steps below go
             # to a worker, so the window keeps redrawing while they run.
-            if external:
+            if recorded:
+                from nvitk.gui.sge.recorded import stage_recorded_job
+                from nvitk.gui.viz.main_canvas import world_geometry
+
+                with world_geometry(viewer):
+                    staging, job = stage_recorded_job(viewer, layer, tool_id=tool_id, params=params,
+                                                      target_mode=target_mode, label_ids=ids or None)
+            elif external:
                 from nvitk.gui.sge.external import stage_external_job
                 from nvitk.gui.viz.main_canvas import world_geometry
 

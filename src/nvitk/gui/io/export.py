@@ -47,6 +47,24 @@ def layer_to_image(layer: Any, *, use_file_affine: bool = True) -> Image:
         data = layer_source_order(layer, img.data)
         meta["shape"] = tuple(int(v) for v in data.shape)
         return Image(data=data, metadata=meta, axes=src_axes, name=img.name)
+    if img.data.ndim == 4 and not (getattr(layer, "metadata", None) or {}).get("nvitk_metadata", {}).get("axes") \
+            and not (getattr(layer, "metadata", None) or {}).get("axes"):
+        # A 3D+t layer with no file behind it (a tool's or a script's), shown time first: the
+        # file layout puts time last, so the data go there too, and the voxel size is that of
+        # the three space axes, not the time axis's scale.
+        from nvitk.gui.core.spatial import _time_axis_index
+
+        t_ax = _time_axis_index(layer)
+        if t_ax != 3:
+            meta = dict(img.metadata or {})
+            data = np.moveaxis(np.asarray(img.data), t_ax, -1)
+            scale = getattr(layer, "scale", None)
+            if scale is not None and len(scale) == 4 and "spacing" not in (getattr(layer, "metadata", None) or {}):
+                sp3 = tuple(float(v) for i, v in enumerate(scale) if i != t_ax)
+                meta["spacing"] = sp3
+                meta["x_res"], meta["y_res"], meta["z_res"] = sp3
+            meta["shape"] = tuple(int(v) for v in data.shape)
+            img = Image(data=data, metadata=meta, axes=img.axes, name=img.name)
     if use_file_affine:
         meta = dict(img.metadata or {})
         src = meta.get("affine_source")

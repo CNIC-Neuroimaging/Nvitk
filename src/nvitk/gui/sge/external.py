@@ -75,7 +75,10 @@ _LAYER_TOKEN = re.compile(r"\{layer:([^}]+)\}")
 
 
 def is_external_tool(tool_id: str | None) -> bool:
-    return bool(tool_id) and str(tool_id).startswith(_PREFIXES)
+    from nvitk.gui.sge.recorded import is_recorded_tool
+
+    # FastSurfer's topology tools run through the viewer (nvitk.gui.sge.recorded).
+    return bool(tool_id) and str(tool_id).startswith(_PREFIXES) and not is_recorded_tool(tool_id)
 
 
 def external_sge_capable(tool_id: str | None) -> bool:
@@ -161,7 +164,8 @@ def stage_external_job(
     for k, name in enumerate(sorted(named)):
         fname = f"named_{k}.nii.gz"
         _export(_resolve_layer(viewer, name), data_dir / fname)
-        aux.append(AuxLayerSpec(param="@layer", file=fname, layer_name=name))
+        # A key of its own per layer: job.json keys the staged layers by parameter.
+        aux.append(AuxLayerSpec(param=f"@layer:{k}", file=fname, layer_name=name))
 
     if tool_id in _DWI_TOOLS and layer is not None:
         for key, suffixes, fallbacks in (("fsl_bvecs", (".bvec", ".bvecs"), ("bvecs",)),
@@ -248,8 +252,8 @@ def run_external_job(job: GuiSgeJob, data_dir: Path, output_dir: Path) -> tuple[
         output_dir,
         input_file=(data_dir / job.input_name) if job.input_name else None,
         input_name=str(params.get("_input_layer_name") or job.tool_id),
-        layer_files={a.param: data_dir / a.file for a in job.aux_layers if a.param != "@layer"},
-        named_files={a.layer_name: data_dir / a.file for a in job.aux_layers if a.param == "@layer"},
+        layer_files={a.param: data_dir / a.file for a in job.aux_layers if not a.param.startswith("@layer")},
+        named_files={a.layer_name: data_dir / a.file for a in job.aux_layers if a.param.startswith("@layer")},
         input_is_labels=bool(params.get("_input_is_labels")),
     )
     if job.tool_id.startswith("fastsurfer_"):

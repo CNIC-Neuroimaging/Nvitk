@@ -507,10 +507,21 @@ def _order_params(panel: Any, tool_id: str) -> None:
     if positions == sorted(positions):
         return
     anchor = min(positions)
+    # magicgui wraps each labelled field in a row (label + widget); remove() unparents that row
+    # without hiding it and insert() builds a new one, so the old row was left behind as a
+    # parentless window holding just the label ("Output directory"...), hundreds of them per
+    # session, any of which could pop up on screen. Hide and delete them once the field has moved.
+    old_rows = []
     for widget in widgets:
+        row = widget._labeled_widget() if hasattr(widget, "_labeled_widget") else None
+        if row is not None:
+            row.native.hide()
+            old_rows.append(row.native)
         panel.remove(widget)
     for offset, widget in enumerate(widgets):
         panel.insert(anchor + offset, widget)
+    for native in old_rows:
+        native.deleteLater()
 
 
 def _add_registry_widgets(panel: Any) -> list[str]:

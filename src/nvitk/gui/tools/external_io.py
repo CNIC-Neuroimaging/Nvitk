@@ -144,8 +144,12 @@ def add_volume(
     colormap: str | None = None,
     opacity: float | None = None,
     visible: bool = True,
+    image: bool = False,
 ) -> Any:
     """Open *path* as a layer placed by its own affine (FastSurfer / FSL outputs).
+
+    *image* keeps an integer volume an Image layer (a binary mask a tool made one), where the
+    reader would otherwise open a label map as Labels.
 
     *labels* makes it a Labels layer; *lut* (``{id: name}`` or ``{id: (name, rgba)}``)
     names its ids and, with colours, paints them; *schema* records the label
@@ -162,7 +166,7 @@ def add_volume(
     if name:
         img.name = name
     if not labels:
-        layer = _add_image_to_viewer(viewer, img, p)
+        layer = _add_image_to_viewer(viewer, img, p, allow_labels=not image)
         if colormap:
             try:
                 layer.colormap = colormap
@@ -488,7 +492,8 @@ def load_manifest(viewer: Any, manifest: Mapping[str, Any], base_dir: str | Path
             continue
         add_volume(viewer, path, name=f"{lead}{entry.get('title') or path.name}", labels=bool(entry.get("labels")),
                    lut=_lut_from_manifest(entry.get("lut")), schema=entry.get("schema"),
-                   colormap=entry.get("colormap"), visible=bool(entry.get("visible", True)))
+                   colormap=entry.get("colormap"), visible=bool(entry.get("visible", True)),
+                   image=bool(entry.get("image")))
         count += 1
     if manifest.get("surfaces"):
         from nvitk.segmentation.fastsurfer.outputs import read_morph, read_surface
@@ -512,10 +517,15 @@ def load_manifest(viewer: Any, manifest: Mapping[str, Any], base_dir: str | Path
             if table.get("payload"):
                 show_results(viewer, f"{lead}{table.get('title', '')}", table["payload"],
                              subtitle=str(table.get("subtitle") or ""), row_header=str(table.get("row_header") or ""))
-    for note in manifest.get("notes", []) or []:
-        from nvitk.gui.tools.runner import notify
+    from nvitk.gui.tools.runner import notify
 
-        notify(str(note))
+    for note in manifest.get("notes", []) or []:
+        # A cluster job's messages name its output folder as {output}: the downloaded copy here.
+        notify(str(note).replace("{output}", str(base)))
+    work_files = list(manifest.get("work_files", []) or [])
+    if work_files:
+        shown = ", ".join(Path(f).name for f in work_files[:6]) + (" …" if len(work_files) > 6 else "")
+        notify(f"Files written by the job (transforms, matrices…) are in {base / 'work'}: {shown}")
     return count
 
 

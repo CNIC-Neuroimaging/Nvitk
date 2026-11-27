@@ -119,6 +119,24 @@ from nvitk.gui.viz.ortho.layout import (
     PaneGrid,
 )
 
+#: Columns of the 3D options' layers table.
+_COL_SLICES, _COL_PLANE, _COL_CUT, _COL_MAIN = 1, 2, 3, 4
+#: Set on a layer the slice views leave out (its "Slices" box unticked); still drawn in 3D.
+SLICES_HIDDEN_ATTR = "_nvitk_slices_hidden"
+
+
+def slices_hidden(layer: Any) -> bool:
+    """Whether the slice views leave *layer* out (it stays visible, and drawn in 3D)."""
+    return bool(getattr(layer, SLICES_HIDDEN_ATTR, False))
+
+
+def set_slices_hidden(layer: Any, hidden: bool) -> None:
+    try:
+        setattr(layer, SLICES_HIDDEN_ATTR, bool(hidden))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class OrthoViewerPanel(QWidget):
     """Axial / coronal / sagittal views of the active layer, plus 3D plane controls."""
 
@@ -365,6 +383,21 @@ class OrthoViewerPanel(QWidget):
         for cell, view in enumerate(self._slice_views):
             view.edit_handler = functools.partial(self._label_editor.handle, cell)
             view.box_handler = functools.partial(self._label_editor.box_edge, cell)
+        # Transform mode: a drag in a view moves the layers in Transform mode (Ctrl turns them).
+        from nvitk.gui.viz.ortho.shape_overlays import SurfaceCutter
+        from nvitk.gui.viz.ortho.transform_drag import OrthoTransformDrag
+
+        self._transform_drag = OrthoTransformDrag(self)
+        for cell, view in enumerate(self._slice_views):
+            view.transform_handler = functools.partial(self._transform_drag.handle, cell)
+        # Points and meshes, drawn over the slices; recut when they change (folded per turn).
+        self._surface_cutter = SurfaceCutter()
+        self._overlay_version = 0
+        self._overlay_keys: dict[int, tuple] = {}
+        self._overlay_timer = QTimer(self)
+        self._overlay_timer.setSingleShot(True)
+        self._overlay_timer.setInterval(15)
+        self._overlay_timer.timeout.connect(self._refresh_overlays)
         # Painted-label refreshes during a stroke, folded to one per event-loop turn.
         self._painted: list[Any] = []
         if not self._embedded:
@@ -947,7 +980,7 @@ class OrthoViewerPanel(QWidget):
         sources: list[RenderSource] = []
         self._offgrid_skipped = []
         for layer in self._candidate_layers():
-            if not bool(getattr(layer, "visible", True)):
+            if not bool(getattr(layer, "visible", True)) or slices_hidden(layer):
                 continue
             source = keep.get(id(layer))
             stale_time = (
@@ -1085,6 +1118,104 @@ class OrthoViewerPanel(QWidget):
                 emitter = getattr(events, name, None) if events is not None else None
                 if emitter is not None:
                     self._connect(emitter, functools.partial(self._on_geometry_changed, layer=layer))
+        # Points and meshes are drawn over the slices: anything that changes how they look.
+        from nvitk.gui.viz.ortho.shape_overlays import OVERLAY_TYPES
+
+        for layer in list(getattr(self._viewer, "layers", []) or []):
+            if type(layer).__name__ not in OVERLAY_TYPES:
+                continue
+            events = getattr(layer, "events", None)
+            for name in ("data", "visible", "opacity", "affine", "scale", "translate", "rotate", "shear",
+                         "face_color", "border_color", "edge_color", "size", "shown", "border_width",
+                         "vertex_values", "vertex_colors", "colormap", "contrast_limits", "gamma"):
+                emitter = getattr(events, name, None) if events is not None else None
+                if emitter is not None:
+                    self._connect(emitter, self._on_overlay_changed)
+
+    def _on_overlay_changed(self, _event: Any = None) -> None:
+        """A point or mesh layer changed: redraw the overlays on the next turn."""
+        self._overlay_version += 1
+        self._overlay_timer.start()
+
+    def plane_map(self, view_index: int) -> Any:
+        """View *view_index*'s :class:`~nvitk.gui.viz.ortho.geometry.PlaneMap` (slice pixel <->
+        world), or ``None`` without a volume (a 2D image, nothing bound)."""
+        from nvitk.gui.viz.ortho.geometry import PlaneMap
+
+        layer = self._layer
+        if layer is None or self._data is None or self._flat_axis is not None:
+            return None
+        if view_index >= len(self._views) or view_index >= len(self._frames):
+            return None
+        try:
+            from nvitk.gui.viz.main_canvas import real_data_to_world
+
+            matrix = real_data_to_world(layer)
+        except Exception:  # noqa: BLE001
+            return None
+        nd = int(layer.ndim)
+        t_ax = layer_time_axis(layer)
+        spatial = [d for d in range(nd) if d != t_ax][-3:]
+        if matrix.shape != (nd + 1, nd + 1) or len(spatial) != 3:
+            return None
+        spatial_matrix = np.eye(4)
+        spatial_matrix[:3, :3] = matrix[np.ix_(spatial, spatial)]
+        spatial_matrix[:3, 3] = matrix[spatial, -1]
+        if t_ax is not None:
+            spatial_matrix[:3, 3] += matrix[spatial, t_ax] * float(self._time)
+        view = self._views[view_index]
+        anchor = view.to_pixel(self._position, self._data.shape)
+        return PlaneMap(
+            matrix=spatial_matrix,
+            centre_vox=np.asarray(self._position[:3], dtype=float),
+            anchor_px=(float(anchor[0]), float(anchor[1])),
+            frame=self._frames[view_index],
+            steps_mm=self._plane_steps(view),
+            spacing=np.asarray(self._spacing, dtype=float),
+        )
+
+    def pin_reference(self, moving: Sequence[Any]) -> None:
+        """Lay the views out on a layer that is not in *moving* (see
+        :func:`~nvitk.gui.viz.layer_transform.pin_ortho_reference`)."""
+        bound = self._layer
+        if bound is None or not any(layer is bound for layer in moving):
+            return
+        others = [
+            layer for layer in self._candidate_layers()
+            if bool(getattr(layer, "visible", True)) and is_volume_layer(layer)
+            and all(layer is not m for m in moving)
+        ]
+        if not others:
+            return
+        key = _grid_key(bound)
+        same = [layer for layer in others if _grid_key(layer) == key]
+        self.refresh_from_layer((same or others)[0])
+
+    def _refresh_overlays(self) -> None:
+        """Recut the points and meshes for every view whose plane (or the layers) changed."""
+        from nvitk.gui.viz.ortho.shape_overlays import overlay_layers, overlay_signature, view_overlays
+
+        views = self._slice_views
+        layers = overlay_layers(self._viewer)
+        if (not layers or self._data is None or self._flat_axis is not None
+                or self._active_projection() is not None):
+            self._overlay_keys.clear()
+            if not layers:
+                self._surface_cutter.clear()
+            for widget in views:
+                widget.set_overlays([])
+            return
+        for index, widget in enumerate(views):
+            plane = self.plane_map(index)
+            if plane is None:
+                self._overlay_keys.pop(index, None)
+                widget.set_overlays([])
+                continue
+            key = (plane.key(), self._overlay_version, overlay_signature(layers))
+            if self._overlay_keys.get(index) == key:
+                continue
+            self._overlay_keys[index] = key
+            widget.set_overlays(view_overlays(self._viewer, plane, self._surface_cutter))
 
     def _on_visible_changed(self, _event: Any = None) -> None:
         """A layer was shown or hidden: the draw list changed."""
@@ -1373,7 +1504,10 @@ class OrthoViewerPanel(QWidget):
             elif not flat:
                 # Same slice, new crosshair: repaint the lines, keep the image.
                 widget.set_crosshair(view.to_pixel(self._position, self._data.shape))
+        if force:
+            self._overlay_version += 1
         if not todo:
+            self._refresh_overlays()
             return
         # Render off the GUI thread's critical path: the moved views concurrently
         # (each oblique view instead parallelises its own resampling, which is
@@ -1393,6 +1527,7 @@ class OrthoViewerPanel(QWidget):
                 aspect=aspect,
                 crosshair=None if flat else view.to_pixel(self._position, self._data.shape),
             )
+        self._refresh_overlays()
 
     # projection
 
@@ -1703,7 +1838,7 @@ class OrthoViewerPanel(QWidget):
         try:
             for row, layer in enumerate(layers):
                 if row < self._layers_table.rowCount():
-                    self._layers_table.setItem(row, 3, self._main_item(layer))
+                    self._layers_table.setItem(row, _COL_MAIN, self._main_item(layer))
         finally:
             self._table_guard = False
 
@@ -1716,45 +1851,86 @@ class OrthoViewerPanel(QWidget):
         """Whether the see-inside cut opens *layer* (default: every drawn layer)."""
         return self._cut_choice.get(id(layer), True)
 
+    def _table_rows(self) -> list[tuple[Any, Any]]:
+        """``(layer, its render source or None)`` per row: the drawn layers, those taken out of
+        the slice views, and the mesh / points layers, in the layer list's order."""
+        from nvitk.gui.viz.ortho.shape_overlays import OVERLAY_TYPES
+
+        drawn = {id(source.layer): source for source in self._sources}
+        rows = []
+        for layer in list(getattr(self._viewer, "layers", []) or []):
+            if id(layer) in drawn:
+                rows.append((layer, drawn[id(layer)]))
+            elif type(layer).__name__ in OVERLAY_TYPES:
+                rows.append((layer, None))
+            elif slices_hidden(layer) and is_drawable_layer(layer) and bool(getattr(layer, "visible", True)):
+                rows.append((layer, None))
+        return rows
+
     def _refresh_layers_table(self) -> None:
-        """One row per drawn layer, with its 3D-slice and cut checkboxes."""
+        """One row per layer the views can draw, with its Slices / 3D slice / Cut / Main boxes."""
         self._table_guard = True
         try:
             table = self._layers_table
-            table.setRowCount(len(self._sources))
-            self._table_layers = [s.layer for s in self._sources]
-            for row, source in enumerate(self._sources):
-                name = QTableWidgetItem(str(getattr(source.layer, "name", "?")))
+            rows = self._table_rows()
+            table.setRowCount(len(rows))
+            self._table_layers = [layer for layer, _source in rows]
+
+            def box(checked: bool, enabled: bool = True, tip: str = "") -> QTableWidgetItem:
+                item = QTableWidgetItem()
+                item.setFlags(Qt.ItemIsUserCheckable | (Qt.ItemIsEnabled if enabled else Qt.NoItemFlags))
+                item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+                if tip:
+                    item.setToolTip(tip)
+                return item
+
+            def blank(tip: str) -> QTableWidgetItem:
+                item = QTableWidgetItem("")
+                item.setFlags(Qt.NoItemFlags)
+                item.setToolTip(tip)
+                return item
+
+            for row, (layer, source) in enumerate(rows):
+                name = QTableWidgetItem(str(getattr(layer, "name", "?")))
                 name.setFlags(Qt.ItemIsEnabled)
                 table.setItem(row, 0, name)
-                plane = QTableWidgetItem()
-                flags = Qt.ItemIsUserCheckable | (Qt.ItemIsEnabled if not source.resampled else Qt.NoItemFlags)
-                plane.setFlags(flags)
-                plane.setCheckState(Qt.Checked if self._wants_plane(source) else Qt.Unchecked)
-                if source.resampled:
-                    plane.setToolTip("Resampled from another grid: no 3D slice image.")
-                table.setItem(row, 1, plane)
-                cut = QTableWidgetItem()
-                cut.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-                cut.setCheckState(Qt.Checked if self._wants_cut(source.layer) else Qt.Unchecked)
-                table.setItem(row, 2, cut)
-                table.setItem(row, 3, self._main_item(source.layer))
+                table.setItem(row, _COL_SLICES, box(not slices_hidden(layer)))
+                if source is not None:
+                    table.setItem(row, _COL_PLANE, box(
+                        self._wants_plane(source), not source.resampled,
+                        "Resampled from another grid: no 3D slice image." if source.resampled else ""))
+                    table.setItem(row, _COL_CUT, box(self._wants_cut(layer)))
+                else:
+                    tip = ("Not in the slice views: no slice image or cut." if slices_hidden(layer)
+                           and type(layer).__name__ not in ("Points", "Surface")
+                           else "Meshes and points have no slice image or cut.")
+                    table.setItem(row, _COL_PLANE, blank(tip))
+                    table.setItem(row, _COL_CUT, blank(tip))
+                table.setItem(row, _COL_MAIN, self._main_item(layer))
         finally:
             self._table_guard = False
 
     def _on_table_item_changed(self, item: Any) -> None:
-        """A 3D-slice or cut checkbox was toggled in the layers table."""
+        """A Slices / 3D slice / Cut / Main box was toggled in the layers table."""
         if self._table_guard or item is None:
             return
         row, col = item.row(), item.column()
         layers = getattr(self, "_table_layers", [])
-        if row >= len(layers) or col not in (1, 2, 3):
+        if row >= len(layers) or col not in (_COL_SLICES, _COL_PLANE, _COL_CUT, _COL_MAIN):
             return
         layer = layers[row]
         checked = item.checkState() == Qt.Checked
-        if col == 3:
+        if col == _COL_MAIN:
             self._main_canvas.set_manually_hidden(layer, not checked)
-        elif col == 1:
+        elif col == _COL_SLICES:
+            set_slices_hidden(layer, not checked)
+            from nvitk.gui.viz.ortho.shape_overlays import OVERLAY_TYPES
+
+            if type(layer).__name__ in OVERLAY_TYPES:
+                self._on_overlay_changed()
+            else:
+                self._rebuild_sources()
+        elif col == _COL_PLANE:
             self._plane_choice[id(layer)] = checked
             if self._show_planes.isChecked():
                 try:
@@ -2267,6 +2443,16 @@ def connect_ortho_panel(viewer: Any, panel: OrthoViewerPanel) -> None:
             and bound in viewer.layers
         ):
             return
+        # A layer in Transform mode is about to be moved by hand: the views stay on (or move
+        # to) another grid, or the first drag would re-lay them under the cursor.
+        from nvitk.gui.viz.layer_transform import layer_mode, transform_targets
+
+        if active is not None and layer_mode(active) == "transform":
+            if bound is not None and bound in viewer.layers and bound is not active:
+                return
+            panel.pin_reference(transform_targets(viewer) or [active])
+            if panel.bound_layer() is not active:
+                return
         # Napari emits `active` twice for a single click, with the same layer
         # both times. Re-binding is not free (it re-materialises the volume,
         # rebuilds every render source and forces a redraw), so the second one
@@ -2332,8 +2518,35 @@ def connect_ortho_panel(viewer: Any, panel: OrthoViewerPanel) -> None:
     # PyQt's exit cleanup and crashed the interpreter on exit. The callback checks the panel.
     viewer.mouse_drag_callbacks.append(_pick_in_3d)
     panel._pick_callback = _pick_in_3d
+    # Transform mode drags layers on the 3D canvas too (first: it claims the drag).
+    from nvitk.gui.viz.layer_transform import install_transform_3d
+
+    install_transform_3d(viewer)
 
     viewer.layers.selection.events.active.connect(_refresh)
+
+    def _on_mode(event: Any = None) -> None:
+        """The active layer switched to Transform mode: move the views off its grid now."""
+        layer = getattr(event, "source", None)
+        if _qt_deleted(panel) or layer is None or layer is not viewer.layers.selection.active:
+            return
+        from nvitk.gui.viz.layer_transform import layer_mode, transform_targets
+
+        if layer_mode(layer) == "transform":
+            panel.pin_reference(transform_targets(viewer) or [layer])
+
+    def _watch_mode(layer: Any) -> None:
+        emitter = getattr(getattr(layer, "events", None), "mode", None)
+        if emitter is not None and not getattr(layer, "_nvitk_mode_watched", False):
+            try:
+                emitter.connect(_on_mode)
+                layer._nvitk_mode_watched = True
+            except Exception:  # noqa: BLE001
+                pass
+
+    for existing in list(viewer.layers):
+        _watch_mode(existing)
+    viewer.layers.events.inserted.connect(lambda event: _watch_mode(getattr(event, "value", None)))
     for name in ("inserted", "removed", "reordered", "moved"):
         emitter = getattr(viewer.layers.events, name, None)
         if emitter is not None:

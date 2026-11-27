@@ -267,3 +267,70 @@ def line_direction_px(
         return None
     norm = float(np.hypot(d_row, d_col))
     return (d_row / norm, d_col / norm)
+
+
+@dataclass(frozen=True)
+class PlaneMap:
+    """One view's plane, as a map between its slice pixels and world space.
+
+    Built by the panel from the bound volume's real voxel -> world matrix, the crosshair voxel
+    and the view's frame: the same numbers :func:`oblique_slice` samples with, so a point mapped
+    here lands on the pixel the slice shows it at, turned planes included. Pixel coordinates are
+    voxel-centred (pixel ``(r, c)`` is drawn over ``[r, r + 1) x [c, c + 1)``).
+    """
+
+    #: Bound volume voxel -> world, spatial 4x4 (world in the viewer's last three axes).
+    matrix: np.ndarray
+    #: Crosshair voxel (fractional), and the pixel it is drawn at.
+    centre_vox: np.ndarray
+    anchor_px: tuple[float, float]
+    frame: PlaneFrame
+    steps_mm: tuple[float, float]
+    spacing: np.ndarray
+
+    def pixel_to_world(self, row: float, col: float) -> np.ndarray:
+        """World point (3,) of the fractional, voxel-centred slice pixel ``(row, col)``."""
+        sp = np.asarray(self.spacing, dtype=float)
+        step_row = float(self.steps_mm[0]) * np.asarray(self.frame.row, dtype=float) / sp
+        step_col = float(self.steps_mm[1]) * np.asarray(self.frame.col, dtype=float) / sp
+        vox = (np.asarray(self.centre_vox, dtype=float)
+               + (float(row) - float(self.anchor_px[0])) * step_row
+               + (float(col) - float(self.anchor_px[1])) * step_col)
+        return (self.matrix @ np.append(vox, 1.0))[:3]
+
+    def to_plane_mm(self, world: np.ndarray) -> np.ndarray:
+        """World points ``(N, 3)`` as millimetre offsets from the crosshair, in the bound
+        volume's (spacing-scaled) voxel axes: the frame's own space."""
+        world = np.atleast_2d(np.asarray(world, dtype=float))
+        inv = np.linalg.inv(self.matrix)
+        vox = world @ inv[:3, :3].T + inv[:3, 3]
+        return (vox - np.asarray(self.centre_vox, dtype=float)) * np.asarray(self.spacing, dtype=float)
+
+    def mm_to_pixels(self, mm: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """``(rows, cols, depth_mm)`` of plane-millimetre points (see :meth:`to_plane_mm`):
+        voxel-centred pixels, and the signed distance off the plane."""
+        mm = np.atleast_2d(np.asarray(mm, dtype=float))
+        rows = float(self.anchor_px[0]) + mm @ np.asarray(self.frame.row, float) / max(float(self.steps_mm[0]), 1e-9)
+        cols = float(self.anchor_px[1]) + mm @ np.asarray(self.frame.col, float) / max(float(self.steps_mm[1]), 1e-9)
+        return rows, cols, mm @ np.asarray(self.frame.normal, float)
+
+    def world_to_pixels(self, world: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """``(rows, cols, depth_mm)`` of world points ``(N, 3)``."""
+        return self.mm_to_pixels(self.to_plane_mm(world))
+
+    def world_normal(self) -> np.ndarray:
+        """The plane's normal as a unit world direction."""
+        vox = np.asarray(self.frame.normal, dtype=float) / np.asarray(self.spacing, dtype=float)
+        return _unit(self.matrix[:3, :3] @ vox)
+
+    def thickness_mm(self) -> float:
+        """One voxel step across the plane, in millimetres (the slice's thickness)."""
+        n = np.asarray(self.frame.normal, dtype=float) / np.asarray(self.spacing, dtype=float)
+        norm = float(np.linalg.norm(n))
+        return 1.0 / norm if norm > 1e-12 else 1.0
+
+    def key(self) -> bytes:
+        """Identity of the plane: equal keys map every point to the same pixel."""
+        parts = [self.matrix, self.centre_vox, np.asarray(self.anchor_px, float), self.frame.row,
+                 self.frame.col, self.frame.normal, np.asarray(self.steps_mm, float), self.spacing]
+        return b"".join(np.ascontiguousarray(np.asarray(p, dtype=float)).tobytes() for p in parts)

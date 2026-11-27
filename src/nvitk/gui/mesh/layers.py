@@ -448,7 +448,20 @@ def set_parts(layer: Any, **changes: Any) -> Display:
     for key, val in changes.items():
         setattr(disp, key, val)
     apply_parts(layer)
+    _tell_slice_views()
     return disp
+
+
+def _tell_slice_views() -> None:
+    """The slice views draw surfaces by these parts too: have them redraw their overlays."""
+    try:
+        import napari
+
+        panel = getattr(napari.current_viewer(), "_nvitk_ortho_panel", None)
+        if panel is not None:
+            panel._on_overlay_changed()
+    except Exception:  # noqa: BLE001 (no viewer, no views)
+        pass
 
 
 def apply_parts(layer: Any) -> None:

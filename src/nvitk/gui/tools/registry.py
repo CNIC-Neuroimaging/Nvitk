@@ -3137,6 +3137,12 @@ def is_sge_capable(tool_id: str | None) -> bool:
     if not tool_id:
         return False
     tid = str(tool_id).strip()
+    # Registration, FreeSurfer, the networks and the other tools that work through the viewer:
+    # run against a viewer rebuilt on the node (nvitk.gui.sge.recorded).
+    from nvitk.gui.sge.recorded import is_recorded_tool
+
+    if is_recorded_tool(tid):
+        return tool_by_id(tid) is not None
     # FastSurfer / FSL: several inputs and outputs, staged their own way (nvitk.gui.sge.external).
     if tid.startswith(("fastsurfer_", "fsl_")):
         from nvitk.gui.sge.external import external_sge_capable

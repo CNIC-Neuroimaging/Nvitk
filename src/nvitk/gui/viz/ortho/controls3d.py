@@ -99,25 +99,26 @@ class Controls3D(QWidget):
         panel._marker_box.toggled.connect(panel._on_marker_toggled)
         card.add(panel._marker_box)
 
-        # One row per drawn layer: whether it gets a slice image in 3D, and
-        # whether the see-inside cut opens it. A mask can stay whole while the
-        # CT around it is cut away, or the other way round.
-        panel._layers_table = QTableWidget(0, 4)
-        panel._layers_table.setHorizontalHeaderLabels(["Layer", "3D slice", "Cut", "Main"])
+        # One row per drawn layer (and per mesh / points layer): whether the slice views draw
+        # it, whether it gets a slice image in 3D, whether the see-inside cut opens it, and
+        # whether the 3D view draws it. A mask can stay whole while the CT around it is cut
+        # away, a mesh can show in 3D only, or the other way round.
+        panel._layers_table = QTableWidget(0, 5)
+        panel._layers_table.setHorizontalHeaderLabels(["Layer", "Slices", "3D slice", "Cut", "Main"])
         panel._layers_table.verticalHeader().setVisible(False)
         panel._layers_table.setSelectionMode(QAbstractItemView.NoSelection)
         panel._layers_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         header = panel._layers_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        for column in range(1, 5):
+            header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
         panel._layers_table.setMinimumHeight(70)
         panel._layers_table.setToolTip(
+            "Slices: draw this layer in the slice views (meshes and points too). "
             "3D slice: draw this layer's slice image on the 3D planes (needs "
             "'…and the slice image' below). Cut: let 'See inside' open this layer. "
-            "Main: draw this layer on the main Napari canvas — unticked, it is hidden "
-            "there only and still drawn in these views and listed as visible."
+            "Main: draw this layer in the 3D view (the main Napari canvas) — unticked, it is "
+            "hidden there only and still listed as visible."
         )
         panel._layers_table.itemChanged.connect(panel._on_table_item_changed)
         from nvitk.gui.core.widgets import resizable  # drag the handle under it to resize

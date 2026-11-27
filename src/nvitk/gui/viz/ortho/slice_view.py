@@ -108,6 +108,15 @@ class SliceView(QWidget):
         self.box_handler: Any | None = None
         self._box_grab: frozenset[str] | None = None
         self._box_hover: frozenset[str] | None = None
+        #: Transform mode (:class:`~nvitk.gui.viz.ortho.transform_drag.OrthoTransformDrag`):
+        #: ``handler(kind, (row, col), event) -> bool`` with *kind* can / press / move / release /
+        #: cancel and fractional slice-pixel edges; True on press means it took the drag.
+        self.transform_handler: Any | None = None
+        self._transforming = False
+        self._transform_from: tuple[float, float] | None = None
+        self._transform_hover = False
+        #: Points and meshes drawn over the slice (:mod:`~nvitk.gui.viz.ortho.shape_overlays`).
+        self._overlays: list[Any] = []
         self._draw_cursor = False
         #: A traced vessel's path and clicked points, as (row, column) slice pixels.
         self._trace: list[tuple[float, float]] = []
@@ -259,7 +268,9 @@ class SliceView(QWidget):
 
     def _apply_cursor(self) -> None:
         edges = self._box_grab or self._box_hover
-        if edges:
+        if self._transforming or (self._transform_hover and not edges):
+            self._canvas.setCursor(Qt.ClosedHandCursor if self._transforming else Qt.SizeAllCursor)
+        elif edges:
             if edges == {"move"}:
                 shape = Qt.SizeAllCursor
             elif len(edges) == 2:
@@ -331,6 +342,75 @@ class SliceView(QWidget):
             return bool(handler(kind, set(self._box_grab), self._pixel_f(event), event))
         except Exception:  # noqa: BLE001 (an editor fault must not wedge the view)
             return False
+
+    def _transform_call(self, kind: str, event: Any) -> bool:
+        handler = self.transform_handler
+        if handler is None:
+            return False
+        try:
+            return bool(handler(kind, self._pixel_f(event) if kind != "cancel" else None, event))
+        except Exception:  # noqa: BLE001 (a transform fault must not wedge the view)
+            return False
+
+    def set_overlays(self, overlays: list[Any] | None) -> None:
+        """Draw points / mesh cuts over the slice (:class:`~nvitk.gui.viz.ortho.shape_overlays.Overlay`)."""
+        overlays = list(overlays or [])
+        if not overlays and not self._overlays:
+            return
+        self._overlays = overlays
+        self._repaint()
+
+    def _paint_overlays(self, painter: Any, geometry: tuple[int, int, float, float]) -> None:
+        """Points as discs, mesh cuts as lines, in slice-pixel coordinates mapped to the canvas."""
+        from qtpy.QtCore import QLineF, QPointF
+        from qtpy.QtGui import QColor, QPainter, QPen
+
+        scaled_w, scaled_h, off_x, off_y = geometry
+        h, w = self._rgb.shape[:2]
+        sx, sy = scaled_w / max(w, 1), scaled_h / max(h, 1)
+
+        def qcolour(rgba: Any, opacity: float) -> QColor:
+            r, g, b, a = (float(v) for v in rgba)
+            return QColor.fromRgbF(min(max(r, 0.0), 1.0), min(max(g, 0.0), 1.0), min(max(b, 0.0), 1.0),
+                                   min(max(a * opacity, 0.0), 1.0))
+
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        for item in self._overlays:
+            coords = np.asarray(item.coords, dtype=float)
+            if coords.size == 0:
+                continue
+            if item.kind == "lines":
+                x0 = off_x + (coords[:, 1] + 0.5) * sx
+                y0 = off_y + (coords[:, 0] + 0.5) * sy
+                x1 = off_x + (coords[:, 3] + 0.5) * sx
+                y1 = off_y + (coords[:, 2] + 0.5) * sy
+                # One pen per colour: a one-colour mesh is a single drawLines call.
+                quant = np.round(np.asarray(item.colors, dtype=float) * 63.0).astype(np.int16)
+                keys, inverse = np.unique(quant, axis=0, return_inverse=True)
+                inverse = np.asarray(inverse).reshape(-1)
+                for k, key in enumerate(keys):
+                    pick = np.flatnonzero(inverse == k)
+                    pen = QPen(qcolour(key / 63.0, item.opacity), float(getattr(item, "width", 1.5)))
+                    painter.setPen(pen)
+                    painter.drawLines([QLineF(x0[i], y0[i], x1[i], y1[i]) for i in pick])
+                continue
+            radii = np.asarray(item.radii, dtype=float) if item.radii is not None else np.ones((len(coords), 2))
+            xs = off_x + (coords[:, 1] + 0.5) * sx
+            ys = off_y + (coords[:, 0] + 0.5) * sy
+            screen = getattr(item, "screen_size", None)
+            for i in range(len(coords)):
+                if screen is not None:
+                    rx = ry = max(float(screen) / 2.0, 1.0)  # mesh vertices: a fixed dot size
+                else:
+                    rx = max(float(radii[i, 1]) * sx, 2.0)
+                    ry = max(float(radii[i, 0]) * sy, 2.0)
+                painter.setBrush(qcolour(item.colors[i], item.opacity))
+                if item.edge_colors is not None and item.edge_width > 0:
+                    painter.setPen(QPen(qcolour(item.edge_colors[i], item.opacity), float(item.edge_width)))
+                else:
+                    painter.setPen(Qt.NoPen)
+                painter.drawEllipse(QPointF(float(xs[i]), float(ys[i])), rx, ry)
+        painter.setBrush(Qt.NoBrush)
 
     def set_crosshair_visible(self, visible: bool) -> None:
         """Draw the crosshair lines, or hide them (the crosshair still moves with clicks)."""
@@ -521,6 +601,9 @@ class SliceView(QWidget):
         canvas = QPixmap(self._base)
         painter = QPainter(canvas)
         painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+        if self._overlays:
+            self._paint_overlays(painter, geometry)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         for cx, cy, dx, dy, colour in (self._line_geometry() or []) if self._show_cross else []:
             pen = QPen(QColor(colour))
             pen.setWidth(1)
@@ -651,6 +734,11 @@ class SliceView(QWidget):
                 self._drag_from = self._cursor_xy(event)
                 self._pan_origin = self._drag_from
                 return True
+            if event.button() == Qt.LeftButton and self._transform_call("press", event):
+                self._transforming = True
+                self._transform_from = self._cursor_xy(event)
+                self._apply_cursor()
+                return True
             if self._edit(event, "press"):
                 self._editing = True
                 return True
@@ -661,10 +749,17 @@ class SliceView(QWidget):
             self._emit_click(event)
             return True
         if event.type() == QEvent.MouseMove:
+            if self._transforming:
+                self._transform_call("move", event)
+                return True
             if self._box_grab is not None:
                 self._box_call("move", event)
                 return True
             if not event.buttons():
+                transform_hover = self.transform_handler is not None and self._transform_call("can", event)
+                if transform_hover != self._transform_hover:
+                    self._transform_hover = transform_hover
+                    self._apply_cursor()
                 hover = self._box_edges_at(event)
                 if hover is not None:
                     try:
@@ -696,6 +791,15 @@ class SliceView(QWidget):
             self._emit_click(event)
             return True
         if event.type() == QEvent.MouseButtonRelease:
+            if self._transforming:
+                self._transforming = False
+                self._transform_call("release", event)
+                self._apply_cursor()
+                origin, self._transform_from = self._transform_from, None
+                x, y = self._cursor_xy(event)
+                if origin is not None and abs(x - origin[0]) + abs(y - origin[1]) < 3.0:
+                    self._emit_click(event)  # a click, not a drag: it moves the crosshair as usual
+                return True
             if self._box_grab is not None:
                 self._box_call("release", event)
                 self._box_grab = None
@@ -715,6 +819,15 @@ class SliceView(QWidget):
                 self._edit(event, "release")
                 return True
             return False
+        if event.type() == QEvent.ShortcutOverride and self._transforming and event.key() == Qt.Key_Escape:
+            event.accept()  # the views' own Esc shortcut waits: this Esc cancels the drag
+            return True
+        if event.type() == QEvent.KeyPress and self._transforming and event.key() == Qt.Key_Escape:
+            # Esc mid-drag puts the layers back where the drag started.
+            self._transforming = False
+            self._transform_call("cancel", event)
+            self._apply_cursor()
+            return True
         if event.type() == QEvent.Leave:
             self.hovered.emit(None)
         if event.type() == QEvent.Leave and self._hover is not None:

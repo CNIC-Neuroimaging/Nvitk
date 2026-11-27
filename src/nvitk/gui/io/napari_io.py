@@ -428,9 +428,10 @@ def _as_label_ids(data: Any) -> np.ndarray:
     return arr
 
 
-def _add_image_to_viewer(viewer: Any, img: Image, path: Path) -> Any:
+def _add_image_to_viewer(viewer: Any, img: Image, path: Path, *, allow_labels: bool = True) -> Any:
     """Add *img* to *viewer* as an Image layer using :func:`_prepare_layer_tuple`'s display kwargs,
-    then apply nvitk's viewer/dims configuration for the new layer."""
+    then apply nvitk's viewer/dims configuration for the new layer (a label map as a Labels
+    layer, unless *allow_labels* is off)."""
     data, layer_meta, _ = _prepare_layer_tuple(img, path)
     kwargs = {
         "name": layer_meta["name"],
@@ -445,7 +446,7 @@ def _add_image_to_viewer(viewer: Any, img: Image, path: Path) -> Any:
     if "rgb" in layer_meta:
         kwargs["rgb"] = layer_meta["rgb"]
     with suppress_nonorthogonal_slice_warning():
-        if not layer_meta.get("rgb") and _holds_labels(data):
+        if allow_labels and not layer_meta.get("rgb") and _holds_labels(data):
             # A label map (a segmentation, a mask): straight in as a Napari Labels layer, as
             # right-click > Convert to labels would make it, so painting, per-label colours and
             # the label vocabulary work from the start.

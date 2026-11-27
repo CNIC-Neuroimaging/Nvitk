@@ -910,6 +910,14 @@ def _fill_layer_menu(menu: Any, viewer: Any, layer: Any, pos: Any) -> None:
         center_view_on(viewer, _targets())
 
     centre.triggered.connect(_centre)
+    from nvitk.gui.viz.layer_transform import has_origin, reset_transform
+
+    moved = [t for t in _targets() if has_origin(t)]
+    if moved:
+        reset = menu.addAction(icon("restore"), "Reset transform")
+        reset.setToolTip("Put the layer (the selected ones, if it is among them) back where it was before "
+                         "it was moved by hand in Transform mode.")
+        reset.triggered.connect(lambda: [reset_transform(t) for t in moved])
     mesh_panel = getattr(viewer, "_nvitk_mesh_panel", None)
     if mesh_panel is not None and kind in ("Surface", "Points"):
         try:
@@ -968,6 +976,17 @@ def _fill_layer_menu(menu: Any, viewer: Any, layer: Any, pos: Any) -> None:
         colours.setToolTip("Recolour every label of this layer (and of the other selected label layers) "
                            "from a palette; hidden labels stay hidden.")
         colours.aboutToShow.connect(lambda m=colours: (m.clear(), _fill_label_colormap_menu(m, viewer, layer, _targets)))
+        meshes = menu.addAction(icon("mesh"), "Surfaces per label")
+        meshes.setToolTip("Marching cubes of every label of this layer (and of the other selected label layers): "
+                          "one surface per label, named and coloured after it, gathered in a folder. Labels "
+                          "hidden in the label list are left out. Settings: Meshlab › Surfaces from labels / mask.")
+        meshes.triggered.connect(lambda: surfaces_per_label_layers(viewer, _targets()))
+        mesh_panel_ = getattr(viewer, "_nvitk_mesh_panel", None)
+        if mesh_panel_ is not None:
+            more = menu.addAction(icon("sliders"), "Surfaces from labels… (Meshlab)")
+            more.setToolTip("Open Meshlab's Surfaces from labels / mask on this layer, to pick the labels, "
+                            "the output (per label, coloured by label, merged, groups), smoothing and decimation.")
+            more.triggered.connect(lambda: _open_mesh_surfaces(viewer, mesh_panel_, layer))
         from nvitk.gui.labels.catalog import get_schema, layer_schema_key, rank_schemas, remember_layer_schema
 
         vocab = menu.addMenu(icon("tag"), "Label vocabulary")
@@ -998,6 +1017,50 @@ def _fill_label_colormap_menu(menu: Any, viewer: Any, layer: Any, targets: Any) 
     menu.addSeparator()
     shuffle = menu.addAction("Shuffle colours (Napari's random palette)")
     shuffle.triggered.connect(lambda: recolour_label_layers(viewer, targets(), None))
+
+
+def surfaces_per_label_layers(viewer: Any, layers: list[Any]) -> list[str]:
+    """One surface per (shown) label of each of *layers* (see
+    :func:`nvitk.gui.mesh.operations.surfaces_per_label`); returns the messages."""
+    from nvitk.gui.core.activity import activity
+    from nvitk.gui.labels.visibility import stored_visible_ids
+    from nvitk.gui.mesh.operations import surfaces_per_label
+    from nvitk.gui.tools.runner import notify
+
+    messages = []
+    for layer in layers:
+        if not (type(layer).__name__ == "Labels" or is_label_like_layer(layer)):
+            continue
+        shown = stored_visible_ids(layer)
+        try:
+            with activity(f"Surfaces per label of “{layer.name}”"):
+                if shown is not None and len(shown) == 0:
+                    raise ValueError("every label is hidden in the label list")
+                result = surfaces_per_label(viewer, layer, labels=list(shown) if shown else None)
+            messages.append(result.message)
+            notify(result.message)
+        except Exception as exc:  # noqa: BLE001 (report, never crash the menu)
+            messages.append(f"{layer.name}: {exc}")
+            notify(f"Surfaces per label of “{layer.name}” failed: {exc}", error=True)
+    return messages
+
+
+def _open_mesh_surfaces(viewer: Any, mesh_panel: Any, layer: Any) -> None:
+    """Show the Meshlab panel on "Surfaces from labels / mask" with *layer* active."""
+    try:
+        viewer.layers.selection.active = layer
+        mesh_panel.select("surfaces")
+        from nvitk.gui.core.workspace import raise_panel
+
+        shell = getattr(viewer, "_nvitk_shell", None)
+        if shell is not None:
+            try:
+                shell.show_module("mesh")
+            except Exception:  # noqa: BLE001
+                pass
+        raise_panel(viewer, "nvitk:mesh")
+    except Exception:  # noqa: BLE001 (a panel layout without the Meshlab tab)
+        pass
 
 
 def recolour_label_layers(viewer: Any, layers: list[Any], colormap: str | None) -> list[Any]:
