@@ -672,7 +672,35 @@ def build_tools_dock(
         )
 
     btn_run_sge.clicked.connect(_on_run_sge)
-    layout.addWidget(btn_run_sge, 0)
+    # Heavy tools compute on a worker thread (tools/background.py): the switch, and whether the
+    # selected tool is one of them.
+    from nvitk.gui.tools.background import background_enabled, can_run_in_background, set_background_enabled
+
+    background_box = QCheckBox("Run in the background")
+    background_box.setChecked(background_enabled())
+    background_box.toggled.connect(set_background_enabled)
+    container._nvitk_background_box = background_box
+
+    def _sync_background_box(*_args: Any) -> None:
+        tid = tool_id_from_label(tool_panel.category.value, tool_panel.operation.value) or ""
+        able = bool(tid) and can_run_in_background(tid)
+        background_box.setEnabled(able)
+        background_box.setToolTip(
+            "Compute on a worker thread: the viewer stays usable (scroll, paint, run other tools) and "
+            "the result is added when it is done. The status bar shows it running."
+            if able else
+            "This tool runs on the GUI thread: it manages its own background job (FSL, FastSurfer), "
+            "opens windows or plots, or interacts with the viewer."
+        )
+
+    tool_panel.operation.changed.connect(_sync_background_box)
+    tool_panel.category.changed.connect(_sync_background_box)
+    _sync_background_box()
+    run_row = QHBoxLayout()
+    run_row.setContentsMargins(0, 0, 0, 0)
+    run_row.addWidget(background_box, 1)
+    run_row.addWidget(btn_run_sge, 0)
+    layout.addLayout(run_row)
     # The tool form and the panel that may come with it (the pipeline form, the TotalSegmentator
     # ROI list) share a splitter, so neither is squeezed by the other: drag the handle between.
     from qtpy.QtWidgets import QSplitter

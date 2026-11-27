@@ -5188,6 +5188,16 @@ def notify(message: str, *, error: bool = False) -> None:
     """Log *message* to the GUI log panel and show it as a Napari notification (error or info),
     silently ignoring failures if Napari's notification API is unavailable."""
     gui_log(message, error=error)
+    from nvitk.gui.core.main_thread import call_on_main, on_main_thread
+
+    if not on_main_thread():
+        # Napari's notifications build widgets: from a background tool, show it on the GUI thread.
+        call_on_main(_show_notification, message, error)
+        return
+    _show_notification(message, error)
+
+
+def _show_notification(message: str, error: bool) -> None:
     try:
         if error:
             from napari.utils.notifications import show_error

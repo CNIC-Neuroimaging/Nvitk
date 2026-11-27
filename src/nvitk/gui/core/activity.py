@@ -275,7 +275,8 @@ def start_task(message: str, total: int | None = None, *, kind: str = "") -> Tas
     """A task that finishes later (call :meth:`Task.finish`), e.g. a worker thread's, or a
     job on the cluster (*kind* ``"cluster"``)."""
     task = activity_hub().start(message, total, kind=kind)
-    _paint_now()
+    if threading.current_thread() is threading.main_thread():
+        _paint_now()
     return task
 
 
@@ -287,6 +288,9 @@ def activity(message: str, *, total: int | None = None, cursor: bool = True) -> 
     if app is None:
         yield Task(activity_hub(), message, total)
         return
+    # Off the GUI thread (a tool running in the background): no wait cursor, which is the
+    # application's, and the indicator repaints on its own there.
+    cursor = cursor and threading.current_thread() is threading.main_thread()
     task = start_task(message, total)
     if cursor:
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)

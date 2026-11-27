@@ -1391,113 +1391,147 @@ def build_tool_panel(
 
         title = str(getattr(spec, "label", "") or tool_id) if spec is not None else tool_id
         on = f" on “{layer.name}”" if layer is not None and run_mode == "layer" else ""
-        try:
-            with activity(f"{title}{on}"):
-                result = run_gui_tool(
-                    tool_id,
-                    layer,
-                    viewer,
-                    target_mode=target_mode,
-                    label_ids=ids or None,
-                    params=params,
-                )
-        except NotImplementedError as exc:
-            log_tool_failure(exc)
-            notify(str(exc), error=True)
-            return
-        except Exception as exc:
-            log_tool_failure(exc)
-            notify(f"Tool failed: {exc}", error=True)
-            return
 
-        if result is None:
-            on_layers_changed()
-            return
+        def _apply_result(result: Any) -> None:
+            """Add (or put in place) the tool's result and record the step: GUI thread."""
+            if result is None:
+                on_layers_changed()
+                return
+            # Layers hold host arrays: a tool on the GPU backend (a per-label run, notably)
+            # may hand back a CuPy one, which np.asarray refuses.
+            from nvitk.core.array import to_numpy
 
-        name = f"{layer.name}_{tool_id}"
-        # A result on the reference layer's grid (resample to reference) is placed (and
-        # saved) like the reference, never like the active layer it was computed from.
-        grid_ref = None
-        if spec is not None and spec.output_on_reference_grid:
-            ref_name = str(params.get("reference_layer") or "").strip()
-            grid_ref = next((ly for ly in viewer.layers if ly.name == ref_name), None)
-        if grid_ref is not None:
-            from nvitk.gui.core.spatial import reference_grid_kwargs
+            result = to_numpy(result)
 
-            out_kwargs = reference_grid_kwargs(layer, grid_ref, name=name)
-        else:
-            try:
-                out_kwargs = layer_display_kwargs(layer, name=name, ndim=int(np.ndim(result)))
-            except TypeError:  # a caller-supplied builder without the ndim keyword
-                out_kwargs = layer_display_kwargs(layer, name=name)
-        can_replace = (
-            overlay_mode == "replace_active"
-            and grid_ref is None
-            and tuple(result.shape) == tuple(layer.data.shape)
-        )
-        result_arr = np.asarray(result)
-        # A parcellation belongs in a Labels layer, not an Image one: an Image layer renders label
-        # ids as intensities and gives no per-label colour, visibility or picking. The runtime test
-        # stays: a per-label tool run on a single label legitimately returns a binary mask, which
-        # is an Image result like any other.
-        label_output = tool_id == "seg_blood_flood" or bool(spec and spec.multilabel)
-        as_labels = label_output and (
-            np.issubdtype(result_arr.dtype, np.integer)
-            and int(result_arr.max(initial=0)) > 1
-        )
-        if can_replace and not as_labels:
-            try:
-                layer.data = result
-                layer.name = name
-            except Exception:
-                viewer.add_image(result, **out_kwargs)
-        elif spec is not None and spec.geometric and is_label_like_layer(layer):
-            # A label map moved by a geometric tool is still a label map.
-            lab = viewer.add_labels(
-                result_arr.astype(np.int32, copy=False), opacity=0.7, **out_kwargs
-            )
-            lab._nvitk_label_like = True
-        elif as_labels:
-            from nvitk.gui.core.spatial import layer_spatial_kwargs
+            name = f"{layer.name}_{tool_id}"
+            # A result on the reference layer's grid (resample to reference) is placed (and
+            # saved) like the reference, never like the active layer it was computed from.
+            grid_ref = None
+            if spec is not None and spec.output_on_reference_grid:
+                ref_name = str(params.get("reference_layer") or "").strip()
+                grid_ref = next((ly for ly in viewer.layers if ly.name == ref_name), None)
+            if grid_ref is not None:
+                from nvitk.gui.core.spatial import reference_grid_kwargs
 
-            spatial_src = layer
-            ref_name = str(params.get("reference_layer") or "").strip()
-            if ref_name and ref_name not in ("", "(none)"):
+                out_kwargs = reference_grid_kwargs(layer, grid_ref, name=name)
+            else:
                 try:
-                    spatial_src = next(ly for ly in viewer.layers if ly.name == ref_name)
-                except StopIteration:
-                    pass
-            spatial = layer_spatial_kwargs(spatial_src, ndim=int(result_arr.ndim))
-            try:
+                    out_kwargs = layer_display_kwargs(layer, name=name, ndim=int(np.ndim(result)))
+                except TypeError:  # a caller-supplied builder without the ndim keyword
+                    out_kwargs = layer_display_kwargs(layer, name=name)
+            can_replace = (
+                overlay_mode == "replace_active"
+                and layer in viewer.layers
+                and grid_ref is None
+                and tuple(result.shape) == tuple(layer.data.shape)
+            )
+            result_arr = np.asarray(result)
+            # A parcellation belongs in a Labels layer, not an Image one: an Image layer renders label
+            # ids as intensities and gives no per-label colour, visibility or picking. The runtime test
+            # stays: a per-label tool run on a single label legitimately returns a binary mask, which
+            # is an Image result like any other.
+            label_output = tool_id == "seg_blood_flood" or bool(spec and spec.multilabel)
+            as_labels = label_output and (
+                np.issubdtype(result_arr.dtype, np.integer)
+                and int(result_arr.max(initial=0)) > 1
+            )
+            if can_replace and not as_labels:
+                try:
+                    layer.data = result
+                    layer.name = name
+                except Exception:
+                    viewer.add_image(result, **out_kwargs)
+            elif spec is not None and spec.geometric and is_label_like_layer(layer):
+                # A label map moved by a geometric tool is still a label map.
                 lab = viewer.add_labels(
-                    result_arr.astype(np.int32, copy=False),
-                    name=name,
-                    opacity=0.7,
-                    **spatial,
+                    result_arr.astype(np.int32, copy=False), opacity=0.7, **out_kwargs
                 )
                 lab._nvitk_label_like = True
-            except Exception:
-                viewer.add_image(result, **out_kwargs)
-        else:
-            viewer.add_image(result, **out_kwargs)
+            elif as_labels:
+                from nvitk.gui.core.spatial import layer_spatial_kwargs
 
-        app_state["outputs"].append({"name": name, "shape": tuple(result.shape)})
-        if record_step is not None:
-            record_step(
-                {
-                    "type": "tool",
-                    "tool": tool_id,
-                    "category": category,
-                    "operation": operation,
-                    "source_layer": layer.name,
-                    "output_layer": name,
-                    "params": params,
-                    "target_mode": target_mode,
-                    "label_ids": ids or None,
-                }
+                spatial_src = layer
+                ref_name = str(params.get("reference_layer") or "").strip()
+                if ref_name and ref_name not in ("", "(none)"):
+                    try:
+                        spatial_src = next(ly for ly in viewer.layers if ly.name == ref_name)
+                    except StopIteration:
+                        pass
+                spatial = layer_spatial_kwargs(spatial_src, ndim=int(result_arr.ndim))
+                try:
+                    lab = viewer.add_labels(
+                        result_arr.astype(np.int32, copy=False),
+                        name=name,
+                        opacity=0.7,
+                        **spatial,
+                    )
+                    lab._nvitk_label_like = True
+                except Exception:
+                    viewer.add_image(result, **out_kwargs)
+            else:
+                viewer.add_image(result, **out_kwargs)
+
+            app_state["outputs"].append({"name": name, "shape": tuple(result.shape)})
+            if record_step is not None:
+                record_step(
+                    {
+                        "type": "tool",
+                        "tool": tool_id,
+                        "category": category,
+                        "operation": operation,
+                        "source_layer": layer.name,
+                        "output_layer": name,
+                        "params": params,
+                        "target_mode": target_mode,
+                        "label_ids": ids or None,
+                    }
+                )
+            notify(f"Applied {operation} → {name}")
+            on_layers_changed()
+
+        def _foreground() -> None:
+            """Run the tool here, on the GUI thread (the window waits)."""
+            try:
+                with activity(f"{title}{on}"):
+                    result = run_gui_tool(
+                        tool_id,
+                        layer,
+                        viewer,
+                        target_mode=target_mode,
+                        label_ids=ids or None,
+                        params=params,
+                    )
+            except NotImplementedError as exc:
+                log_tool_failure(exc)
+                notify(str(exc), error=True)
+                return
+            except Exception as exc:
+                log_tool_failure(exc)
+                notify(f"Tool failed: {exc}", error=True)
+                return
+            _apply_result(result)
+
+        def _failed(exc: BaseException) -> None:
+            from nvitk.gui.core.log_panel import gui_log
+
+            gui_log(f"Tool failed: {exc}", error=True)
+            detail = getattr(exc, "__nvitk_traceback__", "")
+            if detail:
+                gui_log(detail, error=True)
+            notify(str(exc) if isinstance(exc, NotImplementedError) else f"Tool failed: {exc}", error=True)
+
+        # Heavy tools (segmentation, registration, filters...) compute on a worker thread and the
+        # GUI stays usable; their result is added when they are done (tools/background.py).
+        from nvitk.gui.tools.background import background_enabled, can_run_in_background, start_background_tool
+
+        if background_enabled() and can_run_in_background(tool_id):
+            start_background_tool(
+                tool_id, layer, viewer, target_mode=target_mode, label_ids=ids or None, params=params,
+                title=f"{title}{on}", on_done=_apply_result, on_error=_failed, run_foreground=_foreground,
             )
-        notify(f"Applied {operation} → {name}")
-        on_layers_changed()
+            notify(f"{title}{on}: running in the background, the viewer stays usable.")
+            return
+        _foreground()
 
     def _signal_value(event: Any) -> Any:
         """Extract the new value from a magicgui change *event* (or pass through a raw value)."""

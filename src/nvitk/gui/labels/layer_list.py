@@ -964,6 +964,10 @@ def _fill_layer_menu(menu: Any, viewer: Any, layer: Any, pos: Any) -> None:
             fit = menu.addAction(icon("roi_box"), "Set the ROI box around these labels")
             fit.triggered.connect(lambda: set_box(viewer, WorldBox.from_labels(layer, margin_mm=5.0)))
     if kind == "Labels" or is_label_like_layer(layer):
+        colours = menu.addMenu(icon("droplet"), "Label colormap")
+        colours.setToolTip("Recolour every label of this layer (and of the other selected label layers) "
+                           "from a palette; hidden labels stay hidden.")
+        colours.aboutToShow.connect(lambda m=colours: (m.clear(), _fill_label_colormap_menu(m, viewer, layer, _targets)))
         from nvitk.gui.labels.catalog import get_schema, layer_schema_key, rank_schemas, remember_layer_schema
 
         vocab = menu.addMenu(icon("tag"), "Label vocabulary")
@@ -979,6 +983,70 @@ def _fill_layer_menu(menu: Any, viewer: Any, layer: Any, pos: Any) -> None:
         if vocab.isEmpty():
             vocab.addAction("(no vocabulary matches these ids)").setEnabled(False)
     menu.addSeparator()
+
+
+def _fill_label_colormap_menu(menu: Any, viewer: Any, layer: Any, targets: Any) -> None:
+    """The palettes of the Labels panel's colormap list, Napari's default, and a shuffle."""
+    from nvitk.gui.labels.visibility import LABEL_COLORMAPS, stored_label_colormap
+
+    current = stored_label_colormap(layer)
+    for label, key in LABEL_COLORMAPS:
+        action = menu.addAction(label)
+        action.setCheckable(True)
+        action.setChecked(key == current)
+        action.triggered.connect(lambda _=False, k=key: recolour_label_layers(viewer, targets(), k))
+    menu.addSeparator()
+    shuffle = menu.addAction("Shuffle colours (Napari's random palette)")
+    shuffle.triggered.connect(lambda: recolour_label_layers(viewer, targets(), None))
+
+
+def recolour_label_layers(viewer: Any, layers: list[Any], colormap: str | None) -> list[Any]:
+    """Recolour the label layers among *layers* from *colormap* (a key of ``LABEL_COLORMAPS``;
+    ``""`` Napari's default, ``None`` a new random shuffle of it). Label-like images become
+    Labels first. Labels hidden in the label list stay hidden. Returns the layers recoloured."""
+    from nvitk.gui.labels.selector import LabelSelectorWidget
+    from nvitk.gui.labels.visibility import (
+        apply_label_colormap,
+        apply_label_visibility,
+        ensure_labels_layer,
+        stored_visible_ids,
+    )
+    from nvitk.gui.tools.runner import notify
+
+    done: list[Any] = []
+    for layer in layers:
+        if type(layer).__name__ != "Labels":
+            if not is_label_like_layer(layer):
+                continue
+            try:
+                layer = ensure_labels_layer(viewer, layer)
+            except Exception:  # noqa: BLE001
+                continue
+        visible = stored_visible_ids(layer)
+        selected = list(visible) if visible is not None else None
+        try:
+            if colormap is None:
+                apply_label_colormap(layer, "", selected_ids=None)
+                layer.new_colormap()
+                if selected is not None:
+                    apply_label_visibility(layer, selected)
+            else:
+                apply_label_colormap(layer, colormap, selected_ids=selected)
+        except Exception as exc:  # noqa: BLE001
+            notify(f"Could not recolour {layer.name}: {exc}", error=True)
+            continue
+        done.append(layer)
+    # The Labels panel's colormap list and swatches follow.
+    try:
+        window = viewer.window._qt_window
+        for selector in window.findChildren(LabelSelectorWidget):
+            bound = getattr(selector, "_layer_ref", None)
+            if any(bound is l for l in done):
+                selector.set_colormap_key(colormap or "")
+                selector._sync_color_buttons(bound)
+    except Exception:  # noqa: BLE001 (cosmetic)
+        pass
+    return done
 
 
 def install_layer_list_label_buttons(viewer: Any) -> Any | None:

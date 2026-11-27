@@ -23,8 +23,11 @@ from qtpy.QtGui import QBrush, QColor
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QComboBox,
+    QFormLayout,
     QHBoxLayout,
     QHeaderView,
+    QLabel,
+    QLineEdit,
     QListWidget,
     QPushButton,
     QTableWidget,
@@ -34,7 +37,7 @@ from qtpy.QtWidgets import (
 )
 
 from nvitk.gui.core import design
-from nvitk.gui.core.widgets import Section, hint_label
+from nvitk.gui.core.widgets import IconButton, Section, hint_label, primary_button
 
 #: pipeline key (as the portal names it) -> (label, data preset, stage-2 dir, stage-3 module)
 PIPELINES: dict[str, tuple[str, str]] = {
@@ -102,26 +105,46 @@ class PesaFatQcPanel(QWidget):
         pick = QVBoxLayout(self.picker)
         pick.setContentsMargins(0, 0, 0, 0)
         pick.setSpacing(design.SPACE_TIGHT)
-        row = QHBoxLayout()
         self._pipeline = QComboBox()
         self._pipeline.setToolTip("PESA-Fat pipeline: CT-PET or Dixon")
         for key, (label, _preset) in PIPELINES.items():
             self._pipeline.addItem(label, key)
         self._batch = QComboBox()
         self._batch.setToolTip("Cohort / batch folder")
-        row.addWidget(self._pipeline)
-        row.addWidget(self._batch, 1)
-        pick.addLayout(row)
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setVerticalSpacing(design.SPACE_TIGHT)
+        form.addRow("Pipeline", self._pipeline)
+        form.addRow("Cohort", self._batch)
+        pick.addLayout(form)
+        head = QHBoxLayout()
+        head.setContentsMargins(0, design.SPACE_TIGHT, 0, 0)
+        head.setSpacing(design.SPACE_TIGHT)
+        title = QLabel("Subjects")
+        title.setStyleSheet("font-weight: bold;")
+        head.addWidget(title)
+        head.addStretch(1)
+        self._subject_count = hint_label("")
+        self._subject_count.setWordWrap(False)
+        head.addWidget(self._subject_count)
+        refresh = IconButton("refresh", "Reload the cohorts and subjects")
+        refresh.clicked.connect(self._load_roots)
+        head.addWidget(refresh)
+        pick.addLayout(head)
+        self._subject_search = QLineEdit()
+        self._subject_search.setPlaceholderText("Search subjects…")
+        self._subject_search.setClearButtonEnabled(True)
+        self._subject_search.textChanged.connect(lambda _t: self._filter_subjects())
+        pick.addWidget(self._subject_search)
         self._subjects = QListWidget()
         self._subjects.setMinimumHeight(80)
+        self._subjects.setAlternatingRowColors(True)
         pick.addWidget(self._subjects, 1)
-        row = QHBoxLayout()
-        load = QPushButton("Load subject")
+        load = primary_button("Load subject", "Load the subject's volumes and masks, and its review")
         load.clicked.connect(self._load)
-        row.addWidget(load)
+        pick.addWidget(load)
         self._status = hint_label("")
-        row.addWidget(self._status, 1)
-        pick.addLayout(row)
+        pick.addWidget(self._status)
 
         self.review = QWidget()
         rev = QVBoxLayout(self.review)
@@ -220,6 +243,19 @@ class PesaFatQcPanel(QWidget):
             return
         self._subjects.addItems(subjects)
         self._status.setText(f"{len(subjects)} subject(s) in {self._roots.batch or 'the root'}")
+        self._filter_subjects()
+
+    def _filter_subjects(self) -> None:
+        """Hide the subjects the search does not match; the header counts what is left."""
+        needle = self._subject_search.text().strip().lower()
+        total = self._subjects.count()
+        shown = 0
+        for row in range(total):
+            item = self._subjects.item(row)
+            hidden = bool(needle) and needle not in item.text().lower()
+            item.setHidden(hidden)
+            shown += not hidden
+        self._subject_count.setText(f"{shown} of {total}" if shown != total else f"{total}")
 
     # loading
     def _load(self) -> None:

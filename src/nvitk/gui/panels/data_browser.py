@@ -339,7 +339,7 @@ class DataBrowserPanel(QWidget):
 
         # The source: the combo carries the state (scripts set it), the segmented switch shows it.
         from nvitk.gui.core import design
-        from nvitk.gui.core.widgets import SegmentedButtons, hint_label
+        from nvitk.gui.core.widgets import SegmentedButtons, hint_label, primary_button
 
         self._source_combo = QComboBox()
         self._source_combo.addItem("XNAT (catalog)", SOURCE_XNAT)
@@ -379,11 +379,7 @@ class DataBrowserPanel(QWidget):
         for heading in (self._resource_label,):
             heading.setStyleSheet("font-weight: bold;")
 
-        self._action_btn = QPushButton("Download selected scans")
-        self._action_btn.setStyleSheet(
-            f"QPushButton {{ background-color: {design.COLOR_ACCENT_DEEP}; color: {design.COLOR_ON_ACCENT};"
-            " border-radius: 4px; padding: 6px; font-weight: bold; }"
-            f"QPushButton:disabled {{ background-color: {design.COLOR_BUTTON_OFF}; color: {design.COLOR_DISABLED}; }}")
+        self._action_btn = primary_button("Download selected scans")
         self._action_btn.clicked.connect(self._on_action)
 
         self._status = hint_label("Select a data source.")

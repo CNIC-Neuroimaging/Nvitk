@@ -33,6 +33,7 @@ from qtpy.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QSizePolicy,
     QToolButton,
     QVBoxLayout,
@@ -912,6 +913,18 @@ def hint_label(text: str = "", parent: QWidget | None = None) -> QLabel:
     return label
 
 
+def primary_button(text: str, tooltip: str = "", parent: QWidget | None = None) -> QPushButton:
+    """The panel's main action (Load, Download…): bold on the accent fill, greyed when disabled."""
+    button = QPushButton(text, parent)
+    if tooltip:
+        button.setToolTip(tooltip)
+    button.setStyleSheet(
+        f"QPushButton {{ background-color: {design.COLOR_ACCENT_DEEP}; color: {design.COLOR_ON_ACCENT};"
+        " border-radius: 4px; padding: 6px; font-weight: bold; }"
+        f"QPushButton:disabled {{ background-color: {design.COLOR_BUTTON_OFF}; color: {design.COLOR_DISABLED}; }}")
+    return button
+
+
 def separator(parent: QWidget | None = None, *, vertical: bool = False) -> QFrame:
     """A one-pixel rule in the border colour."""
     line = QFrame(parent)
@@ -1057,5 +1070,6 @@ __all__ = [
     "SegmentedButtons",
     "hint_label",
     "popover_button",
+    "primary_button",
     "separator",
 ]

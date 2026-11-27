@@ -22,21 +22,18 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QPushButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from nvitk.gui.core.thread_worker import ThreadWorker
-from nvitk.gui.core.design import COLOR_MUTED, FONT_S
 from nvitk.core.logger import Logger
 from nvitk.db.pipeline_assets import (
     XNAT_RESOURCE_EICAB,
     XNAT_RESOURCE_QVTPY,
     resource_label_to_asset_slot,
 )
-from nvitk.core import config_paths
 from nvitk.db.repo import DataRepo, get_repo_from_settings
 from nvitk.db.xnat_projects import get_xnat_project, list_xnat_project_ids
 from nvitk.gui.core.log_panel import gui_log
@@ -259,15 +256,27 @@ class QcPanel(QWidget):
 
             self._repo = _DR(_default_dataset_root(), auto_scaffold=True)
 
-        from nvitk.gui.core.dataset_root import dataset_bus
+        from nvitk.gui.core import design
+        from nvitk.gui.core.dataset_root import DatasetRootButton, dataset_bus
+        from nvitk.gui.core.widgets import IconButton, SegmentedButtons, hint_label, primary_button
 
         dataset_bus().changed.connect(self._on_dataset_changed)
-        self._status = QLabel("Select a QC source, pipeline and subject, then Load.")
-        self._status.setWordWrap(True)
+        self._status = hint_label("Pick a subject, then Load.")
 
+        # The source: the combo carries the state (scripts set it), the segmented switch shows it.
         self._source = QComboBox()
         self._source.addItem("XNAT (catalog)", SOURCE_XNAT)
         self._source.addItem("Local (NIfTI + results)", SOURCE_LOCAL)
+        self._source.setVisible(False)
+        self._source_switch = SegmentedButtons(
+            [(SOURCE_XNAT, "XNAT", "server",
+              "Subjects whose pipeline results are indexed in the dataset catalog, downloaded from XNAT"),
+             (SOURCE_LOCAL, "Local folders", "folder", "NIfTI and results folders on disk (no XNAT password)")],
+            current=SOURCE_XNAT,
+        )
+        self._source_switch.changed.connect(lambda key: self._source.setCurrentIndex(self._source.findData(key)))
+        self._source.currentIndexChanged.connect(
+            lambda _i: self._source_switch.set_current(self._source.currentData()))
 
         self._pipeline = QComboBox()
         self._pipeline.addItem("qvtpy (4D flow)", PIPELINE_QVTPY)
@@ -279,47 +288,61 @@ class QcPanel(QWidget):
         self._stack.addWidget(self._build_local_page())
 
         self._subject_search = QLineEdit()
-        self._subject_search.setPlaceholderText("Filter subjects…")
+        self._subject_search.setPlaceholderText("Search subjects…")
         self._subject_search.setClearButtonEnabled(True)
 
         self._subjects = QListWidget()
+        self._subjects.setMinimumHeight(80)
+        self._subjects.setAlternatingRowColors(True)
         self._all_subjects: list[dict[str, Any]] = []
         self._qc_statuses: dict[str, str] = {}  # subject_uid -> revised/partial/pending
+        self._subject_count = hint_label("")
+        self._subject_count.setWordWrap(False)
 
-        self._btn_refresh = QPushButton("Refresh subjects")
-        self._btn_load = QPushButton("Load")
+        self._btn_refresh = IconButton("refresh", "Reload the subject list")
+        self._btn_load = primary_button("Load", "Load the selected subject's QC layers and its review")
         self._btn_load.setEnabled(False)
 
-        btn_row = QHBoxLayout()
-        btn_row.addWidget(self._btn_refresh)
-        btn_row.addWidget(self._btn_load)
-
         lay = QVBoxLayout()
+        lay.setSpacing(design.SPACE_TIGHT)
         if self._embedded:
-            from nvitk.gui.core.widgets import hint_label
-
             lay.setContentsMargins(0, 0, 0, 0)
-            source_row = QHBoxLayout()
-            source_row.addWidget(hint_label("Source"))
-            source_row.addWidget(self._source, 1)
-            lay.addLayout(source_row)
             self._pipeline.setVisible(False)  # the hub's pipeline choice drives it
-            lay.addWidget(self._stack)
-            lay.addWidget(self._subject_search)
-            lay.addWidget(self._subjects, stretch=1)
-        else:
-            lay.addWidget(QLabel("QC source"))
-            lay.addWidget(self._source)
-            lay.addWidget(QLabel("Pipeline"))
-            lay.addWidget(self._pipeline)
-            lay.addWidget(self._stack)
-            lay.addWidget(QLabel("Subjects"))
-            lay.addWidget(self._subject_search)
-            lay.addWidget(self._subjects, stretch=1)
-        lay.addLayout(btn_row)
+        # Top row: where the subjects come from (and, standalone, the dataset the reviews go to;
+        # the hub shows that one itself).
+        source_head = QHBoxLayout()
+        source_head.setSpacing(design.SPACE_TIGHT)
+        source_head.addWidget(self._source_switch)
+        source_head.addStretch(1)
+        if not self._embedded:
+            source_head.addWidget(DatasetRootButton())
+        lay.addLayout(source_head)
+        lay.addWidget(self._source)
+        if not self._embedded:
+            form = QFormLayout()
+            form.setContentsMargins(0, 0, 0, 0)
+            form.addRow("Pipeline", self._pipeline)
+            lay.addLayout(form)
+        lay.addWidget(self._stack)
+        subjects_head = QHBoxLayout()
+        subjects_head.setContentsMargins(0, design.SPACE_TIGHT, 0, 0)
+        subjects_head.setSpacing(design.SPACE_TIGHT)
+        subjects_title = QLabel("Subjects")
+        subjects_title.setStyleSheet("font-weight: bold;")
+        subjects_head.addWidget(subjects_title)
+        subjects_head.addStretch(1)
+        subjects_head.addWidget(self._subject_count)
+        subjects_head.addWidget(self._btn_refresh)
+        lay.addLayout(subjects_head)
+        lay.addWidget(self._subject_search)
+        lay.addWidget(self._subjects, stretch=1)
+        lay.addWidget(self._btn_load)
         lay.addWidget(self._status)
         self.setLayout(lay)
 
+        from nvitk.gui.core.xnat_profile import profile_bus
+
+        profile_bus().changed.connect(self._on_profile_changed)
         self._source.currentIndexChanged.connect(self._on_source_changed)
         self._pipeline.currentIndexChanged.connect(self._reload_subjects)
         self._subject_search.textChanged.connect(self._filter_subjects)
@@ -334,82 +357,109 @@ class QcPanel(QWidget):
         self._sync_source_page()
 
     def _build_xnat_page(self) -> QWidget:
-        """Build the XNAT-source page: project picker and config-file path with browse button."""
+        """Build the XNAT-source page: the project and the connection profile (found from the
+        configuration, switchable from its button)."""
+        from nvitk.gui.core import design
+        from nvitk.gui.core.widgets import hint_label
+        from nvitk.gui.core.xnat_profile import XnatProfileButton
+
         page = QWidget()
         self._project = QComboBox()
         for pid in list_xnat_project_ids():
             self._project.addItem(get_xnat_project(pid).display_name, pid)
-        # Prefer PESA Brain as the QC default project.
+        # Prefer PESA Brain as the QC default project (the profile's own project wins below).
         pesa_idx = self._project.findData("PESA_Brain")
         if pesa_idx >= 0:
             self._project.setCurrentIndex(pesa_idx)
 
-        self._config_path = QLineEdit()
-        self._config_path.setPlaceholderText("XNAT config path")
-        default_cfg = config_paths.config_file("xnat.json")
-        if default_cfg is not None:
-            self._config_path.setText(str(default_cfg))
+        # The profile (server, user, project) comes from the configuration; the button names its
+        # server and switches to another profile file when there is one. Shared with the Data tab.
+        self._profile_button = XnatProfileButton()
 
-        cfg_row = QHBoxLayout()
-        cfg_row.addWidget(self._config_path, stretch=1)
-        browse_cfg = QPushButton("…")
-        browse_cfg.setFixedWidth(28)
-        browse_cfg.clicked.connect(self._browse_xnat_config)
-        cfg_row.addWidget(browse_cfg)
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setVerticalSpacing(design.SPACE_TIGHT)
+        form.addRow("Project", self._project)
+        profile_row = QHBoxLayout()
+        profile_row.setContentsMargins(0, 0, 0, 0)
+        profile_row.addWidget(self._profile_button)
+        profile_row.addStretch(1)
+        form.addRow("Profile", profile_row)
 
         lay = QVBoxLayout()
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.addWidget(QLabel("XNAT project"))
-        lay.addWidget(self._project)
-        lay.addWidget(QLabel("XNAT config"))
-        lay.addLayout(cfg_row)
+        lay.setSpacing(design.SPACE_TIGHT)
+        lay.addLayout(form)
+        lay.addWidget(hint_label("Results are read from the local cache when the catalog has them, "
+                                 "else downloaded (the password is asked for, never stored)."))
         page.setLayout(lay)
 
+        # The profile's own project first, before the combo is wired: the rest of the panel is
+        # not built yet (the first showEvent loads the subjects).
+        self._on_profile_changed()
         self._project.currentIndexChanged.connect(self._reload_subjects)
         return page
 
+    def _on_profile_changed(self, _path: str = "") -> None:
+        """A new XNAT profile: pick its default project when the catalog has it."""
+        from nvitk.gui.core.xnat_profile import current_profile, profile_summary
+
+        project = profile_summary(current_profile())["project"]
+        if project:
+            index = self._project.findData(project)
+            if index < 0:
+                index = self._project.findText(project)
+            if index >= 0 and index != self._project.currentIndex():
+                self._project.setCurrentIndex(index)
+
     def _build_local_page(self) -> QWidget:
         """Build the local-source page: NIfTI root and results root path fields with browse buttons."""
+        from nvitk.gui.core import design
+        from nvitk.gui.core.widgets import hint_label
+
         page = QWidget()
         default_nifti, default_results = _default_local_roots()
 
         self._nifti_root = QLineEdit()
-        self._nifti_root.setPlaceholderText("NIfTI root (subjects / 4DFlow / …)")
+        self._nifti_root.setPlaceholderText("Subjects / 4DFlow / …")
         if default_nifti.is_dir():
             self._nifti_root.setText(str(default_nifti))
 
         self._results_root = QLineEdit()
-        self._results_root.setPlaceholderText("Results root (subjects / qvtpy / …)")
+        self._results_root.setPlaceholderText("Subjects / qvtpy / …")
         if default_results.is_dir():
             self._results_root.setText(str(default_results))
 
         form = QFormLayout()
         form.setContentsMargins(0, 0, 0, 0)
-        form.addRow("NIfTI root", self._path_row(self._nifti_root))
-        form.addRow("Results root", self._path_row(self._results_root))
-
-        hint = QLabel(
-            "Subjects are listed from results (preferred) and NIfTI roots. "
-            "Load uses results for QC layers and NIfTI for phases / CD / TOF."
-        )
-        hint.setWordWrap(True)
-        hint.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_S}px;")
+        form.setVerticalSpacing(design.SPACE_TIGHT)
+        form.addRow("NIfTI", self._path_row(self._nifti_root))
+        form.addRow("Results", self._path_row(self._results_root))
 
         lay = QVBoxLayout()
         lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(design.SPACE_TIGHT)
         lay.addLayout(form)
-        lay.addWidget(hint)
+        lay.addWidget(hint_label("Subjects with results are listed first. Load reads the QC layers "
+                                 "from results, and phases / CD / TOF from NIfTI."))
         page.setLayout(lay)
+        for edit in (self._nifti_root, self._results_root):
+            edit.editingFinished.connect(self._on_root_edited)
         return page
 
+    def _on_root_edited(self) -> None:
+        if not self._is_xnat() and self._subjects_loaded:
+            self._reload_subjects()
+
     def _path_row(self, edit: QLineEdit) -> QWidget:
-        """Wrap *edit* with a "..." browse button that fills it from a directory picker."""
+        """Wrap *edit* with a folder button that fills it from a directory picker."""
+        from nvitk.gui.core.widgets import IconButton
+
         row = QWidget()
         h = QHBoxLayout()
         h.setContentsMargins(0, 0, 0, 0)
         h.addWidget(edit, stretch=1)
-        btn = QPushButton("…")
-        btn.setFixedWidth(28)
+        btn = IconButton("folder", "Choose the folder")
         btn.clicked.connect(lambda: self._browse_into(edit))
         h.addWidget(btn)
         row.setLayout(h)
@@ -423,17 +473,6 @@ class QcPanel(QWidget):
         if path:
             edit.setText(path)
             self._reload_subjects()
-
-    def _browse_xnat_config(self) -> None:
-        """Open a file picker for the XNAT config file and set the config-path field."""
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select XNAT config",
-            self._config_path.text() or str(Path.home()),
-            "Config (*.json *.yaml *.yml);;All (*)",
-        )
-        if path:
-            self._config_path.setText(path)
 
     def _is_xnat(self) -> bool:
         """True if the currently selected QC source is XNAT (vs. local disk)."""
@@ -659,10 +698,12 @@ class QcPanel(QWidget):
         QC-status tags/colors."""
         needle = self._subject_search.text().strip().lower()
         self._subjects.clear()
+        shown = 0
         for row in self._all_subjects:
             subj = row["subject_uid"]
             if needle and needle not in subj.lower():
                 continue
+            shown += 1
             label = subj
             if row.get("source") == "local":
                 if row.get("has_results"):
@@ -682,6 +723,22 @@ class QcPanel(QWidget):
                 item.setForeground(QColor(color))
             self._subjects.addItem(item)
         self._btn_load.setEnabled(False)
+        self._sync_subject_count(shown)
+
+    def _sync_subject_count(self, shown: int) -> None:
+        """The Subjects header: how many are listed (of how many) and how many are reviewed."""
+        total = len(self._all_subjects)
+        subjects = {str(r["subject_uid"]) for r in self._all_subjects}
+        revised = sum(1 for s in subjects if self._qc_statuses.get(s) == "revised")
+        partial = sum(1 for s in subjects if self._qc_statuses.get(s) == "partial")
+        parts = [f"{shown} of {total}" if shown != total else f"{total}"]
+        if revised:
+            parts.append(f"✓ {revised}")
+        if partial:
+            parts.append(f"◑ {partial}")
+        self._subject_count.setText(" · ".join(parts))
+        self._subject_count.setToolTip(
+            f"{total} subject(s) listed, {revised} reviewed, {partial} partly reviewed")
 
     def _on_subject_selected(
         self,
@@ -710,13 +767,15 @@ class QcPanel(QWidget):
         """Prompt for the XNAT password and start a :class:`_QcLoadWorker` to download/cache the
         selected subject's pipeline resources in the background."""
         subject_uid = str(row.get("subject_uid") or item.text())
-        config_text = self._config_path.text().strip()
-        if not config_text:
-            notify("Set an XNAT config path.", error=True)
+        from nvitk.gui.core.xnat_profile import current_profile
+
+        profile = current_profile()
+        if not profile:
+            notify("No XNAT profile found: choose one from the Profile button.", error=True)
             return
-        config_path = Path(config_text).expanduser()
+        config_path = Path(profile)
         if not config_path.is_file():
-            notify(f"Config not found: {config_path}", error=True)
+            notify(f"XNAT profile not found: {config_path}", error=True)
             return
 
         password, ok = QInputDialog.getText(

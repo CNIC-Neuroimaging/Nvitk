@@ -90,6 +90,11 @@ class QcHub(QWidget):
             self._reviews.addWidget(widget)
 
         subject = Section("Subject", icon_name="database", hue="blue", pref_key="qc.subject")
+        # The dataset the subjects are read from and the reviews saved to: switchable for the
+        # whole GUI, as on the Data tab.
+        from nvitk.gui.core.dataset_root import DatasetRootButton
+
+        self._dataset_button = subject.add_header_widget(DatasetRootButton())
         subject.add(self._pickers, 1)
         review = Section("Review", icon_name="qc", hue="green", pref_key="qc.review")
         review.add(self._reviews, 1)

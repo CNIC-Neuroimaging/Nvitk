@@ -26,10 +26,23 @@ def gui_log(message: str, *, error: bool = False) -> None:
     level = "ERROR" if error else "INFO"
     line = f"[{stamp}] {level}: {message}"
     if _log_widget is not None:
-        _log_widget.appendPlainText(line)
-        sb = _log_widget.verticalScrollBar()
-        sb.setValue(sb.maximum())
+        # The widget belongs to the GUI thread; a tool running in the background logs from its own.
+        from nvitk.gui.core.main_thread import call_on_main
+
+        call_on_main(_append_line, line)
     print(line, flush=True)
+
+
+def _append_line(line: str) -> None:
+    widget = _log_widget
+    if widget is None:
+        return
+    try:
+        widget.appendPlainText(line)
+        sb = widget.verticalScrollBar()
+        sb.setValue(sb.maximum())
+    except RuntimeError:  # the log dock is gone (closing)
+        pass
 
 
 def build_log_dock_widget() -> QWidget:
