@@ -207,6 +207,7 @@ from nvitk.stats.voxelwise_map import (
 )
 
 from .constants import (
+    ANALYSIS_BAYES,
     MAX_CATEGORICAL_LEVELS,
     ANALYSIS_FORMULA_KINDS,
     ANALYSIS_PANEL_KINDS,
@@ -290,6 +291,16 @@ def _scrollable(widget: QWidget) -> QScrollArea:
 _MMRM_PLOTS: tuple[tuple[str, str], ...] = (
     ("Least-squares means", "emmeans"),
     ("Correlation between levels", "correlation"),
+)
+
+#: The Bayesian model's figures ("" is the default: the posterior prediction against x).
+_BAYES_PLOTS: tuple[tuple[str, str], ...] = (
+    ("Posterior prediction vs x", ""),
+    ("Posterior forest (credible intervals)", "forest"),
+    ("Trace plots (convergence)", "trace"),
+    ("Posterior densities", "density"),
+    ("Group effects (caterpillar)", "caterpillar"),
+    ("Posterior predictive check", "ppc"),
 )
 
 _SEM_PLOTS: tuple[tuple[str, str], ...] = (
@@ -525,6 +536,8 @@ class StatmodelsWindow(QMainWindow):
 
         self._plot = PlotPanel()
         self._plot.set_options_widget(self._build_plot_options())
+        # Every figure, whichever plotter drew it, is shown in the session's style.
+        self._plot.style_hook = self._apply_plot_style
         self._plot.set_map_options_widget(self._build_map_options())
         self._mediation_plot = self._plot.kind_combo()
         # Scrolled like the docks: the plot's own control boxes (groups list, axis
@@ -903,6 +916,9 @@ class StatmodelsWindow(QMainWindow):
         for label, key in LME4_FAMILY_ITEMS:
             self._lme4_family.addItem(label, key)
         self._lme4_family_label = QLabel("Family")
+        # The odds / rate-ratio forest depends on the family: refresh the figure list with it.
+        self._glm_family.currentIndexChanged.connect(lambda *_: self._sync_analysis_type())
+        self._lme4_family.currentIndexChanged.connect(lambda *_: self._sync_analysis_type())
         self._lme4_reml = QCheckBox("REML")
         self._lme4_reml.setChecked(True)
         self._lme4_reml.setToolTip(
@@ -961,6 +977,55 @@ class StatmodelsWindow(QMainWindow):
         form.addRow(self._lme4_family_label, self._lme4_family)
         form.addRow(self._lme4_reml_label, self._lme4_reml)
         form.addRow(self._mmrm_method_label, self._mmrm_method)
+        # Bayesian hierarchical model only: how long to sample, and how wide the priors are.
+        from qtpy.QtWidgets import QSpinBox
+
+        self._bayes_chains = QSpinBox()
+        self._bayes_chains.setRange(1, 16)
+        self._bayes_chains.setValue(4)
+        self._bayes_chains.setToolTip("Independent chains: their agreement (R-hat) is the convergence check; keep 4.")
+        self._bayes_draws = QSpinBox()
+        self._bayes_draws.setRange(100, 50000)
+        self._bayes_draws.setSingleStep(500)
+        self._bayes_draws.setValue(1000)
+        self._bayes_draws.setToolTip("Draws kept per chain after warm-up (posterior sample size = chains × draws).")
+        self._bayes_warmup = QSpinBox()
+        self._bayes_warmup.setRange(50, 50000)
+        self._bayes_warmup.setSingleStep(500)
+        self._bayes_warmup.setValue(1000)
+        self._bayes_warmup.setToolTip("Iterations discarded at the start of each chain while it finds the posterior.")
+        sampling = QWidget()
+        sampling_lay = QHBoxLayout(sampling)
+        sampling_lay.setContentsMargins(0, 0, 0, 0)
+        for text, widget in (("chains", self._bayes_chains), ("draws", self._bayes_draws), ("warm-up", self._bayes_warmup)):
+            sampling_lay.addWidget(QLabel(text))
+            sampling_lay.addWidget(widget)
+        sampling_lay.addStretch(1)
+        self._bayes_sampling = sampling
+        self._bayes_sampling_label = QLabel("Sampling")
+        form.addRow(self._bayes_sampling_label, sampling)
+        self._bayes_prior = QDoubleSpinBox()
+        self._bayes_prior.setRange(0.1, 50.0)
+        self._bayes_prior.setSingleStep(0.5)
+        self._bayes_prior.setValue(2.5)
+        self._bayes_prior.setToolTip(
+            "Width of the coefficients' priors, in SD(outcome) per SD(predictor): 2.5 lets an effect move the "
+            "outcome by a few standard deviations (weakly informative, rstanarm's default); larger is vaguer.")
+        self._bayes_seed = QSpinBox()
+        self._bayes_seed.setRange(0, 2_000_000_000)
+        self._bayes_seed.setValue(1234)
+        self._bayes_seed.setToolTip("Random seed: the same seed reproduces the same draws.")
+        priors = QWidget()
+        priors_lay = QHBoxLayout(priors)
+        priors_lay.setContentsMargins(0, 0, 0, 0)
+        priors_lay.addWidget(QLabel("prior scale"))
+        priors_lay.addWidget(self._bayes_prior)
+        priors_lay.addWidget(QLabel("seed"))
+        priors_lay.addWidget(self._bayes_seed)
+        priors_lay.addStretch(1)
+        self._bayes_priors = priors
+        self._bayes_priors_label = QLabel("Priors")
+        form.addRow(self._bayes_priors_label, priors)
         # SEM and MRF only.
         self._sem_backend = QComboBox()
         self._sem_backend.addItem("auto — semopy if present, else lavaan", "")
@@ -1146,20 +1211,20 @@ class StatmodelsWindow(QMainWindow):
             "noise.\nDisabled when no filter is active — there is nothing to show."
         )
         self._show_filtered.stateChanged.connect(lambda *_: self._on_plot())
-        lay.addWidget(self._show_filtered)
 
         # Matplotlib by default; the interactive backend is opt-in per plot.
-        self._interactive_plot = QCheckBox("Interactive")
+        from nvitk.gui.core.widgets import IconButton
+
+        self._interactive_plot = IconButton("target", checkable=True)
         self._interactive_plot.setToolTip(
             "Render with Plotly instead of Matplotlib: hover a point for its subject and values, "
             "drag to zoom, click a legend entry to hide a series.\n"
             "Matplotlib is the default — it is what the axis-limit sliders act on and what exports "
             "as a publication figure."
         )
-        self._interactive_plot.stateChanged.connect(
+        self._interactive_plot.toggled.connect(
             lambda *_: (self._sync_analysis_type(), self._on_plot())
         )
-        lay.addWidget(self._interactive_plot)
 
         self._plot_display = QComboBox()
         self._plot_display.addItem("Overview", "overview")
@@ -1550,21 +1615,101 @@ class StatmodelsWindow(QMainWindow):
             self._show_signif.toggled.connect(dependent.setVisible)
 
         self._plot_display_label = QLabel("Display")
+        # The plot toolbar: what is drawn (display, x, colour) in line; everything else in
+        # pop-overs grouped by what it changes, as in the rest of nvitk.
+        from nvitk.gui.core.widgets import hint_label, popover_button
+
+        self._plot_display_label = hint_label("Display")
         lay.addWidget(self._plot_display_label)
         lay.addWidget(self._plot_display)
-        lay.addWidget(QLabel("Mode"))
-        lay.addWidget(self._plot_mode)
-        lay.addWidget(QLabel("x"))
+        lay.addWidget(hint_label("x"))
         lay.addWidget(self._plot_x)
+        self._plot_group_label = hint_label("colour by")
         lay.addWidget(self._plot_group_label)
         lay.addWidget(self._plot_group)
-        lay.addWidget(self._include_points)
-        lay.addWidget(self._show_ci)
-        lay.addWidget(self._show_signif)
-        lay.addWidget(self._signif_mode)
-        lay.addWidget(self._signif_basis)
-        lay.addWidget(self._signif_adjust)
+        lay.addWidget(popover_button("plot_scatter", "Data: what the curves are drawn from, raw points, filtered rows",
+                                     self._build_data_popover(), title="Data & points"))
+        lay.addWidget(popover_button("chart", "Statistics: confidence bands, significance brackets, forest plots",
+                                     self._build_stats_popover(), title="Statistics"))
+        lay.addWidget(popover_button("droplet", "Style: palette, text, sizes, grid, legend, export resolution",
+                                     self._build_style_popover(), title="Plot style"))
+        lay.addWidget(self._interactive_plot)
         return widget
+
+    def _popover_page(self) -> tuple[QWidget, QFormLayout]:
+        """A pop-over's content, parented to the window until the pop-over takes it (a parentless
+        widget with children crashes PyQt at exit)."""
+        page = QWidget(self)
+        page.hide()
+        form = QFormLayout(page)
+        form.setContentsMargins(8, 6, 8, 6)
+        form.setVerticalSpacing(4)
+        return page, form
+
+    def _build_data_popover(self) -> QWidget:
+        page, form = self._popover_page()
+        form.addRow("Mode", self._plot_mode)
+        form.addRow("", self._include_points)
+        form.addRow("", self._show_filtered)
+        return page
+
+    def _build_stats_popover(self) -> QWidget:
+        page, form = self._popover_page()
+        form.addRow("", self._show_ci)
+        form.addRow("", self._show_signif)
+        # Unlabelled: the three follow the Signif. toggle (and the bracket mode), and a label row
+        # would stay behind when its control hides.
+        form.addRow("", self._signif_mode)
+        form.addRow("", self._signif_basis)
+        form.addRow("", self._signif_adjust)
+        # Forest plots (the Figure picker's Forest entries): every model's coefficients.
+        self._forest_sort = QComboBox()
+        for label, key in (("model order", "model"), ("by estimate", "effect"), ("by |estimate|", "abs"),
+                           ("by p-value", "p")):
+            self._forest_sort.addItem(label, key)
+        self._forest_sort.setToolTip("Order of the forest plot's rows")
+        self._forest_intercept = QCheckBox("Intercept")
+        self._forest_intercept.setToolTip("Include the intercept (usually on another scale than the effects)")
+        self._forest_values = QCheckBox("Estimates and p beside the rows")
+        self._forest_values.setChecked(True)
+        for widget in (self._forest_sort,):
+            widget.currentIndexChanged.connect(lambda *_: self._on_plot())
+        for widget in (self._forest_intercept, self._forest_values):
+            widget.toggled.connect(lambda *_: self._on_plot())
+        forest_head = QLabel("Forest plots")
+        forest_head.setStyleSheet("font-weight: bold;")
+        form.addRow(forest_head)
+        form.addRow("Sort", self._forest_sort)
+        form.addRow("", self._forest_intercept)
+        form.addRow("", self._forest_values)
+        return page
+
+    def _build_style_popover(self) -> QWidget:
+        from .plot_style import PlotStyle, StyleForm
+
+        self._plot_style = PlotStyle()
+        self._style_form = StyleForm(self._plot_style, self)
+        self._style_form.hide()
+        self._style_form.changed.connect(self._on_style_changed)
+        return self._style_form
+
+    def _apply_plot_style(self, fig: Any) -> None:
+        from .plot_style import apply_dark, apply_style
+
+        style = getattr(self, "_plot_style", None)
+        if style is None:
+            return
+        try:
+            apply_style(fig, style)
+            if style.background == "dark" and hasattr(fig, "savefig"):
+                apply_dark(fig)
+        except Exception as exc:  # noqa: BLE001 (a figure the styler does not understand: as drawn)
+            log.debug("Plot style not applied: %s", exc)
+
+    def _on_style_changed(self, style: Any) -> None:
+        """A new look: redraw the figure under it (every plotter, then the style on top)."""
+        self._plot_style = style
+        self._on_plot()
 
     def _build_map_options(self) -> QWidget:
         """
@@ -3947,6 +4092,11 @@ class StatmodelsWindow(QMainWindow):
         for widget in (self._lme4_family, self._lme4_family_label,
                        self._lme4_reml, self._lme4_reml_label, self._btn_lme4_convert):
             widget.setVisible(is_lme4)
+        is_bayes = kind == ANALYSIS_BAYES
+        for widget in (self._bayes_sampling, self._bayes_sampling_label, self._bayes_priors, self._bayes_priors_label):
+            widget.setVisible(is_bayes)
+        # Same formula syntax as lme4: the MixedLM -> lme4 conversion serves it too.
+        self._btn_lme4_convert.setVisible(is_lme4 or is_bayes)
         is_mmrm = kind == ANALYSIS_MMRM
         for widget in (self._mmrm_method, self._mmrm_method_label):
             widget.setVisible(is_mmrm)
@@ -4002,14 +4152,16 @@ class StatmodelsWindow(QMainWindow):
         # The figure picker serves mediation and MMRM, which each produce several plots; the group
         # checklist only applies to the grouped model plots.
         display = self._map_display()
-        self._plot.set_kind_row_visible(
-            kind in {ANALYSIS_MEDIATION, ANALYSIS_MMRM, ANALYSIS_LMROB,
-                     ANALYSIS_SEM, ANALYSIS_MRF}
-            or bool(display)
-        )
+        # Every model has figures to pick now: its own, and the forest plots of its coefficients.
+        self._plot.set_kind_row_visible(True)
         # The checklist drives the anatomical maps too, so it stays visible there whatever
         # engine produced the fit.
-        self._plot.set_groups_visible(kind in ANALYSIS_FORMULA_KINDS or bool(display))
+        # Not beside a forest plot or the sampler's diagnostics, where there are no groups to hide.
+        from nvitk.stats.forest import FOREST_KINDS
+
+        figure_key = str(self._mediation_plot.currentData() or "")
+        own_figure = figure_key in FOREST_KINDS or (kind == ANALYSIS_BAYES and figure_key != "")
+        self._plot.set_groups_visible((kind in ANALYSIS_FORMULA_KINDS or bool(display)) and not (own_figure and not display))
         # Panelling needs a family of curves over anatomical levels to split up.
         for widget in (self._plot_display, self._plot_display_label):
             widget.setVisible(kind in ANALYSIS_PANEL_KINDS)
@@ -4072,13 +4224,17 @@ class StatmodelsWindow(QMainWindow):
         elif display == "brain":
             self._set_plot_kinds(self._brain_plot_kinds())
         elif is_mmrm:
-            self._set_plot_kinds(_MMRM_PLOTS)
+            self._set_plot_kinds(self._with_forest(_MMRM_PLOTS))
         elif is_lmrob:
-            self._set_plot_kinds(_LMROB_PLOTS)
+            self._set_plot_kinds(self._with_forest(_LMROB_PLOTS))
         elif is_sem:
-            self._set_plot_kinds(_SEM_PLOTS)
+            self._set_plot_kinds(self._with_forest(_SEM_PLOTS))
         elif is_mrf:
-            self._set_plot_kinds(_MRF_PLOTS)
+            self._set_plot_kinds(self._with_forest(_MRF_PLOTS))
+        elif kind == ANALYSIS_BAYES:
+            self._set_plot_kinds(self._with_forest(_BAYES_PLOTS))
+        elif kind in ANALYSIS_FORMULA_KINDS or kind == ANALYSIS_NONLINEAR:
+            self._set_plot_kinds(self._with_forest((("Model fit", ""),)))
         elif kind == ANALYSIS_MEDIATION and self._mediation_bundle is None:
             self._set_plot_kinds((("Run a mediation first", ""),))
 
@@ -4178,6 +4334,46 @@ class StatmodelsWindow(QMainWindow):
         self._on_plot()
         notify(f"{label} fit complete.")
 
+    def _run_in_thread(self, fn: Any, label: str) -> Any:
+        """Run *fn* on a worker thread while the window keeps repainting (a long sampler must not
+        freeze it); returns its value or raises its error. Fitting is disabled meanwhile."""
+        import threading
+
+        from qtpy.QtCore import QEventLoop, QTimer
+
+        box: dict[str, Any] = {}
+
+        def work() -> None:
+            try:
+                box["value"] = fn()
+            except BaseException as exc:  # noqa: BLE001 (re-raised on the GUI thread)
+                box["error"] = exc
+
+        thread = threading.Thread(target=work, name="nvitk-statmodels-fit", daemon=True)
+        loop = QEventLoop()
+        timer = QTimer()
+        timer.setInterval(50)
+        timer.timeout.connect(lambda: loop.quit() if not thread.is_alive() else None)
+        self._btn_fit.setEnabled(False)
+        try:
+            self.statusBar().showMessage(label)
+        except Exception:  # noqa: BLE001
+            pass
+        thread.start()
+        timer.start()
+        if thread.is_alive():
+            loop.exec() if hasattr(loop, "exec") else loop.exec_()
+        timer.stop()
+        thread.join()
+        self._btn_fit.setEnabled(True)
+        try:
+            self.statusBar().clearMessage()
+        except Exception:  # noqa: BLE001
+            pass
+        if "error" in box:
+            raise box["error"]
+        return box["value"]
+
     def _fit_formula_model(self, kind: str):
         """Fit MixedLM / OLS / GLM from the shared formulation panel."""
         formula = self._formula.toPlainText().strip()
@@ -4249,6 +4445,18 @@ class StatmodelsWindow(QMainWindow):
             )
             # The repeated dimension is what the plot splits by.
             return result, model_df, meta, outcome, meta["visit"]
+        if kind == ANALYSIS_BAYES:
+            from nvitk.stats.bayes_hier import fit_bayes_hier
+
+            settings = dict(chains=int(self._bayes_chains.value()), draws=int(self._bayes_draws.value()),
+                            warmup=int(self._bayes_warmup.value()), prior_scale=float(self._bayes_prior.value()),
+                            seed=int(self._bayes_seed.value()))
+            result, model_df, meta = self._run_in_thread(
+                lambda: fit_bayes_hier(df, formula, **settings),
+                f"Sampling the posterior ({settings['chains']} chains × {settings['warmup'] + settings['draws']} iterations)…",
+            )
+            factors = meta.get("grouping_factors") or []
+            return result, model_df, meta, outcome, (factors[0] if factors else groups)
         if kind == ANALYSIS_LME4:
             result, model_df, meta = fit_lme4(
                 data=df,
@@ -4397,6 +4605,15 @@ class StatmodelsWindow(QMainWindow):
             return
         if display == "brain":
             self._plot_brain()
+            return
+        from nvitk.stats.forest import FOREST_KINDS
+
+        figure_key = str(self._mediation_plot.currentData() or "")
+        if figure_key in FOREST_KINDS:
+            self._plot_forest(figure_key)
+            return
+        if kind == ANALYSIS_BAYES:
+            self._plot_bayes(figure_key)
             return
         if kind == ANALYSIS_NONLINEAR:
             self._plot_nonlinear()
@@ -6080,6 +6297,24 @@ class StatmodelsWindow(QMainWindow):
         self._status.setText(f"Mediation failed: {message}")
         notify(f"Mediation failed: {message}", error=True)
 
+    def _with_forest(self, choices: Sequence[tuple[str, str]]) -> list[tuple[str, str]]:
+        """*choices* followed by the forest plots of the model's coefficients (the ratio view only
+        for a log or logit link, where exp(coefficient) is an odds or rate ratio)."""
+        from nvitk.stats.forest import FOREST_KINDS
+
+        out = list(choices)
+        keys = {key for _label, key in out}
+        kind = self._analysis_kind()
+        ratio = (
+            (kind == ANALYSIS_GLM and str(self._glm_family.currentData() or "gaussian") != "gaussian")
+            or (kind == ANALYSIS_LME4 and str(self._lme4_family.currentData() or "gaussian") != "gaussian")
+        )
+        for key, label in FOREST_KINDS.items():
+            if key in keys or (key == "forest_ratio" and not ratio):
+                continue
+            out.append((label, key))
+        return out
+
     def _set_plot_kinds(self, choices: Sequence[tuple[str, str]]) -> None:
         """Repopulate the figure picker, preserving the current pick when it survives."""
         current = str(self._mediation_plot.currentData() or "")
@@ -6109,6 +6344,62 @@ class StatmodelsWindow(QMainWindow):
         idx = self._mediation_plot.findData(current)
         self._mediation_plot.setCurrentIndex(idx if idx >= 0 else 0)
         self._mediation_plot.blockSignals(False)
+
+    def _plot_forest(self, key: str) -> None:
+        """A forest plot of the fitted model's coefficients (any engine): see :mod:`nvitk.stats.forest`."""
+        from nvitk.stats.forest import forest_figure
+
+        try:
+            meta = self._last_fit_meta or {}
+            info = model_info_dict(self._last_result, outcome_name=self._last_outcome or "",
+                                   group_name=self._groups.text().strip(), meta=meta)
+            table = info.get("fixed_effects")
+            bayes = str(meta.get("engine") or "") == ANALYSIS_BAYES
+            fig = forest_figure(
+                table, key, result=self._last_result, data=self._last_model_df, outcome=self._last_outcome,
+                formula=str(meta.get("fixed_formula") or meta.get("formula") or self._formula.toPlainText()),
+                include_intercept=self._forest_intercept.isChecked(),
+                sort=str(self._forest_sort.currentData() or "model"),
+                show_values=self._forest_values.isChecked(),
+                interval_label="95% CrI" if bayes else "95% CI",
+            )
+            self._plot.show_figure(fig)
+            self._plot.set_status(str(getattr(fig, "forest_note", "") or ""))
+        except Exception as exc:  # noqa: BLE001
+            log.debug("Forest plot failed: %s", exc, exc_info=True)
+            self._plot.show_error(f"Forest plot unavailable: {exc}")
+
+    def _plot_bayes(self, key: str) -> None:
+        """The Bayesian model's own figures (trace, densities, caterpillar, PPC, prediction)."""
+        from nvitk.stats import bayes_hier as bh
+
+        result = self._last_result
+        try:
+            if key == "trace":
+                fig = bh.plot_trace(result, include_intercept=self._forest_intercept.isChecked())
+            elif key == "density":
+                fig = bh.plot_posterior_densities(result, include_intercept=self._forest_intercept.isChecked())
+            elif key == "caterpillar":
+                # The term whose grouping is the colour-by column, else the first one.
+                wanted = self._plot_group_column("")
+                index = next((i for i, t in enumerate(result.terms) if t.group == wanted), 0)
+                fig = bh.plot_caterpillar(result, index)
+            elif key == "ppc":
+                fig = bh.plot_ppc(result)
+            else:
+                df = self._last_model_df
+                x = self._plot_x.currentText().strip()
+                if not x or x not in df.columns:
+                    x = next((c for c in df.columns if c not in (result.outcome, "_fitted")
+                              and pd.api.types.is_numeric_dtype(df[c])), "")
+                group = self._plot_group_column("")
+                fig = bh.plot_marginal_effect(result, df, x, group=group if group in df.columns else None,
+                                              include_points=self._include_points.isChecked())
+            self._plot.show_figure(fig)
+            self._plot.set_status("")
+        except Exception as exc:  # noqa: BLE001
+            log.debug("Bayesian plot failed: %s", exc, exc_info=True)
+            self._plot.show_error(f"Plot unavailable: {exc}")
 
     def _plot_mediation(self) -> None:
         """Draw the selected mediation figure."""
@@ -6207,6 +6498,9 @@ class StatmodelsWindow(QMainWindow):
             "lme4_family": str(self._lme4_family.currentData() or "gaussian"),
             "lme4_reml": self._lme4_reml.isChecked(),
             "mmrm": {"method": str(self._mmrm_method.currentData() or "Satterthwaite")},
+            "bayes": {"chains": int(self._bayes_chains.value()), "draws": int(self._bayes_draws.value()),
+                      "warmup": int(self._bayes_warmup.value()), "prior_scale": float(self._bayes_prior.value()),
+                      "seed": int(self._bayes_seed.value())},
             "sem": {
                 "backend": str(self._sem_backend.currentData() or ""),
                 "estimator": str(self._sem_estimator.currentData() or "ML"),
@@ -6244,6 +6538,9 @@ class StatmodelsWindow(QMainWindow):
             "voxelwise_cuts": {a: int(sl.value()) for a, sl in self._vox_cuts.items()},
             "plot_mode": str(self._plot_mode.currentData() or "auto"),
             "plot_x": self._plot_x.currentText().strip(),
+            "plot_style": self._plot_style.to_dict(),
+            "forest": {"intercept": self._forest_intercept.isChecked(), "values": self._forest_values.isChecked(),
+                       "sort": str(self._forest_sort.currentData() or "model")},
             "include_points": self._include_points.isChecked(),
             "show_ci": self._show_ci.isChecked(),
             "show_significance": self._show_signif.isChecked(),
@@ -6377,6 +6674,14 @@ class StatmodelsWindow(QMainWindow):
             self._lme4_family.setCurrentIndex(lidx)
         if "lme4_reml" in cfg:
             self._lme4_reml.setChecked(bool(cfg["lme4_reml"]))
+        bayes_cfg = cfg.get("bayes")
+        if isinstance(bayes_cfg, dict):
+            for key, widget in (("chains", self._bayes_chains), ("draws", self._bayes_draws),
+                                ("warmup", self._bayes_warmup), ("seed", self._bayes_seed)):
+                if key in bayes_cfg:
+                    widget.setValue(int(bayes_cfg[key]))
+            if "prior_scale" in bayes_cfg:
+                self._bayes_prior.setValue(float(bayes_cfg["prior_scale"]))
         mmrm_cfg = cfg.get("mmrm")
         if isinstance(mmrm_cfg, dict):
             midx = self._mmrm_method.findData(str(mmrm_cfg.get("method") or ""))
@@ -6476,6 +6781,18 @@ class StatmodelsWindow(QMainWindow):
                 self._plot_mode.setCurrentIndex(midx)
         if cfg.get("plot_x"):
             self._plot_x.setCurrentText(str(cfg["plot_x"]))
+        if isinstance(cfg.get("plot_style"), dict):
+            from .plot_style import PlotStyle
+
+            self._plot_style = PlotStyle.from_dict(cfg["plot_style"])
+            self._style_form.set_style(self._plot_style)
+        forest_cfg = cfg.get("forest")
+        if isinstance(forest_cfg, dict):
+            self._forest_intercept.setChecked(bool(forest_cfg.get("intercept", False)))
+            self._forest_values.setChecked(bool(forest_cfg.get("values", True)))
+            fidx = self._forest_sort.findData(str(forest_cfg.get("sort") or "model"))
+            if fidx >= 0:
+                self._forest_sort.setCurrentIndex(fidx)
         if "include_points" in cfg:
             self._include_points.setChecked(bool(cfg["include_points"]))
         if "show_ci" in cfg:
@@ -6626,18 +6943,18 @@ class StatmodelsWindow(QMainWindow):
         name = self._model_name.text().strip() or "model"
         suggested = statmodels_root(self._repo) / name / f"{name}_plot.png"
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export plot as PNG", str(suggested), "PNG image (*.png);;All (*)"
+            self, "Export plot", str(suggested), "PNG image (*.png);;SVG vector (*.svg);;PDF (*.pdf);;All (*)"
         )
         if not path:
             return
         # A user who typed a bare name still means a PNG; savefig would otherwise infer the format
         # from an extension that is not there and fail.
         target = Path(path)
-        if target.suffix.lower() != ".png":
+        if target.suffix.lower() not in (".png", ".svg", ".pdf"):
             target = target.with_suffix(".png")
 
         try:
-            written = self._plot.save_figure(target)
+            written = self._plot.save_figure(target, dpi=int(self._plot_style.export_dpi or 200))
         except Exception as exc:
             log.debug("Plot export failed: %s", exc, exc_info=True)
             notify(f"Export failed: {exc}", error=True)

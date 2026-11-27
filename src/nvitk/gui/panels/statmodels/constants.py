@@ -50,10 +50,12 @@ ANALYSIS_NONLINEAR = "nonlinear"
 ANALYSIS_SEM = "sem"
 ANALYSIS_MRF = "mrf"
 ANALYSIS_MEDIATION = "mediation"
+ANALYSIS_BAYES = "bayes"
 
 ANALYSIS_ITEMS: tuple[tuple[str, str], ...] = (
     ("Mixed linear model (MixedLM)", ANALYSIS_MIXEDLM),
     ("Mixed model — R · lme4", ANALYSIS_LME4),
+    ("Bayesian hierarchical model (Gibbs)", ANALYSIS_BAYES),
     ("Repeated measures (MMRM) — R · mmrm", ANALYSIS_MMRM),
     ("Linear model (OLS)", ANALYSIS_OLS),
     ("Robust linear model — R · lmrob", ANALYSIS_LMROB),
@@ -67,7 +69,7 @@ ANALYSIS_ITEMS: tuple[tuple[str, str], ...] = (
 # Analyses driven by a formula, which therefore share the formulation panel and the plot.
 ANALYSIS_FORMULA_KINDS: frozenset[str] = frozenset(
     {ANALYSIS_MIXEDLM, ANALYSIS_LME4, ANALYSIS_MMRM, ANALYSIS_OLS, ANALYSIS_GLM,
-     ANALYSIS_LMROB, ANALYSIS_MRF}
+     ANALYSIS_LMROB, ANALYSIS_MRF, ANALYSIS_BAYES}
 )
 
 # Engines whose covariance/random structure is described by dropdowns rather than by the formula.
@@ -162,6 +164,15 @@ ANALYSIS_HINTS: dict[str, str] = {
     ANALYSIS_MEDIATION: (
         "How much of X's effect on Y runs through M."
     ),
+    ANALYSIS_BAYES: (
+        "The mixed model as a posterior, written lme4's way: pi ~ age_c + sex + (1 | subject_uid) + "
+        "(1 + age_c | territory). Every coefficient gets a credible interval (95 % probable, given the "
+        "data and the weakly informative, data-scaled priors) and a probability of direction; group "
+        "effects are partially pooled, so a territory with few subjects borrows strength from the rest "
+        "instead of reporting a noisy mean, and variance components near zero are estimated rather than "
+        "pinned at 0. Gaussian outcomes. Check R-hat < 1.01 in the report; the Trace and Posterior "
+        "predictive figures show whether the chains agree and the model reproduces the data."
+    ),
 }
 
 # Heteroscedasticity-consistent covariance options for OLS.
@@ -201,6 +212,7 @@ AXIS_SLIDER_MARGIN = 0.25
 CONFIG_VERSION = 2
 
 __all__ = [
+    "ANALYSIS_BAYES",
     "ANALYSIS_FORMULA_KINDS",
     "ANALYSIS_GLM",
     "ANALYSIS_HINTS",

@@ -336,10 +336,21 @@ class ModelReportPanel(QWidget):
                 chips.append((label, f"{stats[key]:.4g}", None))
         if "resid_sd" in stats:
             chips.append(("Residual SD", f"{stats['resid_sd']:.4g}", None))
+        # Bayesian fits: the fit is summarised by R², WAIC and the chains' agreement.
+        if "bayes_r2" in stats:
+            chips.append(("Bayes R²", f"{stats['bayes_r2']:.3f} {stats.get('bayes_r2_ci', '')}".strip(), None))
+        if "waic" in stats and np.isfinite(stats["waic"]):
+            chips.append(("WAIC", f"{stats['waic']:.4g}", None))
+        if "max_rhat" in stats and np.isfinite(stats["max_rhat"]):
+            ok = stats["max_rhat"] < 1.01
+            chips.append(("max R-hat", f"{stats['max_rhat']:.3f}", None if ok else COLOR_WARN))
+        if "min_ess_bulk" in stats and np.isfinite(stats["min_ess_bulk"]):
+            chips.append(("min ESS", f"{stats['min_ess_bulk']:.0f}", None if stats["min_ess_bulk"] > 400 else COLOR_WARN))
         self._set_chips(chips)
 
         messages = [note] if note else []
-        if stats.get("converged") is False:
+        messages += [str(n) for n in info.get("notes") or []]
+        if stats.get("converged") is False and "max_rhat" not in stats:
             messages.append(
                 "The optimizer did not report convergence — treat the standard errors and p-values "
                 "with caution, and check for near-collinear terms or an over-specified random "

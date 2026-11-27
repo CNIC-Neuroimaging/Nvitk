@@ -150,6 +150,26 @@ def register_dicom_tree(
     return df
 
 
+def _resolve_folder_subjects(repo: Any, df: pd.DataFrame) -> pd.DataFrame:
+    """Subject folders are named by any of a subject's identifiers (the XNAT label, the patient
+    id...): each row goes to the subject that name belongs to (the folder name for a new one)."""
+    if df.empty or "subject_uid" not in df.columns:
+        return df
+    try:
+        from nvitk.db.subjects import SubjectIndex, resolve_subject_label
+
+        index = SubjectIndex.load(repo)
+    except Exception:  # noqa: BLE001 (a dataset without id tables)
+        return df
+    if not index.n_subjects:
+        return df
+    names = df["subject_uid"].astype(str)
+    mapping = {name: resolve_subject_label(index, name, prefer=("xnat_subject", "folder")) for name in names.unique()}
+    out = df.copy()
+    out["subject_uid"] = names.map(mapping)
+    return out
+
+
 def upsert_dicom_assets(
     repo: DataRepo,
     dicom_root: str | Path,
@@ -169,6 +189,7 @@ def upsert_dicom_assets(
         pipeline_name=pipeline_name,
         source_batch_id=source_batch_id,
     )
+    df = _resolve_folder_subjects(repo, df)
     if dry_run or df.empty:
         return df
     repo.upsert_table(

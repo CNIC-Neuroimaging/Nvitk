@@ -612,6 +612,11 @@ def model_info_dict(
 
         return mrf_info_dict(result, outcome_name=outcome_name, group_name=group_name, meta=meta)
 
+    if engine == "bayes":
+        from .bayes_hier import bayes_info_dict
+
+        return bayes_info_dict(result, outcome_name=outcome_name, meta=meta)
+
     if engine == "lmrob":
         from .r_robust import lmrob_info_dict
 

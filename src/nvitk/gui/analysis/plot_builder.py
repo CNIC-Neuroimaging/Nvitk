@@ -106,7 +106,7 @@ class PlotBuilder(QWidget):
         few_levels = [c for c in numeric if isinstance(self._frame[c], pd.Series) and self._frame[c].nunique(dropna=True) <= 12]
         keep = {w: w.currentText() for w in (self._x, self._y, self._hue, self._col)}
         for combo, options, optional in (
-            (self._x, columns, False), (self._y, numeric or columns, True),
+            (self._x, columns, True), (self._y, numeric or columns, True),
             (self._hue, categorical + numeric, True), (self._col, categorical + few_levels, True),
         ):
             combo.blockSignals(True)
@@ -117,20 +117,9 @@ class PlotBuilder(QWidget):
             if keep[combo] and combo.findText(keep[combo]) >= 0:
                 combo.setCurrentText(keep[combo])
             combo.blockSignals(False)
-        survived = bool(keep[self._x]) and self._x.currentText() == keep[self._x]
-        if not survived:
-            # A sensible first plot: first categorical column against the first numeric one.
-            if categorical and numeric:
-                self._x.setCurrentText(categorical[0])
-                self._y.setCurrentText(numeric[0])
-                self._kind.setCurrentIndex(self._kind.findData("box"))
-            elif len(numeric) >= 2:
-                self._x.setCurrentText(numeric[0])
-                self._y.setCurrentText(numeric[1])
-                self._kind.setCurrentIndex(self._kind.findData("scatter"))
-            elif numeric:
-                self._x.setCurrentText(numeric[0])
-                self._kind.setCurrentIndex(self._kind.findData("hist"))
+        # Nothing is chosen for a new table: no plot is drawn until a column is picked (a guessed
+        # first plot of a wide table is rarely the one wanted, and can be slow). Choices already
+        # made carry over when the table changes (a filter, a new fit), where the column survives.
         self._changed()
 
     def frame(self) -> pd.DataFrame:
@@ -170,6 +159,16 @@ class PlotBuilder(QWidget):
             self._figure.clear()
             self._canvas.draw_idle()
             self._message.setText("No rows to plot.")
+            return
+        missing = self.spec.problems([str(c) for c in self._frame.columns])
+        if missing:
+            # Not chosen yet: a hint, not an error, and no figure.
+            self._figure.clear()
+            self._canvas.draw_idle()
+            needs_y = PLOT_KINDS.get(self.spec.kind, ("", True, True))[1]
+            what = "x and y" if needs_y and not (self.spec.x or self.spec.y) else ("x" if not self.spec.x else "y")
+            self._message.setText(f"Choose {what} to plot." if any(m.startswith("choose") for m in missing)
+                                  else "Cannot draw: " + "; ".join(missing))
             return
         try:
             render(self.spec, self._frame, self._figure)

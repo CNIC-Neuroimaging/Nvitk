@@ -360,9 +360,13 @@ def _series_value_payload(series: pd.Series) -> tuple[pd.Series, pd.Series, str]
     )
 
 
-def ensure_subject_uid(df: pd.DataFrame, *, candidates: list[str] | None = None) -> pd.DataFrame:
+def ensure_subject_uid(df: pd.DataFrame, *, candidates: list[str] | None = None, repo: Any = None) -> pd.DataFrame:
     """Ensure *df* has a ``subject_uid`` column: reuse it if present, else derive it from a matching id column,
     else synthesize row-index placeholder ids.
+
+    With *repo*, an id column is resolved through the dataset's identifiers
+    (:class:`~nvitk.db.subjects.SubjectIndex`): a sheet keyed by the MRI id or a patient code lands on
+    the subjects those ids belong to. Ids the dataset does not know keep their own value (a new subject).
     """
     out = df.copy()
     if "subject_uid" in out.columns:
@@ -371,7 +375,41 @@ def ensure_subject_uid(df: pd.DataFrame, *, candidates: list[str] | None = None)
 
     subject_column = _first_matching_column(out, candidates or SUBJECT_UID_CANDIDATES)
     if subject_column is not None:
-        out["subject_uid"] = out[subject_column].astype("string")
+        raw = out[subject_column].astype("string")
+        out["subject_uid"] = raw
+        if repo is not None:
+            try:
+                from nvitk.db.subjects import SubjectIndex
+
+                index = SubjectIndex.load(repo)
+                if index.n_subjects:
+                    resolved = index.resolve(raw, "auto", column=str(subject_column)).uids
+                    out["subject_uid"] = resolved.fillna(raw).astype("string")
+            except Exception:  # noqa: BLE001 (a dataset without id tables: the ids as they are)
+                pass
+    elif repo is not None:
+        # No column the configuration names: an identifier column whose values the dataset knows
+        # (a sheet keyed by the MRI id, say) names the subjects.
+        try:
+            from nvitk.db.subjects import SubjectIndex
+
+            index = SubjectIndex.load(repo)
+            best, best_n = None, 0
+            if index.n_subjects:
+                for column in out.columns:
+                    if not _is_identifier_column(str(column)):
+                        continue
+                    n = index.resolve(out[column].astype("string"), "auto", column=str(column)).n_matched
+                    if n > best_n:
+                        best, best_n = column, n
+            if best is not None:
+                raw = out[best].astype("string")
+                resolved = index.resolve(raw, "auto", column=str(best)).uids
+                out["subject_uid"] = resolved.fillna(raw).astype("string")
+                return out
+        except Exception:  # noqa: BLE001
+            pass
+        out["subject_uid"] = pd.Series([f"row_{index:06d}" for index in range(len(out))], dtype="string")
     else:
         out["subject_uid"] = pd.Series([f"row_{index:06d}" for index in range(len(out))], dtype="string")
     return out
@@ -517,7 +555,7 @@ def import_subject_ids_from_source(
     sheet_name: str = "Sheet1",
 ) -> pd.DataFrame:
     """Load a tabular source and harvest its identifier columns into ``subject_ids``."""
-    raw = ensure_subject_uid(read_tabular_source(source_path, sheet_name=sheet_name))
+    raw = ensure_subject_uid(read_tabular_source(source_path, sheet_name=sheet_name), repo=repo)
     return harvest_subject_ids_from_frame(
         repo,
         raw,
@@ -537,7 +575,7 @@ def import_cohort_membership_from_source(
     sheet_name: str = "Sheet1",
 ) -> pd.DataFrame:
     """Load a tabular source and register every row's subject as a member of *cohort_id*."""
-    raw = ensure_subject_uid(read_tabular_source(source_path, sheet_name=sheet_name))
+    raw = ensure_subject_uid(read_tabular_source(source_path, sheet_name=sheet_name), repo=repo)
     df = pd.DataFrame(
         {
             "cohort_id": cohort_id,
@@ -831,7 +869,7 @@ def _parse_generic_clinical_wide(
     """Import a generic wide clinical sheet: harvest subject ids (and optionally sessions), then melt every
     non-identifier column into ``clinical_measurements`` rows and register their variable-dictionary entries.
     """
-    raw = ensure_subject_uid(raw)
+    raw = ensure_subject_uid(raw, repo=repo)
     harvest_subject_ids_from_frame(repo, raw, source_path=source_path, sheet_name=sheet_name, source_batch_id=source_batch_id)
     if harvest_sessions:
         harvest_sessions_from_frame(
@@ -907,7 +945,7 @@ def _parse_generic_image_wide(
     """Import a generic wide image sheet: harvest subject ids (and optionally sessions), then melt every
     non-identifier column into ``image_measurements`` rows, mapping each column via :func:`_parse_image_wide_column`.
     """
-    raw = ensure_subject_uid(raw)
+    raw = ensure_subject_uid(raw, repo=repo)
     harvest_subject_ids_from_frame(repo, raw, source_path=source_path, sheet_name=sheet_name, source_batch_id=source_batch_id)
     if harvest_sessions:
         harvest_sessions_from_frame(
@@ -984,7 +1022,7 @@ def _parse_image_timeseries_long(
     modality: str,
 ) -> pd.DataFrame:
     """Import a long-form per-frame timeseries sheet (one row per subject×vessel×frame) into ``image_measurements``."""
-    raw = ensure_subject_uid(raw)
+    raw = ensure_subject_uid(raw, repo=repo)
     harvest_subject_ids_from_frame(repo, raw, source_path=source_path, sheet_name=sheet_name, source_batch_id=source_batch_id)
 
     frame_index = pd.to_numeric(raw.get("frame"), errors="coerce").astype("Int64")
@@ -1066,7 +1104,7 @@ def _parse_image_timeseries_wide(
     pipeline_id: str | None = None,
 ) -> pd.DataFrame:
     """Import a wide per-frame timeseries sheet (one column per frame index) into ``image_measurements``, melting frame columns to rows."""
-    raw = ensure_subject_uid(raw)
+    raw = ensure_subject_uid(raw, repo=repo)
     harvest_subject_ids_from_frame(repo, raw, source_path=source_path, sheet_name=sheet_name, source_batch_id=source_batch_id)
 
     wide = raw.copy()
@@ -1524,7 +1562,7 @@ def import_source_spec(
             sheet_name=spec.sheet,
         )
     if spec.source_kind == "subject_catalog":
-        raw = ensure_subject_uid(raw, candidates=["subject", "patient_id", "codigoimagen"])
+        raw = ensure_subject_uid(raw, candidates=["subject", "patient_id", "codigoimagen"], repo=repo)
         harvest_subject_ids_from_frame(repo, raw, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id)
         return harvest_sessions_from_frame(
             repo,

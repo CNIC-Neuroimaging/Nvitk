@@ -44,6 +44,16 @@ KIND_TABLES = {
     "clinical": "clinical_measurements",
     "cognitive": "cognitive_measurements",
     "image": "image_measurements",
+    # The subject registry: one row per subject, one column per identifier (nvitk.db.subjects).
+    "subjects": "subject_ids",
+}
+
+#: What to do with subject ids the dataset does not know (measurement imports).
+UNKNOWN_POLICIES = ("auto", "new", "skip")
+UNKNOWN_LABELS = {
+    "auto": "New subjects if the ids are subject uids, else skip",
+    "new": "Add them as new subjects",
+    "skip": "Skip their rows",
 }
 
 #: What a column can be.
@@ -233,11 +243,22 @@ class ImportPlan:
     visit_id: str = ""
     mode: str = "replace"
     register_subject_ids: bool = True
+    #: Which identifier the subject column holds: ``auto`` (the best-matching namespace),
+    #: ``subject_uid`` or a ``subject_ids`` namespace (``mri_id``, ``patient_id``...).
+    subject_namespace: str = "auto"
+    #: Subject ids the dataset does not know: one of :data:`UNKNOWN_POLICIES`.
+    unknown_subjects: str = "auto"
+    #: Registry imports: the prefix of generated uids when no column gives them.
+    uid_prefix: str = "S"
     columns: list[ColumnPlan] = field(default_factory=list)
 
     @property
     def table(self) -> str:
         return KIND_TABLES[self.kind]
+
+    @property
+    def is_registry(self) -> bool:
+        return self.kind == "subjects"
 
     def value_columns(self) -> list[ColumnPlan]:
         return [c for c in self.columns if c.role == "value" and c.variable_id.strip()]
@@ -295,6 +316,8 @@ def guess_plan(df: pd.DataFrame, kind: str, *, repo: Any = None, source_name: st
     after itself."""
     from nvitk.db.importers import _is_identifier_column, _parse_image_wide_column
 
+    if kind == "subjects":
+        return _guess_registry_columns(df, repo)
     columns = [str(c) for c in df.columns]
     cands = _candidates()
     roles: dict[str, str] = {}
@@ -341,6 +364,34 @@ def guess_plan(df: pd.DataFrame, kind: str, *, repo: Any = None, source_name: st
             variable, region, region_label = v, r or "", rl or ""
         variable = resolver(column) or resolver(variable) or variable
         plans.append(ColumnPlan(column, variable_id=variable, region_id=region, region_label=region_label, label=column))
+    return plans
+
+
+def _guess_registry_columns(df: pd.DataFrame, repo: Any) -> list[ColumnPlan]:
+    """Column plan of a subject registry (:func:`nvitk.db.subjects.guess_registry_plan`): the uid
+    column as Subject, identifiers / attributes / the cohort as values named after their namespace."""
+    from nvitk.db.subjects import SubjectIndex, guess_registry_plan
+
+    index = None
+    if repo is not None:
+        try:
+            index = SubjectIndex.load(repo)
+        except Exception:  # noqa: BLE001
+            index = None
+    guess = guess_registry_plan(df, index)
+    plans: list[ColumnPlan] = []
+    for column in (str(c) for c in df.columns):
+        if column == guess.uid_column:
+            plans.append(ColumnPlan(column, role="subject", label=column))
+        elif column in guess.id_columns:
+            ns = guess.id_columns[column]
+            plans.append(ColumnPlan(column, variable_id=ns, label=column))
+        elif column in guess.attribute_columns:
+            plans.append(ColumnPlan(column, variable_id=guess.attribute_columns[column], label=column))
+        elif column == guess.cohort_column:
+            plans.append(ColumnPlan(column, variable_id="cohort", label=column))
+        else:
+            plans.append(ColumnPlan(column, role="skip", label=column))
     return plans
 
 
@@ -398,8 +449,34 @@ def _string_column(df: pd.DataFrame, column: str | None, default: Any = pd.NA) -
     return out.astype("string").str.strip().replace("", pd.NA)
 
 
-def build_rows(df: pd.DataFrame, plan: ImportPlan) -> tuple[pd.DataFrame, list[dict[str, Any]], list[str]]:
-    """The measurement rows, variable entries and problems for *df* under *plan* (nothing written)."""
+def resolve_subject_column(df: pd.DataFrame, plan: ImportPlan, index: Any) -> tuple[pd.Series, Any]:
+    """``(subject_uid per row, Resolution)`` for the plan's subject column, through the dataset's
+    identifiers (:class:`~nvitk.db.subjects.SubjectIndex`): a sheet may name its subjects by any of
+    them (an MRI id, a patient code), never only by ``subject_uid``. Unknown ids follow
+    ``plan.unknown_subjects``; ids belonging to several subjects stay unresolved."""
+    from nvitk.db.subjects import UID
+
+    subject_col = plan.role_column("subject")
+    raw = _string_column(df, subject_col)
+    resolution = index.resolve(raw, plan.subject_namespace or "auto", column=subject_col)
+    uids = resolution.uids.copy()
+    policy = plan.unknown_subjects or "auto"
+    if policy == "auto":
+        policy = "new" if resolution.namespace == UID or index.n_subjects == 0 else "skip"
+    if policy == "new" and resolution.unknown:
+        unknown = set(resolution.unknown)
+        fill = raw.where(raw.isin(unknown))
+        uids = uids.fillna(fill)
+    resolution.policy = policy
+    return uids.astype("string"), resolution
+
+
+def build_rows(df: pd.DataFrame, plan: ImportPlan, *, index: Any = None) -> tuple[pd.DataFrame, list[dict[str, Any]], list[str]]:
+    """The measurement rows, variable entries and problems for *df* under *plan* (nothing written).
+
+    With *index* (the dataset's :class:`~nvitk.db.subjects.SubjectIndex`) the subject column is
+    resolved to ``subject_uid`` (:func:`resolve_subject_column`); without, its values are taken as
+    they are."""
     from nvitk.db.importers import _parse_datetime_series
 
     problems: list[str] = []
@@ -420,6 +497,12 @@ def build_rows(df: pd.DataFrame, plan: ImportPlan) -> tuple[pd.DataFrame, list[d
     blank = int(subjects.isna().sum())
     if blank:
         problems.append(f"{blank} row(s) have no subject id and are skipped.")
+    if index is not None:
+        subjects, resolution = resolve_subject_column(df, plan, index)
+        problems.append(resolution.summary())
+        if resolution.unknown:
+            problems.append(f"{len(resolution.unknown):,} unknown id(s): "
+                            + ("added as new subjects." if resolution.policy == "new" else "their rows are skipped."))
     date_col = plan.role_column("date")
     measured = _parse_datetime_series(df[date_col]) if date_col else pd.Series([pd.NaT] * len(df), dtype="datetime64[ns]")
     source_file = plan.source_name or "spreadsheet"
@@ -522,15 +605,23 @@ class ImportCheck:
     new_regions: dict[str, list[str]] = field(default_factory=dict)
     new_pipeline: bool = False
     per_variable: pd.DataFrame = field(default_factory=pd.DataFrame)
+    #: How the subject column resolved (measurement imports).
+    resolution: Any = None
+    #: What a subject-registry import would do (:class:`~nvitk.db.subjects.RegistryResult`).
+    registry: Any = None
 
     @property
     def ok(self) -> bool:
+        if self.registry is not None:
+            return bool(self.registry.new_subjects or self.registry.updated_subjects)
         return not self.rows.empty and not any(p.startswith(("No ", "Columns no longer", "Image measurements need", "Give the import"))
                                                for p in self.problems)
 
     def summary(self, plan: ImportPlan) -> str:
+        if self.registry is not None:
+            return "\n".join([self.registry.summary(), *self.problems])
         if self.rows.empty:
-            return "Nothing to import."
+            return "Nothing to import.\n" + "\n".join(self.problems)
         lines = [f"{len(self.rows):,} value(s) for {self.rows['subject_uid'].nunique():,} subject(s) → {plan.table}."]
         if plan.mode == "missing_only":
             lines.append(f"New: {self.n_new:,}; already in the dataset (left alone): {self.n_skipped_existing:,}.")
@@ -599,10 +690,81 @@ def _existing(repo: Any, plan: ImportPlan, variables: list[str]) -> pd.DataFrame
     return frame
 
 
+def _subject_index(repo: Any) -> Any:
+    """The dataset's subject identifiers, or ``None`` without a dataset."""
+    if repo is None:
+        return None
+    from nvitk.db.subjects import SubjectIndex
+
+    try:
+        return SubjectIndex.load(repo)
+    except Exception:  # noqa: BLE001 (a dataset without the id tables)
+        return None
+
+
+def registry_plan(df: pd.DataFrame, plan: ImportPlan) -> Any:
+    """The :class:`~nvitk.db.subjects.RegistryPlan` a ``subjects`` import plan describes: the
+    Subject column gives new subjects their uid, every value column is an identifier whose
+    namespace is its Variable (``sex`` / ``birth_date`` are kept as attributes, ``cohort`` as the
+    cohort the subject joins)."""
+    from nvitk.db.subjects import RegistryPlan, namespace_of
+
+    out = RegistryPlan(uid_column=plan.role_column("subject") or "", uid_prefix=plan.uid_prefix or "S",
+                       batch_id=plan.batch_id.strip(), source_name=plan.source_name, sheet=str(plan.sheet),
+                       cohort_id="")
+    for col in plan.columns:
+        if col.role != "value" or col.column not in df.columns:
+            continue
+        ns = namespace_of(col.variable_id or col.column)
+        if ns in ("sex", "birth_date"):
+            out.attribute_columns[col.column] = ns
+        elif ns in ("cohort", "cohort_id"):
+            out.cohort_column = col.column
+        else:
+            out.id_columns[col.column] = ns
+    return out
+
+
+def _check_registry(repo: Any, df: pd.DataFrame, plan: ImportPlan) -> ImportCheck:
+    from nvitk.db.subjects import SubjectIndex, plan_registry
+
+    rplan = registry_plan(df, plan)
+    problems = []
+    if not rplan.id_columns and not rplan.uid_column:
+        problems.append("No identifier columns: mark the uid column as Subject and each identifier as a value "
+                        "named after its namespace (mri_id, patient_id…).")
+    if not plan.batch_id.strip():
+        problems.append("Give the import a batch id (its version tag).")
+    index = SubjectIndex.load(repo) if repo is not None else SubjectIndex()
+    result = plan_registry(index, df, rplan)
+    check = ImportCheck(rows=result.id_rows, entries=[], problems=problems, registry=result)
+    check.n_new = len(result.id_rows)
+    return check
+
+
+def _apply_registry(repo: Any, df: pd.DataFrame, plan: ImportPlan, *, ops: list[dict[str, Any]] | None,
+                    rebuild_index: bool, recipe_name: str, say: Any) -> dict[str, Any]:
+    from nvitk.db.subjects import register_subjects
+
+    say("Registering the subjects and their identifiers…")
+    result = register_subjects(repo, df, registry_plan(df, plan), rebuild_index=rebuild_index)
+    out: dict[str, Any] = {"table": "subject_ids", "rows": int(len(result.id_rows)), "written": int(len(result.id_rows)),
+                           "new_subjects": len(result.new_subjects), "updated_subjects": len(result.updated_subjects),
+                           "conflicts": len(result.conflicts), "summary": result.summary()}
+    if recipe_name:
+        out["recipe"] = str(save_recipe(repo, recipe_name, plan, ops or []))
+    return out
+
+
 def check_import(repo: Any, df: pd.DataFrame, plan: ImportPlan) -> ImportCheck:
     """Build the rows and compare them with the dataset (reads, never writes)."""
-    rows, entries, problems = build_rows(df, plan)
+    if plan.is_registry:
+        return _check_registry(repo, df, plan)
+    index = _subject_index(repo)
+    rows, entries, problems = build_rows(df, plan, index=index)
     check = ImportCheck(rows=rows, entries=entries, problems=problems)
+    if index is not None and plan.role_column("subject"):
+        check.resolution = resolve_subject_column(df, plan, index)[1]
     if rows.empty or repo is None:
         return check
     variables = sorted(rows["variable_id"].astype(str).unique())
@@ -717,7 +879,10 @@ def apply_import(repo: Any, df: pd.DataFrame, plan: ImportPlan, *, ops: list[dic
     """Write the import: pipeline entry, measurement rows (per the write mode), variables, subject
     ids, the recipe; then the query index. Returns counts."""
     say = progress or (lambda _m: None)
-    rows, entries, problems = build_rows(df, plan)
+    if plan.is_registry:
+        return _apply_registry(repo, df, plan, ops=ops, rebuild_index=rebuild_index, recipe_name=recipe_name, say=say)
+    index = _subject_index(repo)
+    rows, entries, problems = build_rows(df, plan, index=index)
     if rows.empty:
         raise ValueError("; ".join(problems) or "Nothing to import.")
     table = plan.table
@@ -760,18 +925,32 @@ def apply_import(repo: Any, df: pd.DataFrame, plan: ImportPlan, *, ops: list[dic
         repo.write_table(table, combined, provenance=provenance)
     say("Registering the variables…")
     repo.register_variables(_variable_entries_for_write(repo, entries, plan.kind))
+    if index is not None:
+        added = sorted({str(u) for u in rows["subject_uid"].dropna().astype(str)} - set(index._uids))
+        result["new_subjects"] = len(added)
     if plan.register_subject_ids:
         try:
             from nvitk.db.importers import harvest_subject_ids_from_frame
 
             subject_col = plan.role_column("subject")
             id_frame = df.copy()
-            id_frame["subject_uid"] = _string_column(df, subject_col)
+            # The resolved subject, not the id the sheet used: the sheet's id columns (the one it
+            # named subjects by included) are recorded as that subject's identifiers.
+            id_frame["subject_uid"] = (resolve_subject_column(df, plan, index)[0] if index is not None
+                                       else _string_column(df, subject_col))
             harvest_subject_ids_from_frame(repo, id_frame, source_path=Path(plan.source_name or "spreadsheet"),
                                            sheet_name=str(plan.sheet), source_batch_id=plan.batch_id,
                                            id_source="nvitk_import")
         except Exception as exc:  # noqa: BLE001 (an id table this dataset lacks)
             result["subject_ids_error"] = str(exc)
+    if result.get("new_subjects"):
+        # Unknown ids taken as new subjects: in the subject list, like the ones already there.
+        try:
+            from nvitk.db.importers import rebuild_subjects_table
+
+            rebuild_subjects_table(repo)
+        except Exception as exc:  # noqa: BLE001
+            result["subjects_error"] = str(exc)
     if recipe_name:
         result["recipe"] = str(save_recipe(repo, recipe_name, plan, ops or []))
     if rebuild_index:

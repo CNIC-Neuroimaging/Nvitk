@@ -973,10 +973,20 @@ def sync_xnat_project(
     source_batch_id = source_batch_id or f"xnat_{utc_now_iso().replace(':', '').replace('-', '')}"
 
     subject_rows: list[dict[str, Any]] = []
+    synced_uids: list[str] = []
     session_rows: list[dict[str, Any]] = []
     scan_rows: list[dict[str, Any]] = []
     asset_rows: list[dict[str, Any]] = []
     subject_id_rows: list[dict[str, Any]] = []
+
+    # XNAT labels are one of the subjects' identifiers: a subject the dataset already has (from its
+    # subject registry, another project) keeps its uid; only an unknown label makes a new subject.
+    from .subjects import SubjectIndex, resolve_subject_label
+
+    try:
+        subject_index = SubjectIndex.load(repo)
+    except Exception:  # noqa: BLE001
+        subject_index = SubjectIndex()
 
     with connect_xnat(config) as session:
         project = session.projects[config.project]
@@ -986,20 +996,23 @@ def sync_xnat_project(
             if subject_label not in project.subjects:
                 continue
             subject = project.subjects[subject_label]
-            subject_uid = str(_coalesce_attr(subject, "label", "id", "name") or subject_label)
-
-            subject_rows.append(
-                {
-                    "subject_uid": subject_uid,
-                    "primary_patient_id": subject_uid,
-                    "primary_seqn": pd.NA,
-                    "sex": pd.NA,
-                    "birth_date": pd.NaT,
-                    "notes": pd.NA,
-                    "source_batch_id": source_batch_id,
-                    "updated_at": utc_now_iso(),
-                }
-            )
+            xnat_label = str(_coalesce_attr(subject, "label", "id", "name") or subject_label)
+            subject_uid = resolve_subject_label(subject_index, xnat_label, prefer=("xnat_subject",))
+            synced_uids.append(subject_uid)
+            if not subject_index.has_subject(subject_uid):
+                # A new subject; one the dataset has keeps its subjects row (sex, birth date...).
+                subject_rows.append(
+                    {
+                        "subject_uid": subject_uid,
+                        "primary_patient_id": subject_uid,
+                        "primary_seqn": pd.NA,
+                        "sex": pd.NA,
+                        "birth_date": pd.NaT,
+                        "notes": pd.NA,
+                        "source_batch_id": source_batch_id,
+                        "updated_at": utc_now_iso(),
+                    }
+                )
             subject_id_rows.append(
                 {
                     "subject_uid": subject_uid,
@@ -1174,7 +1187,9 @@ def sync_xnat_project(
                     )
 
     frames = {
-        "subjects": pd.DataFrame(subject_rows).drop_duplicates(subset=["subject_uid"], keep="last"),
+        "subjects": pd.DataFrame(subject_rows, columns=["subject_uid", "primary_patient_id", "primary_seqn", "sex",
+                                                        "birth_date", "notes", "source_batch_id", "updated_at"]
+                                 ).drop_duplicates(subset=["subject_uid"], keep="last"),
         "subject_ids": pd.DataFrame(subject_id_rows).drop_duplicates(subset=["subject_uid", "id_namespace", "id_value"], keep="last"),
         "sessions": pd.DataFrame(session_rows).drop_duplicates(subset=["session_uid"], keep="last"),
         "scans": pd.DataFrame(scan_rows).drop_duplicates(subset=["scan_uid"], keep="last"),
@@ -1191,7 +1206,7 @@ def sync_xnat_project(
         )
 
     cohort_resolved = (cohort_id or "").strip() or DEFAULT_COHORT_ID
-    synced_subjects = sorted({str(r["subject_uid"]) for r in subject_rows if r.get("subject_uid")})
+    synced_subjects = sorted({str(u) for u in synced_uids if u})
     if synced_subjects:
         upsert_cohort_membership_for_subjects(
             repo,

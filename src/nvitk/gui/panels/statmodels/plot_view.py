@@ -114,14 +114,17 @@ class PlotPanel(QGroupBox):
         self._kind_row.setVisible(False)
         top_lay.addWidget(self._kind_row)
 
-        self._btn_export = QPushButton("Export PNG…")
-        self._btn_export.setToolTip(
-            "Save the figure exactly as displayed — current display type, visible groups, axis "
-            "limits and legend — to a PNG of your choosing."
+        from nvitk.gui.core.widgets import IconButton
+
+        self._btn_export = IconButton(
+            "save",
+            "Export the figure exactly as displayed (display, visible groups, axis limits, legend, style) "
+            "as PNG, SVG or PDF.",
         )
         self._btn_export.setEnabled(False)
         self._btn_export.clicked.connect(lambda *_: self.exportRequested.emit())
-        top_lay.addWidget(self._btn_export)
+        #: Restyles every figure before it is shown (the window's Style pop-over).
+        self.style_hook = None
         lay.addWidget(self._top_row)
 
         # A second row for the controls that belong to one display rather than to every plot: the
@@ -147,7 +150,19 @@ class PlotPanel(QGroupBox):
         split.setSizes([1000, 190])
         lay.addWidget(split, stretch=1)
 
-        lay.addWidget(self._build_axis_controls())
+        # Axis limits and the legend toggle in a pop-over: the figure gets the pane's height.
+        from nvitk.gui.core.widgets import popover_button
+
+        axes_box = self._build_axis_controls()
+        axes_box.setParent(self)
+        axes_box.hide()
+        self._axes_button = popover_button("ruler", "Axes: limits and legend", axes_box, title="Axes")
+        self._tail = QWidget()
+        tail_lay = QHBoxLayout(self._tail)
+        tail_lay.setContentsMargins(0, 0, 0, 0)
+        tail_lay.setSpacing(2)
+        tail_lay.addWidget(self._axes_button)
+        tail_lay.addWidget(self._btn_export)
 
     # construction
     def _build_canvas_host(self) -> QWidget:
@@ -285,8 +300,10 @@ class PlotPanel(QGroupBox):
         self._kind_row.setVisible(bool(visible))
 
     def set_options_widget(self, widget: QWidget) -> None:
-        """Place the window's plot-option controls on the pane's top row."""
+        """Place the window's plot-option controls on the pane's top row (then the axes and export
+        buttons, last)."""
         self._options_slot.addWidget(widget)
+        self._options_slot.addWidget(self._tail)
 
     def set_map_options_widget(self, widget: QWidget) -> None:
         """Place the display-specific controls on the pane's second row."""
@@ -398,12 +415,16 @@ class PlotPanel(QGroupBox):
 
         self.clear()
         if self._is_interactive(fig):
+            if self.style_hook is not None:
+                self.style_hook(fig)
             self._show_interactive(fig)
             return
         if self._is_html_document(fig):
             self._show_html_document(fig)
             return
         whiten_figure(fig)
+        if self.style_hook is not None:
+            self.style_hook(fig)
         canvas = FigureCanvasQTAgg(fig)
         # Without this the canvas insists on the figure's own inch size and the pane grows past the
         # window rather than the figure shrinking into it.

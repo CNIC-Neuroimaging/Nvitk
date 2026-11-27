@@ -68,6 +68,8 @@ PLAN_HEADERS = ("Column", "Role", "Variable", "Region", "Region label", "Unit", 
 ROLE_LABELS = {
     "value": "value", "subject": "subject id", "session": "session", "visit": "visit", "date": "date", "skip": "skip",
 }
+#: How the kinds read in the Kind picker.
+_KIND_LABELS = {"subjects": "subjects (registry: ids per subject)"}
 ROLE_COLORS = {"subject": "blue", "session": "cyan", "visit": "cyan", "date": "cyan", "skip": None, "value": "green"}
 
 
@@ -99,6 +101,14 @@ class _CatalogWorker(ThreadWorker):
             out["variables"] = list(repo.catalog.variable_entries())
             out["pipelines"] = list(repo.catalog.list_pipelines())
             out["kinds"] = [k for k, t in si.KIND_TABLES.items() if repo.catalog.table_exists(t)] or ["clinical", "image"]
+            try:
+                from nvitk.db.subjects import SubjectIndex
+
+                index = SubjectIndex.load(repo)
+                out["id_namespaces"] = index.namespaces()
+                out["n_subjects"] = index.n_subjects
+            except Exception:  # noqa: BLE001
+                out["id_namespaces"], out["n_subjects"] = [], 0
             try:
                 out["regions"] = si.known_regions(repo)
             except Exception:  # noqa: BLE001
@@ -240,6 +250,8 @@ class ImportEditor(QWidget):
         self._check: si.ImportCheck | None = None
         self._workers: list[ThreadWorker] = []
         self._building = False
+        #: A kind asked for before the dataset's kinds were read (set_kind).
+        self._preset_kind: str | None = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(design.PAD, design.PAD, design.PAD, design.PAD)
@@ -336,6 +348,7 @@ class ImportEditor(QWidget):
             "Keep both: rows are told apart by source file / sheet / column (the old importer's behaviour).")
         self._mode.currentIndexChanged.connect(lambda _i: self._invalidate_check())
         left.addRow("Write", self._mode)
+        self._mode_label = left.labelForField(self._mode)
         grid.addLayout(left, 1)
 
         mid = QFormLayout()
@@ -367,6 +380,30 @@ class ImportEditor(QWidget):
         self._visit.currentTextChanged.connect(lambda _t: self._invalidate_check())
         self._visit_label = QLabel("Default visit")
         mid.addRow(self._visit_label, self._visit)
+        # Which identifier the Subject column holds: the dataset resolves it to its subjects.
+        self._id_ns = QComboBox()
+        self._id_ns.setToolTip(
+            "Which identifier the Subject column holds. Auto: the one that matches the most of its values "
+            "(subject uid, mri id, patient id… as recorded in the dataset's subject_ids). Rows land on the "
+            "subjects those ids belong to, whatever id the sheet uses.")
+        self._id_ns.addItem("Auto (best match)", "auto")
+        self._id_ns.currentIndexChanged.connect(lambda _i: self._invalidate_check())
+        self._id_ns_label = QLabel("Subject ids are")
+        mid.addRow(self._id_ns_label, self._id_ns)
+        self._unknown = QComboBox()
+        for policy in si.UNKNOWN_POLICIES:
+            self._unknown.addItem(si.UNKNOWN_LABELS[policy], policy)
+        self._unknown.setToolTip("Ids no subject of the dataset has: new subjects (the id becomes their uid), "
+                                 "or their rows are left out. Register subjects first with the 'subjects' kind.")
+        self._unknown.currentIndexChanged.connect(lambda _i: self._invalidate_check())
+        self._unknown_label = QLabel("Unknown ids")
+        mid.addRow(self._unknown_label, self._unknown)
+        self._uid_prefix = QLineEdit("S")
+        self._uid_prefix.setToolTip("New subjects whose Subject cell is blank (or with no Subject column) get "
+                                    "this prefix and a number: S0001, S0002…")
+        self._uid_prefix.textChanged.connect(lambda _t: self._invalidate_check())
+        self._uid_prefix_label = QLabel("New uids")
+        mid.addRow(self._uid_prefix_label, self._uid_prefix)
         grid.addLayout(mid, 2)
 
         right = QFormLayout()
@@ -518,10 +555,13 @@ class ImportEditor(QWidget):
         self._kind.blockSignals(True)
         self._kind.clear()
         for kind in kinds:
-            self._kind.addItem(kind, kind)
-        index = self._kind.findData(current)
+            self._kind.addItem(_KIND_LABELS.get(kind, kind), kind)
+        index = self._kind.findData(self._preset_kind or current)
         self._kind.setCurrentIndex(max(index, 0))
         self._kind.blockSignals(False)
+        if self._preset_kind and self._frame is not None and not self._frame.empty and index >= 0:
+            self._reguess()
+        self._preset_kind = None
         modalities = sorted({str(p.get("modality") or "").lower() for p in catalog.get("pipelines") or [] if p.get("modality")}
                             | set(catalog.get("regions", pd.DataFrame()).get("modality", pd.Series(dtype=str)).dropna().astype(str).str.lower()))
         text = self._modality.currentText()
@@ -539,7 +579,16 @@ class ImportEditor(QWidget):
             self._recipes.addItems(si.list_recipes(self._repo))
         except Exception:  # noqa: BLE001
             pass
-        self._plan_hint.setText(f"Dataset: {catalog.get('root')}")
+        current_ns = self._id_ns.currentData()
+        self._id_ns.blockSignals(True)
+        self._id_ns.clear()
+        self._id_ns.addItem("Auto (best match)", "auto")
+        for ns, n in catalog.get("id_namespaces") or []:
+            self._id_ns.addItem(f"{ns}  ({n:,})", ns)
+        found = self._id_ns.findData(current_ns)
+        self._id_ns.setCurrentIndex(max(found, 0))
+        self._id_ns.blockSignals(False)
+        self._plan_hint.setText(f"Dataset: {catalog.get('root')}  ·  {int(catalog.get('n_subjects') or 0):,} subject(s)")
         self._modality_changed()
         self._sync_kind()
 
@@ -573,14 +622,46 @@ class ImportEditor(QWidget):
 
     # ------------------------------------------------------------------ settings
     def kind(self) -> str:
-        return str(self._kind.currentData() or "clinical")
+        data = self._kind.currentData()
+        if data is None and self._preset_kind:
+            return self._preset_kind
+        return str(data or "clinical")
+
+    def set_kind(self, kind: str) -> None:
+        """Select *kind* (now, or once the dataset's kinds are read)."""
+        self._preset_kind = kind
+        index = self._kind.findData(kind)
+        if index >= 0:
+            self._kind.setCurrentIndex(index)
+        if self._frame is not None and not self._frame.empty:
+            self._reguess()
 
     def _sync_kind(self) -> None:
         image = self.kind() == "image"
+        registry = self.kind() == "subjects"
+        was_registry = getattr(self, "_last_registry", registry)
+        self._last_registry = registry
+        if registry != was_registry and self._frame is not None and not self._frame.empty:
+            # A registry's columns mean something else (identifiers, not variables): guess again.
+            self._plans = si.guess_plan(self._frame, self.kind(), repo=self._repo, source_name=self._source_name)
         for widget in (self._modality, self._modality_label, self._pipeline_box, self._pipeline_label):
             widget.setVisible(image)
         for widget in (self._visit, self._visit_label):
-            widget.setVisible(not image)
+            widget.setVisible(not image and not registry)
+        for widget in (self._id_ns, self._id_ns_label, self._unknown, self._unknown_label, self._mode, self._mode_label):
+            if widget is not None:
+                widget.setVisible(not registry)
+        for widget in (self._uid_prefix, self._uid_prefix_label):
+            widget.setVisible(registry)
+        header = self._plan_table.horizontalHeaderItem(P_VARIABLE)
+        if header is not None:
+            header.setText("Namespace" if registry else "Variable")
+        if registry:
+            self._plan_hint.setText(
+                "Subject registry: one row per subject. Subject = the column giving new subjects their uid; "
+                "each value column is an identifier, its Namespace the id kind (mri_id, patient_id, xnat_subject…); "
+                "sex, birth_date and cohort are kept as attributes. Rows whose ids belong to a subject already "
+                "add what it lacks; ids of two different subjects are a conflict, never merged.")
         for col in (P_REGION, P_REGION_LABEL):
             self._plan_table.setColumnHidden(col, not image)
         self._model.set_plans(self._plans, self.kind())
@@ -628,6 +709,9 @@ class ImportEditor(QWidget):
             make_default_pipeline=self._pipeline_default.isChecked(),
             visit_id=self._visit.currentText().strip() if self.kind() != "image" else "",
             mode=str(self._mode.currentData() or "replace"),
+            subject_namespace=str(self._id_ns.currentData() or "auto"),
+            unknown_subjects=str(self._unknown.currentData() or "auto"),
+            uid_prefix=self._uid_prefix.text().strip() or "S",
             columns=[si.ColumnPlan(**p.to_dict()) for p in self._plans],
         )
 
@@ -1305,6 +1389,15 @@ class ImportEditor(QWidget):
         worker.start()
 
     def _imported(self, result: dict) -> None:
+        if result.get("summary"):
+            # A subject registry: what it added.
+            self._summary.appendPlainText("Imported the subject registry.\n" + str(result["summary"]))
+            self._check = None
+            self.imported.emit(result)
+            self._load_catalog()
+            return
+        if result.get("new_subjects"):
+            self._summary.appendPlainText(f"{result['new_subjects']} new subject(s) added.")
         parts = [f"Imported into {result.get('table')}: {result.get('written', result.get('rows'))} row(s) written"]
         if result.get("replaced"):
             parts.append(f"{result['replaced']} replaced")
@@ -1327,9 +1420,12 @@ class ImportEditor(QWidget):
 
 
 def open_import_editor(parent: QWidget | None = None, *, path: str | None = None, frame: pd.DataFrame | None = None,
-                       source_name: str = "") -> ImportEditor:
-    """Open an import editor window (on *path*, or on *frame*)."""
+                       source_name: str = "", kind: str | None = None) -> ImportEditor:
+    """Open an import editor window (on *path*, or on *frame*); *kind* preselects what the sheet
+    is (``subjects`` for the subject registry)."""
     editor = ImportEditor(parent, path=path, frame=frame, source_name=source_name)
+    if kind:
+        editor.set_kind(kind)
     editor.setAttribute(Qt.WA_DeleteOnClose, True)
     editor.show()
     editor.raise_()

@@ -132,6 +132,7 @@ class DatasetSetupPanel(QWidget):
         new.add_layout(row)
         new.add(hint_label("Point settings.json “db.root” (or $NVITK_DATASET_ROOT) at it to use it."))
         root.addWidget(new)
+        root.addWidget(self._build_from_scratch())
 
         imp = Section("Import a spreadsheet", icon_name="import", hue="orange", pref_key="setup.import", expanded=False)
         imp.add(hint_label(
@@ -142,7 +143,7 @@ class DatasetSetupPanel(QWidget):
         row = QHBoxLayout()
         open_editor = QPushButton("Open a spreadsheet…")
         open_editor.setToolTip("Open a file in the import editor")
-        open_editor.clicked.connect(self._open_import_editor)
+        open_editor.clicked.connect(lambda: self._open_import_editor(ask=True))
         empty_editor = QPushButton("Import editor")
         empty_editor.setToolTip("Open the import editor (drop a file on it, or apply a recipe)")
         empty_editor.clicked.connect(lambda: self._open_import_editor(ask=False))
@@ -165,6 +166,78 @@ class DatasetSetupPanel(QWidget):
         root.addWidget(xnat)
         root.addStretch(1)
         self.refresh()
+
+    # building a dataset from scratch
+    def _build_from_scratch(self) -> QWidget:
+        """The order that keeps a new dataset's subjects single: the subject registry first, then
+        what refers to subjects (XNAT, folders, measurement sheets) resolved against it."""
+        box = Section("Build from scratch", icon_name="layers", hue="cyan", pref_key="setup.scratch", expanded=False)
+        box.add(hint_label(
+            "Each subject is kept once (subject_uid); every other id it goes by (patient id, MRI id, XNAT "
+            "label, study number…) is a row of subject_ids pointing at it. Everything brought in afterwards "
+            "is matched through those ids, so a sheet keyed by the MRI id lands on the same subjects."))
+        steps = QFormLayout()
+        steps.setContentsMargins(0, 0, 0, 0)
+        registry = QPushButton("Import the subject registry…")
+        registry.setToolTip("A sheet with one row per subject and one column per identifier (and sex, birth date, "
+                            "cohort): opens the import editor on the 'subjects' kind")
+        registry.clicked.connect(lambda: self._open_import_editor(kind="subjects"))
+        steps.addRow("1. Subjects", registry)
+        steps.addRow("2. XNAT", hint_label("Refresh from XNAT (below): sessions, scans and assets; XNAT labels "
+                                           "already in the registry join their subject."))
+        folder_row = QHBoxLayout()
+        self._local_root = QLineEdit()
+        self._local_root.setPlaceholderText("Folder with one sub-folder per subject")
+        browse = QPushButton("…")
+        browse.clicked.connect(lambda: self._pick_dir(self._local_root))
+        self._local_kind = QComboBox()
+        self._local_kind.addItem("NIfTI (TOF / 4DFlow)", "nifti")
+        self._local_kind.addItem("DICOM", "dicom")
+        index_btn = QPushButton("Index")
+        index_btn.setToolTip("Add the folder's scans to assets; sub-folders named by any of a subject's ids join it")
+        index_btn.clicked.connect(self._index_local)
+        folder_row.addWidget(self._local_root, 1)
+        folder_row.addWidget(browse)
+        folder_row.addWidget(self._local_kind)
+        folder_row.addWidget(index_btn)
+        steps.addRow("3. Folders", folder_row)
+        measures = QPushButton("Import measurements…")
+        measures.setToolTip("Clinical / cognitive / image sheets: their subject column may hold any registered id")
+        measures.clicked.connect(lambda: self._open_import_editor())
+        steps.addRow("4. Values", measures)
+        box.add_layout(steps)
+        self._scratch_text = hint_label("")
+        box.add(self._scratch_text)
+        return box
+
+    def _index_local(self) -> None:
+        root = self._local_root.text().strip()
+        if not root:
+            self._scratch_text.setText("Choose the folder to index.")
+            return
+        kind = str(self._local_kind.currentData() or "nifti")
+        self._scratch_text.setText(f"Indexing {root}…")
+        import threading
+
+        from nvitk.gui.core.main_thread import call_on_main
+
+        def work() -> None:
+            try:
+                from nvitk.db.repo import get_repo
+
+                repo = get_repo()
+                if kind == "dicom":
+                    from nvitk.db.local_dicom_assets import upsert_dicom_assets as upsert
+                else:
+                    from nvitk.db.local_nifti_assets import upsert_nifti_assets as upsert
+                df = upsert(repo, root, build_sqlite_index=True)
+                n_subjects = int(df["subject_uid"].nunique()) if not df.empty else 0
+                text = f"Indexed {len(df):,} file(s) of {n_subjects:,} subject(s) from {root}."
+            except Exception as exc:  # noqa: BLE001
+                text = f"Could not index {root}: {exc}"
+            call_on_main(self._scratch_text.setText, text)
+
+        threading.Thread(target=work, name="nvitk-index-folder", daemon=True).start()
 
     # refresh from XNAT
     def _build_refresh(self) -> QWidget:
@@ -357,7 +430,7 @@ class DatasetSetupPanel(QWidget):
         except Exception as exc:  # noqa: BLE001
             self._new_root.setText(f"Could not create: {exc}")
 
-    def _open_import_editor(self, ask: bool = True) -> None:
+    def _open_import_editor(self, ask: bool = True, kind: str | None = None) -> None:
         from nvitk.gui.panels.import_editor import open_import_editor
 
         path = ""
@@ -365,8 +438,9 @@ class DatasetSetupPanel(QWidget):
             path, _ = QFileDialog.getOpenFileName(self, "Spreadsheet", "", "Tables (*.xlsx *.xls *.csv *.tsv *.parquet)")
             if not path:
                 return
-        editor = open_import_editor(self.window(), path=path or None)
+        editor = open_import_editor(self.window(), path=path or None, kind=kind)
         editor.imported.connect(lambda result: self._import_text.setText(
+            str(result.get("summary") or "").split("\n")[0] if result.get("summary") else
             f"Imported {result.get('written', result.get('rows'))} row(s) into {result.get('table')}."))
 
 __all__ = ["DatasetSetupPanel"]
